@@ -1,21 +1,21 @@
 # dsh-mini-remote
 
-> A [DeepSeek Harness](https://github.com/deepseek-ai/DeepSeek-Harness) (DSH) plugin that puts a **minimal remote control** on your phone — only the instruction you send and the AI's final conclusion reach it. Tool calls, file reads and writes, sub-agent dispatch, and reasoning traces all stay on the computer.
+> A [DeepSeek Harness](https://github.com/deepseek-ai/DeepSeek-Harness) (DSH) plugin that puts a **minimal remote control** on your mobile device — only the instruction you send and the AI's final conclusion reach it. Tool calls, file reads and writes, sub-agent dispatch, and reasoning traces all stay on the computer.
 
 ![DSH plugin](https://img.shields.io/badge/DSH_plugin-dsh--plugin-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
 [中文说明 →](README.md)
 
-**To use this plugin from your phone, switch the DSH session page on your PC to Full Access（完全权限）** — approvals cannot be granted from the phone, so a session waiting on one will simply stall.
+**To use this plugin on mobile, switch the DSH session page on your PC to Full Access（完全权限）**
 
 ---
 
-## Why this exists
+## Why I built this plugin
 
-I built this because an agent task often takes a long time to finish. If you step out, you need the phone to drive it remotely.
+The idea came from this: an agent task often takes a long time to finish, and if you step out, you need the phone to drive it remotely.
 
-But the phone clients that exist show the PC's execution steps in faithful detail. You send one instruction; it may think for several minutes, read dozens of files, call tools a few times, and only then give you a conclusion.
+But the phone clients that exist show the PC's execution steps in faithful detail. You send one instruction; it may think for several minutes, read dozens of files, call tools a few times, and only then give you a conclusion. If you're out, or busy away from the computer, you simply don't have the time to watch the phone that closely.
 
 I don't think that approach is bad. It's complete and controllable, and if you're going to do serious work, it's the right one.
 
@@ -85,7 +85,7 @@ Once it's on, **wait half a minute before scanning.** Cloudflare needs a moment 
 <img width="1314" height="2186" alt="screenshot_20260922_233535_com huawei hmos brows" src="https://github.com/user-attachments/assets/8befa186-3e20-4c0e-8efc-8ea523f77648" />
 
 
-## What the phone side does
+## What the mobile side does
 
 Open the link and that's the whole interface: one input box, and the latest reply.
 
