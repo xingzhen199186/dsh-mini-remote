@@ -1,10 +1,13 @@
 # dsh-mini-remote
 
-**A minimal remote control for DSH, built for the phone. The phone receives exactly two things: the instruction you send, and the AI's final conclusion.**
+> A [DeepSeek Harness](https://github.com/deepseek-ai/DeepSeek-Harness) (DSH) plugin that puts a **minimal remote control** on your phone — only the instruction you send and the AI's final conclusion reach it. Tool calls, file reads and writes, sub-agent dispatch, and reasoning traces all stay on the computer.
 
-Tool calls, file reads and writes, sub-agent dispatch, reasoning traces — all of it stays on the computer. Not a word of it goes to the phone. *(To use this plugin from your phone, switch the DSH session page on your PC to **Full Access**（完全权限）— approvals cannot be granted from the phone, so a session waiting on one will simply stall.)*
+![DSH plugin](https://img.shields.io/badge/DSH_plugin-dsh--plugin-blue)
+![License](https://img.shields.io/badge/license-MIT-green)
 
 [中文说明 →](README.zh.md)
+
+**To use this plugin from your phone, switch the DSH session page on your PC to Full Access（完全权限）** — approvals cannot be granted from the phone, so a session waiting on one will simply stall.
 
 ---
 
