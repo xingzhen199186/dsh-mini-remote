@@ -28,7 +28,7 @@
   "author": "xingzhen199186",
   "repository": {
     "type": "git",
-    "url": "https://github.com/xingzhen199186/dsh-mini-remote.git"
+    "url": "git+https://github.com/xingzhen199186/dsh-mini-remote.git"
   },
   "homepage": "https://github.com/xingzhen199186/dsh-mini-remote#readme",
   "bugs": {
