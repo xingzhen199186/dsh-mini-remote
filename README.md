@@ -1,138 +1,138 @@
 # dsh-mini-remote
 
-> A [DeepSeek Harness](https://github.com/deepseek-ai/DeepSeek-Harness) (DSH) plugin that puts a **minimal remote control** on your phone — only the instruction you send and the AI's final conclusion reach it. Tool calls, file reads and writes, sub-agent dispatch, and reasoning traces all stay on the computer.
+> 一个 [DeepSeek Harness](https://github.com/deepseek-ai/DeepSeek-Harness)（DSH）插件，把一部手机变成**极简遥控器**——手机端只收到你发出去的指令和 AI 最后的结论，工具调用、文件读写、子 Agent 调度、思考过程全部留在电脑上。
 
 ![DSH plugin](https://img.shields.io/badge/DSH_plugin-dsh--plugin-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
-[中文说明 →](README.zh.md)
+[English →](README.en.md)
 
-**To use this plugin from your phone, switch the DSH session page on your PC to Full Access（完全权限）** — approvals cannot be granted from the phone, so a session waiting on one will simply stall.
-
----
-
-## Why this exists
-
-I built this because an agent task often takes a long time to finish. If you step out, you need the phone to drive it remotely.
-
-But the phone clients that exist show the PC's execution steps in faithful detail. You send one instruction; it may think for several minutes, read dozens of files, call tools a few times, and only then give you a conclusion.
-
-I don't think that approach is bad. It's complete and controllable, and if you're going to do serious work, it's the right one.
-
-But when I'm out, what I want is something else — **a lighter way to interact that asks less of my attention**. The phone screen is small, and so is the attention I have to spare when I'm out. Most of the time I only need one thing: **this round is done, time to send the next instruction.** And even at my desk, I rarely read the AI's running commentary while it works.
-
-So the interface here is deliberately crude: it drops the PC's execution steps entirely and puts only the AI's final conclusion in front of you.
-
-**In a sense, it exists so that you look at it less.**
-
-So you can spend your time more freely — instead of being stuck in that small screen while you're playing with your daughter or out on a trip.
+**要在手机端使用该插件，请将 PC 端 DSH 会话页面切换到【完全权限】**——手机上点不了审批弹窗，会话会一直卡在那里等。
 
 ---
 
-## Install
+## 为什么会有这个东西
+
+做这个插件的初衷是因为现在AGENT任务执行一轮往往需要很久，而如果出门，则需要手机端来远程操作。
+
+但现有的手机端，会把PC的执行步骤非常还原地展现出来。你发一条指令，它可能要想上几分钟、读几十个文件、调好几次工具，最后才给你一个结论。
+
+我并不认为这种方式不好。信息完整、过程可控，如果你要认真处理任务，它是对的。
+
+但出门在外的时候，就我个人而言，我需要的是另一种东西——**更轻便、更少占用注意力的交互方式**。手机屏幕就那么大，出门时的精力也就那么多。而大部分时候我真正需要的只有一件事：**这一轮跑完了，该发下一条指令了**。而且大部分时间，即使在电脑上，我也很少会去仔细阅读AI做执行过程中的“自言自语”。
+
+所以这个插件的界面做得相当「原始」：它完全省略了电脑网页端的执行步骤，只把 AI 最后的结论送到你面前。
+
+**某种意义上，它的存在，是为了让你更少地去看它。**
+
+你可以更加自由地支配自己的时间，而不是当你和女儿玩耍时，疑惑出游时，被困在那个小小的屏幕里。
+
+---
+
+## 安装
 
 ```powershell
 dsh plugin --profile web add dsh-mini-remote
 ```
 
-Or straight from GitHub, if you would rather pin the source:
+也可以直接从 GitHub 装，这样锁的是源码：
 
 ```powershell
 dsh plugin --profile web add github:xingzhen199186/dsh-mini-remote
 ```
 
-If you already have the source on disk, you can point it at the folder:
+手上有源码目录的话，把目录指给它也一样：
 
 ```powershell
-dsh plugin --profile web add <the folder you put the source in>
+dsh plugin --profile web add <你放源码的目录>
 ```
 
-**You must restart DSH once after installing**, or nothing new shows up in the settings page. After the restart a "Phone Remote" entry appears in the left column, and the startup log prints the phone URL and password.
+装完**必须重启一次 DSH**，设置页里才会出现新东西。重启后左栏会多出「手机遥控」，启动日志里也会打印手机访问地址和密码。
 
 ---
 
-## Configuration: three routes, pick what you need
+## 配置：三条路，按需要选
 
-All three connection methods **exist at the same time**. Pick one, or leave several on.
+三条连接方式**同时存在**，选一条就行，也可以都开着。
 
-Open DSH settings (bottom of the sidebar) → "Phone Remote" in the left column. Every route on that page has a QR code and a link, and the small text under each QR code says **when to use that route**. That's all you need to read.
+打开 DSH 设置（侧边栏最下面）→ 左栏「手机遥控」。这一页上每条路都有一个二维码和一条链接，二维码底下那行小字写着**什么时候用这条**，看它就够了。
 
-### 1. LAN: at home only
+### 一、内网：只在家里用
 
-When the phone and the computer are on the same Wi-Fi, scan the "LAN" code and you're in. **Nothing extra to install** — the least fuss of the three.
+手机和电脑连同一个 Wi-Fi 时，扫「内网」那个码就能用。**不需要任何额外安装**，最省事的一条。
 
-The cost is that it stops working the moment you leave: the phone switches to mobile data and this route is gone.
+代价是出了门就连不上——手机一切到流量，这条就断了。
 
-### 2. Tailscale: works outside, and the address stays fixed
+### 二、Tailscale：出门也能连，地址还固定
 
-Install [Tailscale](https://tailscale.com) on both the computer and the phone, sign in to the same account, and this route appears on the pairing page by itself. The address is fixed — set it up once and forget it.
+电脑和手机都装上 [Tailscale](https://tailscale.com)、登录同一个账号，配对页上就会自动多出这一条。地址固定，配一次以后不用再管。
 
-The cost is an app on each side. If you don't mind installing it, **this is the steadiest route when you're out**.
+代价是两边都要装一个 App。如果你不介意装，**出门在外这条最稳**。
 
-### 3. Public access: nothing to install
+### 三、公网访问：什么都不用装
 
-There's a switch at the bottom of the pairing page. Turn it on and Cloudflare hands you a public URL. The phone can reach it on any network, **with nothing installed**.
+配对页最底下有个开关，打开它，Cloudflare 会给你一个公网网址。手机在任何网络下都能连，**不用装任何东西**。
 
-Two costs, worth knowing before you decide:
+两个代价，先知道再决定：
 
-- **The address changes every time you restart DSH.** When it does, come back and scan the new code.
-- **The first time is slow** — it's downloading a component of about 50 MB, and only that once. While it does, the status line reads "opening…", which is normal, not a hang. Registration occasionally fails; the plugin retries three times on its own.
+- **地址每次重启 DSH 都会换**，换了得回来重新扫一次码。
+- **第一次打开会慢**——它在下载一个五十兆左右的组件，只下这一次。这期间状态那行会显示「正在打开…」，那是正常的，不是卡死。注册偶尔会失败，插件会自动重试 3 次。
 
-Once it's on, **wait half a minute before scanning.** Cloudflare needs a moment to publish the address. Scanning too early reports that it can't be opened — that's not breakage, it's just too soon.
+打开之后**等半分钟再扫**。Cloudflare 需要一点时间把这个地址公布出去，太早扫会提示打不开——那不是坏了，是还没到时候。
 
 ---
 
 <img width="1314" height="2186" alt="screenshot_20260922_233535_com huawei hmos brows" src="https://github.com/user-attachments/assets/8befa186-3e20-4c0e-8efc-8ea523f77648" />
 
 
-## What the phone side does
+## 手机端能做什么
 
-Open the link and that's the whole interface: one input box, and the latest reply.
+打开链接就是全部界面：一个输入框，和最新的一条回复。
 
-**Send instructions.** Type and send; the AI starts working on the computer.
+**发指令。** 打字发出去，AI 就在电脑上开始干活。
 
-**Wait for the conclusion.** While it runs, the page shows "running…". You can keep sending during that time — instructions queue up. When the task ends, the conclusion appears on the page, and the phone chimes and buzzes.
+**等结论。** 跑的时候上面显示「运行中…」。这期间你可以接着发，指令会排队。任务结束，结论直接出现在页面上，同时响一声、震一下。
 
-**Two display modes.** Tap the ⚙ in the top right to switch. "Single frame" (the default) keeps only the newest reply on screen — good for "I just want to see how this one turned out". "Chat" is a back-and-forth bubble list — good for several rounds of follow-up questions. Use it for a while and you'll know which you prefer.
+**两种显示模式。** 点右上角的 ⚙ 切换。「单帧」（默认）整屏只留最新一条回复，适合「我就想看这次的结果」；「聊天」是一来一回的气泡列表，适合连着追问好几轮。用一阵子你会知道自己偏哪个。
 
-**You're reading conclusions, not the process.** There's no tool-call chain, no file diff, no approval dialog on the page — **anything that needs your confirmation cannot be confirmed from the phone**; you have to go back to the computer. Nor will it start new sessions, switch models, or change configuration for you. It's a remote control: the TV still has to be on for the remote to be any use.
-
----
-
-## FAQ
-
-**The QR code scans but the page won't open.**
-First check that the phone and the computer are on the same Wi-Fi.
-
-**Scanning the "public" route from outside won't open.**
-Wait half a minute and try again. If it still won't, the pairing page shows the reason directly. The most common one is **a proxy or VPN running on the computer** — the "TUN mode" in tools like Clash cuts the tunnel's connections; the process looks fine while not a single connection has actually been established. Turn it off and try again. Another possibility: that network simply can't reach Cloudflare (it's intermittent in mainland China, and not something you misconfigured). If so, don't burn time on the public route — **switch to the Tailscale route**.
-
-**It says "disconnected".**
-This happens often after the phone has been in the background. The page reconnects by itself; give it a few seconds. If that doesn't work, open settings and tap "Reconnect".
-
-**The reply arrives but there's no sound.**
-Audio only plays after you've touched the page once. Tap it.
-
-**The phone keeps asking for a password.**
-That means the link you opened didn't carry one — for example, you typed the address by hand. Go back to the computer and scan the QR code again.
-
-**I want a password I can remember.**
-Change it in the password section of "Settings → Phone Remote". **At least 12 characters.** A DSH restart is required afterwards, and the phone has to scan a new code.
+**看的是结论，不是过程。** 页面上没有工具调用链、没有文件 diff、没有审批弹窗——**需要你点确认的操作，手机上点不了**，得回电脑上处理。它也不替你在电脑上开新会话、切模型、改配置。它的定位是一根遥控器：电视还得在那儿开着，遥控器才有用。
 
 ---
 
-## Security
+## 常见问题
 
-**The pairing page carries the password — don't screenshot it and send it around.** The password is encoded straight into the QR code so you never have to type it. That's convenient, and the price is that whoever holds that image can get in.
+**扫码之后打不开。**
+先看手机和电脑是不是同一个 Wi-Fi。
 
-Beyond that: every endpoint requires the password; password comparison is constant-time; five wrong attempts from one source blocks that source for a minute; pairing information is **readable only from the local machine**, so other devices on the same Wi-Fi can't get it; the public tunnel is off by default and you have to turn it on yourself in the settings page; and the phone has no access to your filesystem.
+**出门扫「公网」那条打不开。**
+等半分钟再试。还不行的话，配对页上会直接显示原因。最常见的一种是**电脑上开着代理或 VPN**——Clash 这类软件的「TUN 模式」会把隧道的连接掐断，进程看着好好的，其实一条连接都没建立起来，先把它关掉再试。还有一种：这条网络就是走不通 Cloudflare（国内时好时坏，不是你哪里配错了），那就别在公网上耗着，**改用 Tailscale 那条**。
+
+**显示「未连接」。**
+手机切后台再回来经常会这样，页面会自己重连，等几秒；还不行就进设置点「重连」。
+
+**回复到了，但没声音。**
+声音要你先碰过页面才会响，点一下就行。
+
+**手机上一直让我输密码。**
+说明你打开的链接里没带密码（比如自己手打的地址）。回电脑上重新扫一次二维码就好。
+
+**想换一个自己记得住的密码。**
+在「设置 → 手机遥控」的密码那一块直接改，**至少 12 位**。改完要重启一次 DSH，重启之后手机上要重新扫一次码。
 
 ---
 
-## Credits
+## 安全
 
-This plugin's design draws on [dsh-pocket](https://www.npmjs.com/package/dsh-pocket) by shaobeichen — in particular the shape of the configuration page, where each connection route gets its own link, its own QR code, and its own password.
+**配对页上带着密码，别截图发出去。** 密码直接编在二维码里，扫完不用手敲——方便是方便，代价是谁拿到这张图谁就能进。
 
-## License
+除此之外：所有接口都要密码，密码比对用定长比较；同一来源一分钟错 5 次就挡一分钟；配对信息**只允许本机读取**，同一个 Wi-Fi 下的其他设备拿不到；公网隧道默认关着，要你自己在设置页里打开；手机拿不到你的文件系统。
+
+---
+
+## 致谢
+
+这个插件在设计思路上参考过 [dsh-pocket](https://www.npmjs.com/package/dsh-pocket)（作者 shaobeichen）——尤其是「每条连接路径各配一条链接、一个二维码、一个密码」这种配置形态。
+
+## 许可
 
 MIT
