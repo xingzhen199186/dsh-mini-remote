@@ -2,7 +2,7 @@
 
 **一个极简风格的DSH手机远程遥控插件。手机端只收到：用户发出去的指令和 AI 最后的结论。**
 
-工具调用、文件读写、子 Agent 调度、思考过程——全部留在电脑上，一个字都不往手机送。
+工具调用、文件读写、子 Agent 调度、思考过程——全部留在电脑上，一个字都不往手机送。（要在手机端使用该插件请做PC端DSH会话页面切换到【完全权限】）
 
 ---
 
@@ -76,6 +76,9 @@ dsh plugin --profile web add <你放源码的目录>
 打开之后**等半分钟再扫**。Cloudflare 需要一点时间把这个地址公布出去，太早扫会提示打不开——那不是坏了，是还没到时候。
 
 ---
+
+<img width="1314" height="2186" alt="screenshot_20260922_233535_com huawei hmos brows" src="https://github.com/user-attachments/assets/8befa186-3e20-4c0e-8efc-8ea523f77648" />
+
 
 ## 手机端能做什么
 
