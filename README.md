@@ -154,6 +154,12 @@ dsh plugin --profile web add <你放源码的目录>
 
 ---
 
+## 致谢
+
+这个插件在设计思路上参考过 [dsh-pocket](https://www.npmjs.com/package/dsh-pocket)（作者 shaobeichen）——尤其是「每条连接路径各配一条链接、一个二维码、一个密码」这种配置形态，以及公网隧道和 cloudflared 下载这两块要留意哪些坑（比如 cloudflared 的输出里会先冒出一个 `api.trycloudflare.com`，那不是给你的网址）。
+
+代码是独立实现的：函数划分、控制流和注释都是自己写的，和它没有逐行对应关系。它是一个把桌面**完整镜像**到手机上的插件，和这个「只传头尾」的极简定位不是一回事。特此说明并致谢。
+
 ## 许可
 
 MIT
