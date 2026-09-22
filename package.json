@@ -15,13 +15,24 @@
     "lib",
     "client",
     "cordis.patch.yml",
-    "README.md"
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
   ],
   "scripts": {
     "test": "node --test test/smoke.test.mjs test/plugin.test.mjs test/net.test.mjs test/tunnel.test.mjs test/page.test.mjs test/tree.test.mjs"
   },
   "engines": {
     "node": ">=22"
+  },
+  "author": "xingzhen199186",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/xingzhen199186/dsh-mini-remote.git"
+  },
+  "homepage": "https://github.com/xingzhen199186/dsh-mini-remote#readme",
+  "bugs": {
+    "url": "https://github.com/xingzhen199186/dsh-mini-remote/issues"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.2"
@@ -40,6 +51,12 @@
     "minimal"
   ],
   "license": "MIT",
+  "disclosure": {
+    "transport": "手机与电脑之间是明文 http（内网 / Tailscale / Cloudflare 隧道三种任选其一）。访问口令随 URL 传递，所以公网隧道那条路请不要在不可信网络里用。",
+    "storage": "不保存对话内容之外的任何凭据。cloudflared 二进制按需下载到 DSH 数据目录，不上传。",
+    "telemetry": "不收集、不上传任何数据。",
+    "network": "启用公网隧道时，流量经 Cloudflare 中转；内网和 Tailscale 两条路不经过任何第三方。"
+  },
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"

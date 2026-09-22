@@ -29,10 +29,16 @@
 ## 安装
 
 ```powershell
+dsh plugin --profile web add github:xingzhen199186/dsh-mini-remote
+```
+
+包发布到 npm 之后，直接写包名也行：
+
+```powershell
 dsh plugin --profile web add dsh-mini-remote
 ```
 
-手上有源码目录的话，直接把目录指给它也一样：
+手上有源码目录的话，把目录指给它也一样：
 
 ```powershell
 dsh plugin --profile web add <你放源码的目录>
