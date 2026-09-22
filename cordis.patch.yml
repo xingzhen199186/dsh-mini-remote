@@ -1,0 +1,5 @@
+# dsh-mini-remote bundle patch（dsh.bundle manifest 要求的加载配置）
+# 单包单插件：装一次，插件自带的移动端页面即可用。
+- insert:
+    - id: dsh-mini-remote
+      name: dsh-mini-remote

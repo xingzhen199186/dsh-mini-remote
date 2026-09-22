@@ -1,0 +1,22 @@
+# 换行符统一用 LF，而且是**必须**的。
+#
+# 原因：构建指纹（lib/build.js）是对文件字节做 sha256。Windows 上 git 默认会把
+# LF 换成 CRLF，那样任何人 clone 下来算出的指纹都和作者不一样，
+# live-check.mjs 会一直报「跑的不是这份代码」——而代码其实一点问题都没有。
+# 这个坑在 工程说明.md 里已经被点过一次名（指纹两处实现分家会以假警报咬人）。
+#
+# text=auto：只对 git 认得出的文本文件生效，二进制不动。
+# eol=lf   ：仓库里和检出后都是 LF。
+* text=auto eol=lf
+
+# 二进制，别做任何转换
+*.webp binary
+*.png  binary
+*.jpg  binary
+*.ico  binary
+*.exe  binary
+*.zip  binary
+
+# 测试快照之类如果将来加进来，也按文本处理
+*.json text eol=lf
+*.yml  text eol=lf

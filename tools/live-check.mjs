@@ -1,0 +1,344 @@
+/**
+ * 活体检查：对着**正在运行**的 DSH 打几个接口，确认插件真的在工作。
+ *
+ * 离线测试验的是逻辑，探针（.dsh-mini-remote-probe.mjs）验的是「能不能加载」，
+ * 这个脚本验的是第三件事：**跑起来之后接口真的返回了真实数据**。
+ * 三件事互不替代——逻辑对、能加载，不代表接口通、数据对。
+ *
+ * 必须从 DSH 进程外面跑，因为它验的就是那个进程。
+ *
+ *   node tools/live-check.mjs            # 打一次
+ *   node tools/live-check.mjs --wait 60  # 最多等 60 秒，等**新代码**上线（重启后用）
+ *   node tools/live-check.mjs --port 3090
+ *   node tools/live-check.mjs --build <指纹>   # 手动指定要等的指纹
+ */
+import { readFileSync, readdirSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import { homedir } from 'node:os'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+const HERE = dirname(fileURLToPath(import.meta.url))
+
+/** 和 lib/build.js 算同一个指纹，用来确认应答我们的是不是这份代码。 */
+function localBuild() {
+  const lib = join(HERE, '..', 'lib')
+  const hash = createHash('sha256')
+  const files = []
+  for (const f of readdirSync(lib).sort()) {
+    if (f.endsWith('.js') || f.endsWith('.html')) files.push(join(lib, f))
+  }
+  files.push(join(HERE, '..', 'client', 'client.js'))
+  // 立绘也算在里面（和 lib/build.js 保持一致）：换了图，指纹就该跟着变。
+  try {
+    for (const f of readdirSync(join(lib, 'art')).sort()) {
+      if (f.endsWith('.webp')) files.push(join(lib, 'art', f))
+    }
+  } catch { /* 没有 art 目录就当没有立绘 */ }
+  for (const file of files) {
+    hash.update(file)
+    try {
+      hash.update(readFileSync(file))
+    } catch {
+      hash.update('(读不到)')
+    }
+  }
+  return hash.digest('hex').slice(0, 12)
+}
+
+const argv = process.argv.slice(2)
+function arg(name, fallback) {
+  const i = argv.indexOf(name)
+  return i >= 0 && argv[i + 1] ? argv[i + 1] : fallback
+}
+
+const HOME = process.env.DSH_HOME || join(homedir(), '.dsh')
+const DIR = join(HOME, 'dsh-mini-remote')
+
+function readToken() {
+  try {
+    return readFileSync(join(DIR, 'token'), 'utf8').trim()
+  } catch {
+    return ''
+  }
+}
+
+function readPort() {
+  try {
+    const s = JSON.parse(readFileSync(join(DIR, 'settings.json'), 'utf8'))
+    if (Number.isFinite(s?.port)) return s.port
+  } catch { /* 没有就用默认值 */ }
+  return 3090
+}
+
+const port = Number(arg('--port', readPort()))
+const token = readToken()
+const base = `http://127.0.0.1:${port}`
+
+if (!token) {
+  console.error(`读不到 token（找的是 ${join(DIR, 'token')}）。这个文件由插件第一次启动时生成。`)
+  process.exitCode = 1
+  throw new Error('no token')
+}
+
+async function get(path) {
+  const res = await fetch(`${base}${path}${path.includes('?') ? '&' : '?'}token=${token}`)
+  const body = await res.json().catch(() => ({}))
+  return { status: res.status, body }
+}
+
+async function post(path, payload) {
+  const res = await fetch(`${base}${path}?token=${token}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload ?? {}),
+  })
+  const body = await res.json().catch(() => ({}))
+  return { status: res.status, body }
+}
+
+const wait = Number(arg('--wait', 0))
+if (wait > 0) {
+  // 等「服务应答」是不够的——重启期间旧进程还在应答；等「某个接口返回 200」也不够，
+  // 那个接口很可能上一轮就已经部署了。这两条我都踩过。所以改成等**构建指纹**：
+  // 只有新代码才会报出这个指纹。
+  const want = arg('--build', localBuild())
+  const deadline = Date.now() + wait * 1000
+  let last = ''
+  for (;;) {
+    try {
+      const r = await get('/mini/api/version')
+      last = `HTTP ${r.status} build=${r.body?.build ?? '?'}`
+      if (r.status === 200 && r.body?.build === want) break
+    } catch (err) {
+      last = err?.message ?? String(err)
+    }
+    if (Date.now() > deadline) {
+      console.error(`等了 ${wait} 秒，指纹还是对不上（想要 ${want}，最后一次：${last}）。`)
+      process.exitCode = 1
+      throw new Error('new code never came up')
+    }
+    await new Promise((r) => setTimeout(r, 2000))
+  }
+}
+
+const problems = []
+function check(label, ok, detail) {
+  console.log(`${ok ? 'OK  ' : 'FAIL'}  ${label}${detail ? '  ' + detail : ''}`)
+  if (!ok) problems.push(label)
+}
+
+// 1. 服务活着
+const state = await get('/mini/api/state')
+check('服务应答', state.status === 200, `HTTP ${state.status}`)
+
+// 1b. 应答我们的到底是不是这份代码。这条放在最前面，因为它决定下面所有结论算不算数。
+const mine = localBuild()
+const version = await get('/mini/api/version')
+check('跑的是这份代码', version.body?.build === mine,
+  `进程报 ${version.body?.build ?? '?'}，本地是 ${mine}`
+  + (version.body?.build === mine ? '' : '（指纹不同：下面所有结论都是对旧代码下的，不算数）'))
+
+// 「正在执行」必须跟着会话走。这里只读不改——活体检查跑在用户正在用的实例上，
+// 不能顺手把人家的绑定状态改了。
+check('状态里带 running', typeof state.body?.running === 'boolean',
+  `running=${JSON.stringify(state.body?.running)}，绑定的是 ${state.body?.boundSessionId ?? '(未绑定)'}`)
+const boundRow = (state.body?.sessions ?? []).find((s) => s.id === state.body?.boundSessionId)
+if (boundRow) {
+  check('running 与绑定会话自身一致', state.body.running === Boolean(boundRow.running),
+    `快照说 ${state.body.running}，会话表说 ${boundRow.running}`)
+}
+
+// 显示内容不能跨会话串。用户实机报过两次同一个病根（先 running，后 latest）。
+// 这里只读不改——活体检查跑在用户正在用的实例上。
+const bound = state.body?.boundSessionId
+const wrongLatest = state.body?.latest && state.body.latest.sessionId !== bound
+check('latest 属于当前绑定的会话', !wrongLatest,
+  wrongLatest ? `绑定的是 ${bound}，latest 却是 ${state.body.latest.sessionId} 的` : '')
+const strayHistory = (state.body?.history ?? []).filter((m) => m.sessionId && m.sessionId !== bound)
+check('聊天记录里没有别的会话的消息', strayHistory.length === 0,
+  strayHistory.length ? `${strayHistory.length} 条不属于 ${bound}` : '')
+
+// 2. 会话树那两个服务到位了没有——这是重启后最该确认的一条
+const ws = await get('/mini/api/workspaces')
+check('工作区接口可用', ws.status === 200, `HTTP ${ws.status}`)
+const list = ws.body?.workspaces ?? []
+check('读到工作区', list.length > 0, `${list.length} 个`)
+if (list.length) {
+  const first = list[0]
+  console.log(`      第一个：${first.title}（${first.count} 个会话，${first.running} 个在跑）`)
+  console.log(`      路径：${first.path}`)
+
+  // 3. 展开一个工作区，确认会话和标题真的取得到
+  const sess = await get(`/mini/api/workspaces/${encodeURIComponent(first.id)}/sessions`)
+  check('展开工作区能取到会话', sess.status === 200 && (sess.body?.sessions?.length ?? 0) > 0,
+    `${sess.body?.sessions?.length ?? 0} 条 / 共 ${sess.body?.total ?? '?'} 条`)
+  const withTitle = (sess.body?.sessions ?? []).filter((s) => s.title)
+  console.log(`      其中 ${withTitle.length} 条有标题`)
+  // 真机上出过一次：readTitleSnapshots 返回的是「标题快照」对象而不是字符串，
+  // 直接塞进界面就成了 [object Object]。离线测试的假数据当时返回的是字符串，
+  // 所以这个 bug 只有打真接口才抓得到。
+  const rows = sess.body?.sessions ?? []
+  const notString = rows.filter((s) => s.title && typeof s.title !== 'string')
+  check('标题是字符串', notString.length === 0,
+    notString.length ? `有 ${notString.length} 条不是：${JSON.stringify(notString[0].title).slice(0, 80)}` : '')
+  const objLike = rows.filter((s) => String(s.title ?? '').includes('[object'))
+  check('标题没变成 [object Object]', objLike.length === 0, objLike.length ? objLike[0].title : '')
+  for (const s of rows.slice(0, 3)) {
+    const when = s.createdAt ? new Date(s.createdAt).toLocaleString('zh-CN') : '无时间'
+    console.log(`      · ${s.title || '(无标题，界面显示日期)'}  ${when}${s.running ? '  运行中' : ''}`)
+  }
+}
+
+// 4. 没 token 必须被挡住——安全底线，每次都要验
+const anon = await fetch(`${base}/mini/api/workspaces`)
+check('匿名访问被拒', anon.status === 401, `HTTP ${anon.status}`)
+
+// 5. 手机页面本身：新加的东西真的送到手机上了吗
+const page = await fetch(`${base}/mini?token=${token}`)
+const html = await page.text()
+// 插件源码：有些规则只活在服务端（页面里看不到），比如「多长才认它是回答」
+//
+// 注意读的是**插件源码目录**（`tools/` 的上一级），不是数据目录 `DIR`
+// （`~/.dsh/dsh-mini-remote`，那里只有 token、settings.json 和 bin）。
+// 2026-09-22 这里原本写的是 `join(DIR, 'lib', 'index.js')`，直接 ENOENT 崩掉——
+// 整层活体检查都跑不起来，而它本该是四层验证里的第三层。
+const SRC = join(HERE, '..')
+const pluginSrc = readFileSync(join(SRC, 'lib', 'index.js'), 'utf8')
+check('手机页面能取到', page.status === 200 && html.length > 5000,
+  `HTTP ${page.status}, ${html.length} 字节`)
+for (const id of ['btnNav', 'navBody', 'btnNavClose', 'btnNavRefresh']) {
+  check(`页面里有 id="${id}"`, html.includes(`id="${id}"`))
+}
+check('markdown 渲染器在', html.includes('function mdToHtml'))
+check('复制有 execCommand 退路', html.includes("execCommand('copy')"))
+check('设置里旧的会话下拉已移除', !html.includes('selSession'))
+// 2026-09-21 用户裁决：两个按了没用的按钮、以及它们所在的两行，都从设置里撤掉
+// （明文 http 下浏览器不给用）。知识记在代码注释和 tasks/lessons.md 里，不占界面。
+check('麦克风图标已移除', !html.includes('btnMic'))
+check('完成后提醒的按钮已隐藏', !html.includes('btnNotify'))
+check('设置里没有「完成后提醒」这一行', !html.includes('notifyHint'))
+check('设置里没有「语音输入」这一行', !html.includes('micHint'))
+check('页面不再依赖安全上下文接口', !html.includes('isSecureContext'))
+// 手机上传文件：按钮、藏起来的文件选择器、附件小条，三样都得真的送到手机上
+for (const id of ['btnAttach', 'filePick', 'attachBar']) {
+  check(`上传那一套里有 id="${id}"`, html.includes(`id="${id}"`))
+}
+check('文件选择器是藏起来的', /id="filePick"[^>]*hidden/.test(html))
+check('上传上限由服务端注入，页面里没有第二份',
+  /var MAX_UPLOAD = \d+;/.test(html) && !html.includes('__MAX_UPLOAD__'))
+// 回答流式生成：那段「正在写」的样式和渲染函数都得在
+check('流式那一段有独立样式', html.includes('.live {') && html.includes('@keyframes caret'))
+check('流式那一段由 liveBlock 渲染', html.includes('function liveBlock'))
+check('快照里的 live 接得住', html.includes("if ('live' in snap)"))
+// 旁白不许在手机上闪一下再消失（用户 2026-09-22：「出现又迅速消失，就像泄露出来的一样」）。
+// 判据本身要到这一步末尾才知道，所以只能用长度兜底——插件源码里那条线得在。
+check('太短的内容不往外露（旁白挡在门外）', /const STREAM_MIN_CHARS = \d+/.test(pluginSrc) &&
+  /streaming\.text\.length < STREAM_MIN_CHARS/.test(pluginSrc))
+// 流式一开始吐字，鲸鱼娘要让位（用户 2026-09-22 实机提的：回答在底下长出来了，
+// 底下还挂着它，重复又抢注意力）
+check('流式吐字时鲸鱼娘让位', /var busy = \(state\.running \|\| queued > 0\) && !state\.live/.test(html))
+// 指令气泡和回答之间的间距要比同一条消息内部大（原来 10px 太挤）
+{
+  const css = html.slice(html.indexOf('.bubble {'), html.indexOf('.bubble.user'))
+  const m = css.match(/margin-bottom:\s*(\d+)px/)
+  check('指令和回答之间留够了间距', !!m && Number(m[1]) >= 16, `margin-bottom = ${m ? m[1] : '?'}px`)
+}
+// 鲸鱼娘那七个姿势是装饰性轮播，轮到哪张图跟 Agent 实际状态无关。
+// 所以气泡里的话不许报忧——用户正在等结果，看到「不对劲」会当真。
+// 用户 2026-09-22 实机指着「这里有点不对劲」问过这一句。
+{
+  const poses = html.slice(html.indexOf('var POSES = ['), html.indexOf('var POSE_MS'))
+  const lines = [...poses.matchAll(/line:\s*'([^']*)'/g)].map((m) => m[1])
+  const alarming = lines.filter((l) => /不对劲|出错|错误|失败|坏了|异常|有问题/.test(l))
+  // 8 条里有一条是空串（冲刺那张不带词条），空串不参与报忧检查但也要数进来
+  check('鲸鱼娘说的话不报忧', lines.length === 8 && alarming.length === 0,
+    alarming.length ? `有问题的是：${alarming.join('、')}` : `${lines.length} 条，其中 ${lines.filter((l) => !l).length} 条故意留空`)
+}
+// 不带词条的姿势，气泡要整个收起来——留个空泡泡在那儿比不放更怪
+check('空词条会把气泡收起来',
+  /\$\('workBubble'\)\.hidden = !line;/.test(html) && /var line = POSES\[index\]\.line \|\| ''/.test(html))
+// 冲刺是姿势之间的过渡，不是第 8 个姿势：序列得是「姿势→冲刺→姿势→冲刺」
+check('轮播把冲刺插在每一对姿势之间', html.includes('function poseSequence') &&
+  /if \(POSES\[i\]\.gap\) continue;/.test(html))
+// 2026-09-22 改：这条原来叫「冲刺停得比姿势短」，写死 `GAP_MS = 2400`——
+// 那是**被用户推翻的前提**（他两次要求拉长，现在冲刺和正常姿势一样长，都是 3600，
+// 因为 2.4 秒「看着还是一闪而过」）。钉着旧数字等于钉着一条错的规则，只会以假警报咬人。
+// 现在钉**结构**：冲刺走自己那个常量，将来要单独调它不必动 POSE_MS。
+check('冲刺有自己的停留时长，不跟姿势共用',
+  /POSES\[index\]\.gap \? GAP_MS : POSE_MS/.test(html) && /var GAP_MS = \d+/.test(html))
+// 单帧模式下「正在执行」要加在上一条回答下面，不能把它顶掉
+check('执行提示是加在下面的一条', html.includes('id="work"') && html.includes('work-progress'))
+check('发指令时不再清空上一条回答', !/state\.latest\s*=\s*null/.test(html))
+
+// 6b. 停止：按钮得真送到手机上，路由得真在
+check('页面上有停止按钮', html.includes('id="btnStop"'))
+check('停止按钮打的是 /mini/api/stop', html.includes("'/mini/api/stop'"))
+// 路由是服务端建的：页面有按钮而路由没部署的话，按下去就是 404。
+//
+// 但这一条**经常会被跳过**，而且是故意的。两个原因：
+//   1. 鉴权在路由**之前**，所以匿名那一发 401 证明不了路由存在（随便编个 api 路径也是 401），
+//      得带 token 打一发才知道；
+//   2. 带 token 真打一发就是**真停**——会打断你手上正在跑的任务。
+//      而活体检查通常就是在一个正在跑的会话里执行的，running 多半是 true。
+// 宁可不验，也不打断。路由本身在 test/plugin.test.mjs 里已经用真 HTTP 打过一遍了；
+// 而「跑着的到底是不是这份代码」由上面的指纹那条把关。这里只是多一层保险。
+if (state.body?.running) {
+  check('停止路由（跳过：有任务正在跑，不去打断它）', true, 'running=true')
+} else {
+  const stopKnown = await post('/mini/api/stop', {})
+  const stopUnknown = await post('/mini/api/nope', {})
+  check('停止路由存在（不是 404）', stopKnown.status !== 404, `HTTP ${stopKnown.status}`)
+  // 对照组：证明「不是 404」这个判据本身有效，而不是所有 POST 都返回非 404。
+  check('对照：编出来的路由确实是 404', stopUnknown.status === 404, `HTTP ${stopUnknown.status}`)
+}
+
+// 6c. 排队：跑着也能发、排了什么看得见、能撤
+//
+// 这几条都是**只读**的，不像停止那条有副作用——它们查的是「快照里有没有队列这个字段」
+// 和「页面上有没有那块东西」，不会去动用户手上的任务。
+check('页面上有排队那一块', html.includes('id="queue"'))
+check('页面上打的是 /mini/api/unqueue', html.includes("'/mini/api/unqueue'"))
+check('跑着的时候不再禁用输入框和发送键',
+  !/inputEl\.disabled\s*=\s*state\.running/.test(html)
+  && !/\$\('btnSend'\)\.disabled\s*=\s*state\.running/.test(html))
+const snapForQueue = await (await fetch(`${base}/mini/api/state?token=${token}`)).json()
+check('快照里带队列字段，而且是个数组', Array.isArray(snapForQueue.queued),
+  `queued = ${JSON.stringify(snapForQueue.queued)?.slice(0, 80)}`)
+// 对照组：编出来的字段本来就不该在。证明上面那条不是「什么字段都算有」。
+check('对照：快照里没有编出来的字段', !('definitelyNotAField' in snapForQueue))
+
+// 6d. 聊天模式的气泡宽度
+//
+// 块级元素宽度默认撑满容器，只写 max-width 只是封了个顶——短消息会变成一个大方块。
+// 这条钉的就是那个 fit-content 别被删掉。纯样式，没有别的验法。
+check('聊天模式气泡按文字收（不是固定撑满）', /\.bubble \{[^}]*width:\s*fit-content/.test(html))
+check('对照：气泡的 86% 封顶还在', /\.bubble \{[^}]*max-width:\s*86%/.test(html))
+
+// 6. 鲸鱼娘立绘：8 张都要真能取到，而且没登录的人拿不到
+const POSES = [
+  'work-1-ready', 'work-2-reading', 'work-3-typing', 'work-4-checking',
+  'work-5-thinking', 'work-6-running', 'work-8-sprinting', 'work-7-waiting',
+]
+for (const p of POSES) {
+  const r = await fetch(`${base}/mini/art/${p}.webp?token=${token}`)
+  const buf = Buffer.from(await r.arrayBuffer())
+  // WebP 的魔数：RIFF....WEBP。只看状态码不够——404 的 JSON 也是 200 字节的正文。
+  const isWebp = buf.length > 1000 && buf.subarray(0, 4).toString('latin1') === 'RIFF'
+    && buf.subarray(8, 12).toString('latin1') === 'WEBP'
+  check(`立绘 ${p} 取得到且是真 WebP`, r.status === 200 && isWebp,
+    `HTTP ${r.status}, ${buf.length} 字节`)
+}
+const anonArt = await fetch(`${base}/mini/art/work-1-ready.webp`)
+check('立绘匿名访问被拒', anonArt.status === 401, `HTTP ${anonArt.status}`)
+const trav = await fetch(`${base}/mini/art/..%2F..%2Fpackage.json?token=${token}`)
+check('立绘路径穿越被挡', trav.status === 404, `HTTP ${trav.status}`)
+check('页面把立绘地址带上了 token', html.includes("'/mini/art/' + file + '.webp?token='"))
+check('页面把构建指纹带上了立绘地址', html.includes("&v=' + encodeURIComponent(BUILD)"))
+check('立绘是两帧雪碧图', html.includes('poseFlip') && html.includes('background-size: 244px 106px'))
+
+console.log('')
+console.log(problems.length ? `有 ${problems.length} 项没过：${problems.join('、')}` : '全部通过。')
+// 用 exitCode 而不是 process.exit()：直接退会在 fetch 的 keep-alive 连接还开着时
+// 触发 libuv 的 UV_HANDLE_CLOSING 断言，输出一堆吓人的红字（不影响结果，但很难看）。
+process.exitCode = problems.length ? 1 : 0

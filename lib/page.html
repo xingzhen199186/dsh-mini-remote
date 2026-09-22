@@ -1,0 +1,1891 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f1115">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>DSH mini remote</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #171a21;
+    --panel-2: #1e222b;
+    --line: #2a2f3a;
+    --fg: #e8eaed;
+    --muted: #8b93a1;
+    --accent: #4c8dff;
+    --ok: #35c46b;
+    --warn: #e0a33a;
+    --err: #e5604d;
+    --radius: 14px;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0; height: 100%; overflow: hidden;
+    background: var(--bg); color: var(--fg);
+    font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+          "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    overscroll-behavior: none;
+  }
+  body { display: flex; flex-direction: column; }
+
+  /* ---------- 顶栏 ---------- */
+  header {
+    flex: 0 0 auto; display: flex; align-items: center; gap: 10px;
+    padding: calc(env(safe-area-inset-top) + 10px) 14px 10px;
+    background: var(--panel); border-bottom: 1px solid var(--line);
+  }
+  .brand { font-weight: 600; letter-spacing: .3px; }
+  .dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--muted); flex: 0 0 auto; transition: background .2s;
+  }
+  .dot.ok { background: var(--ok); }
+  .dot.run { background: var(--warn); animation: pulse 1.2s ease-in-out infinite; }
+  .dot.err { background: var(--err); }
+  @keyframes pulse { 50% { opacity: .25; } }
+  .status { color: var(--muted); font-size: 13px; flex: 1 1 auto;
+            overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .icon-btn {
+    flex: 0 0 auto; width: 36px; height: 36px; border-radius: 10px;
+    border: 1px solid var(--line); background: var(--panel-2); color: var(--fg);
+    font-size: 16px; display: grid; place-items: center; cursor: pointer;
+  }
+  .icon-btn:active { transform: scale(.94); }
+
+  /* ---------- 显示区 ---------- */
+  main { flex: 1 1 auto; overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 16px 14px; }
+  main.center { display: grid; place-items: center; }
+
+  #reply {
+    white-space: pre-wrap; word-break: break-word;
+    font-size: 16px; line-height: 1.75;
+  }
+  #reply a { color: var(--accent); }
+  .placeholder { color: var(--muted); font-size: 15px; text-align: center; line-height: 1.9; }
+  .placeholder kbd {
+    background: var(--panel-2); border: 1px solid var(--line);
+    border-radius: 6px; padding: 1px 6px; font-size: 13px; font-family: inherit;
+  }
+
+  /* ---------- 聊天模式 ---------- */
+  /* width: fit-content 是关键，别删。
+     气泡是个块级元素，而块级元素的宽度默认是「撑满容器」——只写 max-width 的话，
+     那只是给它封了个顶，短消息（「好的」「继续」）照样会撑成一个 86% 宽的大方块，
+     右边留一大片空白。fit-content 让它按内容收：短的自适应，长的到 86% 就折行。
+     两种气泡都要，只改一边的话，短回复那边还是会露出大方块，看着像坏了。 */
+  .bubble {
+    width: fit-content;
+    max-width: 86%; padding: 10px 13px; border-radius: var(--radius);
+    /* 18px，和 .said 的下边距一致。原来是 10px，用户 2026-09-22 实机提「指令气泡和
+       回答正文第一行之间贴得太紧」——10px 是「同一条消息内部」的距离，
+       而这里跨的是「我说的话」和「它答的话」，是更大的一个断点，该给更多。 */
+    margin-bottom: 18px; white-space: pre-wrap; word-break: break-word;
+    font-size: 15.5px; line-height: 1.7;
+  }
+  .bubble.user { margin-left: auto; background: var(--panel-2); border: 1px solid var(--line); }
+  .bubble.assistant { margin-right: auto; background: var(--panel); border: 1px solid var(--line); }
+  .bubble a { color: var(--accent); }
+  .bubble .meta { display: block; margin-top: 6px; font-size: 11px; color: var(--muted); }
+  /* 「已停止」标签：被按停的那一轮，手机上收到的只是**已经吐出来的那半句**。
+     不标出来的话，它看着就像模型答崩了。 */
+  .stopped {
+    display: inline-block; padding: 1px 7px; border-radius: 999px; font-size: 11px;
+    color: var(--muted); border: 1px solid var(--line); vertical-align: middle;
+  }
+  .reply-bar .stopped { margin-right: auto; }
+  /* ---------- Markdown 正文 ---------- */
+  /* 外层是 pre-wrap（用户消息和旧内容靠它），markdown 输出的是真块级元素，
+     所以要在这里把 pre-wrap 收掉，否则段落之间会多出一堆空行。 */
+  .md { white-space: normal; }
+  .md > :first-child { margin-top: 0; }
+  .md > :last-child { margin-bottom: 0; }
+  .md p { margin: 0 0 .7em; }
+  .md h1, .md h2, .md h3, .md h4, .md h5, .md h6 {
+    margin: 1em 0 .5em; line-height: 1.35; font-weight: 650;
+  }
+  .md h1 { font-size: 1.35em; }
+  .md h2 { font-size: 1.22em; }
+  .md h3 { font-size: 1.1em; }
+  .md h4, .md h5, .md h6 { font-size: 1em; }
+  .md ul, .md ol { margin: 0 0 .7em; padding-left: 1.4em; }
+  .md li { margin: .18em 0; }
+  .md a { color: var(--accent); word-break: break-all; }
+  .md strong { font-weight: 650; }
+  .md hr { border: none; border-top: 1px solid var(--line); margin: 1em 0; }
+  .md blockquote {
+    margin: 0 0 .7em; padding: .1em 0 .1em .8em;
+    border-left: 3px solid var(--line); color: var(--muted);
+  }
+  .md code {
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: 5px;
+    padding: .1em .35em; font-size: .88em;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  .md .code {
+    margin: 0 0 .7em; border: 1px solid var(--line); border-radius: 10px;
+    background: var(--panel-2); overflow: hidden;
+  }
+  .md .code-head {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 8px; padding: 5px 8px 5px 10px; border-bottom: 1px solid var(--line);
+  }
+  .md .code-head .lang { font-size: 11px; color: var(--muted); }
+  .md .code pre { margin: 0; padding: 10px; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .md .code code {
+    background: none; border: none; padding: 0; font-size: 12.5px; line-height: 1.6;
+    white-space: pre;
+  }
+  /* 表格窄屏放不下就横向滚，别把页面撑破 */
+  .md table { border-collapse: collapse; margin: 0 0 .7em; font-size: .92em; display: block; overflow-x: auto; }
+  .md th, .md td { border: 1px solid var(--line); padding: 5px 9px; text-align: left; white-space: nowrap; }
+  .md th { background: var(--panel-2); font-weight: 600; }
+
+  /* 复制按钮：方形的图标按钮，图标是两个重叠的方框（就是常见那个复制图标）。
+     点下去换成对勾，1.4 秒后自己变回来——手机上没法悬停，也没有「已复制」的
+     系统提示，这个反馈是唯一的，所以必须有。
+     三个地方共用：单帧模式的整篇、聊天模式的气泡、代码块。 */
+  .copy {
+    flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center;
+    width: 28px; height: 28px; padding: 0; border-radius: 8px; cursor: pointer;
+    border: 1px solid var(--line); background: var(--panel-2); color: var(--muted);
+  }
+  .copy svg {
+    width: 15px; height: 15px; fill: none; stroke: currentColor;
+    stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round;
+  }
+  .copy:active { transform: scale(.95); }
+  .copy.done { color: var(--accent); border-color: var(--accent); }
+  .bubble .meta .copy { margin-left: 8px; vertical-align: middle; }
+  /* 上面那条只放「已停止」标签——它是给正文打的预防针，得在正文之前出现。
+     复制按钮挪到正文下面去了（.reply-foot）。 */
+  .reply-bar { display: flex; justify-content: flex-start; margin-bottom: 8px; }
+  /* 复制按钮在正文下方、靠左——用户要求。原来在上面靠右，拇指够不着，
+     而且会比正文先入眼。 */
+  .reply-foot { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+  .reply-foot .time { font-size: 11.5px; color: var(--muted); }
+  /* 聊天模式下 AI 的回答**不套气泡**（用户要求「参考单帧模式那样」）。
+     用户自己的指令仍然是气泡，一左一右、一个有框一个没框，正好分得清谁说的。 */
+  .said { margin-bottom: 18px; }
+  /* ---------- 正在流出来的那一段 ---------- */
+  /* 和最终答案**刻意画得不一样**：上面一条虚线、末尾一个闪动的竖条、没有复制按钮。
+     三样都在说同一句话——「这不是最终答案，还会变」。等答案落定整块被换掉。 */
+  .live {
+    margin-top: 18px; padding-top: 14px;
+    border-top: 1px dashed var(--line);
+  }
+  .live .md > *:last-child::after {
+    content: ''; display: inline-block; width: 2px; height: 1em;
+    margin-left: 2px; vertical-align: -2px;
+    background: var(--accent, #2563eb);
+    animation: caret 1s steps(2, start) infinite;
+  }
+  @keyframes caret { 0%, 50% { opacity: 1; } 50.01%, 100% { opacity: 0; } }
+  /* ---------- 「正在执行」：鲸鱼娘 + 进度条 + 气泡 ----------
+     单帧模式下它出现在上一条回答的**下方**，不顶掉它，所以要用虚线跟正文分开，
+     不然会被当成那条回答的一部分。 */
+  .work {
+    margin-top: 20px; padding-top: 14px;
+    border-top: 1px dashed var(--line);
+  }
+  /* 立绘和气泡是**一组**。这里把两件事拆开：
+       立绘站哪儿 → 由**这一行的宽度**决定，跟词条无关；
+       气泡多宽   → 由词条自己的长短决定。
+     行宽取「最长那句」的整组宽度，再把这一行居中，于是立绘永远站在同一个位置。
+     算账：立绘 122 + 间隙 6 + 最长那句的气泡 171 = 299。
+     那个 171 = 10 个全角字 × 14.5px，加左右内边距 24、边框 2。
+     用 max-content 而不是写死 width：将来真加了更长的词条，这行会自己撑开——
+     宁可立绘挪一点，也不能让字顶出屏幕。
+     min() 是窄屏退路：屏幕比 299 还窄时，这行跟着屏幕收，别溢出。 */
+  .work-top {
+    display: flex; align-items: center; gap: 6px;
+    width: max-content; min-width: min(299px, 100%);
+    margin: 0 auto;
+  }
+
+  /* 立绘：每个姿势是一张「两帧并排」的雪碧图（760×330），靠 background-position
+     在左右两帧之间硬切，手脚就真的在动——不是把一张静图晃一晃。
+     七层叠在一起，换姿势时交叉淡入。 */
+  .work-stage {
+    position: relative; flex: 0 0 auto;
+    width: 122px; height: 106px;
+    /* 整块再轻轻浮动一下。它的节奏和翻帧错开，两下叠起来才像活的。 */
+    animation: workBob 2.4s ease-in-out infinite;
+  }
+  @keyframes workBob { 50% { transform: translateY(-3px); } }
+  .pose {
+    position: absolute; inset: 0;
+    background-repeat: no-repeat;
+    background-position: 0 0;
+    background-size: 244px 106px;   /* 两帧并排的显示宽度 = 122 × 2 */
+    opacity: 0; transition: opacity .35s ease;
+    animation-name: poseFlip;
+    animation-timing-function: step-end;
+    animation-iteration-count: infinite;
+    animation-play-state: paused;   /* 没轮到它的层就别动，省电 */
+  }
+  .pose.on { opacity: 1; animation-play-state: running; }
+  /* 前半段左帧、后半段右帧。49.9%→50% 那一下是硬切、不插值，
+     不然会看到两张图横向滑过去。 */
+  @keyframes poseFlip {
+    0%, 49.9% { background-position: 0 0; }
+    50%, 100% { background-position: -122px 0; }
+  }
+
+  /* 气泡：左边一个小尖角指向立绘。
+     宽度**贴着自己的词条**，多长就多宽，右边不留空。
+     它推不动立绘——立绘的位置由上面 .work-top 的固定行宽管着，跟气泡宽窄无关。
+     所以「词条每 3.6 秒换一次」这件事不会让立绘左右晃。
+     max-width 是窄屏退路：立绘 122 + 间隙 6，剩下的都给气泡，宁可折行也别顶出屏幕。
+     抬到 flex-start 是让尖角对着她的头，而不是对着身子中间。 */
+  .work-bubble {
+    position: relative; flex: 0 1 auto;
+    max-width: calc(100% - 128px);
+    align-self: flex-start; margin-top: 6px;
+    background: var(--panel-2); border: 1px solid var(--line);
+    border-radius: 12px; padding: 9px 12px;
+    font-size: 14.5px; line-height: 1.5; color: var(--fg);
+  }
+  .work-bubble::before, .work-bubble::after {
+    content: ''; position: absolute; top: 50%; width: 0; height: 0;
+    border: 6px solid transparent; margin-top: -6px;
+  }
+  .work-bubble::before { left: -12px; border-right-color: var(--line); }
+  .work-bubble::after { left: -11px; border-right-color: var(--panel-2); }
+
+  /* 进度条故意做成**不确定进度**的流动条，不是百分比。
+     插件按设计只收「指令 + 最终回复」，拿不到 Agent 此刻跑到哪一步，
+     所以画一个填到 80% 的假进度条等于撒谎。它只表达「在跑」，不表达「跑到哪了」。 */
+  .work-progress {
+    margin-top: 10px; height: 4px; border-radius: 2px;
+    background: var(--panel-2); overflow: hidden;
+  }
+  .work-progress i {
+    display: block; width: 38%; height: 100%; border-radius: 2px;
+    background: linear-gradient(90deg, transparent, var(--accent) 45%, var(--accent) 55%, transparent);
+    animation: workSweep 1.5s ease-in-out infinite;
+  }
+  @keyframes workSweep {
+    from { transform: translateX(-105%); }
+    to { transform: translateX(265%); }
+  }
+  /* 秒数在左、停止按钮在右。秒数原来是自己一行右对齐，现在跟按钮同一行。 */
+  .work-foot {
+    margin-top: 8px; display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  }
+  .work-elapsed {
+    color: var(--muted); font-size: 12px;
+    font-variant-numeric: tabular-nums;
+  }
+  /* 停止按钮。做成描边而不是实心：它是个「打断」，不该比「发送」还显眼。
+     按下去之后自己禁用并改文案——cancel() 只是递请求，真正停下要等状态翻，
+     这中间必须让用户看见「已经按到了」，否则会连按好几下。 */
+  .stop {
+    padding: 5px 14px; border-radius: 999px; font-size: 13px;
+    border: 1px solid var(--line); background: transparent; color: var(--fg);
+    transition: opacity .15s;
+  }
+  .stop:disabled { opacity: .5; }
+
+  /* 排队中的指令。跑着任务时接着发的那几条排在这儿，等这一轮跑完再跑。
+     单帧模式下你发出去的那句话在别处一个字都看不见（那一模式只显示回复），
+     所以这块是唯一的反馈，不能省。 */
+  .queue {
+    margin-top: 12px; padding: 8px 10px; border-radius: 10px;
+    background: var(--panel-2); border: 1px solid var(--line);
+  }
+  .queue .q-head { font-size: 11.5px; color: var(--muted); margin-bottom: 6px; }
+  .queue .q-row {
+    display: flex; align-items: center; gap: 8px; padding: 3px 0;
+    font-size: 13.5px; line-height: 1.45;
+  }
+  /* 长指令折行，但最多两行——队列是「提醒还有几条」，不是给人重读全文的地方。 */
+  .queue .q-text {
+    flex: 1 1 auto; min-width: 0; color: var(--fg);
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .queue .q-drop {
+    flex: 0 0 auto; width: 24px; height: 24px; padding: 0; line-height: 1;
+    border-radius: 999px; font-size: 12px;
+    border: 1px solid var(--line); background: transparent; color: var(--muted);
+  }
+
+  /* 系统里设了「减少动态效果」的人：不浮动、不翻帧、不轮播、进度条常亮。
+     秒数照常走——那是信息，不是装饰。 */
+  @media (prefers-reduced-motion: reduce) {
+    .work-stage { animation: none; }
+    .pose { animation: none; transition: none; }
+    .work-progress i { animation: none; width: 100%; opacity: .45; }
+  }
+
+  /* ---------- 底栏 ---------- */
+  footer {
+    flex: 0 0 auto; display: flex; align-items: flex-end; gap: 8px;
+    padding: 10px 12px calc(env(safe-area-inset-bottom) + 10px);
+    background: var(--panel); border-top: 1px solid var(--line);
+  }
+  #input {
+    flex: 1 1 auto; resize: none; min-height: 42px; max-height: 140px;
+    padding: 10px 12px; border-radius: 12px; border: 1px solid var(--line);
+    background: var(--panel-2); color: var(--fg); font: inherit; font-size: 16px;
+    line-height: 1.5; outline: none;
+  }
+  #input:focus { border-color: var(--accent); }
+  .send {
+    flex: 0 0 auto; height: 42px; padding: 0 16px; border-radius: 12px;
+    border: none; background: var(--accent); color: #fff;
+    font-size: 15px; font-weight: 600; cursor: pointer;
+  }
+  .send:disabled { opacity: .4; }
+
+  /* ---------- 上传附件 ---------- */
+  .attach {
+    flex: 0 0 auto; width: 42px; height: 42px; padding: 0; border-radius: 12px;
+    border: 1px solid var(--line); background: var(--panel-2); color: var(--muted);
+    display: inline-flex; align-items: center; justify-content: center; cursor: pointer;
+  }
+  .attach svg { width: 19px; height: 19px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+  .attach:disabled { opacity: .4; }
+  /* 上传中：图标转起来。这条路上没有进度条，至少要让人看出「它在动」。 */
+  .attach.busy svg { animation: spin 1s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* 附件小条：排在输入框上面，让你发之前看得见自己带了什么。 */
+  .attach-bar {
+    flex: 0 0 auto; display: flex; flex-wrap: wrap; gap: 6px;
+    padding: 8px 12px 0; background: var(--panel); border-top: 1px solid var(--line);
+  }
+  .attach-bar[hidden] { display: none; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 6px; max-width: 100%;
+    padding: 5px 6px 5px 10px; border-radius: 999px;
+    border: 1px solid var(--line); background: var(--panel-2);
+    font-size: 12.5px; color: var(--fg);
+  }
+  .chip .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 42vw; }
+  .chip .sz { color: var(--muted); flex: none; }
+  .chip .x {
+    flex: none; width: 20px; height: 20px; padding: 0; border-radius: 50%;
+    border: none; background: transparent; color: var(--muted);
+    font-size: 15px; line-height: 1; cursor: pointer;
+  }
+  .chip.failed { border-color: var(--danger, #dc2626); }
+
+  /* ---------- 左侧导航栏 ---------- */
+  #nav {
+    position: fixed; inset: 0; z-index: 60; display: none;
+    background: rgba(0, 0, 0, .5);
+  }
+  #nav.open { display: block; }
+  .nav-panel {
+    position: absolute; top: 0; bottom: 0; left: 0; width: min(86vw, 350px);
+    display: flex; flex-direction: column;
+    background: var(--panel); border-right: 1px solid var(--line);
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+    animation: navIn .18s ease-out;
+  }
+  @keyframes navIn { from { transform: translateX(-100%); } }
+  .nav-head {
+    flex: 0 0 auto; display: flex; align-items: center; gap: 8px;
+    padding: 12px 12px 12px 16px; border-bottom: 1px solid var(--line);
+    font-weight: 600;
+  }
+  .nav-head > span:first-child { flex: 1 1 auto; }
+  .nav-body { flex: 1 1 auto; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+  .nav-body .placeholder { padding: 24px 16px; font-size: 14px; }
+
+  .ws { border-bottom: 1px solid var(--line); }
+  .ws-head {
+    display: flex; align-items: center; gap: 8px; width: 100%;
+    padding: 12px 14px; background: none; border: none; color: var(--fg);
+    font: inherit; font-size: 14.5px; text-align: left; cursor: pointer;
+  }
+  .ws-head .caret {
+    flex: 0 0 auto; color: var(--muted); font-size: 10px;
+    transition: transform .15s;
+  }
+  .ws.open .ws-head .caret { transform: rotate(90deg); }
+  .ws-head .ws-title { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ws-head .ws-count { flex: 0 0 auto; color: var(--muted); font-size: 12px; }
+  .ws-body { display: none; }
+  .ws.open .ws-body { display: block; }
+
+  .sess {
+    display: flex; align-items: center; gap: 8px; width: 100%;
+    padding: 10px 14px 10px 30px; background: none; border: none; color: var(--fg);
+    font: inherit; font-size: 14px; text-align: left; cursor: pointer;
+  }
+  .sess:active { background: var(--panel-2); }
+  .sess.cur { background: var(--panel-2); box-shadow: inset 3px 0 0 var(--accent); }
+  .sess .s-title { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sess .s-meta { flex: 0 0 auto; color: var(--muted); font-size: 11.5px; }
+  .sess .s-dot, .ws-head .s-dot {
+    flex: 0 0 auto; width: 6px; height: 6px; border-radius: 50%;
+    background: var(--warn); animation: pulse 1.2s ease-in-out infinite;
+  }
+  .nav-note { padding: 10px 16px; color: var(--muted); font-size: 12px; line-height: 1.6; }
+
+  /* ---------- 设置抽屉 ---------- */
+  #settings {
+    position: fixed; inset: 0; background: rgba(0,0,0,.55);
+    display: none; align-items: flex-end; z-index: 50;
+  }
+  #settings.open { display: flex; }
+  .sheet {
+    width: 100%; max-height: 86vh; overflow-y: auto;
+    background: var(--panel); border-radius: 18px 18px 0 0;
+    padding: 18px 16px calc(env(safe-area-inset-bottom) + 18px);
+    border-top: 1px solid var(--line);
+  }
+  .sheet h2 { margin: 0 0 14px; font-size: 16px; }
+  .row {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--line);
+  }
+  .row:last-of-type { border-bottom: none; }
+  .row .label { font-size: 15px; }
+  .row .hint { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .seg { display: flex; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  .seg button {
+    padding: 7px 12px; border: none; background: var(--panel-2); color: var(--muted);
+    font-size: 13px; cursor: pointer;
+  }
+  .seg button.active { background: var(--accent); color: #fff; }
+  select, .btn {
+    padding: 8px 12px; border-radius: 10px; border: 1px solid var(--line);
+    background: var(--panel-2); color: var(--fg); font: inherit; font-size: 14px;
+  }
+  .btn { cursor: pointer; }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+  .sheet .foot { margin-top: 18px; display: flex; gap: 10px; }
+  .sheet .foot .btn { flex: 1 1 0; text-align: center; }
+
+  /* ---------- token 输入 ---------- */
+  #gate { position: fixed; inset: 0; background: var(--bg); z-index: 100;
+          display: none; flex-direction: column; justify-content: center;
+          padding: 24px; gap: 14px; }
+  #gate.open { display: flex; }
+  #gate h1 { font-size: 20px; margin: 0; }
+  #gate p { color: var(--muted); font-size: 14px; margin: 0; }
+  #gate input {
+    padding: 12px 14px; border-radius: 12px; border: 1px solid var(--line);
+    background: var(--panel-2); color: var(--fg); font: inherit; font-size: 16px;
+  }
+  #gate button {
+    padding: 13px; border-radius: 12px; border: none; background: var(--accent);
+    color: #fff; font-size: 16px; font-weight: 600;
+  }
+  #gate .err { color: var(--err); font-size: 13px; min-height: 18px; }
+
+  #toast {
+    position: fixed; left: 50%; bottom: 84px; transform: translateX(-50%) translateY(8px);
+    background: rgba(40,44,54,.97); color: var(--fg); padding: 9px 16px;
+    border-radius: 20px; font-size: 13.5px; opacity: 0; pointer-events: none;
+    transition: opacity .2s, transform .2s; z-index: 200; max-width: 86vw; text-align: center;
+  }
+  #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+</style>
+</head>
+<body>
+
+<header>
+  <button class="icon-btn" id="btnNav" aria-label="工作区与会话">☰</button>
+  <span class="dot" id="dot"></span>
+  <span class="brand">DSH mini remote</span>
+  <span class="status" id="status">连接中…</span>
+  <button class="icon-btn" id="btnSettings" aria-label="设置">⚙</button>
+</header>
+
+<main id="main">
+  <div id="reply"></div>
+  <!-- 「正在执行」是常驻元素，不参与 #reply 的整块重绘。
+       拼进重绘里的话，每次状态广播都会把它重建一次，轮播和浮动动画会一直从头开始。 -->
+  <div id="work" class="work" hidden>
+    <div class="work-top">
+      <div class="work-stage" id="workStage"></div>
+      <div class="work-bubble" id="workBubble">正在执行…</div>
+    </div>
+    <div class="work-progress"><i></i></div>
+    <div class="work-foot">
+      <span class="work-elapsed" id="workElapsed"></span>
+      <button class="stop" id="btnStop" type="button">停止</button>
+    </div>
+  </div>
+
+  <!-- 排队中的指令。**它必须留在 #work 外面。**
+       原来它挂在 #work 里面，而 #work 在回答开始流式生成时会整块隐藏
+       （用户 2026-09-22 提的「内容开始流式生成的时候，鲸鱼娘的动画就可以消失了」），
+       于是排队列表被一起藏掉了。用户 2026-09-22 报：「排队列表现在手机端直接没出现了」。
+       这个 bug 是**被流式修好之后才变明显的**：门槛从 120 降到 40 之后，回答很早就开始
+       流式、state.live 长期有值，用户接着发指令时正好落在那个窗口里。
+       排队和鲸鱼娘是两件事——前者是「还有几条在等」，后者是「她正在忙」，
+       别因为后者要藏就把前者一起藏了。 -->
+  <div class="queue" id="queue" hidden></div>
+</main>
+
+<div class="attach-bar" id="attachBar" hidden></div>
+<footer>
+  <!-- 回形针。input 藏起来，按钮点它——iOS 上直接放一个 file input 样式很难统一。 -->
+  <button class="attach" id="btnAttach" type="button" aria-label="上传文件" title="上传文件">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+  </button>
+  <input type="file" id="filePick" hidden>
+  <textarea id="input" rows="1" placeholder="说点什么…" enterkeyhint="send"></textarea>
+  <button class="send" id="btnSend">发送</button>
+</footer>
+
+<div id="nav">
+  <aside class="nav-panel">
+    <div class="nav-head">
+      <span>工作区与会话</span>
+      <button class="icon-btn" id="btnNavRefresh" aria-label="刷新">⟳</button>
+      <button class="icon-btn" id="btnNavClose" aria-label="关闭">✕</button>
+    </div>
+    <div class="nav-body" id="navBody"></div>
+  </aside>
+</div>
+
+<div id="settings">
+  <div class="sheet">
+    <h2>设置</h2>
+
+    <div class="row">
+      <div>
+        <div class="label">显示模式</div>
+        <div class="hint">单帧：只留最新一条回复</div>
+      </div>
+      <div class="seg" id="segMode">
+        <button data-mode="minimal">单帧</button>
+        <button data-mode="chat">聊天</button>
+      </div>
+    </div>
+
+    <!--
+      这里原来有两行：「完成后提醒」和「语音输入」。
+
+      2026-09-21 用户裁决：**两行都从设置里撤掉，不让用户看到**——
+      它们都是浏览器安全上下文的限制（明文 http 下 Notification 和麦克风都用不了），
+      写在设置里只是把浏览器的一条规矩转嫁给用户去理解。相关知识记在下面
+      「浏览器系统通知」那段注释和 tasks/lessons.md 里，不占用户界面。
+
+      想用语音输入：手机键盘自带的 🎤 听写键，任何连接下都能用。
+      想人不在也能收到提醒：电脑端的外部推送（Bark / ntfy / Telegram），
+      从服务器发出去，不受浏览器这条规矩限制。
+    -->
+
+    <div class="row">
+      <div>
+        <div class="label">提示音与震动</div>
+        <div class="hint">回复到达时提醒（需先点一次页面）</div>
+      </div>
+      <div class="seg" id="segSound">
+        <button data-sound="on">开</button>
+        <button data-sound="off">关</button>
+      </div>
+    </div>
+
+    <div class="row">
+      <div>
+        <div class="label">连接</div>
+        <div class="hint" id="connHint">—</div>
+      </div>
+      <button class="btn" id="btnReconnect">重连</button>
+    </div>
+
+    <div class="foot">
+      <button class="btn" id="btnForget">清除 token</button>
+      <button class="btn primary" id="btnClose">完成</button>
+    </div>
+  </div>
+</div>
+
+<div id="gate">
+  <h1>需要访问令牌</h1>
+  <p>在电脑上打开 DSH 的「设置 → 手机遥控」，用手机重新扫一次二维码就能进来。
+     或者把那一页上的链接整条复制到浏览器地址栏打开。</p>
+  <input id="gateInput" type="text" placeholder="粘贴 token" autocomplete="off"
+         autocapitalize="off" autocorrect="off" spellcheck="false">
+  <div class="err" id="gateErr"></div>
+  <button id="gateBtn">进入</button>
+</div>
+
+<div id="toast"></div>
+
+<script>
+(function () {
+  'use strict';
+
+  var DEFAULT_MODE = '__DEFAULT_MODE__';
+  var NEEDS_TOKEN = __NEEDS_TOKEN__;
+  // 构建指纹，由服务端注入。拼在立绘地址后面，换了图浏览器就不会一直用缓存那张。
+  var BUILD = '__BUILD__';
+  // 单个文件的大小上限（字节），由服务端注入。页面里不写第二份——两处各写一个数，
+  // 迟早会不一致，而那时候的表现是「页面让你传，服务端拒绝」。
+  var MAX_UPLOAD = __MAX_UPLOAD__;
+
+  // ---------------- 状态 ----------------
+  var params = new URLSearchParams(location.search);
+  var state = {
+    token: params.get('token') || localStorage.getItem('dshMiniToken') || '',
+    mode: localStorage.getItem('dshMiniMode') || DEFAULT_MODE || 'minimal',
+    sound: localStorage.getItem('dshMiniSound') !== 'off',
+    running: false,
+    sessions: [],
+    // 排队中的指令（[{ id, text, placement }]）。跑着任务时接着发的那几条排在这儿，
+    // 由服务端每次取快照时从 agent 的收件箱现读，手机不自己记。
+    queued: [],
+    boundSessionId: null,
+    connected: false,
+    lastReplyStamp: 0,
+    // 传好了、还没发出去的文件（[{ uploadId, name, bytes }]）。
+    // 只存服务端发回来的那张小票，不存附件本身——真正的东西已经在电脑上了。
+    uploads: [],
+    // 正在流出来的那一段。空字符串 = 这会儿没有东西要显示。
+    live: ''
+  };
+  if (params.get('token')) {
+    localStorage.setItem('dshMiniToken', params.get('token'));
+    // 别把 token 留在地址栏里，避免被截图/分享带出去。
+    history.replaceState(null, '', location.pathname);
+  }
+
+  var $ = function (id) { return document.getElementById(id); };
+  var mainEl = $('main'), replyEl = $('reply'), inputEl = $('input');
+  var dotEl = $('dot'), statusEl = $('status');
+
+  // ---------------- 小工具 ----------------
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+  // 复制按钮的两个图标。做成常量而不是散在各处：以后换图标只改这一处。
+  // 形状（两个重叠的方框）和配色都在 CSS 的 .copy 里，这里只管画线。
+  var ICON_COPY = '<svg viewBox="0 0 16 16" aria-hidden="true">'
+    + '<rect x="5.6" y="1.6" width="8.8" height="8.8" rx="2.2"/>'
+    + '<rect x="1.6" y="5.6" width="8.8" height="8.8" rx="2.2"/></svg>';
+  var ICON_DONE = '<svg viewBox="0 0 16 16" aria-hidden="true">'
+    + '<path d="M2.6 8.4l3.6 3.6 7.2-7.2"/></svg>';
+  function linkify(text) {
+    return escapeHtml(text).replace(/(https?:\/\/[^\s<]+)/g, function (u) {
+      return '<a href="' + u + '" target="_blank" rel="noopener noreferrer">' + u + '</a>';
+    });
+  }
+
+  // ---------------- Markdown 渲染 ----------------
+  // 手写的最小实现，不引依赖（这个页面是单文件、免构建的）。
+  //
+  // 顺序不能换：**先转义，再上标签**。模型吐出来的东西一律当纯文本，
+  // 只把它写成的那几种语法变成 HTML——绝不让原文里的标签生效。
+  // 认不出来的语法原样留着：宁可少渲染，不能吃掉内容。
+  var CODE_SLOT = '\u0000';
+
+  function mdInline(raw) {
+    // 行内代码先挖出来换成占位符。不这么做的话，`**x**` 这种字面量
+    // 会被后面的粗体规则吃掉，代码里写的东西就显示错了。
+    var codes = [];
+    var out = escapeHtml(raw).replace(/`([^`]+)`/g, function (_, code) {
+      codes.push(code);
+      return CODE_SLOT + (codes.length - 1) + CODE_SLOT;
+    });
+    out = out
+      .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+      .replace(/(^|[^*\w])\*([^*\n]+)\*/g, '$1<em>$2</em>')
+      .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,
+        '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>')
+      .replace(/(^|[\s(])(https?:\/\/[^\s<)]+)/g,
+        '$1<a href="$2" target="_blank" rel="noopener noreferrer">$2</a>');
+    return out.replace(new RegExp(CODE_SLOT + '(\\d+)' + CODE_SLOT, 'g'), function (_, i) {
+      return '<code>' + codes[+i] + '</code>';
+    });
+  }
+
+  function codeBlock(raw, lang) {
+    // data-copy 里放转义后的原文，读回来时浏览器会自动还原成原始字符。
+    var attr = escapeHtml(raw);
+    return '<div class="code"><div class="code-head">'
+      + (lang ? '<span class="lang">' + escapeHtml(lang) + '</span>' : '<span></span>')
+      + '<button class="copy" type="button" aria-label="复制代码" title="复制代码"'
+      + ' data-copy="' + attr + '">' + ICON_COPY + '</button></div>'
+      + '<pre><code>' + attr + '</code></pre></div>';
+  }
+
+  function isBlockStart(line) {
+    return /^\s*```/.test(line)
+      || /^\s*#{1,6}\s/.test(line)
+      || /^\s*[-*+]\s/.test(line)
+      || /^\s*\d+[.)]\s/.test(line)
+      || /^\s*>/.test(line)
+      || /^\s*\|/.test(line)
+      || /^\s*([-*_])\s*\1\s*\1[\s\1]*$/.test(line);
+  }
+
+  function mdToHtml(src) {
+    var lines = String(src).split('\n');
+    var html = [];
+    var i = 0;
+    while (i < lines.length) {
+      var line = lines[i];
+
+      // 围栏代码块：内容只转义，不走行内规则
+      var fence = /^\s*```\s*([\w+#.-]*)\s*$/.exec(line);
+      if (fence) {
+        var buf = [];
+        i += 1;
+        while (i < lines.length && !/^\s*```\s*$/.test(lines[i])) { buf.push(lines[i]); i += 1; }
+        i += 1;
+        html.push(codeBlock(buf.join('\n'), fence[1]));
+        continue;
+      }
+
+      if (!line.trim()) { i += 1; continue; }
+
+      var h = /^\s*(#{1,6})\s+(.*)$/.exec(line);
+      if (h) {
+        var n = h[1].length;
+        html.push('<h' + n + '>' + mdInline(h[2]) + '</h' + n + '>');
+        i += 1;
+        continue;
+      }
+
+      if (/^\s*([-*_])\s*\1\s*\1[\s\1]*$/.test(line)) { html.push('<hr>'); i += 1; continue; }
+
+      if (/^\s*[-*+]\s+/.test(line)) {
+        var ul = [];
+        while (i < lines.length && /^\s*[-*+]\s+/.test(lines[i])) {
+          ul.push('<li>' + mdInline(lines[i].replace(/^\s*[-*+]\s+/, '')) + '</li>');
+          i += 1;
+        }
+        html.push('<ul>' + ul.join('') + '</ul>');
+        continue;
+      }
+
+      if (/^\s*\d+[.)]\s+/.test(line)) {
+        var ol = [];
+        while (i < lines.length && /^\s*\d+[.)]\s+/.test(lines[i])) {
+          ol.push('<li>' + mdInline(lines[i].replace(/^\s*\d+[.)]\s+/, '')) + '</li>');
+          i += 1;
+        }
+        html.push('<ol>' + ol.join('') + '</ol>');
+        continue;
+      }
+
+      if (/^\s*>/.test(line)) {
+        var quote = [];
+        while (i < lines.length && /^\s*>/.test(lines[i])) {
+          quote.push(lines[i].replace(/^\s*>\s?/, ''));
+          i += 1;
+        }
+        html.push('<blockquote>' + mdToHtml(quote.join('\n')) + '</blockquote>');
+        continue;
+      }
+
+      // 表格：当前行是 | … |，下一行是 |---|---| 这种分隔行
+      if (/^\s*\|.*\|\s*$/.test(line) && i + 1 < lines.length && /^\s*\|[\s:|-]+\|\s*$/.test(lines[i + 1])) {
+        var cells = function (l) {
+          return l.trim().replace(/^\||\|$/g, '').split('|').map(function (c) { return c.trim(); });
+        };
+        var head = cells(line);
+        i += 2;
+        var body = [];
+        while (i < lines.length && /^\s*\|.*\|\s*$/.test(lines[i])) { body.push(cells(lines[i])); i += 1; }
+        html.push('<table><thead><tr>'
+          + head.map(function (c) { return '<th>' + mdInline(c) + '</th>'; }).join('')
+          + '</tr></thead><tbody>'
+          + body.map(function (r) {
+            return '<tr>' + r.map(function (c) { return '<td>' + mdInline(c) + '</td>'; }).join('') + '</tr>';
+          }).join('')
+          + '</tbody></table>');
+        continue;
+      }
+
+      // 段落：连续的非空、非块起始行合成一段
+      var para = [line];
+      i += 1;
+      while (i < lines.length && lines[i].trim() && !isBlockStart(lines[i])) { para.push(lines[i]); i += 1; }
+      html.push('<p>' + para.map(mdInline).join('<br>') + '</p>');
+    }
+    return html.join('');
+  }
+
+  // 复制。navigator.clipboard 要求安全上下文（HTTPS），手机走局域网明文 HTTP 时
+  // 它是 undefined——所以必须有 execCommand 这条退路，否则按钮点下去毫无反应。
+  function copyText(text, btn) {
+    // 点一下换成对勾，过 1.4 秒自己变回来。
+    // 连点的时候要 clearTimeout：不然后一个定时器会被前一个提前触发，
+    // 图标在对勾和复制之间闪，或者干脆卡在对勾上不回来。
+    var done = function () {
+      if (!btn) return;
+      btn.classList.add('done');
+      btn.innerHTML = ICON_DONE;
+      clearTimeout(btn._doneTimer);
+      btn._doneTimer = setTimeout(function () {
+        btn.classList.remove('done');
+        btn.innerHTML = ICON_COPY;
+      }, 1400);
+    };
+    var fallback = function () {
+      try {
+        var ta = document.createElement('textarea');
+        ta.value = text;
+        ta.setAttribute('readonly', '');
+        ta.style.position = 'fixed';
+        ta.style.top = '-1000px';
+        document.body.appendChild(ta);
+        ta.select();
+        ta.setSelectionRange(0, ta.value.length);
+        var ok = document.execCommand('copy');
+        document.body.removeChild(ta);
+        if (ok) done(); else toast('复制不了，长按选中文字手动复制');
+      } catch (err) {
+        toast('复制不了，长按选中文字手动复制');
+      }
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(done, fallback);
+    } else {
+      fallback();
+    }
+  }
+  function timeLabel(ts) {
+    if (!ts) return '';
+    var d = new Date(ts);
+    var p = function (n) { return n < 10 ? '0' + n : String(n); };
+    return p(d.getHours()) + ':' + p(d.getMinutes());
+  }
+  var toastTimer;
+  function toast(msg) {
+    var el = $('toast');
+    el.textContent = msg;
+    el.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { el.classList.remove('show'); }, 1800);
+  }
+  function authHeaders(isJson) {
+    return isJson === false
+      ? { 'X-Mini-Token': state.token }
+      : { 'Content-Type': 'application/json', 'X-Mini-Token': state.token };
+  }
+  function api(path, options) {
+    var opts = options || {};
+    // 传文件的时候**不能**写 Content-Type: application/json——那是给 JSON 用的。
+    // 硬写上去，服务端收到的就是一个错的文件类型声明，而浏览器也没机会自己定。
+    var raw = typeof Blob !== 'undefined' && (opts.body instanceof Blob
+      || (typeof FormData !== 'undefined' && opts.body instanceof FormData));
+    opts.headers = Object.assign(authHeaders(!raw), opts.headers || {});
+    return fetch(path, opts).then(function (r) {
+      return r.json().catch(function () { return {}; }).then(function (body) {
+        if (!r.ok) throw new Error(body.error || ('HTTP ' + r.status));
+        return body;
+      });
+    });
+  }
+
+  // ---------------- 声音与震动 ----------------
+  var audioCtx = null;
+  function unlockAudio() {
+    try {
+      if (!audioCtx) {
+        var Ctx = window.AudioContext || window.webkitAudioContext;
+        if (!Ctx) return;
+        audioCtx = new Ctx();
+      }
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+      // 播放一个静音脉冲，iOS 要求真正出过声才算解锁。
+      var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      g.gain.value = 0;
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + 0.01);
+    } catch (e) { /* 不支持就算了，不影响主流程 */ }
+  }
+  function playDing() {
+    if (!state.sound || !audioCtx || audioCtx.state !== 'running') return;
+    try {
+      var t = audioCtx.currentTime;
+      var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = 'sine';
+      o.frequency.setValueAtTime(880, t);
+      o.frequency.setValueAtTime(1180, t + 0.11);
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(0.3, t + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.34);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(t); o.stop(t + 0.36);
+    } catch (e) { /* 忽略 */ }
+  }
+  function buzz() {
+    if (state.sound && navigator.vibrate) navigator.vibrate([200, 100, 200]);
+  }
+
+  // ---------------- 「正在执行」的鲸鱼娘 ----------------
+  // 这些姿态是**装饰性**的：插件按设计只收「用户指令 + 最终回复」，拿不到 Agent
+  // 此刻在干什么，所以轮播不是进度播报，只是让等待有点人味。
+  // 气泡里的话也守着这条线——说的是「还在忙」，不谎报「已完成 60%」。
+  //
+  // **还有一条更硬的规矩：不许报忧。** 用户正在等结果，这时候冒出「出错了」
+  // 「不对劲」之类的话，他会当真。可这些话跟 Agent 实际状态毫无关系，纯粹是
+  // 轮到第几张图。原来第 4 条写的「这里有点不对劲」就是这么个东西，2026-09-22
+  // 被用户指着问「这一句有问题还是什么」，已改掉。测试钉着这条：见 page.test.mjs
+  // 的「鲸鱼娘说的话里不许出现让人以为出事的字眼」。
+  //
+  // 每个姿势是一张「两帧并排」的雪碧图，flip 是翻帧的间隔（秒）：
+  // 敲键盘和小跑要快，端着茶等和托腮想事情要慢。节奏跟着动作走，才不像机器在闪。
+  var POSES = [
+    { file: 'work-1-ready', line: '收到，这就去办', flip: 0.5 },
+    { file: 'work-2-reading', line: '先翻翻资料', flip: 1.5 },
+    { file: 'work-3-typing', line: '正在写…', flip: 0.34 },
+    // 这一句原来是「这里有点不对劲」。**那是错的，而且是有害的**：轮播是装饰性的，
+    // 轮到哪张图跟 Agent 实际在干什么毫无关系，可用户正在等结果，看到手机上写
+    // 「不对劲」只会以为出事了。用户 2026-09-22 实机指着这条问「这一句有问题还是
+    // 什么」，并指定改成「让我检查检查」——姿态叫 checking（核对），这句正好相称：
+    // 只说自己在看，不下判断。
+    { file: 'work-4-checking', line: '让我检查检查', flip: 1.2 },
+    { file: 'work-5-thinking', line: '嗯…让我想想', flip: 1.7 },
+    { file: 'work-6-running', line: '跑一遍看看', flip: 0.4 },
+    // 用户 2026-09-22 要的「跑步的动作」。它**不是第 8 个姿势，而是姿势之间的过渡**：
+    // 序列是「姿势1 → 冲刺 → 姿势2 → 冲刺 → …」，表达「她干完一件、跑去干下一件」。
+    // 所以它带 gap: true——不进轮播循环，只在每个姿势后面闪一下。
+    // **停留时长改过一次方向**：原本刻意比姿势短（怕它「成了又一个姿势」），
+    // 但用户两次要求拉长，现在 GAP_MS 和 POSE_MS 一样是 3.6 秒。理由见 GAP_MS 的注释。
+    // 它和上面那张小跑**刻意画得不一样**：侧面视角、身体前倾、步子拉得更开。
+    // **不带词条**（line 是空串）——用户指定的，冲刺是纯动作，硬配一句话反而弱。
+    // 文件名里的 8 只是个名字，**顺序由数组决定**，别拿它当序号。
+    { file: 'work-8-sprinting', line: '', flip: 0.28, gap: true },
+    // 最后一个只在任务真的跑够久了才进轮播——到那时候说这句话才是实话。
+    // **它必须留在最后**：posePool 用的是 POSES.length - 1，靠位置认它。
+    { file: 'work-7-waiting', line: '还在忙，再等我一会儿', flip: 2.0 }
+  ];
+  var POSE_MS = 3600;
+  /** 冲刺那张停多久。
+   *
+   *  用户同一天提了两次，方向一致：2026-09-22 上午「间隙跑步动画的持续时间太短了」，
+   *  从 1.4 秒拉到 2.4 秒；同日下午又说「出现时间可以再久一些」，再拉到 3.6 秒，
+   *  **和一个正常姿势一样长**。
+   *
+   *  原先这里写着「过渡就该快，跟姿势一样长的话它就成了又一个姿势」——那个顾虑
+   *  被用户两次要求推翻了：他要的就是看清这个动作，而 2.4 秒（约 8 个跑步循环）
+   *  看着还是「一闪而过」。既然他愿意为它多等，就别再按「过渡」对待它。
+   *  代价是整圈轮播从 48 秒变 57.6 秒，「还在忙」那张（SLOW_MS = 60 秒）会在
+   *  第二圈开头才轮得到——比原来晚十几秒，可接受。
+   *
+   *  再要调就调这一个数，别再动 flip：那是跑步循环的快慢，跟停留时长是两回事。 */
+  var GAP_MS = 3600;
+  var SLOW_MS = 60000;
+
+  var reducedMotion = false;
+  try { reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) {}
+
+  var work = { startedAt: 0, pose: 0, poseTimer: null, tickTimer: null, layers: [] };
+
+  /** 现在该用哪几条姿态：跑够一分钟才把「还在忙」放进来。 */
+  function posePool() {
+    return Date.now() - work.startedAt >= SLOW_MS ? POSES.length : POSES.length - 1;
+  }
+
+  /**
+   * 轮播的完整顺序：**每个姿势之间插一次冲刺**。
+   *
+   *   姿势1 → 冲刺 → 姿势2 → 冲刺 → 姿势3 → …
+   *
+   * 用户 2026-09-22 要的效果是「她在干活」：一个姿势带着词条出场，
+   * 然后跑动的她横穿过去，再出现下一个姿势。所以冲刺（带 gap 的那些）
+   * 自己不进这个循环——它只在间隙里出现，而且每次姿势后面都跟一次。
+   *
+   * 返回的是 POSES 的下标序列，长度随「跑了多久」变（前 60 秒不含「还在忙」）。
+   */
+  function poseSequence() {
+    var n = posePool();
+    var gaps = [];
+    for (var g = 0; g < POSES.length; g += 1) {
+      if (POSES[g].gap) gaps.push(g);
+    }
+    var out = [];
+    for (var i = 0; i < n; i += 1) {
+      if (POSES[i].gap) continue;
+      out.push(i);
+      for (var k = 0; k < gaps.length; k += 1) out.push(gaps[k]);
+    }
+    return out;
+  }
+
+  /** 立绘地址。走 query 而不是靠 cookie：从门禁页手输 token 进来时是没有 cookie 的。 */
+  function artUrl(file) {
+    return '/mini/art/' + file + '.webp?token=' + encodeURIComponent(state.token)
+      + '&v=' + encodeURIComponent(BUILD);
+  }
+
+  function paintPose(index) {
+    for (var i = 0; i < work.layers.length; i += 1) {
+      work.layers[i].classList.toggle('on', i === index);
+    }
+    // 有的姿势不带词条（比如那张冲刺）：词条是空串就把整个气泡收起来。
+    // 留一个空泡泡在那儿比不放气泡更怪——那个尖角还指着她的头，像话没说出来。
+    // 收起气泡不会让立绘挪位：.work-top 有 min-width 兜着，行宽不变。
+    var line = POSES[index].line || '';
+    $('workBubble').hidden = !line;
+    $('workBubble').textContent = line;
+  }
+
+  function elapsedLabel(ms) {
+    var s = Math.max(0, Math.floor(ms / 1000));
+    if (s < 60) return '已 ' + s + ' 秒';
+    return '已 ' + Math.floor(s / 60) + ' 分 ' + (s % 60) + ' 秒';
+  }
+
+  function tickElapsed() {
+    $('workElapsed').textContent = elapsedLabel(Date.now() - work.startedAt);
+  }
+
+  /** 立绘在页面一打开就全部加载好——不然第一次「正在执行」会闪一下空白。 */
+  function preloadPoses() {
+    var stage = $('workStage');
+    stage.innerHTML = '';
+    work.layers = [];
+    for (var i = 0; i < POSES.length; i += 1) {
+      var layer = document.createElement('div');
+      layer.className = 'pose';
+      layer.style.backgroundImage = 'url("' + artUrl(POSES[i].file) + '")';
+      layer.style.animationDuration = POSES[i].flip + 's';
+      stage.appendChild(layer);
+      work.layers.push(layer);
+      // #work 是 hidden（display:none），浏览器**不会**为它下载背景图。
+      // 所以这里得拿一个游离的 <img> 主动拉一次，否则第一次「正在执行」会先闪空白。
+      var warm = document.createElement('img');
+      warm.src = artUrl(POSES[i].file);
+    }
+    paintPose(0);
+  }
+
+  /**
+   * 轮播往前走一步，然后按**这一步是什么**决定下次隔多久。
+   *
+   * 原来是一个固定的 setInterval，每 3.6 秒换一张。现在冲刺要停得短，
+   * 固定间隔就做不到——所以改成自己排下一次的 setTimeout。
+   * 停止时 stopWork 会把待排的那一次清掉，不会漏跑。
+   */
+  function nextPose() {
+    var seq = poseSequence();
+    work.pose = (work.pose + 1) % seq.length;
+    var index = seq[work.pose];
+    paintPose(index);
+    work.poseTimer = setTimeout(nextPose, POSES[index].gap ? GAP_MS : POSE_MS);
+  }
+
+  function startWork() {
+    // 已经在跑就别重来。状态广播来得很密，每次重置的话姿态会永远卡在第一张。
+    if (work.startedAt) return;
+    work.startedAt = Date.now();
+    work.pose = 0;
+    paintPose(0);
+    tickElapsed();
+    work.tickTimer = setInterval(tickElapsed, 1000);
+    if (reducedMotion) return;   // 关掉动画的人就停在一张上，秒数照常走
+    work.poseTimer = setTimeout(nextPose, POSE_MS);
+  }
+
+  /** 停止请求的兜底计时器。放在 stopWork 前面，别靠 var 提升兜着。 */
+  var stopTimer = null;
+
+  function stopWork() {
+    work.startedAt = 0;
+    // 轮播现在是自己排下一次的 setTimeout（见 nextPose），用 clearInterval 清
+    // setTimeout 在浏览器里也行，但写 clearTimeout 更不容易让人误会。
+    if (work.poseTimer) { clearTimeout(work.poseTimer); work.poseTimer = null; }
+    if (work.tickTimer) { clearInterval(work.tickTimer); work.tickTimer = null; }
+    // 跑完了就把按钮复位，下一次「正在执行」才是干干净净的一个「停止」。
+    if (stopTimer) { clearTimeout(stopTimer); stopTimer = null; }
+    paintStop(false);
+  }
+
+  // ---------------- 停止 ----------------
+  //
+  // cancel() 在服务端只是**递个请求**，不是「等它停」——真正停下要等驱动收敛，
+  // 到那时候服务端才把 running 翻成 false 推过来。所以按下去之后按钮自己禁用、
+  // 改文案，等那个状态翻：既让人看见「按到了」，也防连按好几下。
+  function paintStop(stopping) {
+    var b = $('btnStop');
+    b.disabled = stopping;
+    b.textContent = stopping ? '正在停…' : '停止';
+  }
+
+  function requestStop() {
+    var b = $('btnStop');
+    if (!state.running || b.disabled) return;
+    paintStop(true);
+    api('/mini/api/stop', { method: 'POST', body: '{}' })
+      .then(function () {
+        // 正常情况：几百毫秒内 status 事件就到了，stopWork() 会把按钮复位。
+        // 但万一那一刻连接正好断了，就会永远卡在「正在停…」——留个兜底，
+        // 十秒还没翻就把按钮放回去，让人能再按一次，而不是干瞪眼。
+        stopTimer = setTimeout(function () {
+          stopTimer = null;
+          if (state.running) {
+            paintStop(false);
+            toast('还没停下来。可以再按一次，或者到电脑上看看。');
+          }
+        }, 10000);
+      })
+      .catch(function (err) {
+        paintStop(false);
+        toast(err.message || '停止失败');
+      });
+  }
+
+  $('btnStop').addEventListener('click', requestStop);
+
+  // ---------------- 排队中的指令 ----------------
+  //
+  // 跑着任务时接着发的那几条不会丢，而是排进 agent 的收件箱（`followup()` 的语义
+  // 就是「排队一个后续轮次」），等当前这一轮结束再跑。既然收下了，就必须让用户看见
+  // 它排在哪——尤其单帧模式下，你发出去的那句话在别处**一个字都看不见**
+  // （那一模式只显示回复），没有这块就等于「发出去了没反应」。
+  //
+  // 队列每次由服务端现读 agent 的收件箱，手机不自己记一份，所以不存在两边对不上。
+  function paintQueue() {
+    var el = $('queue');
+    var list = state.queued || [];
+    if (!list.length) { el.hidden = true; el.innerHTML = ''; return; }
+    el.hidden = false;
+    var rows = '';
+    for (var i = 0; i < list.length; i += 1) {
+      rows += '<div class="q-row">'
+        + '<span class="q-text">' + escapeHtml(list[i].text) + '</span>'
+        + '<button class="q-drop" type="button" data-drop="' + escapeHtml(list[i].id) + '"'
+        + ' aria-label="撤掉这条">✕</button></div>';
+    }
+    el.innerHTML = '<div class="q-head">排队中 ' + list.length + ' 条 · 跑完这轮就轮到它们</div>' + rows;
+  }
+
+  /**
+   * 撤掉一条还在排队的指令。
+   *
+   * 撤不掉是正常情况之一：手机上这份队列是上一次推送时的样子，这中间它完全可能
+   * 已经轮到自己开始跑了。那时候服务端会说「撤不回来了」，这里如实转达，
+   * 并且刷新一次，让界面跟上真实状态——不能假装撤掉了。
+   */
+  function requestUnqueue(id) {
+    // 成功失败都由服务端推一份最新的队列过来（失败时也要推——见 onUnqueue 的说明），
+    // 所以这里不用自己去拉，只需要把失败原因转达给用户。
+    api('/mini/api/unqueue', { method: 'POST', body: JSON.stringify({ id: id }) })
+      .catch(function (err) { toast(err.message || '撤不回来'); });
+  }
+
+  $('queue').addEventListener('click', function (e) {
+    var t = e.target;
+    var id = t && t.getAttribute ? t.getAttribute('data-drop') : null;
+    if (id) requestUnqueue(id);
+  });
+
+  /** 让「正在执行」那块跟着 state.running 显隐。 */
+  function paintWork() {
+    var el = $('work');
+    var queued = (state.queued || []).length;
+    // 队列也算「还有活儿」。正常情况到不了「闲着但队列非空」（followup 总会唤醒驱动），
+    // 但停掉当前这一轮之后、队列还没接上的那一小段就是这种状态——
+    // 那块东西不该先消失一下再冒出来。
+    //
+    // 但**正在流式写回答的时候要收起来**：回答本身已经在屏幕上长出来了，
+    // 底下再挂一只鲸鱼娘就是重复——用户要看的字正在往上冒，那块既占地方又抢注意力。
+    // 用户 2026-09-22 实机提的：「内容开始流式生成的时候，鲸鱼娘的动画就可以消失了」。
+    // 注意这里用 state.live 判断，不是「有没有在跑」——跑着但还没到吐字那一步
+    // （比如正在调工具）时，鲸鱼娘还是要留着，那是它唯一该出现的时候。
+    var busy = (state.running || queued > 0) && !state.live;
+    el.hidden = !busy;
+    if (busy) startWork(); else stopWork();
+    paintQueue();
+  }
+
+  // ---------------- 渲染 ----------------
+  function setStatus(kind, text) {
+    dotEl.className = 'dot ' + kind;
+    statusEl.textContent = text;
+  }
+  function updateStatusUI() {
+    if (!state.connected) { setStatus('err', '未连接'); return; }
+    if (state.running) { setStatus('run', '运行中…'); return; }
+    setStatus('ok', '已连接');
+  }
+  function setRunning(running) {
+    state.running = !!running;
+    // 这里原来会把输入框和发送按钮一起禁用。现在不禁了：跑着的时候**可以接着发**，
+    // 那条会排队（见 send 的说明）。禁掉输入框等于把「排队」这条路从界面上封死，
+    // 而 DSH 本身在跑着的时候是收的。
+    updateStatusUI();
+    // 放这里而不是 render() 里：SSE 的 status 事件只调 setRunning、不重绘，
+    // 漏了这一处的话「运行中」变了而鲸鱼娘不出现。
+    // 另外它也是**唯一**会调 paintWork 的地方，而 paintWork 还要看 state.live
+    // （流式一露头就把鲸鱼娘收起来）。快照每次都带 running，所以 applySnapshot
+    // 会走到这儿、live 的变化也就跟着生效了——别把这个调用挪走。
+    paintWork();
+  }
+
+  function renderMinimal() {
+    mainEl.classList.remove('center');
+    var latest = state.latest;
+    var live = state.live || '';
+    var parts = [];
+    // 「正在执行」不拼进这块 HTML——它是常驻的 #work，由 paintWork() 控制显隐。
+    // 但它仍然显示在回答**下方**，不顶掉回答：原来它排在最前面并且直接 return，
+    // 于是刚发完指令，上一步的结果就整块消失，用户看不到自己上一步得到了什么。
+    if (latest && latest.text) {
+      // 「已停止」留在正文**上方**：它是给正文打的预防针（你收到的只是半句），
+      // 得在读到正文之前看到。
+      // 复制按钮则挪到正文**下方、靠左**——原来在上面靠右，手机上拇指够不着，
+      // 而且会比正文先入眼。
+      var stopped = latest.interrupted ? '<span class="stopped">已停止</span>' : '';
+      parts.push((stopped ? '<div class="reply-bar">' + stopped + '</div>' : '')
+        + '<div class="md">' + mdToHtml(latest.text) + '</div>'
+        + '<div class="reply-foot">'
+        + '<button class="copy" type="button" aria-label="复制全文" title="复制全文"'
+        + ' data-copy="' + escapeHtml(latest.text) + '">' + ICON_COPY + '</button>'
+        + '</div>');
+    }
+    if (live) parts.push(liveBlock(live));
+    if (parts.length) {
+      var stick = atBottom();
+      replyEl.innerHTML = parts.join('');
+      // 流式的时候得跟着往下滚，不然新写出来的内容在屏幕外面，看起来像卡住了。
+      // 但只在用户本来就在底部时才跟——他翻上去看历史的时候别拽他回来。
+      if (live && stick) mainEl.scrollTop = mainEl.scrollHeight;
+      return;
+    }
+    if (state.running) {
+      replyEl.innerHTML = '';
+      return;
+    }
+    replyEl.innerHTML = '<div class="placeholder">在下面输入一条指令，'
+      + '这里只会显示 AI 的最终回复。<br>中间的工具调用和执行过程不会传过来。</div>';
+  }
+
+  /**
+   * 正在流出来的那一段。
+   *
+   * **刻意和答案画得不一样**：上面一条虚线，末尾一个一闪一闪的竖条，而且**没有
+   * 复制按钮**。这三样都在说同一句话——「这不是最终答案，还会变」。等真正的答案
+   * 落定，这一整块会被换掉。
+   *
+   * 为什么要区分得这么清楚：流式阶段拿不到完整内容，没法提前知道模型这一步会不会
+   * 去调工具。服务端已经先用一小段「按兵不动」把绝大多数中间旁白挡在外面了
+   * （见 lib/index.js 的 STREAM_GRACE_MS），但那是启发式、不是判据。万一漏过来
+   * 一句旁白，它会被撤回——那时候用户看到的应该是「刚才那段是过程，不作数」，
+   * 而不是「我的回答怎么没了」。
+   */
+  function liveBlock(text) {
+    return '<div class="live"><div class="md">' + mdToHtml(text) + '</div></div>';
+  }
+
+  /**
+   * 该不该自动滚到底。
+   *
+   * 用户 2026-09-22 实机提的：「有动画的时候手机端页面运动到上面都会自动调回底部，
+   * 这种机制没必要吧。」原来每次重画都无条件滚到底，而鲸鱼娘一帧一动、流式一秒七次，
+   * 于是想往上翻根本翻不动——手一松就被拽回去。
+   *
+   * 改成只在**本来就在底部**的时候才跟着滚：新内容进来时视野跟着走，
+   * 用户自己翻上去看历史时就不打扰他。
+   *
+   * 注意：这个判断必须在改 innerHTML **之前**做。改写内容本身会把滚动位置顶回去，
+   * 改完再问「在不在底部」永远是「在」。
+   */
+  function atBottom() {
+    // 48px 是「差不多到底了」的容差。手指滚动的惯性、地址栏收起都会差几个像素，
+    // 卡得太死会变成「我明明就在底部，它却不跟着走了」。
+    return mainEl.scrollHeight - mainEl.scrollTop - (mainEl.clientHeight || 0) < 48;
+  }
+
+  function renderChat() {
+    mainEl.classList.remove('center');
+    // **还在排队的那条不算「已发出」，这里要把它从聊天记录里滤掉。**
+    //
+    // 用户 2026-09-22 实机提的：「排队的指令在轮到之前不该出现在指令气泡里，
+    // 就像发出去了一样，应该轮到再发出去。」
+    //
+    // 光在发送时不记账还不够。DSH 的一条排队消息可能被**领走一步、那一步又被驳回、
+    // 于是退回队列**（dsh-agent 的原话：preserve queued and steering inbox items
+    // instead of discarding them）。退回去的时候，早先那条「它开始跑了」的事件已经
+    // 发过，聊天记录就此留下一笔——而队列里也还有它。实测抓到过同一个 id 两处都在。
+    //
+    // 所以判据不能是事件，得是**队列本身**：队列里有它，它就还没轮到。
+    // 等它真跑起来、从队列里消失，这一笔自然就露出来了。
+    var queuedIds = {};
+    (state.queued || []).forEach(function (q) { if (q && q.id) queuedIds[q.id] = true; });
+    var list = (state.history || []).filter(function (m) {
+      return !(m.role === 'user' && m.id && queuedIds[m.id]);
+    });
+    if (!list.length && !state.running && !state.live && !(state.queued || []).length) {
+      replyEl.innerHTML = '<div class="placeholder">还没有对话记录。</div>';
+      return;
+    }
+    var html = list.map(function (m) {
+      // 被按停的那一轮：标一句，别让人以为模型答到一半断了。
+      var stopped = m.interrupted ? '<span class="stopped">已停止</span>' : '';
+      // 两种消息都给复制按钮。自己敲的指令也常有「再发一遍」「拿去别处用」的时候，
+      // 原来只给 AI 气泡，用户反馈自己的话复制不了。
+      var copyBtn = '<button class="copy" type="button" aria-label="复制" title="复制"'
+        + ' data-copy="' + escapeHtml(m.text) + '">' + ICON_COPY + '</button>';
+      if (m.role === 'user') {
+        // 自己的指令：仍然是气泡，靠右。自己敲的是纯文本，不走 markdown——
+        // 不然打几个星号就变样了。
+        return '<div class="bubble user">' + linkify(m.text)
+          + '<span class="meta">' + stopped + timeLabel(m.timestamp) + copyBtn + '</span></div>';
+      }
+      // AI 的回答：**不套气泡**（用户要求「参考单帧模式那样」）。
+      // 于是一左一右、一个有框一个没框，正好分得清谁说的。
+      return '<div class="said">'
+        + (stopped ? '<div class="reply-bar">' + stopped + '</div>' : '')
+        + '<div class="md">' + mdToHtml(m.text) + '</div>'
+        + '<div class="reply-foot">' + copyBtn
+        + '<span class="time">' + timeLabel(m.timestamp) + '</span></div></div>';
+    }).join('');
+    // 「正在执行」不再追加一个气泡——它是常驻的 #work，排在整串消息下面。
+    // 两种模式共用同一块，改的时候两边都走一遍。
+    if (state.live) html += liveBlock(state.live);
+    // 先问「在不在底部」，再改内容——顺序反了永远是「在」（见 atBottom 的注释）。
+    var stick = atBottom();
+    replyEl.innerHTML = html;
+    if (stick) mainEl.scrollTop = mainEl.scrollHeight;
+  }
+
+  function render() {
+    if (state.mode === 'chat') renderChat(); else renderMinimal();
+  }
+
+  function applySnapshot(snap) {
+    if (!snap) return;
+    if ('latest' in snap) state.latest = snap.latest;
+    // 正在流出来的那一段。服务端只在自己决定要显示之后才写它，所以这里是空字符串
+    // 不代表模型没在写，只代表「还不到显示的时候」。
+    if ('live' in snap) state.live = snap.live || '';
+    if (snap.history) state.history = snap.history;
+    if (snap.sessions) state.sessions = snap.sessions;
+    if (Array.isArray(snap.queued)) state.queued = snap.queued;
+    if ('boundSessionId' in snap) state.boundSessionId = snap.boundSessionId;
+    // running 也在快照里，而且算的是**当前绑定的那个会话**。不接的话，
+    // 在导航栏切到别的会话时，那个会话会继承上一个会话的「正在执行」。
+    if ('running' in snap) setRunning(snap.running);
+    paintNavCurrent();
+    render();
+  }
+
+  // ---------------- 左侧导航栏 ----------------
+  // 数据分两层取：先列工作区（便宜），展开某个再去要它的会话（要读日志折标题，贵）。
+  // 本机实测 35 个工作区、最多的一个有 452 个会话，一次全拉会卡住手机。
+  var navList = null;      // 工作区列表，开一次取一次
+  var navSessions = {};    // workspaceId -> { sessions, total, truncated }
+  var navExpanded = {};    // workspaceId -> 是否展开
+
+  function openNav() {
+    $('nav').classList.add('open');
+    loadWorkspaces(false);
+  }
+  function closeNav() { $('nav').classList.remove('open'); }
+
+  function loadWorkspaces(force) {
+    if (navList && !force) { renderNav(); return; }
+    $('navBody').innerHTML = '<div class="placeholder">正在读取…</div>';
+    // 带 refresh=1 是给 ⟳ 用的：绕过服务端的短时缓存，真去读一遍。
+    // 不带的话服务端会把最近一次的结果直接给你，导航栏就不再「每次都要重新读取」。
+    api('/mini/api/workspaces' + (force ? '?refresh=1' : '')).then(function (body) {
+      navList = body.workspaces || [];
+      navSessions = {};
+      renderNav();
+    }).catch(function (err) {
+      navList = null;
+      $('navBody').innerHTML = '<div class="placeholder">读不到会话列表：'
+        + escapeHtml(err.message) + '</div>';
+    });
+  }
+
+  function dayLabel(ts) {
+    if (!ts) return '';
+    var d = new Date(ts);
+    var now = new Date();
+    if (d.toDateString() === now.toDateString()) return timeLabel(ts);
+    if (d.getFullYear() === now.getFullYear()) return (d.getMonth() + 1) + '/' + d.getDate();
+    return d.getFullYear() + '/' + (d.getMonth() + 1) + '/' + d.getDate();
+  }
+
+  function renderNav() {
+    var list = navList || [];
+    if (!list.length) {
+      $('navBody').innerHTML = '<div class="placeholder">电脑上还没有可以切换的会话。<br>'
+        + '在电脑上开一个，这里就会出现了。</div>';
+      return;
+    }
+    $('navBody').innerHTML = list.map(function (ws) {
+      var open = Boolean(navExpanded[ws.id]);
+      return '<div class="ws' + (open ? ' open' : '') + '" data-ws="' + escapeHtml(ws.id) + '">'
+        + '<button class="ws-head" type="button">'
+        + '<span class="caret">▶</span>'
+        + '<span class="ws-title">' + escapeHtml(ws.title) + '</span>'
+        + (ws.running ? '<span class="s-dot"></span>' : '')
+        + '<span class="ws-count">' + ws.count + '</span>'
+        + '</button>'
+        + '<div class="ws-body">' + (open ? sessionsHtml(ws.id) : '') + '</div>'
+        + '</div>';
+    }).join('');
+  }
+
+  function sessionsHtml(wsId) {
+    var got = navSessions[wsId];
+    if (!got) return '<div class="placeholder">正在读取…</div>';
+    if (!got.sessions.length) return '<div class="placeholder">这个工作区还没有会话。</div>';
+    var cur = state.boundSessionId;
+    var html = got.sessions.map(function (s) {
+      // 没有标题就用日期——原来退到取 id 的前 8 位当名字，而本机真有一个会话的 id
+      // 以「session-」开头，于是整列都显示成一样的「session-」，等于没有名字。
+      return '<button class="sess' + (s.id === cur ? ' cur' : '') + '" type="button"'
+        + ' data-sess="' + escapeHtml(s.id) + '">'
+        + (s.running ? '<span class="s-dot"></span>' : '')
+        + '<span class="s-title">' + escapeHtml(s.title || '未命名会话') + '</span>'
+        + '<span class="s-meta">' + dayLabel(s.createdAt) + '</span>'
+        + '</button>';
+    }).join('');
+    if (got.truncated) {
+      html += '<div class="nav-note">只列了最近 ' + got.sessions.length + ' 条，共 '
+        + got.total + ' 条。</div>';
+    }
+    return html;
+  }
+
+  function toggleWorkspace(wsId) {
+    if (navExpanded[wsId]) {
+      delete navExpanded[wsId];
+      renderNav();
+      return;
+    }
+    navExpanded[wsId] = true;
+    renderNav();
+    if (navSessions[wsId]) return;
+    api('/mini/api/workspaces/' + encodeURIComponent(wsId) + '/sessions')
+      .then(function (body) {
+        navSessions[wsId] = body;
+        renderNav();
+      })
+      .catch(function (err) {
+        navSessions[wsId] = { sessions: [], total: 0 };
+        renderNav();
+        toast(err.message);
+      });
+  }
+
+  function bindSession(id) {
+    if (!id) return;
+    api('/mini/api/bind', { method: 'POST', body: JSON.stringify({ sessionId: id }) })
+      .then(function (res) {
+        // 接口把切换后的快照一起返回了，直接用它渲染——不用干等 SSE 那一趟。
+        // 不这样的话，切过去的一瞬间屏幕上还留着上一个会话的内容。
+        if (res && res.state) applySnapshot(res.state);
+        else { state.boundSessionId = id; render(); }
+        closeNav();
+        toast('已切换会话');
+      })
+      .catch(function (err) { toast(err.message); });
+  }
+
+  // 当前会话可能在电脑上被切走。这里只改高亮，不重绘整棵树——重绘会把
+  // 用户正在划的滚动位置弹回顶部。
+  function paintNavCurrent() {
+    if (!$('nav').classList.contains('open')) return;
+    var cur = state.boundSessionId;
+    Array.prototype.forEach.call($('navBody').querySelectorAll('.sess'), function (el) {
+      el.classList.toggle('cur', el.getAttribute('data-sess') === cur);
+    });
+  }
+
+  $('btnNav').addEventListener('click', openNav);
+  $('btnNavClose').addEventListener('click', closeNav);
+  $('btnNavRefresh').addEventListener('click', function () { loadWorkspaces(true); });
+  $('nav').addEventListener('click', function (e) { if (e.target === $('nav')) closeNav(); });
+
+  $('navBody').addEventListener('click', function (e) {
+    var t = e.target;
+    var sess = t && t.closest ? t.closest('.sess') : null;
+    if (sess) { bindSession(sess.getAttribute('data-sess')); return; }
+    var head = t && t.closest ? t.closest('.ws-head') : null;
+    if (!head) return;
+    toggleWorkspace(head.parentNode.getAttribute('data-ws'));
+  });
+
+  // ---------------- SSE ----------------
+  var es = null;
+  function connect() {
+    if (es) { try { es.close(); } catch (e) {} es = null; }
+    if (!state.token) { showGate(); return; }
+    setStatus('', '连接中…');
+    es = new EventSource('/mini/api/stream?token=' + encodeURIComponent(state.token));
+
+    es.addEventListener('open', function () {
+      state.connected = true;
+      updateStatusUI();
+      $('connHint').textContent = '已连接';
+    });
+    es.addEventListener('state', function (e) {
+      state.connected = true;
+      updateStatusUI();
+      try { applySnapshot(JSON.parse(e.data)); } catch (err) {}
+    });
+    es.addEventListener('reply', function (e) {
+      var payload = JSON.parse(e.data);
+      // interrupted 必须带上：这条是「实时推过来的那一条」，走的是和刷新时
+      // （/mini/api/state 的完整快照）不同的代码路径。漏了的话，被按停的那半句话
+      // 在实时推送时不会标「已停止」，得刷新一下才出现——测试全绿但真机是坏的。
+      var cut = payload.interrupted === true;
+      state.latest = {
+        text: payload.text, timestamp: payload.timestamp,
+        sessionId: payload.sessionId, interrupted: cut,
+      };
+      if (state.mode === 'chat') {
+        state.history = (state.history || []).concat([
+          {
+            role: 'assistant', text: payload.text, timestamp: payload.timestamp,
+            sessionId: payload.sessionId, interrupted: cut,
+          }
+        ]);
+      }
+      setRunning(false);
+      render();
+      if (!document.hidden) { playDing(); buzz(); }
+      // 页面在后台时的系统通知已经去掉了，原因见下面「浏览器系统通知」那一段。
+      // 需要「人不在也能收到」的，走电脑端的外部推送（Bark / ntfy）。
+    });
+    es.addEventListener('status', function (e) {
+      try { setRunning(JSON.parse(e.data).running); } catch (err) {}
+    });
+    es.addEventListener('error', function () {
+      state.connected = false;
+      updateStatusUI();
+      $('connHint').textContent = '已断开，正在自动重连…';
+      // EventSource 自己会重连，这里不用手动 close。
+    });
+  }
+
+  // ---------------- 发送 ----------------
+  function autoGrow() {
+    inputEl.style.height = 'auto';
+    inputEl.style.height = Math.min(inputEl.scrollHeight, 140) + 'px';
+  }
+
+  // ---------------- 上传附件 ----------------
+  /** 把字节数说成人话。 */
+  function humanSize(n) {
+    if (n >= 1024 * 1024) return (n / 1024 / 1024).toFixed(1).replace(/\.0$/, '') + ' MB';
+    if (n >= 1024) return Math.round(n / 1024) + ' KB';
+    return n + ' B';
+  }
+
+  function setAttachBusy(busy) {
+    var btn = $('btnAttach');
+    if (!btn) return;
+    btn.disabled = busy;
+    btn.classList.toggle('busy', busy);
+  }
+
+  /**
+   * 把选中的文件传到电脑上。
+   *
+   * 文件本身直接当请求体发（fetch 支持把 File 当 body），不走 JSON、不做 base64——
+   * base64 会把体积撑大三分之一，而这条路可能是手机流量。电脑那边是边收边落盘，
+   * 不在内存里攒整份。
+   *
+   * 传完只拿回一张小票（uploadId）。真正的附件已经在电脑上了，手机上不留副本。
+   */
+  function uploadFile(file) {
+    var name = file.name || '文件';
+    // 本地上限和服务端是同一个数（由服务端注入），先拦一道省得白传一场。
+    if (MAX_UPLOAD > 0 && file.size > MAX_UPLOAD) {
+      toast('「' + name + '」有 ' + humanSize(file.size) + '，超过上限 ' + humanSize(MAX_UPLOAD));
+      return;
+    }
+    setAttachBusy(true);
+    api('/mini/api/upload?name=' + encodeURIComponent(name) + '&size=' + file.size,
+      { method: 'POST', body: file })
+      .then(function (res) {
+        state.uploads.push({ uploadId: res.uploadId, name: res.name, bytes: res.bytes });
+        renderAttach();
+      })
+      .catch(function (err) {
+        toast(err.message || '上传失败');
+      })
+      .then(function () { setAttachBusy(false); });
+  }
+
+  /** 附件小条。有东西才出现，没有就整块收起来——不占地方。 */
+  function renderAttach() {
+    var bar = $('attachBar');
+    if (!bar) return;
+    var list = state.uploads || [];
+    bar.hidden = !list.length;
+    bar.innerHTML = list.map(function (f, i) {
+      return '<span class="chip"><span class="nm">' + escapeHtml(f.name) + '</span>'
+        + '<span class="sz">' + humanSize(f.bytes) + '</span>'
+        + '<button class="x" type="button" data-drop="' + i + '" aria-label="去掉">×</button></span>';
+    }).join('');
+  }
+
+  function send() {
+    var text = inputEl.value.trim();
+    var files = state.uploads || [];
+    // 跑着的时候**照样能发**。原来这里有个 `|| state.running` 直接 return，
+    // 于是手机上「正在跑就发不了」，只能干等；而 DSH 本身在跑着的时候是收的——
+    // 那条会排进收件箱，等当前这一轮结束再跑。现在只是把「不许发」改成「排队」。
+    //
+    // 只带文件、一个字不写也是合法的：「这份文件你看一下」本来就是常见用法。
+    // 两样都没有才算空。
+    if (!text && !files.length) return;
+    unlockAudio();
+    // **发指令这个动作，无条件拉回底部。**
+    //
+    // 用户 2026-09-22 实机提的：「用户发送指令时，如果在手机端页面比较上面的位置，
+    // 应该马上下滚回底部。」
+    //
+    // 这跟 atBottom 那条规则不冲突，两者管的不是一件事：那条管的是**页面自己在动**
+    // （鲸鱼娘在跳、流式在写），别把正在翻历史的用户拽回来；这条管的是**用户自己按了发送**，
+    // 那是主动动作，他想看自己刚发出去的那条、以及后面的回答，所以不管当时翻到哪儿都回底部。
+    //
+    // 位置有讲究：必须放在 setRunning 之前。setRunning 会触发一次渲染，而渲染里的
+    // atBottom() 是在改内容**之前**问的——先滚到底，那次渲染才会认为「本来就在底部」
+    // 而继续跟着走；顺序反了，刚回到底部又会被那次渲染判成「用户翻上去了」而停在原地。
+    mainEl.scrollTop = mainEl.scrollHeight;
+    inputEl.value = '';
+    autoGrow();
+
+    var uploadIds = files.map(function (f) { return f.uploadId; });
+    // 手机上先把附件收起来：小票已经交出去了，留着会让用户以为还能再发一次。
+    state.uploads = [];
+    renderAttach();
+    // 聊天模式要在本地回显一条。附件也得看得见——不然发完一条只有文件、没写文字的
+    // 指令，气泡是空的，用户会以为没发出去。
+    var shown = files.length
+      ? text + (text ? '\n' : '') + '📎 ' + files.map(function (f) { return f.name; }).join('、')
+      : text;
+
+    if (state.mode === 'minimal') {
+      // 上一条回答**留着**，由 renderMinimal 在它下面加一条「正在执行」。
+      // 原来这里把 latest 清成 null，加上渲染顺序，结果是发完指令旧结果整块消失。
+      // 旧的顾虑（怕用户把上一轮的结果当成这次任务的回复）现在由那条分隔线解决：
+      // 它明确标出「下面是正在跑的，上面是上一步的」。
+      render();
+    }
+    setRunning(true);
+
+    api('/mini/api/send', { method: 'POST', body: JSON.stringify({ text: text, uploadIds: uploadIds }) })
+      .then(function (res) {
+        // 服务端说这条排队了（发的时候正在跑），给一句话。
+        // 队列那块也会跟着推过来，但那要等一个来回；先给个即时反馈，
+        // 免得用户以为又石沉大海了。
+        if (res && res.queued) {
+          toast('已排队，跑完这轮就轮到它');
+          // **排队不算发出去，所以这里不回显气泡。** 用户 2026-09-22 实机提的：
+          // 排队的指令立刻长成一条指令气泡，看着就像已经发出去了，其实还在队列里。
+          // 它已经在下面的排队列表里露过面了，那就是它此刻该待的地方；
+          // 轮到它真跑起来时，服务端会把它记进 history，气泡那时才出现。
+          return;
+        }
+        // 真发出去了才回显。放在这里而不是发之前，是因为**发之前还不知道会不会排队**；
+        // 顺带也解决了发送失败时屏幕上留一条假气泡的问题。
+        if (state.mode !== 'minimal') {
+          state.history = (state.history || []).concat([
+            { role: 'user', text: shown, timestamp: Date.now() }
+          ]);
+          render();
+        }
+      })
+      .catch(function (err) {
+        setRunning(false);
+        if (state.mode === 'minimal') render();
+        toast(err.message || '发送失败');
+        inputEl.value = text;
+        autoGrow();
+        // 附件也还回来。不然网络抖一下，用户刚传上去的文件就白传了，得重新选一次——
+        // 而重新选一次意味着重新传一遍。
+        state.uploads = files;
+        renderAttach();
+      });
+  }
+
+  $('btnAttach').addEventListener('click', function () { $('filePick').click(); });
+  $('filePick').addEventListener('change', function (e) {
+    var f = e.target.files && e.target.files[0];
+    // 清掉 value：不清的话，连着选同一个文件第二次不会触发 change，
+    // 用户会觉得「点了没反应」。
+    e.target.value = '';
+    if (f) uploadFile(f);
+  });
+  $('attachBar').addEventListener('click', function (e) {
+    var btn = e.target.closest ? e.target.closest('[data-drop]') : null;
+    if (!btn) return;
+    state.uploads.splice(Number(btn.getAttribute('data-drop')), 1);
+    renderAttach();
+  });
+
+  $('btnSend').addEventListener('click', send);
+  inputEl.addEventListener('input', autoGrow);
+  inputEl.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+      e.preventDefault();
+      send();
+    }
+  });
+
+  // ---------------- 语音输入：已移除 ----------------
+  //
+  // 输入框旁边原来有个 🎤，走的是浏览器的 SpeechRecognition。它在手机上**用不了**：
+  // 浏览器把语音识别和 getUserMedia 一样限制在安全上下文里，而本插件三条连接路径
+  // （内网 / Tailscale / 隧道未开）全是明文 http://。依据见 W3C bug 30176：
+  // https://www.w3.org/Bugs/Public/show_bug.cgi?id=30176
+  //
+  // 更糟的是浏览器把这种情况报成 `not-allowed`，和「用户拒绝了权限」同一个错误码，
+  // 于是用户看到的是「麦克风权限被拒绝」，去浏览器设置里翻也找不到能改的东西。
+  //
+  // 2026-09-21 用户裁决：**拿掉这个图标**。留着按了没用，比没有更糟。
+  // 想用说的，用手机键盘自带的 🎤 听写键——不挑连接、不要权限，设置里也写了这一句。
+  // 别把它加回来，除非先有了一条受信任的 https 路径（比如开了证书的 tailscale serve）。
+
+  // ---------------- 设置 ----------------
+  var sheet = $('settings');
+  $('btnSettings').addEventListener('click', function () {
+    sheet.classList.add('open');
+    $('connHint').textContent = state.connected ? '已连接' : '未连接';
+  });
+  $('btnClose').addEventListener('click', function () { sheet.classList.remove('open'); });
+  sheet.addEventListener('click', function (e) { if (e.target === sheet) sheet.classList.remove('open'); });
+
+  Array.prototype.forEach.call($('segMode').children, function (btn) {
+    btn.addEventListener('click', function () {
+      state.mode = btn.dataset.mode;
+      localStorage.setItem('dshMiniMode', state.mode);
+      syncSeg();
+      render();
+    });
+  });
+  Array.prototype.forEach.call($('segSound').children, function (btn) {
+    btn.addEventListener('click', function () {
+      state.sound = btn.dataset.sound === 'on';
+      localStorage.setItem('dshMiniSound', state.sound ? 'on' : 'off');
+      if (state.sound) unlockAudio();
+      syncSeg();
+    });
+  });
+  function syncSeg() {
+    Array.prototype.forEach.call($('segMode').children, function (b) {
+      b.classList.toggle('active', b.dataset.mode === state.mode);
+    });
+    Array.prototype.forEach.call($('segSound').children, function (b) {
+      b.classList.toggle('active', (b.dataset.sound === 'on') === state.sound);
+    });
+  }
+
+  // 会话切换挪到左侧导航栏了（原来这里是设置里的下拉框）。
+
+  // 浏览器系统通知这条路，在手机上走不通，三层原因叠在一起：
+  //   1. 通知权限只能在「安全上下文」（HTTPS 或 localhost）里申请。手机连的是
+  //      明文 HTTP——局域网和 Tailscale 都是——浏览器连这个 API 都不给；
+  //   2. 就算拿到权限，new Notification() 在大多数移动浏览器上会抛 TypeError，
+  //      移动端正确的做法是 service worker 的 showNotification；
+  //   3. service worker 同样要求 HTTPS。
+  //
+  // 2026-09-21 用户裁决：**设置里那个「开启」按钮先隐藏掉**（和输入框旁边的 🎤 一样，
+  // 留着一个按了没用的按钮比没有更让人困惑）。设置里留一行说明，指向真正管用的那条路：
+  // 电脑端的外部推送（Bark / ntfy），它是从服务器发出去的，不受浏览器这条规矩限制。
+  //
+  // 别把这个按钮加回来，除非先有了一条受信任的 https 路径。
+
+  $('btnReconnect').addEventListener('click', function () {
+    connect();
+    toast('正在重连…');
+  });
+
+  $('btnForget').addEventListener('click', function () {
+    localStorage.removeItem('dshMiniToken');
+    state.token = '';
+    if (es) { try { es.close(); } catch (e) {} es = null; }
+    sheet.classList.remove('open');
+    showGate();
+  });
+
+  // ---------------- token 闸门 ----------------
+  function showGate() {
+    $('gate').classList.add('open');
+    $('gateErr').textContent = '';
+    setTimeout(function () { $('gateInput').focus(); }, 120);
+  }
+  $('gateBtn').addEventListener('click', submitGate);
+  $('gateInput').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') submitGate();
+  });
+  function submitGate() {
+    var value = $('gateInput').value.trim();
+    if (!value) { $('gateErr').textContent = '请先粘贴 token'; return; }
+    $('gateErr').textContent = '校验中…';
+    fetch('/mini/api/state', { headers: { 'X-Mini-Token': value } })
+      .then(function (r) {
+        if (!r.ok) throw new Error('token 不正确');
+        localStorage.setItem('dshMiniToken', value);
+        state.token = value;
+        $('gate').classList.remove('open');
+        // 手输 token 进来的人也得有立绘——立绘地址是拿 state.token 拼的，
+        // 不在这里补一次，这一路进来的用户会看到空白的立绘位。
+        preloadPoses();
+        connect();
+      })
+      .catch(function () { $('gateErr').textContent = 'token 不正确，请核对后重试'; });
+  }
+
+  // ---------------- presence 与心跳 ----------------
+  document.addEventListener('visibilitychange', function () {
+    var hidden = document.hidden;
+    if (state.token) {
+      api('/mini/api/presence', {
+        method: 'POST',
+        body: JSON.stringify({ state: hidden ? 'background' : 'foreground' })
+      }).catch(function () {});
+    }
+    if (!hidden) { render(); connectIfDead(); }
+  });
+  setInterval(function () {
+    if (state.token) api('/mini/api/heartbeat', { method: 'POST', body: '{}' }).catch(function () {});
+  }, 30000);
+
+  function connectIfDead() {
+    // 切回前台时 EventSource 可能已经悄悄死了，探一下。
+    if (!state.token) return;
+    if (es && es.readyState === EventSource.OPEN) return;
+    connect();
+  }
+
+  // 复制按钮：整篇、单条气泡、代码块共用一套。
+  // 用事件委托——回复区每次都是整块重绘的，逐个绑会漏。
+  // （原来这里是「点回复区任意位置复制全文」，它直接用了 navigator.clipboard，
+  //   在明文 HTTP 下那个接口是 undefined，点了什么都不会发生；而且它会和
+  //   新加的按钮打架，所以换成显式按钮。）
+  replyEl.addEventListener('click', function (e) {
+    var btn = e.target && e.target.closest ? e.target.closest('.copy') : null;
+    if (!btn) return;
+    e.preventDefault();
+    copyText(btn.getAttribute('data-copy') || '', btn);
+  });
+
+  // ---------------- 启动 ----------------
+  syncSeg();
+  autoGrow();
+  if (NEEDS_TOKEN && !state.token) {
+    showGate();
+  } else if (!state.token) {
+    showGate();
+  } else {
+    preloadPoses();
+    connect();
+  }
+  // 任何一次触摸都顺手解锁音频，避免用户第一次收到回复时没声音。
+  document.addEventListener('touchstart', unlockAudio, { once: true });
+  document.addEventListener('click', unlockAudio, { once: true });
+})();
+</script>
+</body>
+</html>
