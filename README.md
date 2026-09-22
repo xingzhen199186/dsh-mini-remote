@@ -32,13 +32,13 @@ So you can spend your time more freely — instead of being stuck in that small 
 ## Install
 
 ```powershell
-dsh plugin --profile web add github:xingzhen199186/dsh-mini-remote
+dsh plugin --profile web add dsh-mini-remote
 ```
 
-Once the package is on npm, the package name alone works too:
+Or straight from GitHub, if you would rather pin the source:
 
 ```powershell
-dsh plugin --profile web add dsh-mini-remote
+dsh plugin --profile web add github:xingzhen199186/dsh-mini-remote
 ```
 
 If you already have the source on disk, you can point it at the folder:

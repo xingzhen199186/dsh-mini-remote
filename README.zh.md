@@ -32,13 +32,13 @@
 ## 安装
 
 ```powershell
-dsh plugin --profile web add github:xingzhen199186/dsh-mini-remote
+dsh plugin --profile web add dsh-mini-remote
 ```
 
-包发布到 npm 之后，直接写包名也行：
+也可以直接从 GitHub 装，这样锁的是源码：
 
 ```powershell
-dsh plugin --profile web add dsh-mini-remote
+dsh plugin --profile web add github:xingzhen199186/dsh-mini-remote
 ```
 
 手上有源码目录的话，把目录指给它也一样：
