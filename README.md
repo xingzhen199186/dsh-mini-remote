@@ -1,13 +1,13 @@
 # dsh-mini-remote
 
-> 一个 [DeepSeek Harness](https://github.com/deepseek-ai/DeepSeek-Harness)（DSH）插件，把一部手机变成**极简遥控器**——手机端只收到你发出去的指令和 AI 最后的结论，工具调用、文件读写、子 Agent 调度、思考过程全部留在电脑上。
+> 一个 [DeepSeek Harness](https://github.com/deepseek-ai/DeepSeek-Harness)（DSH）插件，把一部手机变成**极简遥控器**——移动端只收到你发出去的指令和 AI 最后的结论，工具调用、文件读写、子 Agent 调度、思考过程全部留在电脑上。
 
 ![DSH plugin](https://img.shields.io/badge/DSH_plugin-dsh--plugin-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
 [English →](README.en.md)
 
-**要在手机端使用该插件，请将 PC 端 DSH 会话页面切换到【完全权限】**——手机上点不了审批弹窗，会话会一直卡在那里等。
+**要在手机端使用该插件，请将 PC 端 DSH 会话页面切换到【完全权限】**
 
 ---
 
