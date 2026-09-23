@@ -1602,6 +1602,154 @@ test('SSE 实时推来的回复也要带上 interrupted（不能只有刷新才�
 })
 
 // ---------------------------------------------------------------------------
+// 左侧导航栏：在工作区里新建会话
+// ---------------------------------------------------------------------------
+//
+// 导航栏这块原来一条行为测试都没有（只有「这些 id 存在」那种存在性检查），
+// 所以「＋ 新建会话」渲染在哪儿、点了打哪个接口、连点会不会建出两个，
+// 全靠肉眼看。这里把导航栏那几段从模板里切出来真跑一遍。
+//
+// 切片从 `var navList` 开始：navList / navSessions / navExpanded 三个模块级变量
+// 就声明在那儿，renderNav 和 sessionsHtml 都要读它们，切在函数里面就找不到了。
+// 锚点对不上会立刻断言失败，不会安静地退化成空测试。
+
+function navHarness({ apiImpl } = {}) {
+  const START_AT = 'var navList = null;'
+  const END_AT = 'function bindSession'
+  const a = html.indexOf(START_AT)
+  const b = html.indexOf(END_AT)
+  assert.ok(a > 0, `在 page.html 里找不到锚点「${START_AT}」`)
+  assert.ok(b > a, `在 page.html 里找不到锚点「${END_AT}」`)
+
+  const calls = []
+  const toasts = []
+  const applied = []
+  const navCls = []
+  const navBody = { innerHTML: '', querySelectorAll: () => [] }
+  const state = { boundSessionId: 's-old' }
+
+  // eslint-disable-next-line no-new-func
+  const build = new Function(
+    'state', 'escapeHtml', '$', 'api', 'toast', 'closeNav', 'loadWorkspaces',
+    'applySnapshot', 'render',
+    `${html.slice(a, b)}
+     return { renderNav, sessionsHtml, createSession, setSessions: (v) => { navSessions = v } };`,
+  )
+  const scope = build(
+    state,
+    md.escapeHtml,
+    (id) => {
+      if (id === 'navBody') return navBody
+      // 'nav' 这个假元素要记下 classList 的增删：closeNav / openNav 都是切片里
+      // **真实存在**的函数（我一开始想用桩替换它们，结果被遮住了、桩是死的），
+      // 所以「导航栏收起来了没有」只能从它对 classList 的动作上看。
+      return { classList: { add: (c) => navCls.push('+' + c), remove: (c) => navCls.push('-' + c), contains: () => true } }
+    },
+    (path, opts) => {
+      calls.push({ path, opts })
+      return apiImpl ? apiImpl(path, opts) : Promise.resolve({
+        ok: true, sessionId: 'session-new', workspaceTitle: '极简遥控器',
+        state: { boundSessionId: 'session-new' },
+      })
+    },
+    (m) => toasts.push(m),
+    // closeNav / loadWorkspaces 在切片里有真身，这两个参数用不上；留着是为了
+    // 万一以后切片范围变了不至于 ReferenceError。
+    () => {},
+    () => {},
+    (snap) => applied.push(snap),
+    () => {},
+  )
+  return {
+    scope, navBody, calls, toasts, applied, navCls, state,
+    // 只数「建会话」那个请求，不数建成之后刷新列表那一次。
+    creates: () => calls.filter((c) => c.path.includes('/sessions')),
+  }
+}
+
+test('导航栏：「＋ 新建会话」排在会话列表最上面', () => {
+  // 排末尾的话，一个 452 条会话的工作区要划到底才看得到（本机真有一个）。
+  const h = navHarness()
+  h.scope.setSessions({
+    w1: {
+      total: 2,
+      truncated: false,
+      sessions: [
+        { id: 's1', title: '甲', createdAt: 200, running: false },
+        { id: 's2', title: '乙', createdAt: 100, running: false },
+      ],
+    },
+  })
+  const out = h.scope.sessionsHtml('w1')
+  const at = out.indexOf('ws-new')
+  const firstSess = out.indexOf('class="sess')
+  assert.ok(at >= 0, '没渲染出「新建会话」')
+  assert.ok(at < firstSess, `「新建会话」要排在第一条会话前面（${at} vs ${firstSess}）`)
+  assert.match(out, /data-newws="w1"/, '要带上工作区 id，不然点了不知道建在哪儿')
+})
+
+test('导航栏：一个会话都没有时，「＋ 新建会话」照样在', () => {
+  const h = navHarness()
+  h.scope.setSessions({ w1: { total: 0, truncated: false, sessions: [] } })
+  const out = h.scope.sessionsHtml('w1')
+  assert.match(out, /ws-new/)
+  assert.match(out, /还没有会话/)
+})
+
+test('导航栏：点了「新建会话」打的是 POST 到那个工作区的会话路径', () => {
+  const h = navHarness()
+  return h.scope.createSession('w-abc').then(() => {
+    const made = h.creates()
+    assert.equal(made.length, 1, '应该只发一次建会话的请求')
+    assert.equal(made[0].path, '/mini/api/workspaces/w-abc/sessions')
+    assert.equal(made[0].opts.method, 'POST')
+  })
+})
+
+test('导航栏：连点两下只建一个（建会话不是幂等的）', () => {
+  // 服务端那道闸门拦不住这个：两个请求都是合法的，会真建出两个会话，
+  // 而手机上什么都看不出来。必须前端自己拦。
+  let release
+  const gate = new Promise((r) => { release = r })
+  const h = navHarness({ apiImpl: () => gate })
+  const first = h.scope.createSession('w1')
+  h.scope.createSession('w1')            // 第二下：闸门应该把它丢掉
+  release({ ok: true, sessionId: 's1', workspaceTitle: '甲', state: {} })
+  return first.then(() => {
+    assert.equal(h.creates().length, 1, '第二次点击必须被丢掉')
+  })
+})
+
+test('导航栏：建成后用返回的快照直接渲染，收起导航栏，并刷新列表', () => {
+  // 不这么做的话，切过去的一瞬间屏幕上还留着上一个会话的正文。
+  const h = navHarness()
+  return h.scope.createSession('w1').then(() => {
+    assert.deepEqual(h.applied, [{ boundSessionId: 'session-new' }], '要拿接口返回的快照渲染')
+    assert.ok(h.navCls.includes('-open'), '建完要把导航栏收起来')
+    assert.ok(
+      h.calls.some((c) => c.path === '/mini/api/workspaces?refresh=1'),
+      '还要刷一次列表，让新会话立刻出现（带 refresh 绕过服务端缓存）',
+    )
+    assert.match(h.toasts[0], /极简遥控器/, '提示里要说清建在哪个工作区')
+  })
+})
+
+test('导航栏：建失败时说人话，并且按钮要能再按', () => {
+  const h = navHarness({
+    apiImpl: () => Promise.reject(new Error('这台电脑上的 DSH 没提供新建会话的能力。')),
+  })
+  return h.scope.createSession('w1').then(() => {
+    assert.equal(h.toasts.length, 1)
+    assert.match(h.toasts[0], /没提供新建会话的能力/)
+    assert.equal(h.applied.length, 0, '失败了不该拿快照去渲染')
+    // 解锁的证据：再点一次还能发出请求（不解锁的话第二次会被闸门吃掉）。
+    return h.scope.createSession('w1')
+  }).then(() => {
+    assert.equal(h.creates().length, 2, '失败之后必须解锁，不然以后都点不动了')
+  })
+})
+
+// ---------------------------------------------------------------------------
 // 单帧模式：回答出现时跳到顶部
 // ---------------------------------------------------------------------------
 

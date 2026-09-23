@@ -1539,7 +1539,10 @@
     // POST 到工作区会话那条路径上：GET 是「列出来」，POST 是「建一个」。
     // 服务端建完会顺手 bind 并把新快照一起返回，所以这里一次请求就完成了
     // 「建 + 切过去」，不用再补一次 bind。
-    api('/mini/api/workspaces/' + encodeURIComponent(wsId) + '/sessions', {
+    //
+    // **要把 promise 返回出去**：起了异步动作就该让调用方等得到它。
+    // 不返回的话外面拿到的是 undefined，接不上任何后续。
+    return api('/mini/api/workspaces/' + encodeURIComponent(wsId) + '/sessions', {
       method: 'POST',
       body: '{}',
     }).then(function (res) {
