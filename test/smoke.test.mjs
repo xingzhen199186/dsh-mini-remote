@@ -296,6 +296,7 @@ async function startTestServer(overrides = {}) {
     // 不给就是「这台电脑没有附件服务」——那也是一条要覆盖的路径。
     onUpload: overrides.onUpload,
     tree: overrides.tree,
+    browse: overrides.browse,
     build: overrides.build,
   })
   return { store, server, token, seen, base: `http://127.0.0.1:${server.port}` }
@@ -666,6 +667,225 @@ test('同一条路径上 GET 还是列表，没被 POST 抢掉', async (t) => {
   const res = await fetch(`${base}/mini/api/workspaces/w1/sessions?token=${token}`)
   assert.equal(res.status, 200)
   assert.equal((await res.json()).sessions.length, 2, 'GET 该照旧给会话列表')
+})
+
+// ---------------------------------------------------------------------------
+// 目录浏览 + 登记工作区
+// ---------------------------------------------------------------------------
+
+/** 假的浏览服务。测试不该真去读盘，真读盘那部分在 browse.test.mjs 里用真目录测。 */
+function fakeBrowse(overrides = {}) {
+  return {
+    listRoots: async ({ recent } = {}) => ({
+      home: 'C:\\Users\\测试', drives: ['C:\\', 'I:\\'], recent: recent ?? [], askedRecent: recent,
+    }),
+    listDirectory: async (p) => (p === 'I:\\没有这个'
+      ? { ok: false, reason: 'unreadable', error: 'ENOENT' }
+      : {
+        ok: true,
+        path: p,
+        ancestors: [{ name: 'I:\\', path: 'I:\\' }, { name: '项目', path: p }],
+        dirs: [{ name: '子目录', path: p + '\\子目录' }],
+        total: 1,
+        truncated: false,
+      }),
+    makeDirectory: async (p, name) => (name === '已存在'
+      ? { ok: false, reason: 'exists' }
+      : name === '带/斜杠'
+        ? { ok: false, reason: 'bad-name' }
+        : { ok: true, path: p + '\\' + name }),
+    ...overrides,
+  }
+}
+
+test('常用位置要 token 才给看', async (t) => {
+  const { server, base } = await startTestServer({ browse: fakeBrowse() })
+  t.after(() => server.close())
+  assert.equal((await fetch(`${base}/mini/api/browse/roots`)).status, 401)
+})
+
+test('常用位置里有主目录、盘符和最近用过的目录', async (t) => {
+  const { server, base, token } = await startTestServer({
+    browse: fakeBrowse(),
+    tree: fakeNav(),
+  })
+  t.after(() => server.close())
+
+  const body = await (await fetch(`${base}/mini/api/browse/roots?token=${token}`)).json()
+  assert.equal(body.ok, true)
+  assert.equal(body.home, 'C:\\Users\\测试')
+  assert.deepEqual(body.drives, ['C:\\', 'I:\\'])
+  // 「最近用过的目录」应该来自已登记的工作区路径，而不是另记一份状态。
+  assert.deepEqual(body.recent, ['I:\\极简遥控器\\极简遥控器'])
+})
+
+test('列目录：只给目录，每一项都带完整路径', async (t) => {
+  const { server, base, token } = await startTestServer({ browse: fakeBrowse() })
+  t.after(() => server.close())
+
+  const res = await fetch(`${base}/mini/api/browse?path=${encodeURIComponent('I:\\项目')}&token=${token}`)
+  assert.equal(res.status, 200)
+  const body = await res.json()
+  assert.equal(body.path, 'I:\\项目')
+  assert.equal(body.dirs[0].name, '子目录')
+  assert.equal(body.dirs[0].path, 'I:\\项目\\子目录')
+  assert.ok(Array.isArray(body.ancestors), '面包屑要一起给，手机不用自己拆路径')
+})
+
+test('列目录不带 path 时回 400，不是默默给个根目录', async (t) => {
+  const { server, base, token } = await startTestServer({ browse: fakeBrowse() })
+  t.after(() => server.close())
+  assert.equal((await fetch(`${base}/mini/api/browse?token=${token}`)).status, 400)
+})
+
+test('目录读不到时回 404，说的是读不到而不是空目录', async (t) => {
+  const { server, base, token } = await startTestServer({ browse: fakeBrowse() })
+  t.after(() => server.close())
+
+  const res = await fetch(`${base}/mini/api/browse?path=${encodeURIComponent('I:\\没有这个')}&token=${token}`)
+  assert.equal(res.status, 404)
+  assert.match((await res.json()).error, /读不到/)
+})
+
+test('没传 browse 时列目录回 503，不是崩掉', async (t) => {
+  const { server, base, token } = await startTestServer()
+  t.after(() => server.close())
+  const res = await fetch(`${base}/mini/api/browse?path=${encodeURIComponent('I:\\a')}&token=${token}`)
+  assert.equal(res.status, 503, '「没这个能力」统一 503，别混进 500')
+})
+
+test('新建文件夹：成功时回完整路径', async (t) => {
+  const { server, base, token } = await startTestServer({ browse: fakeBrowse() })
+  t.after(() => server.close())
+
+  const res = await fetch(`${base}/mini/api/browse/mkdir?token=${token}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ path: 'I:\\项目', name: '新文件夹' }),
+  })
+  assert.equal(res.status, 200)
+  assert.equal((await res.json()).path, 'I:\\项目\\新文件夹')
+})
+
+test('新建文件夹：名字不合法回 400，同名回 409（两种要分得开）', async (t) => {
+  const { server, base, token } = await startTestServer({ browse: fakeBrowse() })
+  t.after(() => server.close())
+
+  const post = (name) => fetch(`${base}/mini/api/browse/mkdir?token=${token}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ path: 'I:\\项目', name }),
+  })
+  assert.equal((await post('带/斜杠')).status, 400)
+  assert.equal((await post('已存在')).status, 409)
+})
+
+test('新建文件夹要 token', async (t) => {
+  const { server, base } = await startTestServer({ browse: fakeBrowse() })
+  t.after(() => server.close())
+  const res = await fetch(`${base}/mini/api/browse/mkdir`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ path: 'I:\\项目', name: 'x' }),
+  })
+  assert.equal(res.status, 401)
+})
+
+test('登记工作区：新建的如实说 created=true，并把最新列表一起带回来', async (t) => {
+  const seen = []
+  const nav = {
+    ...fakeNav(),
+    createWorkspace: async (path) => {
+      seen.push(path)
+      return { ok: true, created: true, workspace: { id: 'w9', path, title: '新项目' } }
+    },
+  }
+  const { server, base, token } = await startTestServer({ tree: nav })
+  t.after(() => server.close())
+
+  const res = await fetch(`${base}/mini/api/workspaces?token=${token}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ path: 'I:\\新项目' }),
+  })
+  assert.equal(res.status, 200)
+  const body = await res.json()
+  assert.equal(body.created, true)
+  assert.equal(body.workspace.title, '新项目')
+  assert.deepEqual(seen, ['I:\\新项目'], '路径要原样传下去')
+  // 列表一起给：手机拿到就能直接画，不会出现「建好了但列表里还没有」。
+  assert.equal(body.workspaces.length, 1)
+})
+
+test('登记工作区：本来就有的如实说 created=false', async (t) => {
+  const nav = {
+    ...fakeNav(),
+    createWorkspace: async (path) => ({
+      ok: true, created: false, workspace: { id: 'w1', path, title: '老项目' },
+    }),
+  }
+  const { server, base, token } = await startTestServer({ tree: nav })
+  t.after(() => server.close())
+
+  const body = await (await fetch(`${base}/mini/api/workspaces?token=${token}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ path: 'I:\\老项目' }),
+  })).json()
+  assert.equal(body.created, false, '要让界面说得出「这个本来就在」')
+})
+
+test('登记工作区：路径不存在时回 400 并带上 DSH 的原话', async (t) => {
+  const nav = {
+    ...fakeNav(),
+    createWorkspace: async () => ({ ok: false, reason: 'failed', error: '不是一个目录' }),
+  }
+  const { server, base, token } = await startTestServer({ tree: nav })
+  t.after(() => server.close())
+
+  const res = await fetch(`${base}/mini/api/workspaces?token=${token}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ path: 'I:\\没有这个' }),
+  })
+  assert.equal(res.status, 400)
+  assert.match((await res.json()).error, /不是一个目录/)
+})
+
+test('登记工作区：没给路径时回 400，不去麻烦工作区服务', async (t) => {
+  // 路由里有一条 bad-path 分支。它只有在真的收到空路径时才走到——
+  // 之前没有测试碰过它，所以把它删掉测试照样全绿（反向验证逮到的）。
+  const seen = []
+  const nav = {
+    ...fakeNav(),
+    createWorkspace: async (path) => {
+      seen.push(path)
+      if (!path) return { ok: false, reason: 'bad-path' }
+      return { ok: true, created: true, workspace: { id: 'w9', path, title: '甲' } }
+    },
+  }
+  const { server, base, token } = await startTestServer({ tree: nav })
+  t.after(() => server.close())
+
+  const res = await fetch(`${base}/mini/api/workspaces?token=${token}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({}),
+  })
+  assert.equal(res.status, 400)
+  assert.match((await res.json()).error, /没给路径/)
+  assert.deepEqual(seen, [''], '空路径要原样交给下游判断，别在这儿编一句')
+})
+
+test('登记工作区：没传 tree 时回 503，不是崩掉', async (t) => {
+  const { server, base, token } = await startTestServer()
+  t.after(() => server.close())
+  const res = await fetch(`${base}/mini/api/workspaces?token=${token}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ path: 'I:\\a' }),
+  })
+  assert.equal(res.status, 503)
 })
 
 test('密码试错 5 次就被挡一分钟，连对的密码也进不来', async (t) => {

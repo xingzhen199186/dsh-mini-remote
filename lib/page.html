@@ -437,6 +437,52 @@
   }
   .ws-new:active { background: var(--panel-2); }
   .ws-new[disabled] { color: var(--muted); cursor: default; }
+
+  /* 导航栏最上面那条「新建工作区」。跟工作区条目之间用一条线隔开：
+     它是这一屏的入口，不是一个工作区。 */
+  .nav-cta {
+    display: flex; align-items: center; gap: 6px; width: 100%;
+    padding: 12px 14px; background: none; border: none; border-bottom: 1px solid var(--line);
+    color: var(--accent); font: inherit; font-size: 14px; text-align: left; cursor: pointer;
+  }
+  .nav-cta:active { background: var(--panel-2); }
+
+  /* 面包屑。横向能划，路径再深也不会把面板撑破。 */
+  .crumb {
+    display: flex; align-items: center; gap: 2px; padding: 8px 10px;
+    overflow-x: auto; white-space: nowrap; border-bottom: 1px solid var(--line);
+  }
+  .crumb button {
+    background: none; border: none; color: var(--accent); font: inherit;
+    font-size: 13px; padding: 4px 6px; cursor: pointer; border-radius: 6px;
+  }
+  .crumb button:active { background: var(--panel-2); }
+  .crumb .sep { color: var(--muted); font-size: 12px; }
+  .crumb .here { color: var(--fg); font-size: 13px; padding: 4px 6px; }
+
+  /* 「就选这个目录」——这一屏唯一的主按钮，所以给它实心底。 */
+  .pick-here {
+    display: block; width: calc(100% - 24px); margin: 10px 12px;
+    padding: 11px; border: none; border-radius: var(--radius);
+    background: var(--accent); color: #fff; font: inherit; font-size: 14px; cursor: pointer;
+  }
+  .pick-here:active { opacity: .85; }
+  .pick-here[disabled] { background: var(--line); color: var(--muted); cursor: default; }
+
+  /* 新建文件夹那一行输入。内联而不是 window.prompt：prompt 在微信这类内嵌
+     浏览器里会被直接屏蔽，那时候点「新建文件夹」什么都不发生、也没提示。 */
+  .mkdir-row { display: flex; gap: 6px; padding: 8px 12px; align-items: center; }
+  .mkdir-row input {
+    flex: 1 1 auto; min-width: 0; padding: 9px 10px; font: inherit; font-size: 14px;
+    background: var(--panel-2); border: 1px solid var(--line);
+    border-radius: 10px; color: var(--fg);
+  }
+  .mkdir-row button {
+    flex: 0 0 auto; padding: 9px 12px; font: inherit; font-size: 13px; cursor: pointer;
+    background: var(--panel-2); border: 1px solid var(--line);
+    border-radius: 10px; color: var(--fg);
+  }
+  .mkdir-row button:active { background: var(--line); }
   .nav-note { padding: 10px 16px; color: var(--muted); font-size: 12px; line-height: 1.6; }
 
   /* ---------- 设置抽屉 ---------- */
@@ -1452,13 +1498,18 @@
   }
 
   function renderNav() {
+    // 目录浏览那一屏接管整个面板。它自己画返回按钮，所以不走下面这套。
+    if (navView === 'browse') { renderBrowse(); return; }
     var list = navList || [];
+    // 「新建工作区」常驻在最上面：它是这一屏的入口，不该等有了会话才出现——
+    // 一个工作区都还没有的人，恰恰最需要它。
+    var cta = '<button class="nav-cta" type="button" data-new-ws="1">＋ 新建工作区</button>';
     if (!list.length) {
-      $('navBody').innerHTML = '<div class="placeholder">电脑上还没有可以切换的会话。<br>'
+      $('navBody').innerHTML = cta + '<div class="placeholder">电脑上还没有可以切换的会话。<br>'
         + '在电脑上开一个，这里就会出现了。</div>';
       return;
     }
-    $('navBody').innerHTML = list.map(function (ws) {
+    $('navBody').innerHTML = cta + list.map(function (ws) {
       var open = Boolean(navExpanded[ws.id]);
       return '<div class="ws' + (open ? ' open' : '') + '" data-ws="' + escapeHtml(ws.id) + '">'
         + '<button class="ws-head" type="button">'
@@ -1496,6 +1547,200 @@
         + got.total + ' 条。</div>';
     }
     return html;
+  }
+
+  // ---------------- 新建工作区：浏览电脑目录 ----------------
+  //
+  // 面板里有两个「屏」：工作区树（默认）和目录浏览。用一个变量记当前在哪一屏，
+  // 而不是再开一层浮层——手机屏幕就这么大，多一层就多一次「怎么退回去」。
+  //
+  // 起点给「常用位置」（主目录 / 最近用过 / 磁盘），不是直接甩盘符：
+  // 从 C:\ 一层层点进去找一个项目文件夹，是要人自己知道路径长什么样。
+  var navView = 'tree';
+  var browseRoots = null;   // 常用位置，开一次取一次
+  var browseAt = null;      // 当前所在目录；null = 还在看常用位置
+  var browseData = null;    // 当前目录的列表
+  var browseMkdir = false;  // 是不是正在新建文件夹（那一行输入框露出来没有）
+  var browseBusy = false;   // 防连点
+
+  function dirName(p) {
+    var parts = String(p).split(/[\\/]/).filter(Boolean);
+    return parts.length ? parts[parts.length - 1] : String(p);
+  }
+
+  function openBrowse() {
+    navView = 'browse';
+    browseAt = null;
+    browseData = null;
+    browseMkdir = false;
+    renderNav();
+    if (browseRoots) return;
+    api('/mini/api/browse/roots').then(function (body) {
+      browseRoots = body;
+      renderNav();
+    }).catch(function (err) {
+      browseRoots = null;
+      $('navBody').innerHTML = '<button class="nav-cta" type="button" data-browse-back="1">← 返回</button>'
+        + '<div class="placeholder">读不到常用位置：' + escapeHtml(err.message) + '</div>';
+    });
+  }
+
+  function browseTo(p) {
+    navView = 'browse';
+    browseAt = p;
+    browseData = null;
+    browseMkdir = false;
+    renderNav();
+    api('/mini/api/browse?path=' + encodeURIComponent(p)).then(function (body) {
+      browseData = body;
+      renderNav();
+    }).catch(function (err) {
+      browseData = { ok: false, error: err.message };
+      renderNav();
+    });
+  }
+
+  /** 目录浏览那一屏。路径来自服务端，这里只负责画。 */
+  function renderBrowse() {
+    var html = '<button class="nav-cta" type="button" data-browse-back="1">← 返回</button>';
+
+    if (!browseAt) {
+      if (!browseRoots) {
+        $('navBody').innerHTML = html + '<div class="placeholder">正在读取…</div>';
+        return;
+      }
+      // 顺序有讲究：主目录（最常用）→ 最近用过（第二常用）→ 磁盘（兜底）。
+      // 磁盘排最后，因为「从盘符一层层点」正是我们要避免的那种走法。
+      var rows = [{ name: '主目录', path: browseRoots.home, tag: '常用' }];
+      (browseRoots.recent || []).forEach(function (p) {
+        rows.push({ name: dirName(p), path: p, tag: '最近' });
+      });
+      (browseRoots.drives || []).forEach(function (p) {
+        rows.push({ name: p, path: p, tag: '磁盘' });
+      });
+      html += '<div class="nav-note">挑一个文件夹，登记成工作区。</div>';
+      html += rows.map(function (r) {
+        return '<button class="sess" type="button" data-browse-to="' + escapeHtml(r.path) + '">'
+          + '<span class="s-title">' + escapeHtml(r.name) + '</span>'
+          + '<span class="s-meta">' + escapeHtml(r.tag) + '</span>'
+          + '</button>';
+      }).join('');
+      $('navBody').innerHTML = html;
+      return;
+    }
+
+    if (!browseData) {
+      $('navBody').innerHTML = html + '<div class="placeholder">正在读取…</div>';
+      return;
+    }
+    if (!browseData.ok) {
+      // 读不到时**如实说**，不装作空目录——两者在界面上长得一模一样，
+      // 而「没有权限」和「本来就是空的」对用户是两件事。
+      $('navBody').innerHTML = html + '<div class="crumb"><span class="here">'
+        + escapeHtml(dirName(browseAt)) + '</span></div>'
+        + '<div class="placeholder">' + escapeHtml(browseData.error || '读不到这个目录。') + '</div>';
+      return;
+    }
+
+    // 面包屑：能一路点回上去。最后一格是当前目录，不再可点。
+    var chain = browseData.ancestors || [];
+    html += '<div class="crumb">' + chain.map(function (a, i) {
+      var last = i === chain.length - 1;
+      var piece = last
+        ? '<span class="here">' + escapeHtml(a.name) + '</span>'
+        : '<button type="button" data-browse-to="' + escapeHtml(a.path) + '">'
+          + escapeHtml(a.name) + '</button><span class="sep">›</span>';
+      return piece;
+    }).join('') + '</div>';
+
+    html += '<button class="pick-here" type="button" data-pick="' + escapeHtml(browseData.path) + '">'
+      + '就选这个目录</button>';
+
+    if (browseMkdir) {
+      // 内联输入，不用 window.prompt：prompt 在微信这类内嵌浏览器里会被直接
+      // 屏蔽掉，那时候用户点「新建文件夹」什么都不发生，而且没有任何提示。
+      html += '<div class="mkdir-row">'
+        + '<input id="mkdirName" type="text" placeholder="新文件夹的名字" autocomplete="off">'
+        + '<button type="button" data-mkdir-ok="1">建</button>'
+        + '<button type="button" data-mkdir-cancel="1">取消</button>'
+        + '</div>';
+    } else {
+      html += '<button class="ws-new" type="button" data-mkdir="1">＋ 新建文件夹</button>';
+    }
+
+    if (!browseData.dirs.length) {
+      html += '<div class="placeholder">这个目录下面没有子目录。</div>';
+    } else {
+      html += browseData.dirs.map(function (d) {
+        return '<button class="sess" type="button" data-browse-to="' + escapeHtml(d.path) + '">'
+          + '<span class="s-title">' + escapeHtml(d.name) + '</span>'
+          + '</button>';
+      }).join('');
+    }
+    if (browseData.truncated) {
+      html += '<div class="nav-note">只列了前 ' + browseData.dirs.length + ' 个，共 '
+        + browseData.total + ' 个。</div>';
+    }
+    $('navBody').innerHTML = html;
+  }
+
+  /**
+   * 「← 返回」：一级一级往外退，退法要跟用户心里的层级对上。
+   *   在某个目录里 → 退回常用位置那一屏（往上几级有面包屑，不用返回键代劳）
+   *   已经在常用位置 → 退回工作区树
+   * 不这么做的话，从深层目录点返回会直接跳回工作区树，用户想换个盘得重新走一遍。
+   */
+  function closeBrowse() {
+    if (browseAt) {
+      browseAt = null;
+      browseData = null;
+      browseMkdir = false;
+      renderNav();
+      return;
+    }
+    navView = 'tree';
+    renderNav();
+  }
+
+  function registerWorkspace(p) {
+    if (browseBusy) return;
+    browseBusy = true;
+    api('/mini/api/workspaces', { method: 'POST', body: JSON.stringify({ path: p }) })
+      .then(function (res) {
+        browseBusy = false;
+        navView = 'tree';
+        browseAt = null;
+        browseData = null;
+        // 服务端把登记后的最新列表一起带回来了，直接用——不用再补一趟请求，
+        // 也就不会出现「建好了但列表里还没有」。
+        if (res && res.workspaces) navList = res.workspaces;
+        navSessions = {};
+        renderNav();
+        toast(res && res.created
+          ? '已登记《' + res.workspace.title + '》'
+          : '《' + res.workspace.title + '》本来就在列表里');
+      })
+      .catch(function (err) {
+        browseBusy = false;
+        toast(err.message);
+      });
+  }
+
+  function makeFolder() {
+    var input = $('mkdirName');
+    var name = input ? input.value : '';
+    if (browseBusy) return;
+    browseBusy = true;
+    api('/mini/api/browse/mkdir', { method: 'POST', body: JSON.stringify({ path: browseAt, name: name }) })
+      .then(function (res) {
+        browseBusy = false;
+        browseMkdir = false;
+        browseTo(res.path);
+      })
+      .catch(function (err) {
+        browseBusy = false;
+        toast(err.message);
+      });
   }
 
   function toggleWorkspace(wsId) {
@@ -1594,12 +1839,32 @@
   $('navBody').addEventListener('click', function (e) {
     var t = e.target;
     var sess = t && t.closest ? t.closest('.sess') : null;
-    if (sess) { bindSession(sess.getAttribute('data-sess')); return; }
+    if (sess) {
+      // 目录浏览那一屏里的 .sess 是「进这个目录」，不是「切到这个会话」。
+      // 两屏共用同一个条目样式，所以要先看当前在哪一屏。
+      if (navView === 'browse') { browseTo(sess.getAttribute('data-browse-to')); return; }
+      bindSession(sess.getAttribute('data-sess'));
+      return;
+    }
+    var at = function (sel) { return t && t.closest ? t.closest(sel) : null; };
+
+    var newWs = at('[data-new-ws]');
+    if (newWs) { openBrowse(); return; }
+    var back = at('[data-browse-back]');
+    if (back) { closeBrowse(); return; }
+    var to = at('[data-browse-to]');
+    if (to) { browseTo(to.getAttribute('data-browse-to')); return; }
+    var pick = at('[data-pick]');
+    if (pick) { registerWorkspace(pick.getAttribute('data-pick')); return; }
+    if (at('[data-mkdir]')) { browseMkdir = true; renderNav(); return; }
+    if (at('[data-mkdir-cancel]')) { browseMkdir = false; renderNav(); return; }
+    if (at('[data-mkdir-ok]')) { makeFolder(); return; }
+
     // 「新建会话」要排在 ws-head 之前判：它在 ws-body 里面、不是 ws-head，
     // 顺序上无所谓，但放在前面更清楚——这一支是动作，那一支是展开/收起。
-    var fresh = t && t.closest ? t.closest('.ws-new') : null;
+    var fresh = at('.ws-new');
     if (fresh) { createSession(fresh.getAttribute('data-newws')); return; }
-    var head = t && t.closest ? t.closest('.ws-head') : null;
+    var head = at('.ws-head');
     if (!head) return;
     toggleWorkspace(head.parentNode.getAttribute('data-ws'));
   });
