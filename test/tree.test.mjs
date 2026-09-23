@@ -8,7 +8,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { listWorkspaces, listSessionsOf } from '../lib/tree.js'
+import { listWorkspaces, listSessionsOf, createSessionIn } from '../lib/tree.js'
 
 function ws(id, path, title, sessionIds) {
   return { id, path, title, sessionIds }
@@ -246,6 +246,95 @@ test('agents 报 running 时如实反映', async () => {
   const agents = { get: () => ({ status: 'running' }) }
   const out = await listSessionsOf({ registry, query, agents, workspaceId: 'w1' })
   assert.equal(out.sessions[0].running, true)
+})
+
+// ---------------------------------------------------------------------------
+// 在一个已有的工作区里新建会话
+// ---------------------------------------------------------------------------
+
+/** 记下被调用的参数，好断言「传进去的确实是那个工作区」。 */
+function controllerOf(impl) {
+  return {
+    calls: [],
+    create(request) {
+      this.calls.push(request)
+      return impl(request)
+    },
+  }
+}
+
+test('在指定工作区里建会话，返回新会话的 id', async () => {
+  const registry = registryOf(ws('w1', 'I:\\a', '甲', ['s1']), ws('w2', 'I:\\b', '乙', ['s2']))
+  const controller = controllerOf(async () => ({ sessionId: 'session-new' }))
+  const out = await createSessionIn({ controller, registry, workspaceId: 'w2' })
+  assert.equal(out.ok, true)
+  assert.equal(out.sessionId, 'session-new')
+  assert.deepEqual(controller.calls, [{ workspaceId: 'w2' }], '要建在 w2 上，不是随便哪个')
+})
+
+test('建会话时把工作区标题带回去，手机能说清建在哪儿', async () => {
+  const registry = registryOf(ws('w1', 'I:\\a', '极简遥控器', []))
+  const controller = controllerOf(async () => ({ sessionId: 's9' }))
+  const out = await createSessionIn({ controller, registry, workspaceId: 'w1' })
+  assert.equal(out.workspaceTitle, '极简遥控器')
+})
+
+test('工作区没标题时退到目录名，而不是留空', async () => {
+  const registry = registryOf(ws('w1', 'I:\\写作算法\\素材', '', []))
+  const controller = controllerOf(async () => ({ sessionId: 's9' }))
+  const out = await createSessionIn({ controller, registry, workspaceId: 'w1' })
+  assert.equal(out.workspaceTitle, '素材')
+})
+
+test('没有会话服务时如实说没这个能力，不是笼统报错', async () => {
+  // headless 组合里就是这样：sessionController 根本不来。
+  const registry = registryOf(ws('w1', 'I:\\a', '甲', []))
+  const out = await createSessionIn({ controller: null, registry, workspaceId: 'w1' })
+  assert.equal(out.ok, false)
+  assert.equal(out.reason, 'no-controller')
+})
+
+test('服务在但 create 不是函数时也算没能力，不硬调', async () => {
+  // 防的是「服务换了个形状」：拿到了对象却没有 create，硬调会抛一个看不懂的错。
+  const registry = registryOf(ws('w1', 'I:\\a', '甲', []))
+  const out = await createSessionIn({ controller: { list: () => [] }, registry, workspaceId: 'w1' })
+  assert.equal(out.reason, 'no-controller')
+})
+
+test('工作区不在了就说工作区不在，别说是服务的问题', async () => {
+  const registry = registryOf(ws('w1', 'I:\\a', '甲', []))
+  const controller = controllerOf(async () => ({ sessionId: 's9' }))
+  const out = await createSessionIn({ controller, registry, workspaceId: 'w-none' })
+  assert.equal(out.reason, 'no-workspace')
+  assert.equal(controller.calls.length, 0, '工作区都没了，不该去麻烦 DSH')
+})
+
+test('DSH 拒绝了就把原因原样带回来', async () => {
+  const registry = registryOf(ws('w1', 'I:\\a', '甲', []))
+  const controller = controllerOf(async () => { throw new Error('磁盘满了') })
+  const out = await createSessionIn({ controller, registry, workspaceId: 'w1' })
+  assert.equal(out.ok, false)
+  assert.equal(out.reason, 'failed')
+  assert.match(out.error, /磁盘满了/)
+})
+
+test('DSH 没返回 id 时算失败，不能装作建成了', async () => {
+  // 最阴的一种：不抛错、也没有 id。放过去的话手机会绑到一个空 id 上，
+  // 界面看着像成功了，其实哪条会话都没切过去。
+  const registry = registryOf(ws('w1', 'I:\\a', '甲', []))
+  const controller = controllerOf(async () => ({}))
+  const out = await createSessionIn({ controller, registry, workspaceId: 'w1' })
+  assert.equal(out.ok, false)
+  assert.equal(out.reason, 'failed')
+})
+
+test('registry 抛错时不炸，退回「没这个工作区」', async () => {
+  // 服务没启动时 requireState() 会抛。导航栏是附带的，不该把建会话也带崩。
+  const registry = { list: () => { throw new Error('服务还没起来') } }
+  const controller = controllerOf(async () => ({ sessionId: 's9' }))
+  const out = await createSessionIn({ controller, registry, workspaceId: 'w1' })
+  assert.equal(out.ok, false)
+  assert.equal(out.reason, 'no-workspace')
 })
 
 test('工作区不存在时返回 null（服务端据此回 404）', async () => {

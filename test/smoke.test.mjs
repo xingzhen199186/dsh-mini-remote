@@ -475,7 +475,7 @@ test('带正确 token 可以读到状态', async (t) => {
 // 左侧导航栏的两个接口
 // ---------------------------------------------------------------------------
 
-function fakeNav() {
+function fakeNav(createSession) {
   return {
     listWorkspaces: async () => [
       { id: 'w1', title: '极简遥控器', path: 'I:\\极简遥控器\\极简遥控器', count: 3, running: 1 },
@@ -493,6 +493,12 @@ function fakeNav() {
           askedLimit: limit,
         }
         : null),
+    // 默认给一个「建得成」的桩；要测失败路径的用例自己传一个进来。
+    createSession: createSession ?? (async (workspaceId) => (
+      workspaceId === 'w1'
+        ? { ok: true, sessionId: 'session-new', workspaceTitle: '极简遥控器' }
+        : { ok: false, reason: 'no-workspace' }
+    )),
   }
 }
 
@@ -554,6 +560,112 @@ test('没传 tree 时接口也能应答（headless 组合里就是空的）', as
   const res = await fetch(`${base}/mini/api/workspaces?token=${token}`)
   assert.equal(res.status, 200)
   assert.deepEqual((await res.json()).workspaces, [])
+})
+
+// ---------------------------------------------------------------------------
+// 在已有工作区里新建会话
+// ---------------------------------------------------------------------------
+
+test('新建会话要 token，没 token 连试都不让试', async (t) => {
+  const { server, base } = await startTestServer({ tree: fakeNav() })
+  t.after(() => server.close())
+
+  const res = await fetch(`${base}/mini/api/workspaces/w1/sessions`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: '{}',
+  })
+  assert.equal(res.status, 401)
+})
+
+test('建完一个会话：返回 id，并且手机已经绑在它上面了', async (t) => {
+  const { server, base, token } = await startTestServer({ tree: fakeNav() })
+  t.after(() => server.close())
+
+  const res = await fetch(`${base}/mini/api/workspaces/w1/sessions?token=${token}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: '{}',
+  })
+  assert.equal(res.status, 200)
+  const body = await res.json()
+  assert.equal(body.ok, true)
+  assert.equal(body.sessionId, 'session-new')
+  assert.equal(body.workspaceTitle, '极简遥控器')
+  // 这两条是「建完就切过去」的证据：服务端自己 bind 了，不用手机再补一次请求。
+  // 少了它就会出现「建好了但手机还停在旧会话上」这种半截状态。
+  assert.equal(body.boundSessionId, 'session-new')
+  assert.equal(body.state.boundSessionId, 'session-new')
+})
+
+test('建会话把工作区 id 原样传下去，不带歪', async (t) => {
+  const seen = []
+  const nav = fakeNav(async (workspaceId) => {
+    seen.push(workspaceId)
+    return { ok: true, sessionId: 's-x', workspaceTitle: '极简遥控器' }
+  })
+  const { server, base, token } = await startTestServer({ tree: nav })
+  t.after(() => server.close())
+
+  await fetch(`${base}/mini/api/workspaces/w1/sessions?token=${token}`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}',
+  })
+  assert.deepEqual(seen, ['w1'])
+})
+
+test('工作区不存在时回 404，不是 500', async (t) => {
+  const { server, base, token } = await startTestServer({ tree: fakeNav() })
+  t.after(() => server.close())
+
+  const res = await fetch(`${base}/mini/api/workspaces/nope/sessions?token=${token}`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}',
+  })
+  assert.equal(res.status, 404)
+})
+
+test('DSH 没这个能力时回 503，并且说的是「没能力」而不是笼统的失败了', async (t) => {
+  const nav = fakeNav(async () => ({ ok: false, reason: 'no-controller' }))
+  const { server, base, token } = await startTestServer({ tree: nav })
+  t.after(() => server.close())
+
+  const res = await fetch(`${base}/mini/api/workspaces/w1/sessions?token=${token}`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}',
+  })
+  assert.equal(res.status, 503)
+  assert.match((await res.json()).error, /没提供/)
+})
+
+test('建失败时回 500，并把 DSH 的原话带出来', async (t) => {
+  const nav = fakeNav(async () => ({ ok: false, reason: 'failed', error: '磁盘满了' }))
+  const { server, base, token } = await startTestServer({ tree: nav })
+  t.after(() => server.close())
+
+  const res = await fetch(`${base}/mini/api/workspaces/w1/sessions?token=${token}`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}',
+  })
+  assert.equal(res.status, 500)
+  assert.match((await res.json()).error, /磁盘满了/)
+})
+
+test('没传 tree 时建会话回 503，不是崩掉', async (t) => {
+  // headless 组合里没有 sessionController，导航栏本来就是空的。
+  // 这里要保证「点了 ＋ 没反应」不会变成一个 500。
+  const { server, base, token } = await startTestServer()
+  t.after(() => server.close())
+
+  const res = await fetch(`${base}/mini/api/workspaces/w1/sessions?token=${token}`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}',
+  })
+  assert.equal(res.status, 503)
+})
+
+test('同一条路径上 GET 还是列表，没被 POST 抢掉', async (t) => {
+  const { server, base, token } = await startTestServer({ tree: fakeNav() })
+  t.after(() => server.close())
+
+  const res = await fetch(`${base}/mini/api/workspaces/w1/sessions?token=${token}`)
+  assert.equal(res.status, 200)
+  assert.equal((await res.json()).sessions.length, 2, 'GET 该照旧给会话列表')
 })
 
 test('密码试错 5 次就被挡一分钟，连对的密码也进不来', async (t) => {
@@ -950,6 +1062,39 @@ test('没传指纹时报 unknown，而不是 undefined', async (t) => {
   t.after(() => server.close())
   const res = await fetch(`${base}/mini/api/version?token=${token}`)
   assert.equal((await res.json()).build, 'unknown')
+})
+
+test('指纹接口顺带报出「这一刻能不能建会话」', async (t) => {
+  // 这是新建会话那个功能的运行时证据：不用动手点，一条命令就能问。
+  const { server, base, token } = await startTestServer({
+    build: 'abc123def456',
+    tree: { ...fakeNav(), canCreateSession: () => true },
+  })
+  t.after(() => server.close())
+  const res = await fetch(`${base}/mini/api/version?token=${token}`)
+  const body = await res.json()
+  assert.equal(body.build, 'abc123def456')
+  assert.equal(body.canCreateSession, true)
+})
+
+test('没传 tree（headless）时如实报 false，不是缺字段', async (t) => {
+  const { server, base, token } = await startTestServer()
+  t.after(() => server.close())
+  const body = await (await fetch(`${base}/mini/api/version?token=${token}`)).json()
+  assert.equal(body.canCreateSession, false, '要有个明确的 false，界面才好判断')
+})
+
+test('探测本身抛错时回 false，不把指纹接口带崩', async (t) => {
+  const { server, base, token } = await startTestServer({
+    tree: {
+      ...fakeNav(),
+      canCreateSession: () => { throw new Error('服务半死') },
+    },
+  })
+  t.after(() => server.close())
+  const res = await fetch(`${base}/mini/api/version?token=${token}`)
+  assert.equal(res.status, 200)
+  assert.equal((await res.json()).canCreateSession, false)
 })
 
 test('指纹接口也要 token', async (t) => {

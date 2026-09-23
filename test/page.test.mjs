@@ -30,8 +30,12 @@ const md = new Function(html.slice(start, end)
  * 用户报的现象是「发完新指令，上一步的回答整块消失，只剩正在执行」——
  * 那是渲染顺序的问题（running 分支排在最前面并 return），光看源码不容易发现，
  * 所以这里用桩把两条路径都跑出来比一比。
+ *
+ * 起点从 `function renderMinimal` 往前挪到了 `var scrolledReplyAt`：那个变量是
+ * renderMinimal 读的「这条回答跳过顶没有」，它必须在切片里，不然函数一跑就
+ * ReferenceError。锚点对不上会立刻断言失败，不会安静地退化成空测试。
  */
-const RS = 'function renderMinimal'
+const RS = 'var scrolledReplyAt'
 const RE = 'function renderChat'
 const rs = html.indexOf(RS)
 const re = html.indexOf(RE)
@@ -52,6 +56,31 @@ function renderMinimalWith(state) {
   const renderMinimal = build(state, replyEl, mainEl, md.escapeHtml, md.mdToHtml, md.ICON_COPY)
   renderMinimal()
   return replyEl.innerHTML
+}
+
+/**
+ * 跟 renderMinimalWith 一样，但**只搭一次、可以反复调用**。
+ *
+ * 单帧模式的「新回答跳到顶部」是靠一个闭包变量记「这条回答跳过顶没有」的，
+ * 每次重新 build 都会把它重置成 0——那样就永远测不出「同一条回答重新渲染时
+ * 不该再跳」这条最关键的规则。所以这里把 renderMinimal 和它的作用域一起留住。
+ */
+function minimalRunner(state) {
+  const replyEl = { innerHTML: '' }
+  const mainEl = { classList: { remove() {} }, scrollTop: 0, scrollHeight: 0 }
+  // eslint-disable-next-line no-new-func
+  const build = new Function(
+    'state', 'replyEl', 'mainEl', 'escapeHtml', 'mdToHtml', 'ICON_COPY',
+    `${html.slice(rs, re)}\nreturn renderMinimal;`,
+  )
+  const renderMinimal = build(state, replyEl, mainEl, md.escapeHtml, md.mdToHtml, md.ICON_COPY)
+  return {
+    state,
+    mainEl,
+    // 模拟「用户往上翻到了别处」，好验证跳顶真的把位置改回了 0。
+    scrollTo(top) { mainEl.scrollTop = top },
+    render() { renderMinimal() },
+  }
 }
 
 /**
@@ -1570,5 +1599,112 @@ test('SSE 实时推来的回复也要带上 interrupted（不能只有刷新才�
   assert.equal(ok.state.latest.interrupted, false, '正常推送不该带标记')
   assert.equal(ok.state.history.length, 0, '单帧模式不往 history 里塞')
   assert.deepEqual(ok.calls, [false], '收到回复要把「正在执行」收掉')
+})
+
+// ---------------------------------------------------------------------------
+// 单帧模式：回答出现时跳到顶部
+// ---------------------------------------------------------------------------
+
+test('单帧模式：新回答到了就跳到顶部，从第一行开始读', () => {
+  const r = minimalRunner({ latest: { text: '一段很长的结论。', timestamp: 100 }, live: '' })
+  r.mainEl.scrollHeight = 3000
+  r.scrollTo(2500)                       // 用户还停在上一轮的末尾
+  r.render()
+  assert.equal(r.mainEl.scrollTop, 0, '回答落定就该回到顶部')
+})
+
+test('同一条回答重新渲染时不再跳顶（重连、切模式、从后台回来）', () => {
+  // 这是整件事最容易做坏的地方：那几种情况都会重新渲染**同一条**回答，
+  // 而用户可能正读到一半，弹回顶部比不跳还烦人。
+  const r = minimalRunner({ latest: { text: '一段很长的结论。', timestamp: 100 }, live: '' })
+  r.mainEl.scrollHeight = 3000
+  r.scrollTo(2500)
+  r.render()
+  assert.equal(r.mainEl.scrollTop, 0, '第一次要跳')
+
+  r.scrollTo(1200)                       // 用户往下读了一段
+  r.render()                             // 重连 / SSE 重推 / 切模式回来
+  assert.equal(r.mainEl.scrollTop, 1200, '同一条回答不能再把人弹回顶部')
+  r.render()
+  assert.equal(r.mainEl.scrollTop, 1200, '再来几次也一样')
+})
+
+test('换了一条新回答就再跳一次（timestamp 变了）', () => {
+  const r = minimalRunner({ latest: { text: '第一条。', timestamp: 100 }, live: '' })
+  r.mainEl.scrollHeight = 3000
+  r.render()
+
+  r.scrollTo(1200)
+  r.render()
+  assert.equal(r.mainEl.scrollTop, 1200, '同一条不跳')
+
+  r.state.latest = { text: '第二条。', timestamp: 200 }
+  r.render()
+  assert.equal(r.mainEl.scrollTop, 0, '新的一条要跳')
+})
+
+test('流式那一段还是黏底，没被跳顶逻辑抢走', () => {
+  // 两条规则管的是不同时刻：live 还在说明答案没落定，该跟着往下走。
+  const r = minimalRunner({ latest: { text: '上一条。', timestamp: 100 }, live: '' })
+  r.render()                             // 先让「跳过顶的是哪一条」记成 100
+  r.mainEl.scrollHeight = 1000
+  r.scrollTo(990)                        // 本来就在底部
+  r.state.live = '正在写…'
+  r.render()
+  assert.equal(r.mainEl.scrollTop, 1000, 'live 还在的时候要跟着往下滚')
+})
+
+test('用户翻上去看历史时，流式也不把他拽回去', () => {
+  // 既有行为，别被这次改动带坏：atBottom 为假就不黏底。
+  const r = minimalRunner({ latest: { text: '上一条。', timestamp: 100 }, live: '' })
+  r.render()
+  r.mainEl.scrollHeight = 3000
+  r.scrollTo(500)                        // 离底部很远
+  r.state.live = '正在写…'
+  r.render()
+  assert.equal(r.mainEl.scrollTop, 500, '别拽他回来')
+})
+
+test('还没有回答时不跳顶（占位符那条）', () => {
+  const r = minimalRunner({ latest: null, live: '' })
+  r.mainEl.scrollHeight = 800
+  r.scrollTo(400)
+  r.render()
+  assert.equal(r.mainEl.scrollTop, 400, '没回答可读，别乱动位置')
+})
+
+test('回答对象没有 timestamp 时也不跳——没有判据就不动', () => {
+  // 跳顶的唯一判据就是 timestamp。拿不到它就没法知道这是不是「新的一条」，
+  // 这时候宁可不动，也不能猜。不写这条的话，`latest.timestamp` 那道判断
+  // 摘掉测试也照样全绿（反向验证时就是这么发现的）。
+  const r = minimalRunner({ latest: { text: '一段结论，但没带时间戳。' }, live: '' })
+  r.mainEl.scrollHeight = 3000
+  r.scrollTo(1200)
+  r.render()
+  assert.equal(r.mainEl.scrollTop, 1200, '没有判据就不该跳')
+})
+
+test('聊天模式照旧黏底，不会被跳到顶部（用户只说了单帧）', () => {
+  const replyEl = { innerHTML: '' }
+  const mainEl = {
+    classList: { remove() {} }, scrollTop: 990, scrollHeight: 1000, clientHeight: 0,
+  }
+  const lb = html.indexOf('function liveBlock')
+  assert.ok(lb > 0, '在 page.html 里找不到 liveBlock')
+  // eslint-disable-next-line no-new-func
+  const build = new Function(
+    'state', 'replyEl', 'mainEl', 'timeLabel',
+    `${html.slice(start, end)}\n${html.slice(lb, html.indexOf('function render()'))}\nreturn renderChat;`,
+  )
+  build(
+    {
+      mode: 'chat',
+      history: [{ role: 'assistant', text: '一段很长的结论。', timestamp: 100 }],
+      live: '',
+      boundSessionId: 's1',
+    },
+    replyEl, mainEl, () => '12:00',
+  )()
+  assert.equal(mainEl.scrollTop, 1000, '聊天模式该照旧黏底，不能跳到 0')
 })
 

@@ -428,6 +428,15 @@
     flex: 0 0 auto; width: 6px; height: 6px; border-radius: 50%;
     background: var(--warn); animation: pulse 1.2s ease-in-out infinite;
   }
+  /* 「新建会话」那一行。跟会话条目同宽、同缩进，但用强调色——
+     它不是一个会话，是一个动作。长得跟会话一样会让人以为点进去就是那条会话。 */
+  .ws-new {
+    display: flex; align-items: center; gap: 6px; width: 100%;
+    padding: 10px 14px 10px 30px; background: none; border: none;
+    color: var(--accent); font: inherit; font-size: 14px; text-align: left; cursor: pointer;
+  }
+  .ws-new:active { background: var(--panel-2); }
+  .ws-new[disabled] { color: var(--muted); cursor: default; }
   .nav-note { padding: 10px 16px; color: var(--muted); font-size: 12px; line-height: 1.6; }
 
   /* ---------- 设置抽屉 ---------- */
@@ -1224,6 +1233,24 @@
     paintWork();
   }
 
+  /**
+   * 单帧模式：「这一条回答」有没有已经带用户滚过顶了。
+   *
+   * **用 timestamp 当身份**，因为它是这里唯一稳定、且只在真推了一条新回答时才变的字段
+   * （`pushReply` 每次都现取 `Date.now()`；重连、SSE 重推、切模式、从后台回来
+   * 都只是把同一条回答重新渲染一遍，timestamp 不变）。
+   *
+   * 用户 2026-09-23 提的：「手机端的单帧模式，回答出现的时候，页面应该跳到顶部，
+   * 方便用户阅读。」不记这个的话：一条长结论渲染出来，用户看到的是最后一行，
+   * 得自己往上翻才读得到开头。
+   *
+   * 记成「已经为哪一条滚过顶」而不是一个「刚跳过」的布尔量，是为了不误伤上面那几种
+   * 重新渲染——那些时候用户可能正读到一半，把他弹回顶部比不跳还烦人。
+   * 初始值 0：开机第一次渲染时任何一条回答的 timestamp 都比它大，于是会跳一次，
+   * 正好是「打开页面从最新那条的开头读起」。
+   */
+  var scrolledReplyAt = 0;
+
   function renderMinimal() {
     mainEl.classList.remove('center');
     var latest = state.latest;
@@ -1252,6 +1279,20 @@
       // 流式的时候得跟着往下滚，不然新写出来的内容在屏幕外面，看起来像卡住了。
       // 但只在用户本来就在底部时才跟——他翻上去看历史的时候别拽他回来。
       if (live && stick) mainEl.scrollTop = mainEl.scrollHeight;
+      // 单帧模式专属：**答案落定的那一刻**跳到顶部，让人从第一行开始读。
+      //
+      // 判据是 timestamp 变了，不是「渲染了一次」——重连、SSE 重推、切模式、
+      // 从后台回来都会重新渲染同一条回答，那些时候用户可能正读到一半，
+      // 弹回顶部比不跳还烦人（见 scrolledReplyAt 的说明）。
+      //
+      // 和上面那条黏底不冲突，两者管的是不同时刻：流式那会儿（live 还在）
+      // 答案没落定，该跟着往下走；落定之后才轮到这一条把它拉回开头。
+      // 也别跟下面 send() 里那条「按了发送无条件回底部」搞混——那是用户自己的
+      // 主动动作，他想看自己刚发出去的那条；这条是回答到了，他要读回答。
+      if (latest && latest.timestamp && latest.timestamp !== scrolledReplyAt) {
+        scrolledReplyAt = latest.timestamp;
+        mainEl.scrollTop = 0;
+      }
       return;
     }
     if (state.running) {
@@ -1432,11 +1473,15 @@
   }
 
   function sessionsHtml(wsId) {
+    // 「新建会话」永远排在最上面：不管这个工作区有几个会话、甚至一个都没有，
+    // 这一行都在。放在列表末尾的话，一个 452 条会话的工作区要划到底才看得到。
+    var html = '<button class="ws-new" type="button" data-newws="' + escapeHtml(wsId) + '">'
+      + '＋ 新建会话</button>';
     var got = navSessions[wsId];
-    if (!got) return '<div class="placeholder">正在读取…</div>';
-    if (!got.sessions.length) return '<div class="placeholder">这个工作区还没有会话。</div>';
+    if (!got) return html + '<div class="placeholder">正在读取…</div>';
+    if (!got.sessions.length) return html + '<div class="placeholder">这个工作区还没有会话。</div>';
     var cur = state.boundSessionId;
-    var html = got.sessions.map(function (s) {
+    html += got.sessions.map(function (s) {
       // 没有标题就用日期——原来退到取 id 的前 8 位当名字，而本机真有一个会话的 id
       // 以「session-」开头，于是整列都显示成一样的「session-」，等于没有名字。
       return '<button class="sess' + (s.id === cur ? ' cur' : '') + '" type="button"'
@@ -1474,6 +1519,46 @@
       });
   }
 
+  // 防连点。建会话**不是幂等的**——点两下就在电脑上真建出两个会话来，
+  // 而手机上什么都看不出来（第二个只是把列表撑长了一行）。所以这里必须自己拦。
+  // 服务端那道闸门拦不住这个：两个请求都是合法的。
+  var creatingSession = false;
+
+  function createSession(wsId) {
+    if (creatingSession) return;
+    creatingSession = true;
+    Array.prototype.forEach.call($('navBody').querySelectorAll('.ws-new'), function (el) {
+      el.disabled = true;
+    });
+    function done() {
+      creatingSession = false;
+      Array.prototype.forEach.call($('navBody').querySelectorAll('.ws-new'), function (el) {
+        el.disabled = false;
+      });
+    }
+    // POST 到工作区会话那条路径上：GET 是「列出来」，POST 是「建一个」。
+    // 服务端建完会顺手 bind 并把新快照一起返回，所以这里一次请求就完成了
+    // 「建 + 切过去」，不用再补一次 bind。
+    api('/mini/api/workspaces/' + encodeURIComponent(wsId) + '/sessions', {
+      method: 'POST',
+      body: '{}',
+    }).then(function (res) {
+      done();
+      // 接口把绑定后的快照一起给了，直接渲染——不这样的话，切过去的一瞬间
+      // 屏幕上还留着上一个会话的正文。
+      if (res && res.state) applySnapshot(res.state);
+      else render();
+      closeNav();
+      toast('已在《' + ((res && res.workspaceTitle) || '工作区') + '》里建好新会话');
+      // 让列表里立刻出现这条新会话。force 是为了绕过服务端那份 30 秒的缓存——
+      // 刚建的会话它还不知道，不绕过的话切回来会「咦刚才那条呢」。
+      loadWorkspaces(true);
+    }).catch(function (err) {
+      done();
+      toast(err.message);
+    });
+  }
+
   function bindSession(id) {
     if (!id) return;
     api('/mini/api/bind', { method: 'POST', body: JSON.stringify({ sessionId: id }) })
@@ -1507,6 +1592,10 @@
     var t = e.target;
     var sess = t && t.closest ? t.closest('.sess') : null;
     if (sess) { bindSession(sess.getAttribute('data-sess')); return; }
+    // 「新建会话」要排在 ws-head 之前判：它在 ws-body 里面、不是 ws-head，
+    // 顺序上无所谓，但放在前面更清楚——这一支是动作，那一支是展开/收起。
+    var fresh = t && t.closest ? t.closest('.ws-new') : null;
+    if (fresh) { createSession(fresh.getAttribute('data-newws')); return; }
     var head = t && t.closest ? t.closest('.ws-head') : null;
     if (!head) return;
     toggleWorkspace(head.parentNode.getAttribute('data-ws'));
