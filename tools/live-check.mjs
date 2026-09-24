@@ -165,14 +165,35 @@ check('工作区接口可用', ws.status === 200, `HTTP ${ws.status}`)
 const list = ws.body?.workspaces ?? []
 check('读到工作区', list.length > 0, `${list.length} 个`)
 if (list.length) {
-  const first = list[0]
-  console.log(`      第一个：${first.title}（${first.count} 个会话，${first.running} 个在跑）`)
+  // 挑一个**非空**的来展开。
+  //
+  // 2026-09-24 踩到过：导航栏改成「空工作区也列出来」之后（那是为了修「新建的工作区
+  // 在列表里看不见」——新建出来的工作区一开始本来就是空的），`list[0]` 可能正好是
+  // 个空工作区，展开它当然 0 条，这条检查就**假红**了。
+  //
+  // 真机上的假红最费时间，因为它看着像 bug：实际是本机注册表里攒了一堆别的工具
+  // 留下的空目录（`.claude/projects` 那些），再加上我们自己的测试残留。
+  const emptyOnes = list.filter((w) => w.empty)
+  check('空工作区也列得出来（新建的那个一开始就是空的）', 'empty' in list[0],
+    `${list.length} 个里 ${emptyOnes.length} 个是空的`)
+
+  const first = list.find((w) => !w.empty) ?? list[0]
+  console.log(`      挑来展开的：${first.title}（${first.count} 个会话，${first.running} 个在跑）`)
   console.log(`      路径：${first.path}`)
 
   // 3. 展开一个工作区，确认会话和标题真的取得到
   const sess = await get(`/mini/api/workspaces/${encodeURIComponent(first.id)}/sessions`)
   check('展开工作区能取到会话', sess.status === 200 && (sess.body?.sessions?.length ?? 0) > 0,
     `${sess.body?.sessions?.length ?? 0} 条 / 共 ${sess.body?.total ?? '?'} 条`)
+
+  // 空工作区展开要**干净地返回 0 条**：不报错、不 404。手机上点开一个刚建好的
+  // 工作区走的正是这条路径，它得好看。
+  if (emptyOnes.length) {
+    const es = await get(`/mini/api/workspaces/${encodeURIComponent(emptyOnes[0].id)}/sessions`)
+    check('展开空工作区返回 0 条而不是报错',
+      es.status === 200 && (es.body?.sessions?.length ?? 0) === 0,
+      `HTTP ${es.status} / ${es.body?.sessions?.length ?? '?'} 条`)
+  }
   const withTitle = (sess.body?.sessions ?? []).filter((s) => s.title)
   console.log(`      其中 ${withTitle.length} 条有标题`)
   // 真机上出过一次：readTitleSnapshots 返回的是「标题快照」对象而不是字符串，
@@ -191,8 +212,19 @@ if (list.length) {
 }
 
 // 4. 没 token 必须被挡住——安全底线，每次都要验
-const anon = await fetch(`${base}/mini/api/workspaces`)
-check('匿名访问被拒', anon.status === 401, `HTTP ${anon.status}`)
+//
+// 2026-09-24 扩到新接口：权限档位那个接口能**把电脑提到完全权限**，工作区浏览能
+// **看到各盘的目录结构**，新建会话能**让 Agent 真的开工**。这三样只要漏一个，
+// 整条安全底线就穿了，所以它们必须和 /workspaces 一样逐条验。
+for (const p of [
+  '/mini/api/workspaces',
+  '/mini/api/permissions',
+  '/mini/api/browse/roots',
+  '/mini/api/browse?path=' + encodeURIComponent('I:\\'),
+]) {
+  const anon = await fetch(`${base}${p}`)
+  check(`匿名访问被拒 ${p.split('?')[0]}`, anon.status === 401, `HTTP ${anon.status}`)
+}
 
 // 5. 手机页面本身：新加的东西真的送到手机上了吗
 const page = await fetch(`${base}/mini?token=${token}`)
@@ -314,6 +346,52 @@ check('对照：快照里没有编出来的字段', !('definitelyNotAField' in s
 // 这条钉的就是那个 fit-content 别被删掉。纯样式，没有别的验法。
 check('聊天模式气泡按文字收（不是固定撑满）', /\.bubble \{[^}]*width:\s*fit-content/.test(html))
 check('对照：气泡的 86% 封顶还在', /\.bubble \{[^}]*max-width:\s*86%/.test(html))
+
+// 6e. 新加的三样：新建会话 / 权限档位 / 目录浏览
+//
+// 这三样离线测试里都验过逻辑了，但**离线测不出真机上接口到底通不通**——
+// 2026-09-24 就是这么连着翻了两回车：单元测试 392 条全绿，真机上却是
+// 「新建的工作区看不见」「权限档位点不动」。逻辑对，不等于接口通。
+const ver = await get('/mini/api/version')
+check('版本接口带新建会话的能力位', typeof ver.body?.canCreateSession === 'boolean',
+  `canCreateSession = ${ver.body?.canCreateSession}`)
+
+// 权限档位：手机界面直接照这两个字段画——名字是给人看的，dangerous 决定点它要不要
+// 二次确认。所以两件都不能错：名字不能拿英文键名充数；危险标记必须**恰好一个**，
+// 而且必须落在完全权限那一档上。标错就等于点一下直接提权、中间那道确认没了。
+const perm = await get('/mini/api/permissions')
+check('权限档位接口可用', perm.status === 200, `HTTP ${perm.status}`)
+if (perm.status === 200 && perm.body?.ok) {
+  const opts = perm.body.options ?? []
+  check('读到权限档位', opts.length >= 2,
+    `${opts.length} 档：${opts.map((o) => o.name).join(' / ')}`)
+  const noName = opts.filter((o) => !o.name || o.name === o.value)
+  check('每一档都有给人看的名字（不是拿英文键名充数）', noName.length === 0,
+    noName.length ? `没名字的是 ${noName.map((o) => o.value).join(', ')}` : '')
+  const danger = opts.filter((o) => o.dangerous)
+  check('危险的档位恰好标了一个（多标少标都等于确认那一步失效）', danger.length === 1,
+    danger.length ? `标在 ${danger[0].value}` : '一个都没标')
+  check('标危险的那一档就是完全权限',
+    danger.length === 1 && danger[0].value === 'danger-full-access',
+    danger.length ? danger[0].value : '')
+  check('当前档位在列表里（界面要能标出「现在是哪一档」）',
+    opts.some((o) => o.value === perm.body.currentValue),
+    `currentValue = ${perm.body.currentValue}`)
+}
+
+// 目录浏览：手机挑工作区走的就是它。除了「读得到」，还要验**当初定的那条边界**——
+// 手机只看得到文件夹，看不到文件。这条边界现在是靠接口结构保证的（只回 dirs，
+// 根本没有 files 那个字段），所以钉住「那个字段不存在」比钉住「过滤掉了」可靠。
+const roots = await get('/mini/api/browse/roots')
+check('常用位置读得到', roots.status === 200 && (roots.body?.drives?.length ?? 0) > 0,
+  `家目录 + ${roots.body?.drives?.length ?? 0} 个盘 + ${roots.body?.recent?.length ?? 0} 个最近`)
+const br = await get('/mini/api/browse?path=' + encodeURIComponent(homedir()))
+check('浏览一个真实目录读得到', br.status === 200, `HTTP ${br.status}`)
+if (br.status === 200) {
+  check('浏览只回文件夹——结构上就没有「文件」这个字段',
+    Array.isArray(br.body?.dirs) && !('files' in br.body) && !('entries' in br.body),
+    `dirs = ${br.body?.dirs?.length ?? '?'}，顶层键 ${Object.keys(br.body ?? {}).join(',')}`)
+}
 
 // 6. 鲸鱼娘立绘：8 张都要真能取到，而且没登录的人拿不到
 const POSES = [
