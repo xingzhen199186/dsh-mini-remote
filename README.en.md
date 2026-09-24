@@ -67,6 +67,12 @@ Install [Tailscale](https://tailscale.com) on both the computer and the phone, s
 
 The cost is an app on each side. If you don't mind installing it, **this is the steadiest route when you're out**.
 
+You can take this route one step further and get an encrypted address as well (shaped like `https://your-machine.your-tailnet.ts.net/`). It is **the same computer over the same tunnel** as the entry above; the only difference is that the connection is encrypted. It is not a fourth route — the plain `http://` entry keeps working and keeps showing.
+
+Encryption is what makes the browser willing to hand over system notifications, the microphone, and full clipboard access. This step is the prerequisite for those three, though it is not those three features by itself.
+
+There's a switch on the pairing page — just turn it on. The first time, you have to confirm it in Tailscale's admin console: it is a tailnet-wide switch, and the plugin cannot click it for you. So the pairing page puts the exact link Tailscale hands out right in front of you — one click and you're there. If this computer isn't signed in to Tailscale yet, it says so and gives you a sign-in link instead.
+
 ### 3. Public access: nothing to install
 
 There's a switch at the bottom of the pairing page. Turn it on and Cloudflare hands you a public URL. The phone can reach it on any network, **with nothing installed**.
