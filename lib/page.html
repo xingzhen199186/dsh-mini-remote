@@ -1516,7 +1516,9 @@
         + '<span class="caret">▶</span>'
         + '<span class="ws-title">' + escapeHtml(ws.title) + '</span>'
         + (ws.running ? '<span class="s-dot"></span>' : '')
-        + '<span class="ws-count">' + ws.count + '</span>'
+        // 空工作区（通常是刚在手机上建的那个）不写「0」，写「还没有会话」：
+        // 一个孤零零的 0 看着像出了错，说清楚反而让人知道下一步该干什么。
+        + '<span class="ws-count">' + (ws.count || (ws.empty ? '新' : 0)) + '</span>'
         + '</button>'
         + '<div class="ws-body">' + (open ? sessionsHtml(ws.id) : '') + '</div>'
         + '</div>';

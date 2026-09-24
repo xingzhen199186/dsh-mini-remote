@@ -888,6 +888,47 @@ test('登记工作区：没传 tree 时回 503，不是崩掉', async (t) => {
   assert.equal(res.status, 503)
 })
 
+test('工作区列表要带上「空工作区也列出来」这个开关', async (t) => {
+  // 不带的话，手机刚建好的空工作区会被滤掉——接口回 created=true，
+  // 列表里却找不到，用户只会以为没建成（闸门脚本逮到过）。
+  const seen = []
+  const nav = {
+    ...fakeNav(),
+    listWorkspaces: async (runningIds, force, includeEmpty) => {
+      seen.push(includeEmpty)
+      return []
+    },
+  }
+  const { server, base, token } = await startTestServer({ tree: nav })
+  t.after(() => server.close())
+
+  await fetch(`${base}/mini/api/workspaces?token=${token}`)
+  assert.deepEqual(seen, [true], '平时列列表也要带上这个开关')
+})
+
+test('登记工作区后返回的那份列表也要带这个开关', async (t) => {
+  const seen = []
+  const nav = {
+    ...fakeNav(),
+    listWorkspaces: async (runningIds, force, includeEmpty) => {
+      seen.push(includeEmpty)
+      return []
+    },
+    createWorkspace: async (path) => ({
+      ok: true, created: true, workspace: { id: 'w9', path, title: '新' },
+    }),
+  }
+  const { server, base, token } = await startTestServer({ tree: nav })
+  t.after(() => server.close())
+
+  await fetch(`${base}/mini/api/workspaces?token=${token}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ path: 'I:\\新' }),
+  })
+  assert.deepEqual(seen, [true], '建完立刻回的那份列表尤其要带上——不然新工作区当场消失')
+})
+
 test('密码试错 5 次就被挡一分钟，连对的密码也进不来', async (t) => {
   const { server, base, token } = await startTestServer()
   t.after(() => server.close())

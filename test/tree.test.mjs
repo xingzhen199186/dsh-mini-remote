@@ -65,6 +65,27 @@ test('没有会话的工作区不占地方', async () => {
   assert.deepEqual(out.map((w) => w.title), ['有'])
 })
 
+test('手机端要能看见空工作区（刚建的那个本来就是空的）', async () => {
+  // 不这么做的话：手机新建工作区 → 接口回 created=true → 列表里找不到它。
+  // 用户只会以为没建成。闸门脚本就是这么逮到的。
+  const registry = registryOf(ws('w1', 'I:\\a', '空', []), ws('w2', 'I:\\b', '有', ['s1']))
+  const out = await listWorkspaces({
+    registry, query: queryOf([rec('s1', 1)]), includeEmpty: true,
+  })
+  assert.deepEqual(out.map((w) => w.title).sort(), ['有', '空'])
+  const empty = out.find((w) => w.title === '空')
+  assert.equal(empty.count, 0)
+  assert.equal(empty.empty, true, '手机据此知道该提示「这里还没有会话」')
+  assert.equal(out.find((w) => w.title === '有').empty, false)
+})
+
+test('空工作区只带自己的标题，不会伪造出会话', async () => {
+  const registry = registryOf(ws('w1', 'I:\\a', '空', []))
+  const out = await listWorkspaces({ registry, query: queryOf([]), includeEmpty: true })
+  assert.equal(out[0].count, 0)
+  assert.equal(out[0].running, 0, '没有会话就不该有「在跑」')
+})
+
 test('子 agent 的会话不进手机', async () => {
   const registry = registryOf(ws('w1', 'I:\\a', '甲', ['s1', 'sub1']))
   const query = queryOf([rec('s1', 1), rec('sub1', 2, { origin: 'subagent' })])
