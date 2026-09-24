@@ -661,7 +661,7 @@
     </div>
 
     <!--
-      「锁屏也能提醒」。**默认藏起来，由脚本按 isSecureContext 决定露不露。**
+      「页面在后台时提醒」。**默认藏起来，由脚本按 isSecureContext 决定露不露。**
 
       2026-09-21 它整行被撤掉过，理由是当时三条连接路径全是明文 http，浏览器不给发
       系统通知，摆出来只是让用户点一下碰一鼻子灰。2026-09-25 Tailscale 那条路接上
@@ -671,10 +671,19 @@
       为什么非要有 service worker：手机浏览器上 new Notification() 会直接抛 TypeError，
       唯一能发系统通知的入口是 ServiceWorkerRegistration.showNotification()。
       详见 lib/sw.js。
+
+      **名字改过一次，2026-09-25。** 原来叫「锁屏也能提醒」，那是我起大了：手机锁屏后
+      系统会冻结后台页面，那条实时连接跟着断掉，回复根本到不了页面——于是没有通知可发，
+      而且页面上看不出任何异常，因为站在页面的角度它只是"还没收到回复"。service worker
+      救不了这个：它是被事件唤醒的，没有事件它就不存在。
+
+      **所以这个开关能兑现的是「页面还活着但在后台」**——切到别的应用、屏幕刚锁不久。
+      真正不怕锁屏的是电脑端那条外部推送（Bark/ntfy/Telegram），它从服务器直接发出去，
+      不经过浏览器。两者不冲突，各管一段：这一条管"你正在用手机但没看这一页"。
     -->
     <div class="row" id="rowNotify" style="display:none">
       <div>
-        <div class="label">锁屏也能提醒</div>
+        <div class="label">页面在后台时提醒</div>
         <div class="hint" id="notifyHint">回复到了发一条系统通知</div>
       </div>
       <div class="seg" id="segNotify">
