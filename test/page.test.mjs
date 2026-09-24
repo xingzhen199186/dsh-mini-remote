@@ -1856,3 +1856,49 @@ test('聊天模式照旧黏底，不会被跳到顶部（用户只说了单帧�
   assert.equal(mainEl.scrollTop, 1000, '聊天模式该照旧黏底，不能跳到 0')
 })
 
+/**
+ * 权限档位的点击接线。
+ *
+ * 真机踩到过：三档**画得出来、点下去毫无反应**——因为 `#segPerm` 上根本没绑点击，
+ * `tapPerm` 一次都没被调用过。逻辑是对的，缺的是那根线。
+ *
+ * 所以这类 bug 逻辑测试永远测不出来（测试直接调 `tapPerm` 验逻辑，而真机上坏掉的
+ * 正是「谁来喊它」）。这里把**那段接线本身**切出来真跑一遍：绑不上监听、绑错了事件、
+ * 点下去不喊 `tapPerm`，三种情况都要红。
+ */
+test('权限档位的点击真的接上了 tapPerm（不是画出来就算）', () => {
+  const P0 = "$('segPerm').addEventListener('click'"
+  const P1 = "Array.prototype.forEach.call($('segMode')"
+  const p0 = html.indexOf(P0)
+  const p1 = html.indexOf(P1)
+  assert.ok(p0 > 0, `在 page.html 里找不到权限档位的点击绑定（${P0}）`)
+  assert.ok(p1 > p0, `找不到权限档位绑定的结束锚点（${P1}）`)
+
+  const bound = []
+  const segEl = { addEventListener(type, fn) { bound.push([type, fn]) } }
+  const tapped = []
+  // eslint-disable-next-line no-new-func
+  new Function('$', 'tapPerm', `${html.slice(p0, p1)}\n`)(
+    (id) => (id === 'segPerm' ? segEl : { addEventListener() {} }),
+    (name) => tapped.push(name),
+  )
+
+  assert.equal(bound.length, 1, '#segPerm 上必须正好绑一个监听（绑两个会点一下切两次）')
+  assert.equal(bound[0][0], 'click', '绑的必须是 click')
+  const onClick = bound[0][1]
+
+  // 真机上那一下：点的是按钮本身（按钮里只有文字）。
+  const btn = { dataset: { perm: 'read-only' }, parentNode: null }
+  onClick.call(segEl, { target: btn })
+  assert.deepEqual(tapped, ['read-only'], '点按钮要带着 data-perm 去喊 tapPerm')
+
+  // 点到容器空白处不能误触发——那不是任何一档。
+  tapped.length = 0
+  onClick.call(segEl, { target: segEl })
+  assert.deepEqual(tapped, [], '点到容器本身不该切档位')
+
+  // 监听挂在容器上、不挂在按钮上：renderPerms 每次都整块换 innerHTML，
+  // 挂按钮上的监听会被下一次重画冲掉——那样修完能好一次，再点就坏。
+  assert.match(html, /renderPerms[\s\S]*?seg\.innerHTML/, 'renderPerms 应当是整块重画')
+})
+
