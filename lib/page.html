@@ -660,6 +660,29 @@
       </div>
     </div>
 
+    <!--
+      「锁屏也能提醒」。**默认藏起来，由脚本按 isSecureContext 决定露不露。**
+
+      2026-09-21 它整行被撤掉过，理由是当时三条连接路径全是明文 http，浏览器不给发
+      系统通知，摆出来只是让用户点一下碰一鼻子灰。2026-09-25 Tailscale 那条路接上
+      HTTPS 之后前提变了，它才回来——**但那条理由本身仍然成立**，所以是「加密下才露」，
+      不是「哪都露」。
+
+      为什么非要有 service worker：手机浏览器上 new Notification() 会直接抛 TypeError，
+      唯一能发系统通知的入口是 ServiceWorkerRegistration.showNotification()。
+      详见 lib/sw.js。
+    -->
+    <div class="row" id="rowNotify" style="display:none">
+      <div>
+        <div class="label">锁屏也能提醒</div>
+        <div class="hint" id="notifyHint">回复到了发一条系统通知</div>
+      </div>
+      <div class="seg" id="segNotify">
+        <button data-notify="on">开</button>
+        <button data-notify="off">关</button>
+      </div>
+    </div>
+
     <div class="row">
       <div>
         <div class="label">连接</div>
@@ -705,6 +728,9 @@
     token: params.get('token') || localStorage.getItem('dshMiniToken') || '',
     mode: localStorage.getItem('dshMiniMode') || DEFAULT_MODE || 'minimal',
     sound: localStorage.getItem('dshMiniSound') !== 'off',
+    // 锁屏也能提醒（系统通知）。默认关着——它要用户主动点一下才会申请权限，
+    // 不能替他决定。明文连接下这一项永远是空转的，见下面「锁屏也能提醒」那一段。
+    notify: localStorage.getItem('dshMiniNotify') === 'on',
     running: false,
     sessions: [],
     // 排队中的指令（[{ id, text, placement }]）。跑着任务时接着发的那几条排在这儿，
@@ -2007,9 +2033,13 @@
       }
       setRunning(false);
       render();
-      if (!document.hidden) { playDing(); buzz(); }
-      // 页面在后台时的系统通知已经去掉了，原因见下面「浏览器系统通知」那一段。
-      // 需要「人不在也能收到」的，走电脑端的外部推送（Bark / ntfy）。
+      if (!document.hidden) {
+        playDing(); buzz();
+      } else {
+        // 页面在后台或锁屏时，响铃和震动都叫不醒人——那两样只在页面看得见的时候有用。
+        // 要叫醒他只能发系统通知。明文连接下这个函数是空转的，见下面「锁屏也能提醒」。
+        notifySystem(payload.text);
+      }
     });
     es.addEventListener('status', function (e) {
       try { setRunning(JSON.parse(e.data).running); } catch (err) {}
@@ -2352,18 +2382,86 @@
 
   // 会话切换挪到左侧导航栏了（原来这里是设置里的下拉框）。
 
-  // 浏览器系统通知这条路，在手机上走不通，三层原因叠在一起：
-  //   1. 通知权限只能在「安全上下文」（HTTPS 或 localhost）里申请。手机连的是
-  //      明文 HTTP——局域网和 Tailscale 都是——浏览器连这个 API 都不给；
+  // ---------------- 锁屏也能提醒（系统通知） ----------------
+  //
+  // 页内的响铃和震动只在页面看得见的时候有用。人把手机放下、屏幕锁了，那两样都
+  // 叫不醒他——要叫醒他只能发系统通知。
+  //
+  // 这条路以前是关着的，三层原因叠在一起：
+  //   1. 通知权限只能在「安全上下文」（HTTPS 或 localhost）里申请。当时三条连接
+  //      路径全是明文 HTTP，浏览器连这个 API 都不给；
   //   2. 就算拿到权限，new Notification() 在大多数移动浏览器上会抛 TypeError，
-  //      移动端正确的做法是 service worker 的 showNotification；
+  //      移动端唯一正确的入口是 service worker 的 showNotification；
   //   3. service worker 同样要求 HTTPS。
+  // 2026-09-25 Tailscale 那条路接上 HTTPS，第 1、3 条同时成立，这条路才通。
   //
-  // 2026-09-21 用户裁决：**设置里那个「开启」按钮先隐藏掉**（和输入框旁边的 🎤 一样，
-  // 留着一个按了没用的按钮比没有更让人困惑）。设置里留一行说明，指向真正管用的那条路：
-  // 电脑端的外部推送（Bark / ntfy），它是从服务器发出去的，不受浏览器这条规矩限制。
+  // **所以这一行只在加密连接下露出来。** 明文下露出来，用户点一下只会碰一鼻子灰
+  // ——那正是 2026-09-21 把它整行撤掉的理由，那条理由现在仍然成立。
   //
-  // 别把这个按钮加回来，除非先有了一条受信任的 https 路径。
+  // 电脑端的外部推送（Bark / ntfy / Telegram）是另一条路：从服务器发出去，不经
+  // 浏览器，明文连接下也照常能用。两者不冲突，各管一段。
+  var NOTIFY_OK = window.isSecureContext
+    && 'serviceWorker' in navigator
+    && 'Notification' in window;
+
+  function notifySystem(text) {
+    if (!state.notify || !NOTIFY_OK) return;
+    if (Notification.permission !== 'granted') return;
+    navigator.serviceWorker.ready.then(function (reg) {
+      return reg.showNotification('回复到了', {
+        body: String(text || '').replace(/\s+/g, ' ').trim().slice(0, 120),
+        // 带上 tag：同一条回复重复到达时替换掉旧的，别堆一屏。
+        tag: 'dsh-reply',
+        renotify: true,
+        // 地址由页面给。不能拿 service worker 自己的 location 拼——那是那个 .js
+        // 文件的地址，用户点通知会打开一份源码。
+        data: { url: location.href },
+      });
+    }).catch(function () { /* 发不出去就算了，不该影响主流程 */ });
+  }
+
+  function syncNotify() {
+    Array.prototype.forEach.call($('segNotify').children, function (b) {
+      b.classList.toggle('active', (b.dataset.notify === 'on') === state.notify);
+    });
+  }
+
+  if (NOTIFY_OK) {
+    // 先注册 service worker。**这一步不申请权限**——权限要用户主动点一下才给，
+    // 页面一加载就弹窗会被浏览器直接拒掉，而且很讨厌。
+    //
+    // 注册成功才把那一行露出来。注册不上就继续藏着：露一个点了没用的开关，
+    // 比没有更让人困惑。
+    navigator.serviceWorker.register('/mini/sw.js?v=' + BUILD).then(function () {
+      $('rowNotify').style.display = '';
+      $('notifyHint').textContent = Notification.permission === 'granted'
+        ? '回复到了发一条系统通知'
+        : '打开时浏览器会问一次要不要允许';
+      syncNotify();
+    }).catch(function () { /* 注册不上就不露，见上 */ });
+
+    $('segNotify').addEventListener('click', function (e) {
+      var btn = e.target.closest('button');
+      if (!btn) return;
+      if (btn.dataset.notify !== 'on') {
+        state.notify = false;
+        localStorage.setItem('dshMiniNotify', 'off');
+        syncNotify();
+        return;
+      }
+      // 要开：到这一步才申请权限。用户是主动点的，浏览器给得痛快。
+      Notification.requestPermission().then(function (perm) {
+        if (perm !== 'granted') {
+          $('notifyHint').textContent = '浏览器没允许。要去浏览器设置里给这个网站开通知权限。';
+          return;
+        }
+        state.notify = true;
+        localStorage.setItem('dshMiniNotify', 'on');
+        $('notifyHint').textContent = '回复到了发一条系统通知';
+        syncNotify();
+      });
+    });
+  }
 
   $('btnReconnect').addEventListener('click', function () {
     connect();

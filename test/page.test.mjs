@@ -402,28 +402,30 @@ test('明文 HTTP 下没有 navigator.clipboard，失败也要说一声', async 
   assert.equal(btn.innerHTML, '', '没复制成功就不该给对勾')
 })
 
-test('设置里的「完成后提醒」整行撤掉，不让用户看到', () => {
-  // 2026-09-21 用户裁决，理由和麦克风图标一样：明文 HTTP 下浏览器不给用，
+test('「锁屏也能提醒」只在加密连接下露出来，明文下必须藏着', () => {
+  // 2026-09-21 用户裁决把它整行撤掉过，理由是明文 HTTP 下浏览器不给发系统通知，
   // 留着一个按了没用的按钮比没有更让人困惑。
+  //
+  // 2026-09-25 Tailscale 那条路接上 HTTPS，前提变了，它才回来。**但那条理由本身
+  // 仍然成立**——所以是「加密下才露」，不是「哪都露」：那一行默认 display:none，
+  // 由脚本按 isSecureContext 判断，而且**注册成功才露**（注册不上就继续藏着）。
   //
   // 断言代码形态，不是「某个词不出现」——下面这段说明里就有那几个名字，
   // 用 includes() 会被自己的注释绊倒（这个坑栽过三次了）。
-  assert.ok(!html.includes('btnNotify'), '按钮要拿掉')
-  assert.ok(!html.includes('requestPermission'), '别再申请通知权限了')
+  assert.ok(/id="rowNotify"[^>]*style="display:none"/.test(html), '默认必须是藏着的')
+  assert.ok(/window\.isSecureContext/.test(html), '露不露要看是不是安全上下文')
+  assert.ok(!html.includes('btnNotify'), '还是不要那个单独的通知按钮')
   // 真正的调用一定带参数（标题），注释里的裸名字匹配不上
-  assert.ok(!/new Notification\s*\(\s*['"]/.test(html), '别再直接弹系统通知')
+  assert.ok(!/new Notification\s*\(\s*['"]/.test(html), '手机浏览器上这么写会抛 TypeError')
+  // 正确的入口是 service worker 的 showNotification——这也是必须有个 service worker 的原因
+  assert.ok(/showNotification/.test(html), '要走 service worker 那个入口')
 })
 
-test('设置里的「完成后提醒」和「语音输入」两行都不在界面上', () => {
-  // 用户第二次收窄：不只是按钮，「整行」都不要让用户看到。
-  // 这两行的内容（为什么用不了、改用什么）记在代码注释和 tasks/lessons.md 里，
-  // 不占用户界面。
-  //
-  // 断言的是「那一行的形状」（label div），不是那两个词出现没有——
-  // 页面里留着一段说明为什么撤掉的注释，里面必然提到这两个名字。
-  assert.ok(!html.includes('notifyHint'), '完成后提醒那一行的元素要撤掉')
+test('「语音输入」那一行仍然不在界面上', () => {
+  // 这一条没有变。加密路通了，但语音输入要做的话，得先决定「录下的声音送到哪儿去
+  // 转成文字」——那意味着给插件引进一条「你的声音要出这台电脑」的路径，而它现在
+  // 完全没有这类东西。那是另一件事，还没做，所以这一行照旧撤着。
   assert.ok(!html.includes('micHint'), '语音输入那一行的元素要撤掉')
-  assert.ok(!/<div class="label">完成后提醒<\/div>/.test(html), '界面上不该有这一行')
   assert.ok(!/<div class="label">语音输入<\/div>/.test(html), '界面上不该有这一行')
 })
 

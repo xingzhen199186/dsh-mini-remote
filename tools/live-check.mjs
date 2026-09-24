@@ -253,11 +253,16 @@ check('复制有 execCommand 退路', html.includes("execCommand('copy')"))
 check('设置里旧的会话下拉已移除', !html.includes('selSession'))
 // 2026-09-21 用户裁决：两个按了没用的按钮、以及它们所在的两行，都从设置里撤掉
 // （明文 http 下浏览器不给用）。知识记在代码注释和 tasks/lessons.md 里，不占界面。
+//
+// 2026-09-25 变了一半：Tailscale 那条路接上了 HTTPS，「锁屏也能提醒」的前提成立，
+// 它回来了——**但只在加密连接下露**。原来那条理由（明文下摆了也没用）仍然成立，
+// 所以这里查的是「默认藏着 + 认安全上下文」，不是简单地把断言删掉。
 check('麦克风图标已移除', !html.includes('btnMic'))
-check('完成后提醒的按钮已隐藏', !html.includes('btnNotify'))
-check('设置里没有「完成后提醒」这一行', !html.includes('notifyHint'))
+check('「锁屏也能提醒」默认是藏着的', /id="rowNotify"[^>]*style="display:none"/.test(html))
+check('它认安全上下文，加密下才露', html.includes('isSecureContext'))
+check('还是不要那个单独的通知按钮', !html.includes('btnNotify'))
+check('系统通知走 service worker 那个入口', html.includes('showNotification'))
 check('设置里没有「语音输入」这一行', !html.includes('micHint'))
-check('页面不再依赖安全上下文接口', !html.includes('isSecureContext'))
 // 手机上传文件：按钮、藏起来的文件选择器、附件小条，三样都得真的送到手机上
 for (const id of ['btnAttach', 'filePick', 'attachBar']) {
   check(`上传那一套里有 id="${id}"`, html.includes(`id="${id}"`))
@@ -480,6 +485,21 @@ if (isPairing) {
   } else {
     check('serve 没开时，面板上不出现 https 那条', !httpsEntry, httpsEntry ? httpsEntry.url : '')
   }
+}
+
+// service worker：它只为系统通知而存在（见 lib/sw.js），但**响应头少一个就整个不工作**。
+//
+// 页面在 `/mini`，不在 `/mini/` 底下，而这个文件从 `/mini/sw.js` 发出去，默认作用域
+// 只到 `/mini/`——够不着那个页面。少了 `Service-Worker-Allowed`，注册会直接失败，
+// 而失败只在浏览器控制台里报，用户那边看到的是「开关开了但永远收不到通知」。
+{
+  const res = await fetch(`${base}/mini/sw.js`).catch(() => null)
+  check('service worker 发得出来', Boolean(res && res.status === 200), res ? `HTTP ${res.status}` : '取不到')
+  check(
+    '带了 Service-Worker-Allowed，作用域放开到根',
+    Boolean(res && res.headers.get('service-worker-allowed')),
+    res ? String(res.headers.get('service-worker-allowed')) : '',
+  )
 }
 
 console.log('')
