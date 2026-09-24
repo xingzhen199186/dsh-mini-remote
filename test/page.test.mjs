@@ -402,23 +402,25 @@ test('明文 HTTP 下没有 navigator.clipboard，失败也要说一声', async 
   assert.equal(btn.innerHTML, '', '没复制成功就不该给对勾')
 })
 
-test('「锁屏也能提醒」只在加密连接下露出来，明文下必须藏着', () => {
-  // 2026-09-21 用户裁决把它整行撤掉过，理由是明文 HTTP 下浏览器不给发系统通知，
-  // 留着一个按了没用的按钮比没有更让人困惑。
+test('系统通知那一行不露出来，别再被加回来', () => {
+  // 2026-09-25 用户裁决：浏览器里不做这个功能了，原话「类似功能我们以后考虑做成 APP
+  // 时再加，浏览器里不放了」。
   //
-  // 2026-09-25 Tailscale 那条路接上 HTTPS，前提变了，它才回来。**但那条理由本身
-  // 仍然成立**——所以是「加密下才露」，不是「哪都露」：那一行默认 display:none，
-  // 由脚本按 isSecureContext 判断，而且**注册成功才露**（注册不上就继续藏着）。
+  // 试到底的结论：**手机锁屏会冻结后台页面**，那条实时连接跟着断掉，回复根本到不了
+  // 页面，也就没人去发通知。这是手机系统的调度，网页绕不过去；service worker 也救不了
+  // ——它是被事件唤醒的，没有事件它就不存在。
   //
-  // 断言代码形态，不是「某个词不出现」——下面这段说明里就有那几个名字，
-  // 用 includes() 会被自己的注释绊倒（这个坑栽过三次了）。
-  assert.ok(/id="rowNotify"[^>]*style="display:none"/.test(html), '默认必须是藏着的')
-  assert.ok(/window\.isSecureContext/.test(html), '露不露要看是不是安全上下文')
-  assert.ok(!html.includes('btnNotify'), '还是不要那个单独的通知按钮')
-  // 真正的调用一定带参数（标题），注释里的裸名字匹配不上
-  assert.ok(!/new Notification\s*\(\s*['"]/.test(html), '手机浏览器上这么写会抛 TypeError')
-  // 正确的入口是 service worker 的 showNotification——这也是必须有个 service worker 的原因
-  assert.ok(/showNotification/.test(html), '要走 service worker 那个入口')
+  // **代码留着，只是不露出来**，所以这里钉的是「没有把它露出来的那行代码」，
+  // 不是「这段代码不存在」。将来做 App 里的锁屏提醒，这些直接能用。
+  assert.ok(/id="rowNotify"[^>]*style="display:none"/.test(html), '那一行必须是藏着的')
+  // **不能直接 includes()**：那行代码是**注释掉**留着的，字符串还在文件里，一查就命中。
+  // 所以按行看：凡是提到它的行，必须都是注释。
+  const revealLines = html.split('\n').filter((l) => l.includes("rowNotify').style.display"))
+  assert.ok(revealLines.length > 0, '那行代码应该留着（注释形式），将来做 App 用得上')
+  assert.ok(revealLines.every((l) => l.trim().startsWith('//')), '别再把它露出来了')
+  assert.ok(html.includes("// $('rowNotify').style.display = ''"), '留着的形式是注释')
+  assert.ok(/showNotification/.test(html), '通知那段逻辑要留着，将来做 App 用得上')
+  assert.ok(/window\.isSecureContext/.test(html), '它认安全上下文，这段判断也留着')
 })
 
 test('「语音输入」那一行仍然不在界面上', () => {

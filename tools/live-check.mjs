@@ -254,14 +254,20 @@ check('设置里旧的会话下拉已移除', !html.includes('selSession'))
 // 2026-09-21 用户裁决：两个按了没用的按钮、以及它们所在的两行，都从设置里撤掉
 // （明文 http 下浏览器不给用）。知识记在代码注释和 tasks/lessons.md 里，不占界面。
 //
-// 2026-09-25 变了一半：Tailscale 那条路接上了 HTTPS，「锁屏也能提醒」的前提成立，
-// 它回来了——**但只在加密连接下露**。原来那条理由（明文下摆了也没用）仍然成立，
-// 所以这里查的是「默认藏着 + 认安全上下文」，不是简单地把断言删掉。
+// 2026-09-25 中间试过一半：Tailscale 那条路接上 HTTPS 之后，「锁屏也能提醒」回来过
+// 一次。**当天晚些又撤了**——试到底的结论是手机锁屏会冻结后台页面，实时连接断掉，
+// 回复到不了页面，没人去发通知。这一次不是"前提没到"，是"浏览器这条路本来就有上限"，
+// 用户决定留到以后做成 App 时再说。
 check('麦克风图标已移除', !html.includes('btnMic'))
-check('「锁屏也能提醒」默认是藏着的', /id="rowNotify"[^>]*style="display:none"/.test(html))
-check('它认安全上下文，加密下才露', html.includes('isSecureContext'))
-check('还是不要那个单独的通知按钮', !html.includes('btnNotify'))
-check('系统通知走 service worker 那个入口', html.includes('showNotification'))
+// 2026-09-25 用户裁决：浏览器里不做系统通知了（试到底的结论是锁屏会冻结后台页面，
+// 实时连接断掉，回复到不了页面）。**代码留着，只是不露出来**——所以查的是
+// 「没有把它露出来的那行代码」，不是「这段代码不存在」。
+check('系统通知那一行是藏着的', /id="rowNotify"[^>]*style="display:none"/.test(html))
+// **不能直接 includes() 查它不在**：那行代码是注释掉留着的，字符串还在文件里，一查就命中
+// （写测试的时候就这么错过一次，测试反过来抓住了我）。按行看：提到它的行必须都是注释。
+const revealLines = html.split('\n').filter((l) => l.includes("rowNotify').style.display"))
+check('那行代码以注释形式留着', revealLines.length > 0 && revealLines.every((l) => l.trim().startsWith('//')))
+check('通知那段逻辑留着（将来做 App 用得上）', html.includes('showNotification'))
 check('设置里没有「语音输入」这一行', !html.includes('micHint'))
 // 手机上传文件：按钮、藏起来的文件选择器、附件小条，三样都得真的送到手机上
 for (const id of ['btnAttach', 'filePick', 'attachBar']) {
