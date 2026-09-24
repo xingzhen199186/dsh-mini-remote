@@ -9,7 +9,10 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { CUSTOM_PRESET, FULL_ACCESS_MODE, available, listPresets, setPreset } from '../lib/permissions.js'
+import {
+  CUSTOM_PRESET, FULL_ACCESS_MODE, PRESET_LABELS,
+  available, labelOf, listPresets, setPreset,
+} from '../lib/permissions.js'
 
 const SESSION = { id: 'session-1' }
 
@@ -126,6 +129,68 @@ test('custom 只在它真的生效时补一格，而且永远不是切换目标'
   const normal = listPresets({ service: serviceOf({ current: 'workspace-write' }), session: SESSION })
   assert.equal(normal.options.some((o) => o.value === CUSTOM_PRESET), false,
     '不是 custom 就不该多出那一格')
+})
+
+// ---------------------------------------------------------------------------
+// 中文标签
+//
+// 背景：`optionOf()` 只在配置里定义过 name 时才给标签，本机没定义，它回的是
+// 键名。三个中文在 DSH 网页界面那侧，服务里没有，所以得我们自己映射。
+// ---------------------------------------------------------------------------
+
+test('三个档位翻成中文', () => {
+  assert.equal(labelOf('read-only'), '仅可查看')
+  assert.equal(labelOf('workspace-write'), '工作区内修改')
+  assert.equal(labelOf('danger-full-access'), '完全权限')
+})
+
+test('表里没有的档位退回原始标识符，不留空也不写「未知」', () => {
+  // DSH 哪天加个新档位，界面上会显示它的标识符——不好看，但那是个真名字。
+  for (const name of ['brand-new-preset', 'custom', '']) {
+    assert.equal(labelOf(name), name, `${JSON.stringify(name)} 应该原样退回`)
+  }
+})
+
+test('配置里自己起了名字就听配置的，不被通用表盖掉', () => {
+  // 这台机器的主人在配置里写了「只读模式」，那是他的意思。
+  assert.equal(labelOf('read-only', '只读模式'), '只读模式')
+  // 但服务在没配名字时会退回键名——那种情况不算「配置起了名字」，该用我们的映射。
+  assert.equal(labelOf('read-only', 'read-only'), '仅可查看')
+  assert.equal(labelOf('read-only', ''), '仅可查看')
+  assert.equal(labelOf('read-only', undefined), '仅可查看')
+})
+
+test('档位盘里带出来的就是中文', () => {
+  const service = serviceOf()   // 假服务照本机实际行为：name 回键名
+  const out = listPresets({ service, session: SESSION })
+  assert.deepEqual(out.options.map((o) => o.name), ['仅可查看', '工作区内修改', '完全权限'])
+  // 值仍然是标识符——切的时候要用它，不能拿中文去切。
+  assert.deepEqual(out.options.map((o) => o.value), ['read-only', 'workspace-write', 'danger-full-access'])
+})
+
+test('配置起了名字时档位盘用配置的名字', () => {
+  const service = serviceOf({
+    specs: { 'read-only': { label: '只读模式' } },
+    names: ['read-only'],
+    current: 'read-only',
+  })
+  assert.equal(listPresets({ service, session: SESSION }).options[0].name, '只读模式')
+})
+
+test('服务没给说明时 description 是空串，不是 undefined 也不是硬编的话', () => {
+  // 空串在页面那边是假值，于是那一行退回显示「当前：<档位名>」，
+  // 而不是渲染出一个空行、也不是我编的一句可能不准的说明。
+  const service = serviceOf()
+  const out = listPresets({ service, session: SESSION })
+  for (const o of out.options) {
+    assert.equal(typeof o.description, 'string', 'description 得是字符串')
+    assert.equal(o.description, '', '服务没给就如实是空的')
+  }
+})
+
+test('映射表本身只认这三个稳定的标识符', () => {
+  assert.deepEqual(Object.keys(PRESET_LABELS).sort(),
+    ['danger-full-access', 'read-only', 'workspace-write'])
 })
 
 // ---------------------------------------------------------------------------
