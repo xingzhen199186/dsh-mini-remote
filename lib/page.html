@@ -2227,6 +2227,22 @@
 
   loadPermissions();
 
+  // 档位按钮的点击。
+  //
+  // 监听挂在**容器**上，不挂在按钮上——`renderPerms()` 每次都整块换 innerHTML，
+  // 挂按钮上的监听会被下一次重画冲掉。挂在容器上就不受影响。
+  //
+  // 这个坑真机踩到过：三档看得见、点下去毫无反应，因为 `tapPerm` 一次都没被调用。
+  // 单元测试没抓住它，是因为测试直接调 `tapPerm` 验逻辑，而真机上缺的是**接线**——
+  // 逻辑对、没人喊它。
+  $('segPerm').addEventListener('click', function (e) {
+    var btn = e.target;
+    // 按钮里现在只有文字，点到的就是按钮本身；这个循环是防将来往里塞图标。
+    while (btn && btn !== this && !(btn.dataset && btn.dataset.perm)) btn = btn.parentNode;
+    if (!btn || btn === this) return;
+    tapPerm(btn.dataset.perm);
+  });
+
   Array.prototype.forEach.call($('segMode').children, function (btn) {
     btn.addEventListener('click', function () {
       state.mode = btn.dataset.mode;
