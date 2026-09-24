@@ -852,6 +852,174 @@ test('登记工作区：路径不存在时回 400 并带上 DSH 的原话', asyn
   assert.match((await res.json()).error, /不是一个目录/)
 })
 
+// ---------------------------------------------------------------------------
+// 权限档位
+// ---------------------------------------------------------------------------
+
+/** 假的档位服务那一侧。档位名故意起得跟默认表不一样，钉住「运行时不写死」。 */
+function permNav(overrides = {}) {
+  return {
+    ...fakeNav(),
+    permissions: async () => ({
+      ok: true,
+      currentValue: '只看',
+      options: [
+        { value: '只看', name: '仅可查看', description: 'Agent 只能读', dangerous: false },
+        { value: '改文件', name: '工作区内修改', description: '在工作区里改', dangerous: false },
+        { value: '全开', name: '完全权限', description: '哪儿都能改', dangerous: true },
+      ],
+    }),
+    setPermission: async () => ({ ok: true, name: '改文件' }),
+    ...overrides,
+  }
+}
+
+test('权限档位要 token 才给看', async (t) => {
+  const { server, base } = await startTestServer({ tree: permNav() })
+  t.after(() => server.close())
+  assert.equal((await fetch(`${base}/mini/api/permissions`)).status, 401)
+})
+
+test('读档位盘：名字和标签一路带过来，哪个危险也标好了', async (t) => {
+  const { server, base, token } = await startTestServer({ tree: permNav() })
+  t.after(() => server.close())
+
+  const body = await (await fetch(`${base}/mini/api/permissions?token=${token}`)).json()
+  assert.equal(body.ok, true)
+  assert.equal(body.currentValue, '只看')
+  assert.deepEqual(body.options.map((o) => o.name), ['仅可查看', '工作区内修改', '完全权限'])
+  assert.equal(body.options.at(-1).dangerous, true, '哪个要确认，服务端就标好给手机，手机不猜')
+  assert.ok(!body.boundSessionId, '没绑定会话时这个字段就该是空的（假值），不能编一个出来')
+})
+
+test('拿不到档位服务时如实说没这个能力，手机据此整块不显示', async (t) => {
+  const nav = {
+    ...fakeNav(),
+    permissions: async () => ({ ok: false, reason: 'no-service' }),
+  }
+  const { server, base, token } = await startTestServer({ tree: nav })
+  t.after(() => server.close())
+
+  const res = await fetch(`${base}/mini/api/permissions?token=${token}`)
+  assert.equal(res.status, 200, '这不是错误，是「这台电脑没这个能力」')
+  assert.equal((await res.json()).ok, false)
+})
+
+test('没传 tree 时读档位也不崩', async (t) => {
+  const { server, base, token } = await startTestServer()
+  t.after(() => server.close())
+  const res = await fetch(`${base}/mini/api/permissions?token=${token}`)
+  assert.equal(res.status, 200)
+  assert.equal((await res.json()).ok, false)
+})
+
+test('切档位：作用在**当前绑定的那个会话**上', async (t) => {
+  const seen = []
+  const nav = permNav({
+    setPermission: async (sessionId, name) => { seen.push([sessionId, name]); return { ok: true, name } },
+  })
+  const { server, store, base, token } = await startTestServer({ tree: nav })
+  t.after(() => server.close())
+
+  store.bind('session-绑定的')
+  const res = await fetch(`${base}/mini/api/permissions?token=${token}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ name: '改文件' }),
+  })
+  assert.equal(res.status, 200)
+  assert.deepEqual(seen, [['session-绑定的', '改文件']], '要拿绑定会话去切，不是随便一个')
+})
+
+test('切完把最新状态一起回来，手机不用再问一趟', async (t) => {
+  const nav = permNav()
+  const { server, base, token } = await startTestServer({ tree: nav })
+  t.after(() => server.close())
+
+  const body = await (await fetch(`${base}/mini/api/permissions?token=${token}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ name: '改文件' }),
+  })).json()
+  assert.equal(body.ok, true)
+  assert.equal(body.name, '改文件')
+  assert.ok(Array.isArray(body.options), '切完的整盘要一起给，手机据此更新高亮')
+})
+
+test('切档位：表里没有的名字回 400，带了也不透传', async (t) => {
+  const seen = []
+  const nav = permNav({
+    setPermission: async (sessionId, name) => {
+      seen.push(name)
+      // 真服务里「表里没有」就是这个结果。
+      if (name !== '改文件' && name !== '全开') return { ok: false, reason: 'unknown-preset' }
+      return { ok: true, name }
+    },
+  })
+  const { server, base, token } = await startTestServer({ tree: nav })
+  t.after(() => server.close())
+
+  const res = await fetch(`${base}/mini/api/permissions?token=${token}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ name: '瞎写的档位' }),
+  })
+  assert.equal(res.status, 400)
+  assert.match((await res.json()).error, /没有这个权限档位/)
+
+  // 名字不是字符串时也别炸，空串交给下游判断。
+  const res2 = await fetch(`${base}/mini/api/permissions?token=${token}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ name: 42 }),
+  })
+  assert.equal(res2.status, 400)
+  assert.deepEqual(seen, ['瞎写的档位', ''], '数字要被收成空串，不能原样透传')
+})
+
+test('没绑定会话时切档位回 409，说的是「先挑个会话」', async (t) => {
+  const nav = permNav({
+    setPermission: async () => ({ ok: false, reason: 'no-session' }),
+  })
+  const { server, base, token } = await startTestServer({ tree: nav })
+  t.after(() => server.close())
+
+  const res = await fetch(`${base}/mini/api/permissions?token=${token}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ name: '改文件' }),
+  })
+  assert.equal(res.status, 409)
+  assert.match((await res.json()).error, /先挑一个会话/)
+})
+
+test('切档位失败时把原因带出来，不装作切好了', async (t) => {
+  const nav = permNav({
+    setPermission: async () => ({ ok: false, reason: 'failed', error: '这个会话动不了' }),
+  })
+  const { server, base, token } = await startTestServer({ tree: nav })
+  t.after(() => server.close())
+
+  const res = await fetch(`${base}/mini/api/permissions?token=${token}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ name: '改文件' }),
+  })
+  assert.equal(res.status, 500)
+  assert.match((await res.json()).error, /这个会话动不了/)
+})
+
+test('切档位也要 token —— 这是唯一一个能改电脑权限的接口', async (t) => {
+  const { server, base } = await startTestServer({ tree: permNav() })
+  t.after(() => server.close())
+  const res = await fetch(`${base}/mini/api/permissions`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ name: '全开' }),
+  })
+  assert.equal(res.status, 401)
+})
+
 test('登记工作区：没给路径时回 400，不去麻烦工作区服务', async (t) => {
   // 路由里有一条 bad-path 分支。它只有在真的收到空路径时才走到——
   // 之前没有测试碰过它，所以把它删掉测试照样全绿（反向验证逮到的）。

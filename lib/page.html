@@ -483,6 +483,10 @@
     border-radius: 10px; color: var(--fg);
   }
   .mkdir-row button:active { background: var(--line); }
+
+  /* 「完全权限」那一档的待确认状态：点一次先变成这样，再点一次才真切。
+     跟 .active（当前所在档位）用不同颜色区分——一个是「将要去」，一个是「已在」。 */
+  .seg button.armed { background: var(--danger, #c0392b); color: #fff; }
   .nav-note { padding: 10px 16px; color: var(--muted); font-size: 12px; line-height: 1.6; }
 
   /* ---------- 设置抽屉 ---------- */
@@ -618,6 +622,18 @@
         <button data-mode="minimal">单帧</button>
         <button data-mode="chat">聊天</button>
       </div>
+    </div>
+
+    <!-- 权限档位。整块由脚本填：这台电脑有哪些档位是**运行时读**的，一个都不写死。
+         服务拿不到时整块不显示——它是附加能力，缺了遥控本身照常。 -->
+    <div id="permBlock" hidden>
+      <div class="row">
+        <div>
+          <div class="label">权限档位</div>
+          <div class="hint" id="permHint">作用在当前会话上</div>
+        </div>
+      </div>
+      <div class="seg" id="segPerm"></div>
     </div>
 
     <!--
@@ -2114,6 +2130,91 @@
   });
   $('btnClose').addEventListener('click', function () { sheet.classList.remove('open'); });
   sheet.addEventListener('click', function (e) { if (e.target === sheet) sheet.classList.remove('open'); });
+
+  // ---------------- 权限档位 ----------------
+  //
+  // 这是把 PC 端那道授权闸门搬到了手机上：**手机从此能指挥 Agent 把电脑提到
+  // 完全权限**。闸门还在（要 token / 密码），但它守的那扇门换了一扇——
+  // 拿到手机的人等于拿到了这台电脑的写权限。这是功能本身的代价，不是瑕疵。
+  //
+  // 所以「完全权限」那一档要点两次。用页面内的两步确认、不用 window.confirm：
+  // 那种弹窗在微信这类内嵌浏览器里会被直接屏蔽，而在屏蔽的情况下万一返回
+  // 真值就等于确认被跳过了——不安全的方向上不能赌。
+  //
+  // 档位名和标签全是运行时从服务端读的，一个都不写死：这台机器上到底是两个
+  // 还是三个档位、中文叫什么，只有跑起来才知道。
+  var permOptions = null;   // null = 还没读到（或这台电脑没这个能力）
+  var permArmed = '';       // 哪一档正在等「再点一次」
+
+  function loadPermissions() {
+    api('/mini/api/permissions').then(function (body) {
+      if (!body || !body.ok) { $('permBlock').hidden = true; return; }
+      permOptions = body;
+      renderPerms();
+    }).catch(function () {
+      // 读不到就整块不显示。附加能力缺了，不该影响发指令。
+      permOptions = null;
+      $('permBlock').hidden = true;
+    });
+  }
+
+  function renderPerms() {
+    if (!permOptions) return;
+    $('permBlock').hidden = false;
+    var seg = $('segPerm');
+    seg.innerHTML = (permOptions.options || []).map(function (o) {
+      var cls = [];
+      if (o.value === permOptions.currentValue) cls.push('active');
+      if (o.value === permArmed) cls.push('armed');
+      return '<button type="button" data-perm="' + escapeHtml(o.value) + '"'
+        + (cls.length ? ' class="' + cls.join(' ') + '"' : '') + '>'
+        + escapeHtml(o.value === permArmed ? '再点一次：' + o.name : o.name)
+        + '</button>';
+    }).join('');
+    $('permHint').textContent = permHintText();
+  }
+
+  /** 把当前档位的说明当提示语。比干说「作用在当前会话上」有用。 */
+  function permHintText() {
+    if (!permOptions) return '';
+    var cur = (permOptions.options || []).filter(function (o) {
+      return o.value === permOptions.currentValue;
+    })[0];
+    if (!cur) return '作用在当前会话上';
+    return cur.description || ('当前：' + cur.name);
+  }
+
+  function tapPerm(name) {
+    if (!permOptions) return;
+    // 点的就是当前这一档：什么都不做。不这么做的话，一次误触会往会话日志里
+    // 记一条没有意义的切换。
+    if (name === permOptions.currentValue) return;
+    var opt = (permOptions.options || []).filter(function (o) { return o.value === name; })[0];
+    if (!opt) return;
+
+    if (opt.dangerous && permArmed !== name) {
+      permArmed = name;
+      renderPerms();
+      toast('再点一次「' + opt.name + '」就切过去');
+      return;
+    }
+    permArmed = '';
+    api('/mini/api/permissions', { method: 'POST', body: JSON.stringify({ name: name }) })
+      .then(function (body) {
+        if (!body || !body.ok) return;
+        // 服务端把切换后的最新状态一起回来了，直接重画，不用再补一趟。
+        permOptions = body;
+        renderPerms();
+        toast('已切到「' + opt.name + '」');
+      })
+      .catch(function (err) {
+        permArmed = '';
+        renderPerms();
+        toast(err.message);
+      });
+  }
+
+  loadPermissions();
 
   Array.prototype.forEach.call($('segMode').children, function (btn) {
     btn.addEventListener('click', function () {
