@@ -2447,7 +2447,7 @@
     function notifyHintText() {
       var p = Notification.permission;
       if (p === 'granted') return '回复到了发一条系统通知';
-      if (p === 'denied') return '浏览器拒过这个网站的通知权限，要去浏览器的设置里手动允许';
+      if (p === 'denied') return '通知权限被拒过——拒过一次浏览器就不会再问了。要么去浏览器设置里给本站允许通知，要么清掉这个网站的数据（权限会跟着重置，之后要重新扫一次码）';
       return '打开时浏览器会问一次要不要允许';
     }
 
@@ -2462,7 +2462,7 @@
         settled = true;
         if (perm !== 'granted') {
           $('notifyHint').textContent = '浏览器没给通知权限（现在是「' + (perm || '没反应')
-            + '」）。要去浏览器的设置里，找到这个网站，手动允许通知。';
+            + '」）。要么去浏览器设置里给本站允许通知，要么清掉这个网站的数据，然后重新扫码。';
           syncNotify();
           return;
         }
@@ -2482,7 +2482,7 @@
       setTimeout(function () {
         if (!settled) {
           $('notifyHint').textContent = '浏览器没弹权限询问（现在是「' + Notification.permission
-            + '」）。要去浏览器的设置里，找到这个网站，手动允许通知。';
+            + '」）。要么去浏览器设置里给本站允许通知，要么清掉这个网站的数据，然后重新扫码。';
         }
       }, 3000);
     }
