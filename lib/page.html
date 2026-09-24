@@ -1401,6 +1401,22 @@
     return mainEl.scrollHeight - mainEl.scrollTop - (mainEl.clientHeight || 0) < 48;
   }
 
+  /**
+   * 把某一块的**开头**对齐到视野顶部（聊天模式用，见 renderChat）。
+   *
+   * 用两个矩形的差值算，不用 `offsetTop`：`main` 上没有 `position: relative`，
+   * `offsetTop` 会一路找到 body 去，算出来是错的。矩形差值不管定位上下文怎么变都对。
+   *
+   * 留 12px 空隙：`main` 自己带 16px 内边距，滚下去之后那段内边距就滚没了，
+   * 不留缝的话回答的第一行会顶在屏幕最上沿，看着像被切掉了。
+   */
+  function pinToTop(el) {
+    if (!el || typeof el.getBoundingClientRect !== 'function') return;
+    if (typeof mainEl.getBoundingClientRect !== 'function') return;
+    var gap = el.getBoundingClientRect().top - mainEl.getBoundingClientRect().top;
+    mainEl.scrollTop += gap - 12;
+  }
+
   function renderChat() {
     mainEl.classList.remove('center');
     // **还在排队的那条不算「已发出」，这里要把它从聊天记录里滤掉。**
@@ -1451,7 +1467,73 @@
     // 先问「在不在底部」，再改内容——顺序反了永远是「在」（见 atBottom 的注释）。
     var stick = atBottom();
     replyEl.innerHTML = html;
-    if (stick) mainEl.scrollTop = mainEl.scrollHeight;
+    scrollChat(stick);
+  }
+
+  /**
+   * 聊天模式里「已经为哪一次回答把开头对齐到顶部」。
+   *
+   * 取值是 `'live'`（正在流的那一段）或 `'done:<timestamp>'`（落定的那条）。
+   * 记这个是为了**每条回答只对齐一次**——不记的话，用户往下读的时候每次重画
+   * 都会把他拽回开头，比不对齐还烦人。
+   *
+   * 声明放在这里而不是跟 scrolledReplyAt 作伴：page.test.mjs 是从 `liveBlock`
+   * 切到 `render()` 来跑聊天模式的，放前面就切不进来，一跑就是 ReferenceError。
+   */
+  var pinnedAnswerKey = '';
+
+  /**
+   * 聊天模式的滚动：**回答的开头才是要读的地方，不是末尾。**
+   *
+   * 用户 2026-09-24 提的：「聊天模式下，回答出现时，页面也应该停留在回答的开头
+   * 而非末尾，这样用户不用往上滚到开头」。
+   *
+   * 和单帧模式那条的区别：单帧只有一条回答，所以它对齐的是 0（页面顶端）；
+   * 聊天模式有一串历史，要对齐的是**最新那条回答自己的开头**。
+   *
+   * 回答分两个阶段，各对齐一次（记号记在 pinnedAnswerKey 里）：
+   *
+   *   · **正在流**（live 非空）——对齐 `.live` 的开头，之后**不再跟底部**。
+   *     这是关键的一条：流式每秒重画好几次，要是继续黏底，用户刚滚到开头
+   *     就被拽回末尾，等于没改。
+   *
+   *   · **落定**（timestamp 变了）——对齐最后那条 `.said` 的开头，
+   *     让最终版从第一行开始读。
+   *
+   * 为什么要记 key、而不是「每次都对齐」：用户往下读的时候，每次重画都把他拽回
+   * 开头，比不对齐还烦人。这一点和单帧模式里 scrolledReplyAt 的道理是一样的。
+   */
+  function scrollChat(stick) {
+    var liveNow = state.live || '';
+    var newest = liveNow
+      ? 'live'
+      : (state.latest && state.latest.timestamp ? 'done:' + state.latest.timestamp : '');
+    if (newest && newest !== pinnedAnswerKey) {
+      // 先记账，再决定动不动他。记完就不再重复处理这条回答——
+      // 用户往下读的时候被反复拉回开头，比不对齐还烦人。
+      pinnedAnswerKey = newest;
+      // **只在「他本来就在底部跟着看」的时候才动他。**
+      //
+      // 这一条不能省：用户 2026-09-22 实机提过「有动画的时候手机端页面运动到上面
+      // 都会自动调回底部，这种机制没必要吧」。他要是自己翻上去看历史了，
+      // 我们把他拽到回答开头，和当初拽回底部是同一类冒犯。
+      //
+      // 注意 stick 是**改 innerHTML 之前**问的（见 atBottom 的注释），
+      // 所以它答的是「他刚才在不在底部」，正是这里要问的。
+      if (!stick) return;
+      var target = null;
+      if (liveNow) {
+        target = replyEl.querySelector ? replyEl.querySelector('.live') : null;
+      } else if (replyEl.querySelectorAll) {
+        var saids = replyEl.querySelectorAll('.said');
+        target = saids.length ? saids[saids.length - 1] : null;
+      }
+      pinToTop(target);
+      return;
+    }
+    // 没有新回答的时候照旧黏底（历史重排、切会话、用户自己发指令这些），
+    // 但**流式期间不跟**——那正是要停在开头的时候。
+    if (stick && !liveNow) mainEl.scrollTop = mainEl.scrollHeight;
   }
 
   function render() {

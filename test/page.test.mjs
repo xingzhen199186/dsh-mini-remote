@@ -1176,12 +1176,28 @@ test('聊天模式下，正在写的那段跟在最后一条消息后面', () =>
 
 /**
  * 渲染一次，返回渲染后的滚动位置。用来盯「会不会把用户拽回底部」。
- * 假 mainEl 的 scrollHeight 不会自己变，所以渲染后 scrollTop 只有两种结果：
- * 被设成 scrollHeight（跟到底了），或者原样不动（没打扰用户）。
+ *
+ * 假 mainEl 的 scrollHeight 不会自己变，所以渲染后 scrollTop 只有三种结果：
+ *   1. 被设成 scrollHeight —— 跟到底了；
+ *   2. **被对齐到回答开头**（2026-09-24 之后新增的第三条路，见 renderChat 的 scrollChat）；
+ *   3. 原样不动 —— 没打扰用户。
+ *
+ * 假 replyEl 必须能 `querySelector('.live')`，否则第 2 条会静默退化成空操作，
+ * 测试就测了个寂寞。`.live` 的开头固定在 800，容器顶固定在 0。
  */
 function scrollAfterRender(state, { scrollTop, scrollHeight, clientHeight }) {
-  const replyEl = { innerHTML: '' }
-  const mainEl = { classList: { remove() {} }, scrollTop, scrollHeight, clientHeight }
+  const replyEl = {
+    innerHTML: '',
+    querySelector(sel) {
+      if (sel !== '.live') return null
+      return this.innerHTML.includes('class="live"')
+        ? { getBoundingClientRect: () => ({ top: 800 }) } : null
+    },
+  }
+  const mainEl = {
+    classList: { remove() {} }, scrollTop, scrollHeight, clientHeight,
+    getBoundingClientRect: () => ({ top: 0 }),
+  }
   const lb = html.indexOf('function liveBlock')
   // eslint-disable-next-line no-new-func
   const build = new Function(
@@ -1206,16 +1222,19 @@ test('用户翻上去看历史时，不把他拽回底部', () => {
   }
 
   // 用户翻在上面（离底部 800px）：别动他的位置
-  const up = scrollAfterRender(state, { scrollTop: 100, scrollHeight: 1000, clientHeight: 100 })
+  const up = scrollAfterRender(state, { scrollTop: 100, scrollHeight: 2000, clientHeight: 0 })
   assert.equal(up, 100, '用户翻上去看历史，不该被拽回底部')
 
-  // 用户本来就在底部：新内容进来时视野要跟着走，否则看着像卡住了
-  const bottom = scrollAfterRender(state, { scrollTop: 900, scrollHeight: 1000, clientHeight: 100 })
-  assert.equal(bottom, 1000, '本来就在底部，就要跟着往下滚')
+  // 本来就在底部：**不再跟着滚到末尾，改成把回答的开头对齐到顶部**
+  // （2026-09-24 用户提的「回答出现时页面应该停留在回答的开头而非末尾」）。
+  // 开头在 800，容器顶在 0：1990 + 800 - 12 = 2778。
+  const bottom = scrollAfterRender(state, { scrollTop: 1990, scrollHeight: 2000, clientHeight: 0 })
+  assert.equal(bottom, 2778, '本来就在底部，就把回答开头拉上来（不是滚到末尾）')
 
-  // 差几个像素（手指惯性、地址栏收起）也算在底部，不然会「明明在底部却不跟」
-  const near = scrollAfterRender(state, { scrollTop: 880, scrollHeight: 1000, clientHeight: 100 })
-  assert.equal(near, 1000, '差一点点也算在底部')
+  // 差几个像素（手指惯性、地址栏收起）也算在底部——48px 容差现在管的是
+  // 「要不要动他」这件事：1960 + 800 - 12 = 2748。
+  const near = scrollAfterRender(state, { scrollTop: 1960, scrollHeight: 2000, clientHeight: 0 })
+  assert.equal(near, 2748, '差一点点也算在底部，同样把开头拉上来')
 })
 
 test('按发送时，不管翻到哪儿都立刻回到底部', () => {
@@ -1832,11 +1851,42 @@ test('回答对象没有 timestamp 时也不跳——没有判据就不动', () 
   assert.equal(r.mainEl.scrollTop, 1200, '没有判据就不该跳')
 })
 
-test('聊天模式照旧黏底，不会被跳到顶部（用户只说了单帧）', () => {
-  const replyEl = { innerHTML: '' }
-  const mainEl = {
-    classList: { remove() {} }, scrollTop: 990, scrollHeight: 1000, clientHeight: 0,
+/**
+ * 聊天模式的滚动：**回答的开头才是要读的地方，不是末尾。**
+ *
+ * 用户 2026-09-24 提的：「聊天模式下，回答出现时，页面也应该停留在回答的开头
+ * 而非末尾，这样用户不用往上滚到开头」。
+ *
+ * 这推翻了原先那条「聊天模式照旧黏底（用户只说了单帧）」——当时他只说了单帧，
+ * 所以聊天模式特意保持原样。现在口径变了，测试跟着变，不是测试写错了。
+ */
+function chatRunner({
+  latest, live, history = [], scrollTop = 0, scrollHeight = 2000,
+  liveTop = 800, saidTop = 600, mainTop = 0,
+} = {}) {
+  // 假的 replyEl：querySelector / querySelectorAll 靠扫 innerHTML 里的 class 字符串，
+  // 不真去解析 HTML——够用，而且渲染细节变了也不会误红。
+  const replyEl = {
+    innerHTML: '',
+    querySelector(sel) {
+      if (sel !== '.live') return null
+      return this.innerHTML.includes('class="live"')
+        ? { getBoundingClientRect: () => ({ top: liveTop }) } : null
+    },
+    querySelectorAll(sel) {
+      if (sel !== '.said') return []
+      const n = (this.innerHTML.match(/class="said"/g) || []).length
+      return Array.from({ length: n }, (_, i) => ({
+        getBoundingClientRect: () => ({ top: saidTop + i * 10 }),
+      }))
+    },
   }
+  const mainEl = {
+    classList: { remove() {} },
+    scrollTop, scrollHeight, clientHeight: 0,
+    getBoundingClientRect: () => ({ top: mainTop }),
+  }
+  const state = { mode: 'chat', history, live: live || '', latest, boundSessionId: 's1' }
   const lb = html.indexOf('function liveBlock')
   assert.ok(lb > 0, '在 page.html 里找不到 liveBlock')
   // eslint-disable-next-line no-new-func
@@ -1844,16 +1894,69 @@ test('聊天模式照旧黏底，不会被跳到顶部（用户只说了单帧�
     'state', 'replyEl', 'mainEl', 'timeLabel',
     `${html.slice(start, end)}\n${html.slice(lb, html.indexOf('function render()'))}\nreturn renderChat;`,
   )
-  build(
-    {
-      mode: 'chat',
-      history: [{ role: 'assistant', text: '一段很长的结论。', timestamp: 100 }],
-      live: '',
-      boundSessionId: 's1',
-    },
-    replyEl, mainEl, () => '12:00',
-  )()
-  assert.equal(mainEl.scrollTop, 1000, '聊天模式该照旧黏底，不能跳到 0')
+  return { render: build(state, replyEl, mainEl, () => '12:00'), state, mainEl, replyEl }
+}
+
+test('聊天模式：没有新回答时照旧黏底（重排、切会话不该乱动）', () => {
+  // 没有 latest、没有 live —— 也就是「什么都没新来」，这时候维持原样：
+  // 本来在底部就跟着底部。这条是原来那条测试的本意，保留下来。
+  const r = chatRunner({
+    history: [{ role: 'assistant', text: '一段很长的结论。', timestamp: 100 }],
+    scrollTop: 1990, scrollHeight: 2000,
+  })
+  r.render()
+  assert.equal(r.mainEl.scrollTop, 2000, '没有新回答就照旧黏底')
+})
+
+test('聊天模式：新回答落定时对齐它的开头，不是末尾', () => {
+  // 本来在底部（1990/2000，差 10px 在 48px 容差内），所以该动他。
+  // 回答开头在 600，容器顶在 0 —— 滚过去 600 再留 12px 空隙：1990 + 600 - 12。
+  const r = chatRunner({
+    latest: { text: '答案', timestamp: 7 },
+    history: [{ role: 'assistant', text: '答案', timestamp: 7 }],
+    scrollTop: 1990, scrollHeight: 2000, saidTop: 600,
+  })
+  r.render()
+  assert.equal(r.mainEl.scrollTop, 2578, '回答开头(600)该对齐到视野顶部，留 12px 空隙')
+})
+
+test('聊天模式：回答正在流的时候停在开头，不被反复拽回末尾', () => {
+  const r = chatRunner({ live: '第一句', scrollTop: 1990, scrollHeight: 2000, liveTop: 800 })
+  r.render()
+  assert.equal(r.mainEl.scrollTop, 2778, '流式一开始就把开头(800)对齐到顶部：1990 + 800 - 12')
+
+  // 关键的一条。流式每秒重画好几次，用户这时候多半正读到一半——
+  // 这里故意把 scrollHeight 设成让 atBottom() 为**真**（340-300=40 < 48 的容差），
+  // 也就是「看起来就在底部」。要是流式期间还走黏底那条路，他刚滚到开头就被拽走。
+  r.mainEl.scrollTop = 300
+  r.state.live = '第一句，又长了一点'
+  r.mainEl.scrollHeight = 340
+  r.render()
+  assert.equal(r.mainEl.scrollTop, 300, '流式期间就算贴着底部，也不该被拽走')
+
+  // 也不能「每次重画都再对齐一次」——那同样会把人从读到一半的地方弹回开头。
+  r.mainEl.scrollTop = 120
+  r.state.live = '第一句，又长了一点，再长一点'
+  r.render()
+  assert.equal(r.mainEl.scrollTop, 120, '同一条回答只对齐一次，别反复弹回开头')
+})
+
+test('聊天模式：他自己翻上去看历史时，回答来了也不动他', () => {
+  // 用户 2026-09-22 实机提的：「有动画的时候手机端页面运动到上面都会自动调回底部，
+  // 这种机制没必要吧。」把他拽到回答开头，和当初拽回底部是同一类冒犯。
+  // 所以「对齐开头」只在**他本来就在底部跟着看**的时候才做。
+  const r = chatRunner({ live: '正在写', scrollTop: 100, scrollHeight: 2000, liveTop: 800 })
+  r.render()
+  assert.equal(r.mainEl.scrollTop, 100, '翻上去看历史时，流式来了也不该动他的位置')
+
+  // 落定的回答同理。
+  const s = chatRunner({
+    latest: { text: '答案', timestamp: 7 },
+    history: [{ role: 'assistant', text: '答案', timestamp: 7 }],
+    scrollTop: 100, scrollHeight: 2000, saidTop: 600,
+  })
+  s.render()
+  assert.equal(s.mainEl.scrollTop, 100, '翻上去看历史时，回答落定也不该动他')
 })
 
 /**
