@@ -18,6 +18,8 @@ import {
   readServeStatus,
   classifyEnableFailure,
   readBackendState,
+  cliCandidates,
+  runTailscale,
 } from '../lib/serve.js'
 
 // ---------------------------------------------------------------------------
@@ -222,4 +224,63 @@ test('JSON 坏掉、或者根本不是对象：安静地返回空，不抛', () 
 test('BackendState 不是字符串时也给 null，不把奇怪的东西当状态', () => {
   assert.equal(readBackendState('{"BackendState":123}').state, null)
   assert.equal(readBackendState('{}').state, null)
+})
+
+// ---------------------------------------------------------------------------
+// 找得到命令，而且别让用户干等
+// ---------------------------------------------------------------------------
+
+test('找 tailscale：PATH 之外，还认常见安装位置', () => {
+  // 原来写死成 'tailscale'、靠 PATH。这台电脑 PATH 里有，所以一直没出问题——
+  // 但别人完全可能装在别处，那对他来说就是「插件说找不到 Tailscale」，而其实装着呢。
+  const c = cliCandidates()
+  assert.ok(c.includes('tailscale'), 'PATH 那条要在')
+  assert.ok(c.length >= 2, '不能只有 PATH 一条')
+  if (process.platform === 'win32') {
+    assert.ok(c.some((x) => /Tailscale[\\/]tailscale\.exe$/i.test(x)), 'Windows 上要认安装目录')
+  }
+})
+
+test('环境变量指定的命令排在最前面', () => {
+  const before = process.env.DSH_MINI_REMOTE_TAILSCALE
+  process.env.DSH_MINI_REMOTE_TAILSCALE = '/somewhere/else/tailscale'
+  try {
+    assert.equal(cliCandidates()[0], '/somewhere/else/tailscale')
+  } finally {
+    if (before === undefined) delete process.env.DSH_MINI_REMOTE_TAILSCALE
+    else process.env.DSH_MINI_REMOTE_TAILSCALE = before
+  }
+})
+
+test('命令打印完链接就挂着时：一秒上下收工，不等满超时', async () => {
+  // 2026-09-24 实测：tailnet 没开 Serve 时，`tailscale serve --bg 3090` 会把提示
+  // 打印出来，然后**一直挂着不退出**（当时挂了 180 秒没退）。只等回调的话，用户
+  // 点一下开关要干等 15 秒才看到那条链接——而他明明一秒前就能看到。
+  //
+  // 让 node 扮演那个「打印完就挂着」的命令，把真实行为复现出来。
+  const script = [
+    'console.error("Serve is not enabled on your tailnet.")',
+    'console.error("To enable, visit:")',
+    'console.error("\\thttps://login.tailscale.com/f/serve?node=AAAABBBBCCCCDDDD")',
+    'setTimeout(function () {}, 60000)',
+  ].join(';')
+  const before = process.env.DSH_MINI_REMOTE_TAILSCALE
+  process.env.DSH_MINI_REMOTE_TAILSCALE = process.execPath
+  try {
+    const t0 = Date.now()
+    const r = await runTailscale(['-e', script], 15000, {
+      stopWhen: (out) => Boolean(enableLinkFrom(out)),
+    })
+    const ms = Date.now() - t0
+    assert.equal(r.stopped, true, '应该是我们叫停的，不是它自己跑完的')
+    assert.ok(r.out.includes('login.tailscale.com/f/serve?node=AAAABBBBCCCCDDDD'), '链接要留着')
+    assert.ok(ms < 5000, `等太久了：${ms}ms（该是一秒上下，不该接近 15 秒）`)
+    // 叫停的必须当失败处理——命令是被我们杀的，serve 并没有开成。
+    const f = classifyEnableFailure(r.out, r.missing)
+    assert.equal(f.reason, 'tailnet')
+    assert.ok(f.enableLink, '用户要的就是这条链接')
+  } finally {
+    if (before === undefined) delete process.env.DSH_MINI_REMOTE_TAILSCALE
+    else process.env.DSH_MINI_REMOTE_TAILSCALE = before
+  }
 })
