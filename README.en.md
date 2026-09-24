@@ -123,7 +123,7 @@ Change it in the password section of "Settings → Phone Remote". **At least 12 
 
 **The pairing page carries the password — don't screenshot it and send it around.** The password is encoded straight into the QR code so you never have to type it. That's convenient, and the price is that whoever holds that image can get in.
 
-Beyond that: every endpoint requires the password; password comparison is constant-time; five wrong attempts from one source blocks that source for a minute; pairing information is **readable only from the local machine**, so other devices on the same Wi-Fi can't get it; the public tunnel is off by default and you have to turn it on yourself in the settings page; and the phone has no access to your filesystem.
+Beyond that: every endpoint requires the password; password comparison is constant-time; five wrong attempts from one source blocks that source for a minute; pairing information is **readable only from the local machine**, so other devices on the same Wi-Fi can't get it; the public tunnel is off by default and you have to turn it on yourself in the settings page; the phone sees no file contents — when you pick a workspace it lists folder names only, and never lists or reads files. **One thing worth stating plainly: the phone can switch the agent's permission preset.** On Full Access, the agent can then modify any file on this computer. That path is open.
 
 ---
 
