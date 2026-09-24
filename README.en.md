@@ -7,8 +7,6 @@
 
 [中文说明 →](README.md)
 
-**To use this plugin on mobile, switch the DSH session page on your PC to Full Access（完全权限）**
-
 ---
 
 ## Why I built this plugin
