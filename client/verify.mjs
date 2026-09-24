@@ -505,6 +505,202 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
   });
 }
 
+// 4e. Tailscale 的 HTTPS 地址：开关、状态、以及「tailnet 没开 Serve」那条路
+{
+  const withServe = (serve, extra) => Object.assign({
+    ok: true,
+    port: 3090,
+    token: TOKEN,
+    entries: [{ kind: 'lan', label: '内网', hint: '手机连同一个 Wi-Fi 时用这个', url: URL_LAN, qr: QR }],
+    // **故意不给 tunnel**：给了页面上就会有两个复选框（公网一个、HTTPS 一个），
+    // 下面按顺序取第一个会抓到公网那个。少给一块，这里就只剩一个复选框，
+    // 「抓对了没有」不再是个变量。两块同时在的顺序另有一条专门测。
+    tunnel: null,
+    serve,
+  }, extra || {});
+
+  let tree7 = null;
+  let posted7 = [];
+  // 这次 POST 返回什么，由每条用例自己定——失败那条路要回的是 serve 自己的形状
+  // （带 reason 和 enableLink），不是配对信息。
+  let postReply = null;
+  let serveBox = () => [];
+
+  // **每条用例一套全新的状态单元。** 脚手架的 `draw()` 只把 `cursor` 归零，
+  // 不清 `cells`——所以上一条用例里「开开关失败了」留下的错误会一直挂在后面
+  // 每一条上。2026-09-25 就是这么撞上的：一条用例本该只有一条链接，却数出两条。
+  // 真机上不会这样（面板每次加载都是干净的），是脚手架复用了同一个组件实例。
+  const mount7 = async (payload) => {
+    const h = useHarness();
+    posted7 = [];
+    h.onUpdate(() => { tree7 = h.draw(Comp); });
+    serveBox = () => byType(tree7, 'input').filter((n) => n.props.type === 'checkbox');
+    setGlobal('fetch', async (url, init) => {
+      if (init && init.method === 'POST') {
+        posted7.push({ url, body: JSON.parse(init.body) });
+        return jsonResponse(200, postReply);
+      }
+      return jsonResponse(200, payload);
+    });
+    tree7 = h.draw(Comp);
+    h.runEffects();
+    await tick();
+  };
+
+  await check('HTTPS 没开时：开关未选中，并说清楚开了能换来什么', async () => {
+    await mount7(withServe({ installed: true, on: false, url: null, urlOfOtherPort: null, error: null }));
+    const text = textOf(tree7);
+    assert.match(text, /HTTPS 地址（Tailscale）/);
+    // 光说「没开」没用，得说清楚**开了能换来什么**，否则用户没理由去开它
+    assert.match(text, /通知/);
+    assert.match(text, /麦克风/);
+    // 还要说清楚它和上面那条明文 Tailscale 是同一台电脑，不是第四条路
+    assert.match(text, /同一台电脑/);
+  });
+
+  await check('HTTPS 开着时：开关选中，并指向面板上那条加密地址', async () => {
+    await mount7(withServe({
+      installed: true, on: true, url: 'https://x.ts.net/', urlOfOtherPort: null, error: null,
+    }));
+    const text = textOf(tree7);
+    assert.match(text, /已开启/);
+    assert.match(text, /「Tailscale（加密）」/, '要告诉用户上面哪一条是它');
+  });
+
+  await check('serve 配着但指的是别的端口：说清楚，不能含糊成「没开」', async () => {
+    // 含糊成「没开」的话，用户会以为是自己这台电脑不支持，然后放弃。
+    await mount7(withServe({
+      installed: true, on: false, url: null, urlOfOtherPort: 'https://x.ts.net/', error: null,
+    }));
+    const text = textOf(tree7);
+    assert.match(text, /指的是别的端口/);
+    assert.doesNotMatch(text, /^没开/, '不能只说没开');
+  });
+
+  await check('没装 Tailscale 时：开关禁用，别让人点了没反应', async () => {
+    await mount7(withServe({ installed: false, on: false, url: null, urlOfOtherPort: null, error: null }));
+    const text = textOf(tree7);
+    assert.match(text, /没装 Tailscale/);
+    assert.equal(serveBox().length, 1);
+    assert.equal(serveBox()[0].props.disabled, true, '装都没装，开关该是灰的');
+  });
+
+  // 这条是整块界面上最要紧的一条。tailnet 没开 Serve 是整个功能里门槛最高的一步，
+  // 而 Tailscale 官方把开启链接印在报错里了——把它原样递给用户，他点一下就完事。
+  // 界面上如果只显示一句「失败了」，用户就卡死在这里。
+  await check('tailnet 没开 Serve：报错要说明白，并且把开启链接做成可点的', async () => {
+    postReply = {
+      ok: false,
+      reason: 'tailnet',
+      error: 'Tailscale 的 Serve 功能还没在这个账号上打开。点下面这条链接开一下，然后回来再试一次。',
+      enableLink: 'https://login.tailscale.com/f/serve?node=nKZqMyw1VE11CNTRL',
+    };
+    await mount7(withServe({ installed: true, on: false, url: null, urlOfOtherPort: null, error: null }));
+    serveBox()[0].props.onChange({ target: { checked: true } });
+    await tick();
+
+    assert.equal(posted7.length, 1);
+    assert.equal(posted7[0].url, '/mini-remote/serve');
+    assert.deepEqual(posted7[0].body, { enabled: true });
+
+    const text = textOf(tree7);
+    assert.match(text, /Serve 功能还没在这个账号上打开/);
+    const links = byType(tree7, 'a').filter((n) => String(n.props.href).includes('login.tailscale.com'));
+    assert.equal(links.length, 1, '开启链接必须真的渲染成一个可点的链接');
+    assert.equal(links[0].props.href, 'https://login.tailscale.com/f/serve?node=nKZqMyw1VE11CNTRL');
+  });
+
+  // 下面三条测的是「还没走完这一关的人，面板上能看到什么」。
+  //
+  // 起因是用户 2026-09-25 提的问题：这插件不是给一个人用的，别人上手之后，
+  // 插件能不能自动带他走完这一步？不能（那是 tailnet 级、要浏览器会话的授权）。
+  // 那就必须**在点开关之前**就把该去哪儿说清楚，而不是等他点了、等十几秒、
+  // 失败了才知道。服务端早就算出了那两条链接，是界面把它们丢掉了。
+  await check('serve 没开、但报错里有开启链接时：不用点开关就先给出来', async () => {
+    await mount7(withServe({
+      installed: true,
+      on: false,
+      url: null,
+      urlOfOtherPort: null,
+      error: null,
+      enableLink: 'https://login.tailscale.com/f/serve?node=nKZqMyw1VE11CNTRL',
+    }));
+    const links = byType(tree7, 'a').filter((n) => String(n.props.href).includes('/f/serve'));
+    assert.equal(links.length, 1, '还没点开关，这条链接就该在了');
+    assert.equal(links[0].props.href, 'https://login.tailscale.com/f/serve?node=nKZqMyw1VE11CNTRL');
+    assert.match(textOf(tree7), /插件代不了你点/, '要说清楚这一步得他自己在浏览器里点');
+  });
+
+  await check('装了但没登录：说的是「没登录」，并且给出登录链接', async () => {
+    // 合成一句「没开」的话，一个还没登录的人会反复点开关——怎么点都不会有反应，
+    // 因为手机要连的那个地址，是登录之后才存在的。
+    await mount7(withServe({
+      installed: true,
+      on: false,
+      url: null,
+      urlOfOtherPort: null,
+      error: 'Tailscale 装了，但这个账号还没登录。',
+      needsLogin: true,
+      loginUrl: 'https://login.tailscale.com/a/abc123def456',
+    }));
+    const text = textOf(tree7);
+    assert.match(text, /还没登录/);
+    assert.doesNotMatch(text, /^没开/, '不能含糊成「没开」');
+    const links = byType(tree7, 'a').filter((n) => String(n.props.href).includes('login.tailscale.com'));
+    assert.equal(links.length, 1);
+    assert.equal(links[0].props.href, 'https://login.tailscale.com/a/abc123def456');
+    assert.equal(serveBox()[0].props.disabled, true, '登录之前点开关没有意义，该是灰的');
+  });
+
+  await check('状态问不出来时：原文照登，不假装成「没开」', async () => {
+    await mount7(withServe({
+      installed: true,
+      on: false,
+      url: null,
+      urlOfOtherPort: null,
+      error: '问不出来 Tailscale serve 的现状。',
+    }));
+    assert.match(textOf(tree7), /问不出来/);
+  });
+
+  await check('成功开启后：面板换成新状态，开关变选中', async () => {
+    postReply = withServe({
+      installed: true, on: true, url: 'https://x.ts.net/', urlOfOtherPort: null, error: null,
+    });
+    await mount7(withServe({ installed: true, on: false, url: null, urlOfOtherPort: null, error: null }));
+    serveBox()[0].props.onChange({ target: { checked: true } });
+    await tick();
+    assert.match(textOf(tree7), /已开启/);
+  });
+
+  await check('整块面板报错时，HTTPS 开关仍然露得出来', async () => {
+    // 和公网那条同理：tailnet 没开 Serve 的时候，面板上其它东西多半也在报错，
+    // 而那正是用户最需要看到那条开启链接的时候。
+    await mount7(withServe(
+      { installed: true, on: false, url: null, urlOfOtherPort: null, error: null },
+      { ok: false, error: '没找到手机能连上的地址。', entries: undefined },
+    ));
+    assert.match(textOf(tree7), /HTTPS 地址（Tailscale）/);
+    assert.equal(serveBox().length, 1);
+  });
+
+  await check('公网和 HTTPS 两块同时出现时，HTTPS 排在公网后面', async () => {
+    // 顺序是有意的：三条连接路径（内网 / Tailscale / 公网）先说完，
+    // 再补一句 Tailscale 那条路还能换成加密的。反过来的话用户会以为
+    // HTTPS 是第四条路，而它其实只是同一条路上的一个开关。
+    await mount7(withServe(
+      { installed: true, on: false, url: null, urlOfOtherPort: null, error: null },
+      { tunnel: { enabled: false, up: false, starting: false, error: null } },
+    ));
+    const text = textOf(tree7);
+    assert.ok(
+      text.indexOf('公网访问') < text.indexOf('HTTPS 地址（Tailscale）'),
+      'HTTPS 那一块该排在公网后面',
+    );
+    assert.equal(serveBox().length, 2, '两块各有一个开关');
+  });
+}
+
 // ---------------------------------------------------------------- 结果
 
 console.log(`\n通过 ${passed} 项，失败 ${failures.length} 项。`);

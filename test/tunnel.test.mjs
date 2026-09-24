@@ -295,6 +295,78 @@ test('装了但没登录：说的是「没登录」，不是叫人家再装一�
   assert.equal(notice.installed, true)
 })
 
+// ---------------------------------------------------------------------------
+// Tailscale 那条路上的 HTTPS 地址（2026-09-24）
+// ---------------------------------------------------------------------------
+
+test('serve 开着时，配对面板多出一条加密的 Tailscale 地址', async () => {
+  const payload = await buildPairing({
+    port: 3090,
+    token: 'abc123',
+    bound: [],
+    serve: { installed: true, url: 'https://desktop-gbsdc68.tail0429e3.ts.net/' },
+  })
+  assert.equal(payload.ok, true)
+  assert.equal(payload.entries.length, 1)
+  const [entry] = payload.entries
+  assert.equal(entry.kind, 'tailscale-https')
+  // 尾斜杠不能拼成 `//mini`——serve 报出来的网址是带尾斜杠的。
+  assert.equal(entry.url, 'https://desktop-gbsdc68.tail0429e3.ts.net/mini?token=abc123')
+  assert.match(entry.qr, /^data:image\/png;base64,/)
+  assert.match(entry.hint, /加密/, '要说清楚它和明文那条的区别在哪儿')
+  assert.match(
+    entry.hint,
+    /通知|麦克风/,
+    '还要说清楚加密能换来什么——否则用户看不出两条码为什么要并存',
+  )
+})
+
+test('serve 没开时，不出现那条加密地址', async () => {
+  const payload = await buildPairing({
+    port: 3090,
+    token: 'abc123',
+    bound: [],
+    serve: { installed: true, url: null, urlOfOtherPort: null },
+  })
+  assert.equal(payload.ok, false, 'bound 是空的，所以一条地址都没有')
+  assert.ok(!payload.entries, '不该凭空冒出一条')
+  assert.equal(payload.serve.on, false)
+})
+
+test('serve 配着、但指的是别的端口：不能当成本插件的地址', async () => {
+  // serve 完全可能被用户拿去转发别的东西。指向别人的时候把地址摆到手机上，
+  // 用户扫出来是另一个服务——比不给更糟。
+  const payload = await buildPairing({
+    port: 3090,
+    token: 'abc123',
+    bound: [],
+    serve: { installed: true, url: null, urlOfOtherPort: 'https://x.ts.net/' },
+  })
+  assert.equal(payload.serve.on, false)
+  assert.equal(
+    payload.serve.urlOfOtherPort,
+    'https://x.ts.net/',
+    '要留着它，界面才说得出「配着，但指的是别的端口」而不是含糊的「没开」',
+  )
+})
+
+test('serve 那个字段在**每一条**返回路径上都要有', async () => {
+  // 第 26 轮吃过一次亏：tailscale 那个字段只在成功路径上带，失败的时候那一行
+  // 又会整个消失，用户看到的是「这里什么都没有」，不知道自己缺了什么。
+  //
+  // 四种返回路径里能造出三种（「一条地址都没有」那种要求本机网卡全空，造不出来）。
+  const cases = [
+    ['成功', { port: 3090, token: 'a', bound: [], serve: { url: 'https://x.ts.net/' } }],
+    ['隧道报错', { port: 3090, token: 'a', bound: [], tunnel: { enabled: true, error: '炸了' } }],
+    ['绑定配置问题', { port: 3090, token: 'a', bound: [], tunnel: { enabled: false } }],
+  ]
+  for (const [name, opts] of cases) {
+    const payload = await buildPairing(opts)
+    assert.ok('serve' in payload, `${name} 那条返回路径上缺了 serve 字段`)
+    assert.equal(typeof payload.serve.installed, 'boolean', `${name}：installed 该是布尔`)
+  }
+})
+
 test('配对面板里始终带着 tailscale 这个字段，界面才有得判断', async () => {
   const payload = await buildPairing({
     port: 3090,

@@ -25,6 +25,7 @@ window.__ModuleLoader__.load({
     var PAIRING_PATH = '/mini-remote/pairing';
     var TOKEN_PATH = '/mini-remote/token';
     var TUNNEL_PATH = '/mini-remote/tunnel';
+    var SERVE_PATH = '/mini-remote/serve';
 
     // 颜色走 DSH 主题变量（真名前缀是 --dsw-alias-，深浅色自动跟随）。
     // 每个变量都带一个浅色兜底值，变量缺失时界面仍然可读。
@@ -73,6 +74,11 @@ window.__ModuleLoader__.load({
       var pwdErrState = useState(null);
       var pwdError = pwdErrState[0];
       var setPwdError = pwdErrState[1];
+      // HTTPS 开关的失败信息单独存一份（不是复用上面的 failure）：它要多带一条
+      // 「点这里去开启」的链接，一条字符串装不下。
+      var serveErrState = useState(null);
+      var serveError = serveErrState[0];
+      var setServeError = serveErrState[1];
 
       // 同源 GET，不带任何 token：这台电脑自己读得到，别人的电脑读不到。
       useEffect(function () {
@@ -180,6 +186,57 @@ window.__ModuleLoader__.load({
           .then(function () { setBusy(false); });
       };
 
+      /**
+       * 开/关 Tailscale 的 HTTPS 地址。
+       *
+       * 失败时**不复用上面那个 failure**：这条要多带一条「点这里去开启」的链接，
+       * 一条字符串装不下。而那条链接恰恰是整个功能里门槛最高的一步——tailnet
+       * 后台的一个一次性开关。Tailscale 官方把它印在报错里了，原样递给用户就行。
+       *
+       * 成功与否的判据是响应体里有没有 `reason`：serve 失败那条路带它，
+       * 配对信息那条路不带。配对信息本身也可能是 `ok:false`（比如一条地址都没有），
+       * 那种情况照旧交给 setInfo，让面板自己把它画成错误块。
+       */
+      var toggleServe = function (enabled) {
+        if (busy) return;
+        setBusy(true);
+        setServeError(null);
+        fetch(SERVE_PATH, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ enabled: enabled }),
+        })
+          .then(function (res) {
+            return res.json().then(
+              function (body) { return { status: res.status, body: body }; },
+              function () { return { status: res.status, body: null }; },
+            );
+          })
+          .then(function (r) {
+            var b = (r.body && typeof r.body === 'object') ? r.body : null;
+            if (!b) {
+              setServeError({
+                error: '切换 HTTPS 地址失败：服务返回了 HTTP ' + r.status + '。',
+                enableLink: null,
+              });
+              return;
+            }
+            if (b.reason) {
+              setServeError({ error: b.error || '开 HTTPS 地址失败了。', enableLink: b.enableLink || null });
+              return;
+            }
+            setInfo(b);
+            setFailure(null);
+          })
+          .catch(function (err) {
+            setServeError({
+              error: '切换 HTTPS 地址失败：' + ((err && err.message) || String(err)),
+              enableLink: null,
+            });
+          })
+          .then(function () { setBusy(false); });
+      };
+
       return h('div', { style: styles.card },
         h('div', { style: styles.title }, '手机遥控'),
         h('div', { style: styles.muted }, '手机扫码就能用，不用输密码——密码已经编在二维码里了。'),
@@ -192,11 +249,20 @@ window.__ModuleLoader__.load({
           busy: busy,
           pwdError: pwdError,
           savePassword: savePassword,
+        }, {
+          // **摊平再传**。serveError 自己是 `{error, enableLink}`，如果直接写成
+          // `{error: serveError}`，serveBlock 里的 `err.error` 拿到的就是整个对象，
+          // 而 `h('div', {}, 对象)` 渲染出来是一个**空**的 div——错误文字一个字都不
+          // 显示，界面上看上去只是「点了没反应」。2026-09-24 就是这么踩进去的：
+          // 状态和渲染全是对的，只有最后一步取错了字段。
+          error: serveError ? serveError.error : null,
+          enableLink: serveError ? serveError.enableLink : null,
+          toggle: toggleServe,
         }),
       );
     }
 
-    function content(info, failure, copied, copy, busy, toggle, pwd) {
+    function content(info, failure, copied, copy, busy, toggle, pwd, serve) {
       if (failure) return h('div', { style: styles.error }, failure);
       if (!info) return h('div', { style: styles.loading }, '正在读取配对信息…');
 
@@ -220,7 +286,84 @@ window.__ModuleLoader__.load({
       // 出错时也要把开关露出来：不然「隧道起不来」会让整个面板变成一条报错，
       // 用户连关掉它的地方都找不到。
       if (info.tunnel) blocks.push(tunnelBlock(info.tunnel, busy, toggle));
+      // HTTPS 那一块：**不管配对信息成功还是失败都要出现**。失败时尤其要出现——
+      // tailnet 没开 Serve 的时候，用户需要的正是那条开启链接，而那时候面板上
+      // 其它东西多半也在报错，正好是他最需要指路的时候。
+      if (info.serve || serve.error) blocks.push(serveBlock(info.serve, serve, busy));
       return h('div', null, blocks);
+    }
+
+    /**
+     * Tailscale 的 HTTPS 地址这一块。
+     *
+     * 为什么值得单独占一块：手机端有三样东西被明文 http 挡着——完成后提醒、
+     * 语音输入、剪贴板的完整能力。浏览器只在加密连接上才给用。
+     * 开了这个，Tailscale 那条路上就多出一个 https:// 地址，那三样才有得谈。
+     *
+     * **它不是第四条路**：同一台电脑、同一个服务、同一条 Tailscale 通道，
+     * 只是把连接换成加密的。上面那条明文的照旧能用，也照旧显示。
+     */
+    function serveBlock(st, err, busy) {
+      var on = Boolean(st && st.on);
+      var installed = !st || st.installed !== false;
+      var other = st && st.urlOfOtherPort ? st.urlOfOtherPort : null;
+      var needsLogin = Boolean(st && st.needsLogin);
+      // 服务端已经算好了该说哪句话，界面照说就行。
+      var stateError = st && st.error ? st.error : null;
+      var status;
+      if (!installed) {
+        status = '这台电脑上没装 Tailscale，所以开不了。上面那条「在外面用（Tailscale）」里有下载链接。';
+      } else if (on) {
+        status = '已开启。上面那条「Tailscale（加密）」就是它——出门在外用它，地址不用写端口。';
+      } else if (needsLogin) {
+        // 这一步的下一步动作和「没开」完全不同：他得先去登录，登录之后那个地址才会存在。
+        // 合成一句「没开」，一个还没登录的人会反复点开关，怎么点都没反应。
+        status = 'Tailscale 装了，但这个账号还没登录。先在电脑上登录一次——手机要连的那个地址，是登录之后才有的。';
+      } else if (stateError) {
+        status = '问不出来 Tailscale 现在是什么状态。';
+      } else if (other) {
+        // 不能含糊地说「没开」：用户会以为是自己这台电脑不支持。
+        status = 'Tailscale 的 serve 配着，但它指的是别的端口，不是这个插件。想给手机用的话，把下面这个开关打开。';
+      } else {
+        status = '没开。开了之后 Tailscale 那条路上会多一个 https:// 地址——手机浏览器只在加密连接上才肯给用通知和麦克风。'
+          + '第一次开要在浏览器里确认一下（Tailscale 后台的一个开关），插件代不了你点。';
+      }
+
+      // 两条链接都是 Tailscale 官方给的，原样递过去。这是整个功能里门槛最高的两步：
+      // 一次是登录，一次是给 tailnet 开 Serve。自己写一句「请到后台开启」等于把门槛加回去。
+      var loginUrl = needsLogin && st.loginUrl ? st.loginUrl : null;
+      var enableUrl = (err && err.enableLink) || (st && st.enableLink) || null;
+      var shownError = (err && err.error) || stateError;
+
+      return h('div', { key: 'serve', style: styles.block },
+        h('div', { style: styles.entryTitle }, 'HTTPS 地址（Tailscale）'),
+        h('div', { style: styles.muted }, '和上面那条 Tailscale 是同一台电脑，区别只在连接加不加密。地址好记，也不用写端口。'),
+        h('label', { style: styles.toggleRow },
+          h('input', {
+            type: 'checkbox',
+            checked: on,
+            disabled: Boolean(busy) || !installed || needsLogin,
+            onChange: function (e) { err.toggle(e.target.checked); },
+          }),
+          h('span', null, on ? '已开启' : '开启'),
+        ),
+        h('div', { style: shownError ? styles.detail : styles.muted }, status),
+        loginUrl ? h('a', {
+          href: loginUrl,
+          target: '_blank',
+          rel: 'noreferrer',
+          style: styles.link,
+        }, '点这里去登录（Tailscale 官方页面）') : null,
+        enableUrl ? h('a', {
+          href: enableUrl,
+          target: '_blank',
+          rel: 'noreferrer',
+          style: styles.link,
+        }, '点这里去开启（Tailscale 官方页面）') : null,
+        // 失败原文照登，别吞。这条路上最可能的失败是「tailnet 还没开 Serve」，
+        // 而那种情况 Tailscale 会印出一条开启链接——上面那条链接才是用户要的东西。
+        err && err.error ? h('div', { style: styles.error }, err.error) : null,
+      );
     }
 
     /**

@@ -72,6 +72,12 @@ function readPort() {
 }
 
 const port = Number(arg('--port', readPort()))
+// 设置页那几个接口（`/mini-remote/*`）注册在 **DSH 自己的 web 服务**上，不是插件这台。
+// 用 base 去打它们会拿到 404——2026-09-25 就是这么白跑了一轮，而且更糟：
+// 404 的正文里没有 `serve` 字段，于是「serve 没开时不出现 https 那条」**假绿**了。
+// 判据错的时候，绿比红危险。
+const adminPort = Number(arg('--admin-port', 3080))
+const adminBase = `http://127.0.0.1:${adminPort}`
 const token = readToken()
 const base = `http://127.0.0.1:${port}`
 
@@ -414,6 +420,67 @@ check('立绘路径穿越被挡', trav.status === 404, `HTTP ${trav.status}`)
 check('页面把立绘地址带上了 token', html.includes("'/mini/art/' + file + '.webp?token='"))
 check('页面把构建指纹带上了立绘地址', html.includes("&v=' + encodeURIComponent(BUILD)"))
 check('立绘是两帧雪碧图', html.includes('poseFlip') && html.includes('background-size: 244px 106px'))
+
+// Tailscale 的 HTTPS 那条路（2026-09-24）。
+//
+// **只读，绝不去拨那个开关。** POST /mini-remote/serve 能真的开/关这台电脑上的
+// Tailscale serve，探活脚本去拨它，等于每次跑检查都可能改掉用户的设置。
+// 但只读也够：配对信息里带着 serve 的状态，那条 https 地址也带着。
+//
+// 用 adminBase：`/mini-remote/*` 注册在 DSH 自己的 web 服务上，不在插件这台。
+const pairing = await fetch(`${adminBase}/mini-remote/pairing`)
+  .then(async (r) => ({ status: r.status, body: await r.json().catch(() => ({})) }))
+  .catch((err) => ({ status: 0, body: null, error: String((err && err.message) || err) }))
+check(
+  '配对接口可用',
+  pairing.status === 200,
+  pairing.status ? `HTTP ${pairing.status}` : pairing.error,
+)
+
+// **先确认拿到的真是配对信息，再看里面有什么。**
+// 拿到 404 的话，`serve` 字段自然不存在，下面每一条都会安静地走向「没问题」那一支——
+// 2026-09-25 就假绿过一次：三项检查里两项红、第三项「不出现 https 那条」绿得毫无意义。
+// 判据错的时候，绿比红危险。
+const isPairing = Boolean(pairing.body && Array.isArray(pairing.body.entries))
+check(
+  '拿到的确实是配对信息，不是 404 之类',
+  isPairing,
+  isPairing ? `${pairing.body.entries.length} 条地址` : JSON.stringify(pairing.body).slice(0, 120),
+)
+
+if (isPairing) {
+  const serve = pairing.body.serve
+  check(
+    '配对信息里带 serve 状态',
+    typeof serve?.installed === 'boolean',
+    JSON.stringify(serve),
+  )
+  const httpsEntry = pairing.body.entries.find((e) => e.kind === 'tailscale-https')
+  if (serve?.on) {
+    check(
+      'serve 开着时，面板上有一条 https 的 Tailscale 地址',
+      Boolean(httpsEntry) && /^https:\/\//.test(httpsEntry.url || ''),
+      httpsEntry ? httpsEntry.url : '没找到',
+    )
+    if (httpsEntry) {
+      // 真发一次请求。证书、代理、Host 头、token 校验，一次全过——这是唯一能证明
+      // 「手机走这条路真的连得上」的办法，光看配置对不对说明不了问题。
+      // 注意第一次可能要等十几秒（Tailscale 要去签证书），之后就快了。
+      const vurl = `${String(serve.url || '').replace(/\/+$/, '')}/mini/api/version?token=${token}`
+      const t0 = Date.now()
+      const https = await fetch(vurl)
+        .then(async (r) => ({ status: r.status, body: await r.json().catch(() => ({})) }))
+        .catch((err) => ({ status: 0, error: String((err && err.message) || err) }))
+      check(
+        '走 https 真能连上这台电脑，而且跑的是同一份代码',
+        https.status === 200 && https.body?.build === mine,
+        https.status ? `HTTP ${https.status}, ${Date.now() - t0}ms` : https.error,
+      )
+    }
+  } else {
+    check('serve 没开时，面板上不出现 https 那条', !httpsEntry, httpsEntry ? httpsEntry.url : '')
+  }
+}
 
 console.log('')
 console.log(problems.length ? `有 ${problems.length} 项没过：${problems.join('、')}` : '全部通过。')
