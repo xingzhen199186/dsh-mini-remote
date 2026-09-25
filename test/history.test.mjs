@@ -147,3 +147,48 @@ test('取最后一条回复：只有用户说过话时给 null，不能拿用户
   assert.equal(lastReply([], 'sess-1'), null)
   assert.equal(lastReply(null, 'sess-1'), null)
 })
+
+// ---------------------------------------------------------------------------
+// 斜杠指令也在会话记录里——重放的时候不能把它丢了，也不能把它当成一轮对话
+// ---------------------------------------------------------------------------
+
+const cmdRun = (id, name, args = '') => ev('command/run', { commandId: id, name, args })
+const cmdDone = (id, kind, text) => ev('command/done', { commandId: id, kind, text })
+
+test('重放：斜杠指令单独成条，夹在两轮对话中间不串位', () => {
+  const rows = replayHistory([
+    ...turn('第一问', '第一答'),
+    cmdRun('c1', 'compact'),
+    cmdDone('c1', 'success', '压好了'),
+    ...turn('第二问', '第二答'),
+  ])
+
+  assert.deepEqual(rows.map((r) => r.role), ['user', 'assistant', 'command', 'user', 'assistant'])
+  assert.equal(rows[2].name, 'compact')
+  assert.equal(rows[2].kind, 'success')
+  assert.equal(rows[2].text, '压好了')
+  // 时间戳取事件自己的，不是「现在」——它要和手机上实时记的那一份按时间合成
+  assert.equal(typeof rows[2].timestamp, 'number')
+})
+
+test('重放：只重放出「开始」没重放出「收尾」的指令，还挂着「执行中」', () => {
+  // 真实场景：日志尾部窗口正好截在两条事件中间，或者那条指令跑的时候插件还没起来。
+  const rows = replayHistory([...turn('问', '答'), cmdRun('c1', 'goal', ' clear')])
+
+  const row = rows.at(-1)
+  assert.equal(row.role, 'command')
+  assert.equal(row.name, 'goal')
+  assert.equal(row.args, ' clear', '名字后面那段原样留着，指令自己解释')
+  assert.equal(row.kind, 'running')
+})
+
+test('重放：指令不是回答，单帧模式拿的还是模型那句', () => {
+  const rows = replayHistory([
+    ...turn('问一句', '答一句'),
+    cmdRun('c1', 'compact'),
+    cmdDone('c1', 'error', '压不动'),
+  ])
+
+  assert.equal(lastReply(rows, 'sess-1').text, '答一句',
+    '指令的结果是系统动作，不是 AI 的回答——单帧模式显示它会让用户以为模型说了这句')
+})

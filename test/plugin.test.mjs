@@ -57,7 +57,7 @@ function makeCtx(services, directNames) {
   })
 }
 
-function mockCtx({ attachments, sessionQuery } = {}) {
+function mockCtx({ attachments, sessionQuery, commands } = {}) {
   const handlers = new Map()
   // `ctx.on` 的第三个参数（注册选项）也要留下来：提问钩子靠 `prepend` 才能排到
   // 电脑浏览器前面，而漏掉它**不报错、只是永远轮不到**。这种错只能靠断言钉住。
@@ -105,17 +105,21 @@ function mockCtx({ attachments, sessionQuery } = {}) {
       // 同上：会话记录服务（真机上是 DSH 自己的 DSH 会话记录）。插件要拿它
       // 读一个会话**完整**的历史，所以测试也得能把它摆出来、也能让它缺席。
       ...(sessionQuery ? { sessionQuery } : {}),
+      // 同上：斜杠指令账本（DSH 的 `ctx.commands`）。**可缺席**也是一条要覆盖的路径：
+      // DSH 明说无界面的组合不提供这个面，那时候手机上打 `/` 必须如实说没有指令，
+      // 而不是显示一个空名单。
+      ...(commands ? { commands } : {}),
     }, ['agents', 'logger', 'on', 'effect']),
   }
 }
 
 /** 起一个被测插件实例，返回访问它所需的一切。 */
-async function bootPlugin({ agents = {}, config = {}, attachments = null, sessionQuery = null } = {}) {
+async function bootPlugin({ agents = {}, config = {}, attachments = null, sessionQuery = null, commands = null } = {}) {
   const home = mkdtempSync(join(tmpdir(), 'dsh-mini-home-'))
   process.env.DSH_HOME = home
 
   const port = await freePort()
-  const mock = mockCtx({ attachments, sessionQuery })
+  const mock = mockCtx({ attachments, sessionQuery, commands })
   const { ctx, handlers, handlerOptions, agents: agentMap } = mock
   for (const [id, agent] of Object.entries(agents)) agentMap.set(id, agent)
 
@@ -1595,4 +1599,217 @@ test('没有会话记录服务时（headless 组合）：行为跟以前一样�
   assert.equal(res.ok, true)
   assert.deepEqual(res.state.history, [])
   assert.equal(res.state.historyLoading, false)
+})
+
+// ---------------------------------------------------------------------------
+// 斜杠指令：手机上打 `/` 能列出并执行 DSH 的指令
+// ---------------------------------------------------------------------------
+
+/**
+ * 假的指令账本，形状照抄 DSH 的 `ctx.commands`（list / find / execute）。
+ * 记下每一次执行——「整行原文原样交给 DSH」是这里最要紧的一条断言。
+ */
+function fakeCommands(descriptors) {
+  const calls = []
+  return {
+    calls,
+    list: () => descriptors,
+    find: (_agent, name) => descriptors.find((d) => d.name === name),
+    execute: async (agent, line, attachments, signal) => {
+      calls.push({ agent, line, attachments, signal })
+      return { commandId: 'c1', result: { kind: 'success', text: '好了' } }
+    },
+  }
+}
+
+/** 一个「还活着」的 agent：指令面只认活着的会话。 */
+const liveAgent = (id) => ({ id, status: 'idle', session: { header: { id } } })
+
+const getCommands = async (p) => (await fetch(`${p.base}/mini/api/commands?token=${p.token}`)).json()
+const postCommand = async (p, line) => {
+  const res = await fetch(`${p.base}/mini/api/command?token=${p.token}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ line }),
+  })
+  return { status: res.status, body: await res.json() }
+}
+
+test('指令名单：问的是 DSH 自己的账本，手机不另维护一份', async (t) => {
+  const commands = fakeCommands([
+    { name: 'goal', description: 'Set a goal', input: { hint: 'want to achieve', attachments: true } },
+    { name: 'compact', description: 'Compact the context' },
+  ])
+  const p = await bootPlugin({ agents: { 'sess-c': liveAgent('sess-c') }, commands })
+  t.after(p.stop)
+
+  await bindSession(p, 'sess-c')
+  const body = await getCommands(p)
+  assert.equal(body.ok, true)
+  assert.deepEqual(body.commands.map((c) => c.name), ['compact', 'goal'])
+  assert.equal(body.commands[1].hint, 'want to achieve')
+  assert.equal(body.commands[1].attachments, true)
+})
+
+test('指令名单：会话没在跑就说清楚，不能回一个空名单', async (t) => {
+  // 空名单的意思是「一条指令都没有」——而这里是「拿不到」，用户该做的是把会话跑起来。
+  const p = await bootPlugin({ commands: fakeCommands([{ name: 'compact', description: 'x' }]) })
+  t.after(p.stop)
+
+  await bindSession(p, 'sess-sleeping')
+  const body = await getCommands(p)
+  assert.equal(body.ok, false)
+  assert.match(body.error, /没在跑/)
+  assert.equal(body.commands, undefined, '拿不到就不给名单，别让手机显示成「没有指令」')
+})
+
+test('指令名单：这台电脑没有指令服务时（headless 组合）如实说没有', async (t) => {
+  const p = await bootPlugin({ agents: { 'sess-c': liveAgent('sess-c') } }) // 不传 commands
+  t.after(p.stop)
+
+  await bindSession(p, 'sess-c')
+  const body = await getCommands(p)
+  assert.equal(body.ok, false)
+  assert.match(body.error, /没提供指令/)
+})
+
+test('执行指令：整行原文原样交给 DSH，一个附件都不带', async (t) => {
+  const commands = fakeCommands([{ name: 'goal', description: 'x', input: { hint: 'y' } }])
+  const p = await bootPlugin({ agents: { 'sess-c': liveAgent('sess-c') }, commands })
+  t.after(p.stop)
+
+  await bindSession(p, 'sess-c')
+  const { status, body } = await postCommand(p, '/goal 拿到三个客户')
+  assert.equal(status, 200)
+  assert.equal(body.ok, true)
+
+  assert.equal(commands.calls.length, 1)
+  // 参数不许我们代拆：DSH 的契约里 rawInput 含分隔空白，由指令自己解释。
+  assert.equal(commands.calls[0].line, '/goal 拿到三个客户')
+  assert.deepEqual(commands.calls[0].attachments, [],
+    '手机上传的小票和指令要的不是同一套东西，宁可一个都不传，也不能拿错东西顶上')
+  assert.ok(commands.calls[0].signal, '得给 DSH 一个可中止的信号')
+})
+
+test('执行指令：不等它跑完就回话（结果走事件流）', async (t) => {
+  // 像 /compact 那种要跑十几秒的指令，如果这条请求等它跑完，手机上就是「点了没反应」。
+  const never = { list: () => [{ name: 'compact', description: 'x' }], find: () => ({ name: 'compact' }), execute: () => new Promise(() => {}) }
+  const p = await bootPlugin({ agents: { 'sess-c': liveAgent('sess-c') }, commands: never })
+  t.after(p.stop)
+
+  await bindSession(p, 'sess-c')
+  const { status, body } = await postCommand(p, '/compact')
+  assert.equal(status, 200)
+  assert.equal(body.ok, true)
+})
+
+test('执行指令：没有这条指令就拒绝，绝不退回去当普通消息发给模型', async (t) => {
+  const commands = fakeCommands([{ name: 'compact', description: 'x' }])
+  const p = await bootPlugin({ agents: { 'sess-c': liveAgent('sess-c') }, commands })
+  t.after(p.stop)
+
+  await bindSession(p, 'sess-c')
+  const { status, body } = await postCommand(p, '/xyz')
+  assert.equal(status, 409)
+  assert.equal(body.ok, false)
+  assert.equal(body.error, '没有 /xyz 这条指令。')
+  assert.equal(commands.calls.length, 0, '认不出来就不该执行任何东西')
+})
+
+test('执行指令：形状不对时说语法，不说「没这条指令」', async (t) => {
+  const commands = fakeCommands([])
+  const p = await bootPlugin({ agents: { 'sess-c': liveAgent('sess-c') }, commands })
+  t.after(p.stop)
+
+  await bindSession(p, 'sess-c')
+  // DSH 的名字必须以小写字母开头：`/9x` 连指令都不是，和「没这条指令」是两回事。
+  const { body } = await postCommand(p, '/9x')
+  assert.equal(body.ok, false)
+  assert.match(body.error, /小写字母/)
+  assert.equal(commands.calls.length, 0)
+})
+
+test('执行指令：会话没在跑时拒绝，别拿着旧会话去跑', async (t) => {
+  const commands = fakeCommands([{ name: 'compact', description: 'x' }])
+  const p = await bootPlugin({ commands })
+  t.after(p.stop)
+
+  await bindSession(p, 'sess-sleeping')
+  const { status, body } = await postCommand(p, '/compact')
+  assert.equal(status, 409)
+  assert.match(body.error, /没在跑/)
+  assert.equal(commands.calls.length, 0)
+})
+
+test('指令事件：手机上新长出一条「指令」行，不是用户的气泡', async (t) => {
+  const p = await bootPlugin({ agents: { 'sess-c': liveAgent('sess-c') } })
+  t.after(p.stop)
+  await bindSession(p, 'sess-c')
+
+  const session = { id: 'sess-c', header: { id: 'sess-c' } }
+  const handle = p.handlers.get('session/event')
+  handle(session, ev('command/run', { commandId: 'c1', name: 'compact', args: '' }))
+
+  const snap = await waitSnap(p, (s) => s.history.some((m) => m.role === 'command'), '指令行出现')
+  const row = snap.history.at(-1)
+  assert.equal(row.role, 'command', '指令不是用户说的话，也不是模型的回答，是第三种')
+  assert.equal(row.name, 'compact')
+  assert.equal(row.kind, 'running')
+  assert.equal(snap.history.filter((m) => m.role === 'user').length, 0,
+    '指令绝不能长成一条用户气泡——手机上那会分不清「这句是谁说的」')
+  assert.equal(snap.latest, null, '指令不是「最终回复」，单帧模式不该拿它顶上')
+})
+
+test('合成：同一条指令，硬盘那份还写着「执行中」，手里那份已经拿到结果', async (t) => {
+  // 读日志的那一瞬间 /compact 确实还在跑（它要跑十几秒，而一分钟重读一次日志，
+  // 撞上的机会不小），所以硬盘那份只有 command/run。手里这份后来收到了收尾。
+  // 关键是两条的时间戳**一样**（同一条 run 事件）——只按时间戳接尾的话，
+  // 手里那条接不上去，手机上会一直挂着「执行中」直到下一次重读。
+  const at = 1_700_000_000_000 + 5000
+  const runEvent = {
+    type: 'command/run', seq: 0, time: at,
+    data: { commandId: 'c1', name: 'compact', args: '' },
+  }
+  const query = fakeQuery({ 'sess-cmd': [...logOf([['问', '答']]), runEvent] })
+  const p = await bootPlugin({ agents: { 'sess-cmd': liveAgent('sess-cmd') }, sessionQuery: query })
+  t.after(p.stop)
+
+  const session = { id: 'sess-cmd', header: { id: 'sess-cmd' } }
+  const handle = p.handlers.get('session/event')
+  handle(session, runEvent)
+  handle(session, {
+    type: 'command/done', seq: 0, time: at + 5000,
+    data: { commandId: 'c1', kind: 'success', text: '压好了' },
+  })
+
+  await bindSession(p, 'sess-cmd')
+  // 等到硬盘那份真的读回来了（「答」只可能来自日志），才能断言合成结果。
+  const snap = await waitSnap(p, (s) => s.history.some((m) => m.text === '答'), '读回来')
+
+  const cmds = snap.history.filter((m) => m.role === 'command')
+  assert.equal(cmds.length, 1, '同一条指令不能出现两行')
+  assert.equal(cmds[0].kind, 'success', '手里那份已经收尾了，不能还挂着硬盘里那个「执行中」')
+  assert.equal(cmds[0].text, '压好了')
+  assert.equal(cmds[0].timestamp, at, '时间戳还是那条事件自己的，不是收尾那一刻')
+})
+
+test('指令事件：收尾只改那一条，单帧模式显示的还是模型那句回答', async (t) => {
+  const p = await bootPlugin({ agents: { 'sess-c': liveAgent('sess-c') } })
+  t.after(p.stop)
+  await bindSession(p, 'sess-c')
+
+  const session = { id: 'sess-c', header: { id: 'sess-c' } }
+  const handle = p.handlers.get('session/event')
+  // 先跑完一轮真实的对话，单帧模式里就有了一句回答。
+  for (const e of logOf([['问一句', '答完了']])) handle(session, e)
+  await waitSnap(p, (s) => s.latest?.text === '答完了', '回答落地')
+
+  handle(session, ev('command/run', { commandId: 'c9', name: 'compact', args: '' }))
+  await waitSnap(p, (s) => s.history.some((m) => m.role === 'command'), '指令行出现')
+  handle(session, ev('command/done', { commandId: 'c9', kind: 'error', text: '压不动' }))
+
+  const snap = await waitSnap(p, (s) => s.history.at(-1)?.kind === 'error', '收尾')
+  assert.equal(snap.history.filter((m) => m.role === 'command').length, 1, '收尾是改那一条，不是再加一条')
+  assert.equal(snap.history.at(-1).text, '压不动')
+  assert.equal(snap.latest.text, '答完了', '指令跑完不该顶掉单帧模式里模型那句回答')
 })

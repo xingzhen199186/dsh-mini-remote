@@ -170,6 +170,28 @@
   /* 聊天模式下 AI 的回答**不套气泡**（用户要求「参考单帧模式那样」）。
      用户自己的指令仍然是气泡，一左一右、一个有框一个没框，正好分得清谁说的。 */
   .said { margin-bottom: 18px; }
+  /* ---------- 历史里的一条指令（会话做的一个动作，不是谁说的话） ----------
+     和上面两种气泡都刻意画得不同：不套框、不给复制按钮，只用左边一条细线起头。
+     它是**系统动作**——长得像一句话，就会被当成 AI 的回答去读，而它根本不是回答。 */
+  .cmd {
+    display: flex; align-items: baseline; gap: 8px;
+    width: fit-content; max-width: 100%;
+    margin: 0 0 14px; padding: 4px 10px 4px 9px;
+    border-left: 2px solid var(--line); border-radius: 0 8px 8px 0;
+    background: var(--panel-2); font-size: 13px; line-height: 1.5;
+  }
+  /* 名字加参数排一行，太长就省略——它是「做了哪件事」的标签，不是正文。 */
+  .cmd .cmd-line {
+    min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    color: var(--fg);
+  }
+  .cmd .cmd-res { flex: 0 0 auto; color: var(--muted); }
+  .cmd.success { border-left-color: var(--ok); }
+  .cmd.success .cmd-res { color: var(--ok); }
+  /* 出错的那一种必须是红的：整串历史里只有它需要用户抬眼看一下。 */
+  .cmd.error { border-left-color: var(--err); }
+  .cmd.error .cmd-res { color: var(--err); }
   /* ---------- 正在流出来的那一段 ---------- */
   /* 和最终答案**刻意画得不一样**：上面一条虚线、末尾一个闪动的竖条、没有复制按钮。
      三样都在说同一句话——「这不是最终答案，还会变」。等答案落定整块被换掉。 */
@@ -374,6 +396,34 @@
     font-size: 15px; line-height: 1; cursor: pointer;
   }
   .chip.failed { border-color: var(--danger, #dc2626); }
+
+  /* ---------- 指令菜单（在输入框里打 / 时弹出来的那个列表） ----------
+     排在底栏**上面**，不挡住输入框：手机屏幕就那么大，把它盖住，用户就看不见自己
+     正在打的那一行字了——手机上没有悬停，也没有第二个地方能看。 */
+  .cmd-menu {
+    flex: 0 0 auto; max-height: 42vh; overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    padding: 6px 8px; background: var(--panel); border-top: 1px solid var(--line);
+  }
+  .cmd-menu[hidden] { display: none; }
+  .cmd-menu .cmd-row {
+    display: flex; align-items: baseline; gap: 10px; width: 100%;
+    padding: 9px 8px; border: none; border-radius: 8px; background: none;
+    color: var(--fg); font: inherit; font-size: 14.5px; text-align: left; cursor: pointer;
+  }
+  .cmd-menu .cmd-row:active { background: var(--panel-2); }
+  .cmd-menu .cmd-name {
+    flex: 0 0 auto; color: var(--accent);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  /* 说明收成一行：这一屏是「扫一眼挑一个」，不是读文档的地方。 */
+  .cmd-menu .cmd-desc {
+    flex: 1 1 auto; min-width: 0; color: var(--muted); font-size: 12.5px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  /* 取不到指令时说清原因，**不显示空列表**：空列表看着就像「这个会话没有指令」，
+     而真实原因多半是「这个会话现在没在跑」——两件事，用户能做的事也不一样。 */
+  .cmd-menu .cmd-note { padding: 10px 8px; color: var(--muted); font-size: 13px; }
 
   /* ---------- 左侧导航栏 ---------- */
   #nav {
@@ -649,6 +699,11 @@
 </main>
 
 <div class="attach-bar" id="attachBar" hidden></div>
+
+<!-- 在输入框里打 / 时弹出来的指令列表。和附件小条一样排在底栏**上面**：
+     盖住输入框的话，用户就看不清自己正在打什么了。 -->
+<div class="cmd-menu" id="cmdMenu" hidden></div>
+
 <footer>
   <!-- 回形针。input 藏起来，按钮点它——iOS 上直接放一个 file input 样式很难统一。 -->
   <button class="attach" id="btnAttach" type="button" aria-label="上传文件" title="上传文件">
@@ -818,7 +873,15 @@
     historyLoading: false,
     // 「这份历史只到最近一段」（服务端读历史有上限时会给这一句）。
     historyTruncated: false,
-    historyNote: ''
+    historyNote: '',
+    // 斜杠指令的列表（在输入框里打 / 时弹出来的那个菜单）。
+    // **按绑定的会话缓存**：指令表是每个会话一份的，而这个会话没在跑时服务端一条都
+    // 读不到（回 ok:false + 一句话）。所以换了会话必须重取——否则用户点到的是上一个
+    // 会话的指令，点下去必然被拒，而他从屏幕上完全看不出为什么。
+    commands: null,        // null = 还没取到
+    commandsError: '',     // 取不到时服务端给的那句话，原样显示给用户
+    commandsFor: null,     // 上面这份数据是哪个会话的
+    commandsLoading: false // 正在取（挡住重复请求，见 loadCommands）
   };
   if (params.get('token')) {
     localStorage.setItem('dshMiniToken', params.get('token'));
@@ -1435,6 +1498,10 @@
         + ' data-copy="' + escapeHtml(latest.text) + '">' + ICON_COPY + '</button>'
         + '</div>');
     }
+    // 刚跑完的那条指令也要露出来（判据和为什么见 commandTail）。
+    // 「正在执行」那块照旧：它是常驻的 #work，跟这里没关系。
+    var tail = commandTail();
+    if (tail) parts.push(commandBlock(tail));
     if (live) parts.push(liveBlock(live));
     if (parts.length) {
       var stick = atBottom();
@@ -1488,6 +1555,58 @@
    */
   function liveBlock(text) {
     return '<div class="live"><div class="md">' + mdToHtml(text) + '</div></div>';
+  }
+
+  /**
+   * 历史里的一条指令（`role:'command'`）：这个会话执行了 /xxx，跑到哪一步了。
+   *
+   * 为什么单独一种长相：它既不是用户说的话，也不是 AI 说的话，而是**会话做的一个
+   * 动作**。套上气泡就成了一句人说的话，会被当成回答去读；给它复制按钮也没有意义
+   * （「/compact 执行中…」没有拿走的必要）。所以收成一行紧凑的条目：名字用等宽字体，
+   * 后面直接跟结果。
+   *
+   * 三种状态里只有 running 是「还不知道结果」：服务端在这一条上**不报进度**，
+   * 所以只能说「执行中…」——编一个百分比就是撒谎。
+   *
+   * 这两个函数夹在 liveBlock 和 renderChat 中间是有原因的，**别挪**：page.test.mjs
+   * 是按源码里的锚点串切片的——聊天模式那一套从 liveBlock 那一段切到 render 那一段，
+   * 单帧模式那一套从 scrolledReplyAt 那一段切到 renderChat 那一段，两把刀的交集就是
+   * 这里。放到交集外面，总有一套测试一跑就 ReferenceError。
+   * （顺带一句：这段注释里**不能**写出那几个锚点串的完整样子，否则 indexOf 会先命中
+   *   注释、把切片截断，报出来的是「SyntaxError」而不是人话。）
+   */
+  function commandBlock(m) {
+    // args 是名字后面**原样**的输入（含分隔空格），可能为空串——所以直接拼，
+    // 不自己补一个空格：补了就把「用户到底敲了什么」改样了。
+    var line = '/' + (m.name || '') + (m.args || '');
+    var kind = m.kind === 'error' ? 'error' : (m.kind === 'success' ? 'success' : 'running');
+    var res = kind === 'error' ? (m.text || '没跑起来')
+      : (kind === 'success' ? (m.text || '完成') : '执行中…');
+    return '<div class="cmd ' + kind + '">'
+      + '<span class="cmd-line">' + escapeHtml(line) + '</span>'
+      + '<span class="cmd-res">' + escapeHtml(res) + '</span></div>';
+  }
+
+  /**
+   * 单帧模式要跟着显示的那条指令：**历史里最后一条**，而且得真的是一条指令。
+   *
+   * 为什么要单独处理：单帧模式整屏只留最新一条回复，而指令**不产生回复**——用户点一下
+   * /compact，这里要是什么都不画，屏幕上就是一动不动，看着像点了个没反应的按钮。
+   *
+   * 用「最后一条」而不是「最近一条指令」：中间要是夹了别的消息（指令跑完模型又答了
+   * 一句），那条指令已经不是最新的事了，再把它贴在最下面就成了过期通知。
+   *
+   * 最后还有一道时间判断，别删。单帧模式的回答是走 SSE 的 reply 那条路来的，它
+   * **不往 history 里塞东西**（只有聊天模式才塞），所以 history 的尾巴会一直停在那条
+   * 指令上。不加这一道，新回答到了之后底下还挂着一条「执行中…」，看着像它卡住了。
+   */
+  function commandTail() {
+    var h = state.history || [];
+    var last = h.length ? h[h.length - 1] : null;
+    if (!last || last.role !== 'command') return null;
+    var lt = (state.latest && state.latest.timestamp) || 0;
+    if (lt && last.timestamp && last.timestamp < lt) return null;
+    return last;
   }
 
   /**
@@ -1554,6 +1673,9 @@
       return;
     }
     var html = list.map(function (m) {
+      // 指令行：这是会话做的一个动作，不是谁说的话，单独一种长相——
+      // 不套气泡、不给复制按钮（见 commandBlock 的说明）。
+      if (m.role === 'command') return commandBlock(m);
       // 被按停的那一轮：标一句，别让人以为模型答到一半断了。
       var stopped = m.interrupted ? '<span class="stopped">已停止</span>' : '';
       // 两种消息都给复制按钮。自己敲的指令也常有「再发一遍」「拿去别处用」的时候，
@@ -1676,7 +1798,14 @@
     state.historyNote = snap.historyNote || '';
     if (snap.sessions) state.sessions = snap.sessions;
     if (Array.isArray(snap.queued)) state.queued = snap.queued;
-    if ('boundSessionId' in snap) state.boundSessionId = snap.boundSessionId;
+    if ('boundSessionId' in snap) {
+      var wasBound = state.boundSessionId;
+      state.boundSessionId = snap.boundSessionId;
+      // 换了会话，指令菜单那份缓存就作废了（指令表是每个会话一份的，这个会话没在跑
+      // 时一条都读不到，见「斜杠指令」那一段）。重画一次，它自己会发现数据不属于
+      // 这个会话、去重取——否则用户点到的是上一个会话的指令，点下去必然被拒。
+      if (state.boundSessionId !== wasBound) paintCmdMenu();
+    }
     // running 也在快照里，而且算的是**当前绑定的那个会话**。不接的话，
     // 在导航栏切到别的会话时，那个会话会继承上一个会话的「正在执行」。
     if ('running' in snap) setRunning(snap.running);
@@ -2268,6 +2397,183 @@
     inputEl.style.height = Math.min(inputEl.scrollHeight, 140) + 'px';
   }
 
+  // ---------------- 斜杠指令（在输入框里打 / 时弹出来的菜单） ----------------
+  //
+  // 手机上敲 `/` 要能看见这个会话有哪些指令、点一下就执行。这一块管三件事：
+  // 菜单怎么出（paintCmdMenu）、点一条怎么处理（pickCommand）、执行本身
+  // （runCommand，下面 send 那条路也用它）。
+  //
+  // 数据**按会话缓存**，理由见 state 里 commands* 那几个字段。
+  //
+  // 输入框本来的提示语。选了一条「要参数」的指令时它会被换成那句 hint，发出去之后
+  // 要换回来——留着上一个指令的参数提示，下一个普通问题就顶着一句不相干的话。
+  var INPUT_HINT = inputEl.placeholder || '';
+
+  /**
+   * 输入框里那个「还没打完的指令」。
+   *
+   * 命中时返回 `/` 后面那一段（只打了一个 `/` 就是空串），没命中返回 null。
+   * 判据收得很紧：**整行**必须正好是「/ 加一串小写字母数字下划线横线」。出现空格、
+   * 前面多了别的字、用了大写，都算没命中——菜单收起来，交给 send 里那条分流规则。
+   *
+   * 只认小写是因为 DSH 的指令名就是小写：把大写也当命中，用户会看到「打了没反应」
+   * （过滤出零条 → 菜单收起），而真实原因只是他开着大写。
+   */
+  function slashQuery() {
+    var m = /^\/([a-z0-9_-]*)$/.exec(inputEl.value);
+    return m ? m[1] : null;
+  }
+
+  function hideCmdMenu() {
+    var el = $('cmdMenu');
+    if (!el) return;
+    el.hidden = true;
+    el.innerHTML = '';
+  }
+
+  /** 这个会话的指令表是不是还没有（或者需要重取）。 */
+  function needCommands() {
+    // 换了会话就得重取，见 state 里 commands* 的说明。
+    if (state.commandsFor !== state.boundSessionId) return true;
+    // 这个会话还什么都没拿到、也没失败过——第一次用到它的时候去取。
+    return !state.commands && !state.commandsError;
+  }
+
+  function loadCommands() {
+    // 正在取就别再发一次：菜单是跟着输入框每敲一个字重画的，不拦着的话
+    // 打「/compact」会连发八个请求。
+    if (state.commandsLoading) return;
+    state.commandsLoading = true;
+    // 记下这份数据是**给哪个会话**取的，而不是「请求是什么时候发的」——
+    // 请求飞在路上时用户完全可能已经切走了，回来那一份就不作数了。
+    var forSession = state.boundSessionId;
+    state.commands = null;
+    state.commandsError = '';
+    api('/mini/api/commands').then(function (res) {
+      state.commandsLoading = false;
+      if (forSession !== state.boundSessionId) return;   // 不是这个会话的，扔掉
+      state.commandsFor = forSession;
+      if (res && res.ok) {
+        state.commands = res.commands || [];
+        state.commandsError = '';
+      } else {
+        // 服务端给了原因（多半是「这个会话现在没在跑」）就原样留着显示。
+        // **不能显示成空列表**：那等于说「这个会话没有指令」，是另一回事。
+        state.commandsError = (res && res.error) || '读不到指令列表';
+      }
+      paintCmdMenu();
+    }).catch(function (err) {
+      state.commandsLoading = false;
+      if (forSession !== state.boundSessionId) return;
+      state.commandsFor = forSession;
+      state.commands = null;
+      state.commandsError = err.message || '读不到指令列表';
+      paintCmdMenu();
+    });
+  }
+
+  /**
+   * 画（或收起）那只菜单。
+   *
+   * 它**每回都按输入框重算**，自己不记「现在是开着还是关着」：这样就不会出现
+   * 「菜单和输入框对不上」的状态——比如程序清空输入框（点菜单、发完之后）不会触发
+   * input 事件，那种时候没人替我们收菜单，只能自己出面对齐。
+   */
+  function paintCmdMenu() {
+    var el = $('cmdMenu');
+    if (!el) return;
+    var prefix = slashQuery();
+    if (prefix === null) { hideCmdMenu(); return; }
+    var wasOpen = !el.hidden;
+    // 上次没取到时，**每次重新打开可以再试一次**（关着→打开这一下才重取，不是每敲一个
+    // 字都取）。这一条是必须的：失败的原因多半是「这个会话现在没在跑」，而用户完全可能
+    // 随后就发了条消息让它跑起来——那时再打 /，看到的却是上一句已经过时的话，
+    // 他会以为这个功能坏了。
+    if (needCommands() || (!wasOpen && state.commandsError)) loadCommands();
+    el.hidden = false;
+    if (state.commandsError) {
+      el.innerHTML = '<div class="cmd-note">' + escapeHtml(state.commandsError) + '</div>';
+      return;
+    }
+    if (!state.commands) {
+      // 取回来之前先占个位——不然敲了 / 什么都不发生，看着像坏了。
+      el.innerHTML = '<div class="cmd-note">正在读取可用的指令…</div>';
+      return;
+    }
+    var rows = state.commands.filter(function (c) {
+      return String(c.name || '').indexOf(prefix) === 0;
+    });
+    // 一条都对不上就收起来，**不写「没有匹配的指令」**：用户还在打字，打到一半没有
+    // 匹配是常事，插一句提示只是噪音。真打错了指令，按发送时会被明确拒绝并说明。
+    if (!rows.length) { hideCmdMenu(); return; }
+    el.innerHTML = rows.map(function (c) {
+      return '<button class="cmd-row" type="button" data-cmd="' + escapeHtml(c.name) + '">'
+        + '<span class="cmd-name">/' + escapeHtml(c.name) + '</span>'
+        + '<span class="cmd-desc">' + escapeHtml(c.description || '') + '</span></button>';
+    }).join('');
+  }
+
+  /**
+   * 菜单里点了一条。
+   *
+   * 分两路，判据是服务端给的 hint（这条指令要不要参数）：
+   *   · 不要参数 —— 直接执行。让用户再按一次发送是白白多一步。
+   *   · 要参数   —— 把 `/名字 ` 填进输入框，末尾留一个空格、光标停在后面，并把
+   *     hint 那句话挂到输入框的 placeholder 上。
+   *     **不自己编一句「请输入参数」**：只有服务端知道这条指令要什么，
+   *     编一句就等于让用户照着一个错的提示去填。
+   */
+  function pickCommand(name) {
+    var list = state.commands || [];
+    var cmd = null;
+    for (var i = 0; i < list.length; i++) { if (list[i].name === name) cmd = list[i]; }
+    if (!cmd) return;
+    hideCmdMenu();
+    // 先把提示语还原，再按这一条决定要不要挂 hint——不然上一次点的那条「要参数」的
+    // 指令留下的提示，会跟到这一条（不需要参数的）头上。
+    inputEl.placeholder = INPUT_HINT;
+    if (cmd.hint) {
+      inputEl.value = '/' + cmd.name + ' ';
+      inputEl.placeholder = cmd.hint;
+      inputEl.focus();
+      // 光标停在最后：停在名字中间的话，用户接着打的字会插进名字里去。
+      inputEl.setSelectionRange(inputEl.value.length, inputEl.value.length);
+      autoGrow();
+      return;
+    }
+    inputEl.value = '';
+    autoGrow();
+    runCommand('/' + cmd.name);
+  }
+
+  /**
+   * 执行一条斜杠指令。
+   *
+   * 和普通消息走的是**两条不同的接口**：/mini/api/command 收的是完整的一行（含 /
+   * 和参数），/mini/api/send 收的是「发给模型的一句话」。手机这边不替用户猜他打的是
+   * 哪一个——猜错的代价是一次真花掉额度的提问，而且电脑端对不存在的指令是明确拒绝的，
+   * 两边行为得一致。
+   *
+   * 接口只回一个 ok：这条指令**存不存在、跑得怎么样，都不在这里**。开始和结果由会话
+   * 事件推回来（历史里出现 role:'command' 的条目，kind 从 running 变 success/error）。
+   * 所以这里既不做乐观显示（会跟推来的那条重一份），也不报喜——只把「当场被拒」
+   * 这一种情况说出来。
+   */
+  function runCommand(line) {
+    api('/mini/api/command', { method: 'POST', body: JSON.stringify({ line: line }) })
+      .then(function (res) {
+        if (res && res.ok) return;
+        // 被拒（没有这条指令 / 语法不对）的原因必须让用户看见，不能悄悄咽掉。
+        toast((res && res.error) || '这条指令没跑起来');
+      })
+      .catch(function (err) { toast(err.message || '这条指令没跑起来'); });
+  }
+
+  $('cmdMenu').addEventListener('click', function (e) {
+    var btn = e.target && e.target.closest ? e.target.closest('[data-cmd]') : null;
+    if (btn) pickCommand(btn.getAttribute('data-cmd'));
+  });
+
   // ---------------- 上传附件 ----------------
   /** 把字节数说成人话。 */
   function humanSize(n) {
@@ -2351,6 +2657,27 @@
     mainEl.scrollTop = mainEl.scrollHeight;
     inputEl.value = '';
     autoGrow();
+    // 输入框空了，菜单得当场收起来：清空是程序改的 value，不会触发 input 事件，
+    // 没人替我们重算，菜单就会挂在那儿配着一个空输入框。
+    hideCmdMenu();
+    inputEl.placeholder = INPUT_HINT;
+
+    // **以 / 打头的走指令那条路，不再当普通消息发。**
+    //
+    // 这是用户拍板的：手机上打了一条不存在的指令，要跟电脑端一样被明确拒绝并说明原因，
+    // 不能悄悄当成一次提问发给模型——那既让两边行为不一致，又等于把一次敲错变成一次
+    // 真花掉额度的提问。
+    //
+    // 存不存在由服务端判（这边的指令表可能是缓存的旧值），所以这里不看列表，
+    // 只认「trim 之后第一个字符是不是 /」。
+    if (text.charAt(0) === '/') {
+      // 附件跟不过去：指令接口收的只有那一行（见 runCommand 的说明）。
+      // 这里**不动 state.uploads**——清掉就等于把用户刚传上来的文件悄悄扔了，
+      // 而他还以为跟着发出去了。留在小条上看得见，想发就配一句话再发一次。
+      if (files.length) toast('指令带不了附件，附件还留在下面');
+      runCommand(text);
+      return;
+    }
 
     var uploadIds = files.map(function (f) { return f.uploadId; });
     // 手机上先把附件收起来：小票已经交出去了，留着会让用户以为还能再发一次。
@@ -2423,6 +2750,9 @@
 
   $('btnSend').addEventListener('click', send);
   inputEl.addEventListener('input', autoGrow);
+  // 每敲一个字重算一次菜单。它自己会先看「是不是一个没打完的 / 名字」再决定动不动，
+  // 所以这里不用加判据。
+  inputEl.addEventListener('input', paintCmdMenu);
   inputEl.addEventListener('keydown', function (e) {
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
       e.preventDefault();

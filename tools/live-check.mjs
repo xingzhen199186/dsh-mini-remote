@@ -269,6 +269,23 @@ const revealLines = html.split('\n').filter((l) => l.includes("rowNotify').style
 check('那行代码以注释形式留着', revealLines.length > 0 && revealLines.every((l) => l.trim().startsWith('//')))
 check('通知那段逻辑留着（将来做 App 用得上）', html.includes('showNotification'))
 check('设置里没有「语音输入」这一行', !html.includes('micHint'))
+
+// 斜杠指令（2026-09-25）。**注意判据**：这里只能验「路由在不在、页面长得对不对」，
+// 不能验「指令能不能跑」——那会真执行一条指令、真改用户的会话。真跑那一下归第④层
+// （手机上点一次）。路由存在与否用「不是 404」判：这个实例绑的会话很可能正睡着，
+// 那种情况下 409 + 「没在跑」也是**正确**的答复，一样证明新代码上线了。
+const commands = await get('/mini/api/commands')
+check('指令接口在（不是 404，说明跑的是新代码）', commands.status !== 404,
+  `HTTP ${commands.status}${commands.body?.error ? '  ' + commands.body.error : ''}`
+  + (commands.body?.ok ? `  ${commands.body.commands?.length ?? 0} 条` : ''))
+if (commands.body?.ok) {
+  check('指令名单里有个名字和一句说明',
+    (commands.body.commands ?? []).every((c) => typeof c.name === 'string' && c.name && typeof c.description === 'string'),
+    (commands.body.commands ?? []).map((c) => c.name).join(' '))
+}
+check('页面里有指令菜单', html.includes('id="cmdMenu"'))
+check('页面里有指令行渲染', html.includes('function commandBlock'))
+check('页面把 / 开头的行分流走了', html.includes("charAt(0) === '/'"))
 // 手机上传文件：按钮、藏起来的文件选择器、附件小条，三样都得真的送到手机上
 for (const id of ['btnAttach', 'filePick', 'attachBar']) {
   check(`上传那一套里有 id="${id}"`, html.includes(`id="${id}"`))

@@ -2058,3 +2058,367 @@ test('权限档位的点击真的接上了 tapPerm（不是画出来就算）', 
   assert.match(html, /renderPerms[\s\S]*?seg\.innerHTML/, 'renderPerms 应当是整块重画')
 })
 
+// ---------------------------------------------------------------------------
+// 斜杠指令：手机上打 / 弹菜单、点一条执行、以及它在历史里怎么画
+// ---------------------------------------------------------------------------
+//
+// 这一块要的两条接口（GET /mini/api/commands、POST /mini/api/command）是宿主侧同时
+// 在做的，所以这里**按契约把它们的形状造出来**，而不是等那边写完——这一份的绿红
+// 不该取决于同事的进度。造的是接口的样子（回什么字段、收什么 body），不是另一套行为：
+// 契约一旦变了，这里要跟着变，所以下面每一条桩都写明了它对应契约的哪一句。
+
+const CM_S = '// ---------------- 斜杠指令'
+const CM_E = '// ---------------- 上传附件 ----------------'
+assert.ok(html.indexOf(CM_S) > 0, `在 page.html 里找不到锚点「${CM_S}」`)
+assert.ok(html.indexOf(CM_E) > html.indexOf(CM_S), `在 page.html 里找不到锚点「${CM_E}」`)
+
+// 契约里那条 GET 的形状：已按 name 排好序，hint 可能为 null。
+const COMMANDS = [
+  { name: 'compact', description: '压缩这个会话的上下文', hint: null, attachments: false },
+  { name: 'config', description: '改设置', hint: '要改哪一项？', attachments: false },
+  { name: 'cost', description: '看这个会话花掉多少', hint: null, attachments: false },
+]
+
+/**
+ * 把「斜杠指令」那一段从模板里抠出来跑。
+ *
+ * 切片是两个注释锚点之间的整块：菜单的数据、画菜单、点一条、执行。锚点对不上会立刻
+ * 断言失败，不会安静地退化成空测试。
+ */
+function buildMenu({
+  value = '/', sessionId = 's1', rejects = false,
+  replies = { commands: { ok: true, commands: COMMANDS } },
+} = {}) {
+  const input = {
+    value, placeholder: '说点什么…', style: {}, scrollHeight: 40,
+    focus() {}, setSelectionRange() {},
+  }
+  const els = {}
+  const calls = []
+  const toasts = []
+  const state = {
+    commands: null, commandsError: '', commandsFor: null, commandsLoading: false,
+    boundSessionId: sessionId,
+  }
+  const sandbox = {
+    state, inputEl: input,
+    api: (path, opts) => {
+      calls.push({ path, opts })
+      if (rejects) return Promise.reject(new Error('连不上电脑'))
+      // 按契约：路径去掉前缀就是那份桩的名字（commands / command）。
+      return Promise.resolve(replies[path.replace('/mini/api/', '')] || { ok: true })
+    },
+    toast: (m) => toasts.push(m),
+    escapeHtml: md.escapeHtml,
+    autoGrow: () => {},
+    $: (id) => (els[id] || (els[id] = {
+      hidden: true, innerHTML: '', addEventListener() {},
+    })),
+  }
+  // eslint-disable-next-line no-new-func
+  const build = new Function(...Object.keys(sandbox),
+    `${html.slice(html.indexOf(CM_S), html.indexOf(CM_E))}\n`
+    + 'return { slashQuery, paintCmdMenu, pickCommand, runCommand, hideCmdMenu, needCommands };')
+  const fns = build(...Object.values(sandbox))
+  return {
+    ...fns, input, els, calls, toasts, state,
+    menu: () => els.cmdMenu,
+    // 菜单的数据是异步取回来的，等它落地。两个微任务够 api() 那条链走完。
+    settle: async () => { await Promise.resolve(); await Promise.resolve() },
+  }
+}
+
+test('斜杠菜单：打一个 / 就弹出来，列出指令的名字和说明', async () => {
+  const m = buildMenu()
+  m.paintCmdMenu()
+  await m.settle()
+
+  // 第一次用到它才去取——页面打开时不取，省一趟请求。
+  assert.equal(m.calls.length, 1, `只该取一次，实际 ${m.calls.length} 次`)
+  assert.equal(m.calls[0].path, '/mini/api/commands')
+  assert.equal(m.menu().hidden, false, '菜单要露出来')
+  assert.match(m.menu().innerHTML, /compact/, '名字要在')
+  assert.match(m.menu().innerHTML, /压缩这个会话的上下文/, '说明也要在，不能只有名字')
+  assert.match(m.menu().innerHTML, /cost/, '别的指令不许漏')
+  assert.match(m.menu().innerHTML, /data-cmd="compact"/, '点了要知道点的是哪一条')
+})
+
+test('斜杠菜单：打下去的字母按前缀过滤', async () => {
+  // 两个字母：三条里 co 打头的都还在。
+  const two = buildMenu({ value: '/co' })
+  two.paintCmdMenu()
+  await two.settle()
+  assert.match(two.menu().innerHTML, /compact/)
+  assert.match(two.menu().innerHTML, /config/, 'co 打头的都要留着')
+  assert.match(two.menu().innerHTML, /cost/)
+
+  // 再打一个字母：只剩对得上的那条。这一半才是「过滤」本身——
+  // 只验「名字还在」的话，把过滤整个去掉测试也照样绿。
+  const three = buildMenu({ value: '/com' })
+  three.paintCmdMenu()
+  await three.settle()
+  const out = three.menu().innerHTML
+  assert.match(out, /compact/)
+  assert.ok(!out.includes('config'), 'com 打头的只剩 compact')
+  assert.ok(!out.includes('cost'))
+})
+
+test('斜杠菜单：出现空格或者不再是 / 打头，就收起来，也不白取一次', async () => {
+  // 打了空格 = 这条指令的名字打完了、开始写参数了，菜单让位给输入框。
+  const space = buildMenu({ value: '/compact ' })
+  space.paintCmdMenu()
+  await space.settle()
+  assert.equal(space.menu().hidden, true, '有空格就收起来')
+  assert.equal(space.menu().innerHTML, '', '不许留个空壳在那儿')
+  assert.equal(space.calls.length, 0, '收起来了就不该为它取指令表')
+
+  // 内容不再以 / 开头，同理。
+  const talk = buildMenu({ value: '你好 /compact' })
+  talk.paintCmdMenu()
+  await talk.settle()
+  assert.equal(talk.menu().hidden, true)
+
+  // 大写不算命中：DSH 的指令名就是小写，把 /CO 当命中会让用户「打了没反应」。
+  const upper = buildMenu({ value: '/CO' })
+  upper.paintCmdMenu()
+  await upper.settle()
+  assert.equal(upper.menu().hidden, true)
+})
+
+test('斜杠菜单：取不到时说清原因，不显示空列表，也不反复重取', async () => {
+  // 契约里那条失败形状：这个会话没在跑。
+  const m = buildMenu({
+    replies: {
+      commands: { ok: false, error: '这个会话现在没在跑，指令要先让它跑起来。' },
+    },
+  })
+  m.paintCmdMenu()
+  await m.settle()
+  const out = m.menu().innerHTML
+  assert.equal(m.menu().hidden, false, '出错了也要占着菜单位置把话说清楚')
+  assert.match(out, /这个会话现在没在跑/, '服务端那句话要原样显示出来')
+  assert.ok(!out.includes('cmd-row'),
+    '不能显示成空列表——空列表看着就像「这个会话没有指令」，是另一回事')
+
+  // 用户接着打字，每敲一个字都会重画一次。失败之后不能每次都再打一遍接口。
+  m.paintCmdMenu()
+  m.paintCmdMenu()
+  await m.settle()
+  assert.equal(m.calls.length, 1, `失败之后不该反复重取，实际取了 ${m.calls.length} 次`)
+})
+
+test('斜杠菜单：上次没取到，重新打开时会再试一次', async () => {
+  // 失败的原因多半是「这个会话现在没在跑」，而用户随后完全可能发一条消息让它跑起来。
+  // 那时再打 /，要是还挂着上次那句话，他会以为这个功能坏了。
+  // 但也不能每敲一个字都重取——所以判据是「关着→打开」这一下。
+  const m = buildMenu({
+    replies: {
+      commands: { ok: false, error: '这个会话现在没在跑，指令要先让它跑起来。' },
+    },
+  })
+  m.paintCmdMenu()
+  await m.settle()
+  assert.equal(m.calls.length, 1)
+
+  // 菜单还开着的时候接着打字：不再取。
+  m.paintCmdMenu()
+  await m.settle()
+  assert.equal(m.calls.length, 1, '开着的时候接着打字不该再取')
+
+  // 收起来（比如清空输入框）再重新打一个 /：这一次可以再试。
+  m.input.value = ''
+  m.paintCmdMenu()
+  assert.equal(m.menu().hidden, true, '输入框空了就收起来')
+  m.input.value = '/'
+  m.paintCmdMenu()
+  await m.settle()
+  assert.equal(m.calls.length, 2, '重新打开时要再问一次，不能一直挂着上次那句话')
+})
+
+test('斜杠菜单：连不上电脑时也要说一句，不是一片空白', async () => {
+  const m = buildMenu({ rejects: true })
+  m.paintCmdMenu()
+  await m.settle()
+  assert.equal(m.menu().hidden, false)
+  assert.match(m.menu().innerHTML, /连不上电脑/, '网络不通也得说人话')
+})
+
+test('斜杠菜单：换了会话要重取（指令表是每个会话一份的）', async () => {
+  const m = buildMenu()
+  m.paintCmdMenu()
+  await m.settle()
+  assert.equal(m.calls.length, 1)
+
+  m.state.boundSessionId = 's2'      // 用户在导航栏切到了另一个会话
+  m.paintCmdMenu()
+  await m.settle()
+  assert.equal(m.calls.length, 2,
+    '换了会话必须重取：拿上一个会话的指令表出来点，点下去必然被拒，用户还看不出为什么')
+})
+
+test('斜杠菜单：点没参数的指令，立刻执行，并清空输入框、收起菜单', async () => {
+  const m = buildMenu({ value: '/co' })
+  m.paintCmdMenu()
+  await m.settle()
+
+  m.pickCommand('compact')
+  await m.settle()
+  assert.equal(m.input.value, '', '执行了就把输入框清空')
+  assert.equal(m.menu().hidden, true, '菜单同时收起来')
+  assert.equal(m.calls.length, 2, `取列表一次、执行一次，实际 ${m.calls.length} 次`)
+  assert.equal(m.calls[1].path, '/mini/api/command')
+  assert.equal(JSON.parse(m.calls[1].opts.body).line, '/compact',
+    '发的是完整的一行（含 /），不是光一个名字')
+})
+
+test('斜杠菜单：点要参数的指令，只填进输入框，并把 hint 挂到 placeholder 上', async () => {
+  const m = buildMenu({ value: '/con' })
+  m.paintCmdMenu()
+  await m.settle()
+
+  m.pickCommand('config')
+  await m.settle()
+  assert.equal(m.input.value, '/config ', '末尾要留一个空格，等用户接着打参数')
+  assert.equal(m.input.placeholder, '要改哪一项？',
+    '提示就用服务端给的 hint，不自己编一句「请输入参数」')
+  assert.equal(m.menu().hidden, true, '填完就收起来，别再挡着')
+  assert.equal(m.calls.length, 1, '还只是在填参数，这时候不该执行')
+})
+
+test('发送：trim 之后以 / 开头，就走指令接口，不再走 send', async () => {
+  const b = buildSend()
+  b.input.value = '  /compact --force  '
+  b.send()
+  await Promise.resolve()
+  await Promise.resolve()
+
+  assert.equal(b.calls.length, 1, `只该发一次，实际 ${b.calls.length} 次`)
+  assert.equal(b.calls[0].path, '/mini/api/command', '走的是指令那条路')
+  assert.equal(JSON.parse(b.calls[0].opts.body).line, '/compact --force',
+    '发的是 trim 之后的完整一行（参数也在里面）')
+  assert.equal(b.input.value, '', '发出去了就把输入框清掉')
+})
+
+test('发送：不是 / 开头的照旧走 send', async () => {
+  const b = buildSend()
+  b.input.value = '把这一段改成两列'
+  b.send()
+  await Promise.resolve()
+  await Promise.resolve()
+  assert.equal(b.calls.length, 1)
+  assert.equal(b.calls[0].path, '/mini/api/send', '普通消息一个字都不该变')
+})
+
+test('发送：指令被拒时说清原因，而且**不会**再当普通消息发一次', async () => {
+  // 契约里那条拒绝形状。用户拍板过：打了一条不存在的指令要跟电脑端一样拒绝并说明，
+  // 不能悄悄当普通消息发给模型。
+  const b = buildSend({ serverSays: { ok: false, error: '没有 /xyz 这条指令' } })
+  b.state.mode = 'chat'
+  b.input.value = '/xyz'
+  b.send()
+  await Promise.resolve()
+  await Promise.resolve()
+
+  assert.equal(b.calls.length, 1, `被拒之后不能再补发一次普通消息，实际发了 ${b.calls.length} 次`)
+  assert.equal(b.calls[0].path, '/mini/api/command')
+  assert.equal(b.toasts.length, 1, '要把原因说出来，不能悄悄咽掉')
+  assert.equal(b.toasts[0], '没有 /xyz 这条指令')
+  assert.equal(b.state.history.length, 0,
+    '也不许在聊天记录里留一条「已发出」的气泡——那等于骗人说发出去了')
+})
+
+test('历史里的指令行：running / success / error 三种长得不一样', () => {
+  const base = { role: 'command', commandId: 'c1', name: 'compact', args: ' --force', timestamp: 5 };
+
+  const running = renderChatWith({ running: true, history: [{ ...base, kind: 'running' }] })
+  assert.match(running, /class="cmd running"/, '正在跑的是单独一种')
+  assert.match(running, /\/compact --force/, '名字要连着参数一起画，而且是原样的')
+  assert.match(running, /执行中…/, '不知道结果就只说在跑，不编进度')
+
+  const done = renderChatWith({ running: false, history: [{ ...base, kind: 'success', text: '已压缩' }] })
+  assert.match(done, /class="cmd success"/)
+  assert.match(done, /已压缩/, '成功时显示服务端给的那句话')
+
+  // 成功但没给话时也得有个交代，不能留半行空白。
+  const quiet = renderChatWith({ running: false, history: [{ ...base, kind: 'success' }] })
+  assert.match(quiet, /完成/)
+
+  const bad = renderChatWith({
+    running: false,
+    history: [{ ...base, kind: 'error', text: '压缩失败：没有可压缩的内容' }],
+  })
+  assert.match(bad, /class="cmd error"/)
+  assert.match(bad, /压缩失败：没有可压缩的内容/, '失败的原因要显示出来')
+})
+
+test('历史里的指令行：不是气泡、没有复制按钮，出错是红的', () => {
+  const out = renderChatWith({
+    running: false,
+    history: [
+      { role: 'user', text: '压一下上下文', timestamp: 1 },
+      { role: 'command', commandId: 'c1', name: 'compact', args: '', kind: 'error', text: '没跑起来', timestamp: 2 },
+    ],
+  })
+  // 它是「会话做的一个动作」，不是谁说的话：套气泡就会被当成回答去读。
+  assert.ok(!/class="bubble[^"]*">\s*<span class="cmd-line"/.test(out), '指令行不许套气泡')
+  assert.ok(!out.includes('class="said"'), '也不该用 AI 回答那一套')
+  // 复制一条「/compact 没跑起来」没有意义。
+  assert.equal((out.match(/class="copy/g) || []).length, 1,
+    '整串历史里只有用户那条气泡该有复制按钮')
+
+  // 类名挂上了不等于颜色对——这条钉的是样式本身。
+  // 切片取「.cmd 那一段规则」到菜单那一段，中间正好是它的全部样式。
+  const cssAt = html.indexOf('.cmd {')
+  const cssEnd = html.indexOf('.cmd-row')
+  assert.ok(cssAt > 0 && cssEnd > cssAt,
+    '找不到指令行的样式（锚点对不上，别让这两条断言静悄悄地空跑）')
+  const css = html.slice(cssAt, cssEnd)
+  assert.match(css, /\.cmd\.error \{[^}]*--err/, '出错那条左边的线要是红的')
+  assert.match(css, /\.cmd\.error \.cmd-res \{[^}]*--err/, '连结果那行字一起红')
+})
+
+test('单帧模式：历史里最后一条是指令时，也要显示出来', () => {
+  // 用户点一下 /compact，单帧模式整屏只有「最新一条回复」——而指令不产生回复，
+  // 不特意画它的话，屏幕上就是一动不动，看着像点了个没反应的按钮。
+  const out = renderMinimalWith({
+    running: false,
+    latest: { text: '上一步的答案', timestamp: 100 },
+    history: [
+      { role: 'assistant', text: '上一步的答案', timestamp: 100 },
+      { role: 'command', commandId: 'c1', name: 'compact', args: '', kind: 'success', text: '已压缩', timestamp: 200 },
+    ],
+  })
+  assert.match(out, /上一步的答案/, '上一条回答照旧留着')
+  assert.match(out, /cmd-line/, '指令行要露出来')
+  assert.match(out, /\/compact/)
+  assert.match(out, /已压缩/, '跑完了就说它跑完了')
+})
+
+test('单帧模式：最后一条不是指令时，不该冒出指令行', () => {
+  const out = renderMinimalWith({
+    running: false,
+    latest: { text: '这次的答案', timestamp: 300 },
+    history: [
+      { role: 'command', commandId: 'c1', name: 'compact', args: '', kind: 'success', timestamp: 200 },
+      { role: 'assistant', text: '这次的答案', timestamp: 300 },
+    ],
+  })
+  assert.match(out, /这次的答案/)
+  assert.ok(!out.includes('cmd-line'), '最后一条是回答，就不该有指令行')
+})
+
+test('单帧模式：新回答到了，底下不该再挂着上一条指令', () => {
+  // 这道判断看着多余，其实是必须的：单帧模式的回答走 SSE 的 reply 那条路，
+  // 它**不往 history 里塞**东西，所以 history 的尾巴会一直停在那条指令上。
+  // 只按「最后一条是 command」判断的话，新回答下面会永远挂着一条过期指令。
+  const out = renderMinimalWith({
+    running: false,
+    latest: { text: '这次的答案', timestamp: 300 },
+    history: [
+      { role: 'command', commandId: 'c1', name: 'compact', args: '', kind: 'running', timestamp: 200 },
+    ],
+  })
+  assert.match(out, /这次的答案/)
+  assert.ok(!out.includes('cmd-line'), '那条指令比手上的回答还旧，已经不是最新的事了')
+})
+
