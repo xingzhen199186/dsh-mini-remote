@@ -576,70 +576,6 @@
 <div id="modelBar" style="display:none;align-items:center;gap:8px;padding:6px 12px;font-size:12px;color:var(--dim,#888);border-bottom:1px solid var(--line,#e5e5e5)">
   <span id="modelBarText"></span>
 </div>
-<!-- 这一段暂时**不执行**（标成非脚本），是有意的停手，不是忘了接上：
-     这个页面被设计成**只有一个脚本块**——测试钉住了这一条，因为抽取脚本的正则
-     是贪婪匹配，多一个块就会把中间的 HTML 整段当成 JS 去解析（这次就是这么炸的）。
-     另外**别在这段注释里写出那个标签的尖括号原文**：测试的正则只认字面量，
-     注释里的它照样会被当成脚本开头，一样会把中间的东西吃进去。
-     所以这段代码要挪进上面那个唯一的 script 里才会生效。代码本身没问题，
-     /mini/api/models 也验过真数据了。 -->
-<template id="modelBarCode">
-(function () {
-  var bar = document.getElementById('modelBar')
-  var text = document.getElementById('modelBarText')
-  if (!bar || !text) return
-
-  // token：页面本来就是带着它打开的，直接沿用，不让用户再输一次。
-  function token() {
-    try {
-      var q = new URLSearchParams(location.search).get('token')
-      if (q) return q
-    } catch (e) { /* 老浏览器没有 URLSearchParams，走下面 */ }
-    var m = location.search.match(/[?&]token=([^&]+)/)
-    return m ? decodeURIComponent(m[1]) : ''
-  }
-
-  function show(selection) {
-    if (!selection || !selection.model) { bar.style.display = 'none'; return }
-    var parts = []
-    if (selection.provider) {
-      // 来源名用 DSH 给的那个（「DeepSeek」「opencode go」「mimo」），不是内部 id
-      parts.push(selection.provider)
-    }
-    parts.push(selection.model)
-    if (selection.reasoningEffort) parts.push('思考 ' + selection.reasoningEffort)
-    text.textContent = '📦 ' + parts.join(' · ')
-    bar.style.display = 'flex'
-  }
-
-  function load() {
-    var t = token()
-    if (!t) return
-    fetch('/mini/api/models?token=' + encodeURIComponent(t), { cache: 'no-store' })
-      .then(function (r) { return r.ok ? r.json() : null })
-      .then(function (d) {
-        if (!d || !d.ok) return
-        // 来源名要拿 id→name 的映射换一下，DSH 给的是内部 id（opencode-go-new）
-        // 和给人看的名字（opencode go）两套，显示用后者。
-        var s = d.current
-        if (s && s.provider && d.groups) {
-          for (var i = 0; i < d.groups.length; i++) {
-            if (d.groups[i].id === s.provider) { s.provider = d.groups[i].name; break }
-          }
-        }
-        show(s)
-      })
-      .catch(function () { /* 读不到就保持原样，不显示错的东西 */ })
-  }
-
-  load()
-  // 在电脑上改了模型，手机这边也要跟上。**轮询很土，但这里是诚实的做法**：
-  // 我们没法从这段独立代码挂进页面已有的那条 SSE，而显示一个过期的模型名
-  // 比不显示更糟——用户会以为自己改的没生效。15 秒一次，开销可以忽略。
-  setInterval(function () { if (!document.hidden) load() }, 15000)
-  document.addEventListener('visibilitychange', function () { if (!document.hidden) load() })
-})()
-</template>
 
 <main id="main">
   <div id="reply"></div>
@@ -2706,6 +2642,58 @@
   // 任何一次触摸都顺手解锁音频，避免用户第一次收到回复时没声音。
   document.addEventListener('touchstart', unlockAudio, { once: true });
   document.addEventListener('click', unlockAudio, { once: true });
+
+  // -------------------------------------------------------------------------
+  // 模型与思考强度（2026-09-25 用户要求：手机上要能改每个会话的模型和强度）
+  //
+  // 这一步只做**显示**，不做修改：先把真数据摆出来、确认显示得对、确认刷新跟得上，
+  // 再把按钮加上去。不做「点了没用」的东西。
+  //
+  // **位置很重要**：必须写在这个外层函数**里面**——`state` 是它内部的变量，
+  // 写到 `})();` 后面就看不见了，结果会是「永远不显示」而且一句错都不报。
+  // 另外**不能再开一个 script 块**：这个页面的测试用贪婪正则抽取脚本，
+  // 多一个块就会把中间的 HTML 整段当成 JS 解析。这个坑踩过一次，别再来一次。
+  // -------------------------------------------------------------------------
+  ;(function () {
+    var bar = document.getElementById('modelBar')
+    var text = document.getElementById('modelBarText')
+    if (!bar || !text) return
+
+    function show(selection) {
+      if (!selection || !selection.model) { bar.style.display = 'none'; return }
+      var parts = []
+      // 来源名要用 DSH 给的那个（「DeepSeek」「opencode go」「mimo」），不是内部 id
+      if (selection.provider) parts.push(selection.provider)
+      parts.push(selection.model)
+      if (selection.reasoningEffort) parts.push('思考 ' + selection.reasoningEffort)
+      text.textContent = parts.join(' · ')
+      bar.style.display = 'flex'
+    }
+
+    function load() {
+      if (!state.token) return
+      fetch('/mini/api/models?token=' + encodeURIComponent(state.token), { cache: 'no-store' })
+        .then(function (r) { return r.ok ? r.json() : null })
+        .then(function (d) {
+          if (!d || !d.ok) return
+          var s = d.current
+          // id→name 换一下：DSH 内部叫 opencode-go-new，给人看的是 opencode go
+          if (s && s.provider && d.groups) {
+            for (var i = 0; i < d.groups.length; i++) {
+              if (d.groups[i].id === s.provider) { s.provider = d.groups[i].name; break }
+            }
+          }
+          show(s)
+        })
+        .catch(function () { /* 读不到就保持原样，不显示错的东西 */ })
+    }
+
+    load()
+    // 在电脑上改了模型，手机这边也要跟上。**轮询很土，但这里是诚实的做法**：
+    // 显示一个过期的模型名比不显示更糟——用户会以为自己改的没生效。
+    setInterval(function () { if (!document.hidden) load() }, 15000)
+    document.addEventListener('visibilitychange', function () { if (!document.hidden) load() })
+  })();
 })();
 </script>
 </body>
