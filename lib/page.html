@@ -2797,7 +2797,9 @@
         .then(function (d) {
           if (!d || !d.ok) return
           catalog = d
-          current = d.current || null
+          // 这个会话还没记下模型时（新建的、还没发过话），按目录的默认值显示——
+          // 那正是它接下来会用的。硬显示成空，用户会以为这里坏了。
+          current = (d.current && d.current.model) ? d.current : (d.default || null)
           // 服务端追上了就撤掉本地那个临时值，之后一律以服务端的为准
           if (pending && current && current.provider === pending.provider
               && current.model === pending.model) pending = null
@@ -2810,6 +2812,19 @@
     bar.style.cursor = 'pointer'
     bar.addEventListener('click', openSheet)
     mask.addEventListener('click', closeSheet)
+
+    // 手机切了会话要**立刻**跟上，不能等下面那个 15 秒的轮询——那段时间里顶栏显示的
+    // 是上一个会话的模型，看上去就像新会话用错了模型。页面自己把「现在是哪个会话」
+    // 存在 state.boundSessionId 里（状态广播一到就更新），盯着它很便宜。
+    var lastSession = state.boundSessionId || null
+    setInterval(function () {
+      var id = state.boundSessionId || null
+      if (id === lastSession) return
+      lastSession = id
+      pending = null   // 上一个会话身上那个临时值，跟这个会话没关系，必须扔掉
+      load()
+    }, 1000)
+
     load()
     // 在电脑上改了模型，手机这边也要跟上。**轮询很土，但这里是诚实的做法**：
     // 显示一个过期的模型名比不显示更糟——用户会以为自己改的没生效。
