@@ -565,8 +565,8 @@
 
 <!-- 模型与思考强度（2026-09-25 用户要求：手机上要能改每个会话的模型和强度）。
 
-     这一步只做**显示**，不做修改：先把真数据摆出来、确认显示得对、确认刷新跟得上，
-     再把按钮加上去。顺序是故意的——不做「点了没用」的东西。
+     现在两件事都在了：顶部那一行显示当前用的模型，**点它弹出面板可以改**。
+     面板里的强度只画当前模型自己声明的档位；模型不支持调强度时那一行不出现。
 
      **整段是自包含的**：自己的 script 标签、自己的请求、自己的元素，不碰页面现有的
      任何代码。唯一的对外依赖是 /mini/api/models 那条接口（已经验过真数据）。
@@ -2646,8 +2646,8 @@
   // -------------------------------------------------------------------------
   // 模型与思考强度（2026-09-25 用户要求：手机上要能改每个会话的模型和强度）
   //
-  // 这一步只做**显示**，不做修改：先把真数据摆出来、确认显示得对、确认刷新跟得上，
-  // 再把按钮加上去。不做「点了没用」的东西。
+  // 顶栏那一行显示当前用的模型，点它弹出面板可以改。强度按当前模型自己声明的
+  // 档位长；模型不支持调强度时那一行不出现。
   //
   // **位置很重要**：必须写在这个外层函数**里面**——`state` 是它内部的变量，
   // 写到 `})();` 后面就看不见了，结果会是「永远不显示」而且一句错都不报。
@@ -2659,35 +2659,157 @@
     var text = document.getElementById('modelBarText')
     if (!bar || !text) return
 
-    function show(selection) {
-      if (!selection || !selection.model) { bar.style.display = 'none'; return }
-      var parts = []
+    var catalog = null  // 服务端给的模型目录
+    var current = null  // 服务端记的当前选择 {provider, model, reasoningEffort}
+    // 刚改完、服务端还没确认的那个值。为什么要多这一个：服务端记的「当前模型」是在
+    // **下一次请求**时才更新的，所以改完立刻回头去读，读到的还是旧名字。先信
+    // set-model 的返回值，等服务端追上了再让它接管。
+    var pending = null
+    var busy = false   // 防止连点两下发出两个互相打架的请求
+
+    // ---- 顶栏 ------------------------------------------------------------
+    function groupName(id) {
+      var gs = (catalog && catalog.groups) || []
+      for (var i = 0; i < gs.length; i++) { if (gs[i].id === id) return gs[i].name }
+      return id || ''
+    }
+    function sel() { return pending || current || null }
+
+    function renderBar() {
+      var s = sel()
+      if (!s || !s.model) { bar.style.display = 'none'; return }
       // 来源名要用 DSH 给的那个（「DeepSeek」「opencode go」「mimo」），不是内部 id
-      if (selection.provider) parts.push(selection.provider)
-      parts.push(selection.model)
-      if (selection.reasoningEffort) parts.push('思考 ' + selection.reasoningEffort)
+      var parts = [groupName(s.provider), s.model]
+      if (s.reasoningEffort) parts.push('思考 ' + s.reasoningEffort)
       text.textContent = parts.join(' · ')
       bar.style.display = 'flex'
     }
 
+    // ---- 选择面板 --------------------------------------------------------
+    function el(tag, css, txt) {
+      var e = document.createElement(tag)
+      if (css) e.style.cssText = css
+      if (txt != null) e.textContent = txt
+      return e
+    }
+    var ROW = 'display:block;width:100%;text-align:left;background:none;border:0;font:inherit;'
+      + 'color:inherit;padding:11px 2px;border-bottom:1px solid var(--line,#333)'
+    var HEAD = 'padding:14px 2px 4px;font-size:12px;color:var(--dim,#888)'
+    var CHIP = 'margin:0 6px 6px 0;padding:5px 13px;border:1px solid var(--line,#444);'
+      + 'border-radius:999px;background:none;font:inherit;color:inherit;font-size:13px'
+
+    // 面板用代码建出来、挂在 body 末尾，而不是写进页面结构里——这样这一整块的
+    // 改动全部落在脚本内部，不用动 HTML，也就不会碰到别的部分。
+    var mask = el('div', 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:69;display:none')
+    var sheet = el('div', 'position:fixed;left:0;right:0;bottom:0;z-index:70;display:none;'
+      + 'max-height:72vh;overflow-y:auto;background:var(--bg,#1b1b1b);'
+      + 'border-top:1px solid var(--line,#444);border-radius:14px 14px 0 0;'
+      + 'padding:10px 14px calc(16px + env(safe-area-inset-bottom))')
+    document.body.appendChild(mask)
+    document.body.appendChild(sheet)
+
+    function renderSheet() {
+      sheet.textContent = ''
+      var s = sel() || {}
+      sheet.appendChild(el('div', 'font-size:13px;color:var(--dim,#888);padding:2px 2px 6px',
+        '这个会话用哪个模型'))
+      if (!catalog) { sheet.appendChild(el('div', 'padding:12px 2px', '还没读到模型列表。')); return }
+
+      var groups = catalog.groups || []
+      for (var gi = 0; gi < groups.length; gi++) {
+        var grp = groups[gi]
+        sheet.appendChild(el('div', HEAD, grp.name || grp.id))
+        var models = grp.models || []
+        for (var mi = 0; mi < models.length; mi++) {
+          var mod = models[mi]
+          var isCur = s.provider === grp.id && s.model === mod.id
+          var b = el('button', ROW, (isCur ? '✓ ' : '') + (mod.name || mod.id))
+          if (isCur) b.style.fontWeight = '600'
+          b.addEventListener('click', picker(grp.id, mod.id))
+          sheet.appendChild(b)
+
+          // 强度只在**当前这个模型**下面出现，而且只画它自己声明的档位——DeepSeek 是
+          // off/low/high/max，opencode 和 mimo 是 minimal…max，两套不一样，不能合并成
+          // 一个统一的说法。模型没声明强度时（五十个里有四十三个）这里什么都不画，
+          // 不给一个拖了没反应的控件。
+          var r = mod.reasoning
+          if (isCur && r && r.efforts && r.efforts.length) {
+            var box = el('div', 'padding:8px 2px 12px;border-bottom:1px solid var(--line,#333)')
+            for (var ei = 0; ei < r.efforts.length; ei++) {
+              var ef = r.efforts[ei]
+              var on = s.reasoningEffort === ef.id
+              var c = el('button', CHIP + (on ? ';border-color:currentColor;font-weight:600' : ''),
+                (on ? '✓ ' : '') + (ef.name || ef.id))
+              c.addEventListener('click', picker(grp.id, mod.id, ef.id))
+              box.appendChild(c)
+            }
+            sheet.appendChild(box)
+          }
+        }
+      }
+
+      // 某个来源读不到时如实说出来，不要假装整份目录都是全的
+      var fails = catalog.failures || []
+      for (var fi = 0; fi < fails.length; fi++) {
+        sheet.appendChild(el('div', 'padding:10px 2px;font-size:13px;color:var(--dim,#888)',
+          '⚠ ' + (fails[fi].name || fails[fi].id) + '：' + (fails[fi].message || '读不到')))
+      }
+
+      var close = el('button', ROW + ';border-bottom:0;text-align:center;color:var(--dim,#888)', '关闭')
+      close.addEventListener('click', closeSheet)
+      sheet.appendChild(close)
+    }
+
+    // 把参数用闭包封起来。循环里直接写回调会全都指向最后一项——这是老坑了。
+    function picker(provider, model, effort) {
+      return function () { if (!busy) pick(provider, model, effort) }
+    }
+
+    function pick(provider, model, effort) {
+      var body = { provider: provider, model: model }
+      if (effort) body.reasoningEffort = effort
+      busy = true
+      fetch('/mini/api/set-model?token=' + encodeURIComponent(state.token), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      })
+        .then(function (r) { return r.json().catch(function () { return null }) })
+        .then(function (d) {
+          busy = false
+          if (!d || !d.ok) { alert('没改成：' + ((d && d.error) || '电脑那边没答应')); return }
+          var v = d.selected || body
+          pending = { provider: v.provider, model: v.model, reasoningEffort: v.reasoningEffort || null }
+          renderBar()
+          renderSheet()
+        })
+        .catch(function () { busy = false; alert('没改成：连不上电脑。') })
+    }
+
+    function openSheet() { renderSheet(); mask.style.display = 'block'; sheet.style.display = 'block' }
+    function closeSheet() { mask.style.display = 'none'; sheet.style.display = 'none' }
+
+    // ---- 读目录 ----------------------------------------------------------
     function load() {
       if (!state.token) return
       fetch('/mini/api/models?token=' + encodeURIComponent(state.token), { cache: 'no-store' })
         .then(function (r) { return r.ok ? r.json() : null })
         .then(function (d) {
           if (!d || !d.ok) return
-          var s = d.current
-          // id→name 换一下：DSH 内部叫 opencode-go-new，给人看的是 opencode go
-          if (s && s.provider && d.groups) {
-            for (var i = 0; i < d.groups.length; i++) {
-              if (d.groups[i].id === s.provider) { s.provider = d.groups[i].name; break }
-            }
-          }
-          show(s)
+          catalog = d
+          current = d.current || null
+          // 服务端追上了就撤掉本地那个临时值，之后一律以服务端的为准
+          if (pending && current && current.provider === pending.provider
+              && current.model === pending.model) pending = null
+          renderBar()
+          if (sheet.style.display !== 'none') renderSheet()
         })
         .catch(function () { /* 读不到就保持原样，不显示错的东西 */ })
     }
 
+    bar.style.cursor = 'pointer'
+    bar.addEventListener('click', openSheet)
+    mask.addEventListener('click', closeSheet)
     load()
     // 在电脑上改了模型，手机这边也要跟上。**轮询很土，但这里是诚实的做法**：
     // 显示一个过期的模型名比不显示更糟——用户会以为自己改的没生效。
