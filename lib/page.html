@@ -2677,7 +2677,13 @@
 
     function renderBar() {
       var s = sel()
-      if (!s || !s.model) { bar.style.display = 'none'; return }
+      if (!s || !s.model) {
+        // 问不到这个会话用哪个模型时，如实说一句——既不装作没这个功能，也不编一个。
+        // 点它还照样能打开面板挑一个，挑完就写得进去。
+        text.textContent = '模型：还没问到'
+        bar.style.display = 'flex'
+        return
+      }
       // 来源名要用 DSH 给的那个（「DeepSeek」「opencode go」「mimo」），不是内部 id
       var parts = [groupName(s.provider), s.model]
       if (s.reasoningEffort) parts.push('思考 ' + s.reasoningEffort)
@@ -2797,9 +2803,12 @@
         .then(function (d) {
           if (!d || !d.ok) return
           catalog = d
-          // 这个会话还没记下模型时（新建的、还没发过话），按目录的默认值显示——
-          // 那正是它接下来会用的。硬显示成空，用户会以为这里坏了。
-          current = (d.current && d.current.model) ? d.current : (d.default || null)
+          // **问不到就说问不到，绝不用目录默认值兜底。**
+          //
+          // 上一版这里写的是「没记下就显示目录默认值」，看着体贴，实际是编的：
+          // 目录那个默认值等于「上一次选过的模型」，于是用户切到一个用别的模型的
+          // 会话，顶栏显示的还是上一个模型——一个像模像样的错答案，比空着坏得多。
+          current = (d.current && d.current.model) ? d.current : null
           // 服务端追上了就撤掉本地那个临时值，之后一律以服务端的为准
           if (pending && current && current.provider === pending.provider
               && current.model === pending.model) pending = null
