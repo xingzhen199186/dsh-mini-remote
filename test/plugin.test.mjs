@@ -57,7 +57,7 @@ function makeCtx(services, directNames) {
   })
 }
 
-function mockCtx({ attachments } = {}) {
+function mockCtx({ attachments, sessionQuery } = {}) {
   const handlers = new Map()
   // `ctx.on` 的第三个参数（注册选项）也要留下来：提问钩子靠 `prepend` 才能排到
   // 电脑浏览器前面，而漏掉它**不报错、只是永远轮不到**。这种错只能靠断言钉住。
@@ -102,17 +102,20 @@ function mockCtx({ attachments } = {}) {
       // 只有传了才有：纯 headless 组合下 DSH 没有附件服务，
       // 「没有它的时候怎么办」也是一条要覆盖的路径。
       ...(attachments ? { attachments } : {}),
+      // 同上：会话记录服务（真机上是 DSH 自己的 DSH 会话记录）。插件要拿它
+      // 读一个会话**完整**的历史，所以测试也得能把它摆出来、也能让它缺席。
+      ...(sessionQuery ? { sessionQuery } : {}),
     }, ['agents', 'logger', 'on', 'effect']),
   }
 }
 
 /** 起一个被测插件实例，返回访问它所需的一切。 */
-async function bootPlugin({ agents = {}, config = {}, attachments = null } = {}) {
+async function bootPlugin({ agents = {}, config = {}, attachments = null, sessionQuery = null } = {}) {
   const home = mkdtempSync(join(tmpdir(), 'dsh-mini-home-'))
   process.env.DSH_HOME = home
 
   const port = await freePort()
-  const mock = mockCtx({ attachments })
+  const mock = mockCtx({ attachments, sessionQuery })
   const { ctx, handlers, handlerOptions, agents: agentMap } = mock
   for (const [id, agent] of Object.entries(agents)) agentMap.set(id, agent)
 
@@ -1395,4 +1398,201 @@ test('提问钩子：手机上答不出来（返回空），把问题还给电�
   const got = await h.hook(askRequest(h.sessionId), next)
   assert.equal(got, '电脑来答', '手机中途没了要还给电脑，不能两头都答不上')
   assert.equal(handed, 1)
+})
+
+// ---------------------------------------------------------------------------
+// 点开一个会话，就该看到它**完整**的历史（2026-09-25 用户提的要求）
+//
+// 这一组的判据是「从 HTTP 那一头看出去的事实」：绑一个插件从没见过的会话，
+// 然后看快照里的 history / latest 到底是什么。中间用假的会话记录服务顶替
+// DSH 自己的记录（真机上是 DSH 从内存或日志里给出来的那一串原始事件）。
+// ---------------------------------------------------------------------------
+
+/** 一段会话记录：[[问, 答], ...] → 一串会话事件，时间从 start 开始递增。 */
+function logOf(pairs, start = 1_700_000_000_000) {
+  const events = []
+  let clock = start
+  const at = () => (clock += 1000)
+  for (const [ask, answer] of pairs) {
+    events.push(
+      { ...ev('turn/start', { turn: 1 }), time: at() },
+      { ...ev('user/message', { source: { kind: 'user' }, content: text(ask) }), time: at() },
+      { ...ev('assistant/message', { message: { content: text(answer) } }), time: at() },
+      { ...ev('turn/end', { turn: 1, reason: { kind: 'completed' } }), time: at() },
+    )
+  }
+  return events
+}
+
+/**
+ * 假的会话记录服务。`logs` 里没有的会话会抛——真机上老日志格式对不上就是这样，
+ * 「读不出来怎么办」也得是一条走过的路。
+ */
+function fakeQuery(logs) {
+  const calls = []
+  let gate = null
+  return {
+    calls,
+    /** 把下一次读挂住，用来观察「正在读」那一刻手机看到的是什么。 */
+    holdNext() {
+      let open
+      const promise = new Promise((r) => { open = r })
+      gate = { promise, open }
+      return gate
+    },
+    async readSession(id) {
+      calls.push(id)
+      const held = gate
+      gate = null
+      if (held) await held.promise
+      const events = logs[id]
+      if (!events) throw new Error('没有这个会话的记录')
+      return { session: { id }, events }
+    },
+  }
+}
+
+async function bindSession(p, sessionId) {
+  const res = await fetch(`${p.base}/mini/api/bind?token=${p.token}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sessionId }),
+  })
+  return res.json()
+}
+
+/** 等快照满足条件：读记录是后台动作，读完才广播新快照。 */
+async function waitSnap(p, ok, what) {
+  for (let i = 0; i < 100; i += 1) {
+    const snap = await snapOf(p)
+    if (ok(snap)) return snap
+    await new Promise((r) => setTimeout(r, 20))
+  }
+  throw new Error('等不到：' + what)
+}
+
+test('点开一个没看过的会话：聊天模式能看到它之前的每一轮', async (t) => {
+  const query = fakeQuery({
+    'sess-old': logOf([['第一问', '第一答'], ['第二问', '第二答']]),
+  })
+  const p = await bootPlugin({ sessionQuery: query })
+  t.after(p.stop)
+
+  // 绑定之前，这个会话插件一次都没见过——历史是空的（这就是用户报的那个现象）
+  const before = await snapOf(p)
+  assert.deepEqual(before.history, [])
+
+  await bindSession(p, 'sess-old')
+  const snap = await waitSnap(p, (s) => s.history.length === 4, '四轮历史读回来')
+
+  assert.deepEqual(snap.history.map((m) => `${m.role}:${m.text}`), [
+    'user:第一问', 'assistant:第一答', 'user:第二问', 'assistant:第二答',
+  ], '用户指令和最终回复都要在，而且要按发生的顺序排')
+  assert.equal(snap.boundSessionId, 'sess-old')
+})
+
+test('点开一个没看过的会话：单帧模式显示最后一条最终回复', async (t) => {
+  const query = fakeQuery({
+    'sess-old': logOf([['第一问', '第一答'], ['第二问', '第二答']]),
+  })
+  const p = await bootPlugin({ sessionQuery: query })
+  t.after(p.stop)
+
+  await bindSession(p, 'sess-old')
+  const snap = await waitSnap(p, (s) => s.latest, '最后一条回复读回来')
+
+  assert.equal(snap.latest.text, '第二答', '单帧模式要的是最后那一条，不是最前面那条')
+  assert.ok(snap.latest.timestamp > 0, '时间戳要带出来，手机上显示的是这个会话发生的时间')
+})
+
+test('读记录的这一会儿，要告诉手机「正在读」，不能让它显示成空会话', async (t) => {
+  const query = fakeQuery({ 'sess-old': logOf([['问', '答']]) })
+  const held = query.holdNext()
+  const p = await bootPlugin({ sessionQuery: query })
+  t.after(p.stop)
+
+  const res = await bindSession(p, 'sess-old')
+  assert.equal(res.state.historyLoading, true,
+    '读的时候得说实话：不然手机上会显示「还没有对话记录」，看起来这个会话是空的')
+
+  held.open()
+  const snap = await waitSnap(p, (s) => s.history.length === 2, '读完')
+  assert.equal(snap.historyLoading, false, '读完了就该把「正在读」收掉')
+})
+
+test('读记录：同一个会话不会反复读（否则点一下就翻一次盘）', async (t) => {
+  const query = fakeQuery({ 'sess-old': logOf([['问', '答']]) })
+  const p = await bootPlugin({ sessionQuery: query })
+  t.after(p.stop)
+
+  await bindSession(p, 'sess-old')
+  await waitSnap(p, (s) => s.history.length === 2, '第一次读完')
+  // 再绑一次，并且在中间多问几次状态（手机刷新、SSE 重连都会问）
+  await snapOf(p)
+  await snapOf(p)
+  await bindSession(p, 'sess-old')
+  await new Promise((r) => setTimeout(r, 50))
+
+  assert.equal(query.calls.length, 1, '一分钟内同一个会话只读一次，读完就记着')
+})
+
+test('记录读不出来（老日志对不上）：退回手里那份，不编，也不卡在「正在读」', async (t) => {
+  // logs 里没有这个会话 → 假服务会抛，对应真机上老日志读不出来的情况
+  const query = fakeQuery({})
+  const p = await bootPlugin({ sessionQuery: query })
+  t.after(p.stop)
+
+  const res = await bindSession(p, 'sess-broken')
+  assert.equal(res.ok, true, '读不出来不能影响绑定本身')
+  assert.equal(res.state.historyLoading, true, '刚绑定那一刻确实在读')
+
+  const snap = await waitSnap(p, (s) => s.historyLoading === false, '读完（哪怕失败）')
+  assert.deepEqual(snap.history, [], '没有就是没有，不能编一段出来')
+  assert.equal(snap.latest, null)
+})
+
+test('合成：记录里那份 + 刚发生还没落进日志的那一条，接在后面', async (t) => {
+  // 记录里那份的旧时间戳（2023），下面灌进去的「活的那一轮」时间戳是现在
+  const query = fakeQuery({ 'sess-m': logOf([['老问题', '老回答']]) })
+  const p = await bootPlugin({ sessionQuery: query })
+  t.after(p.stop)
+
+  const session = { id: 'sess-m', header: { id: 'sess-m' } }
+  const handle = p.handlers.get('session/event')
+  for (const e of logOf([['刚问的', '刚答的']])) handle(session, e)
+
+  await bindSession(p, 'sess-m')
+  const snap = await waitSnap(p, (s) => s.history.length >= 2, '读回来')
+
+  assert.deepEqual(snap.history.map((m) => m.text).slice(-2), ['刚问的', '刚答的'],
+    '刚发生的那一轮要接在记录的后面——不然手机上会少了眼前这一幕')
+  assert.equal(snap.latest.text, '刚答的')
+})
+
+test('合成：记录里已经有的那几条，不会因为手里也记着就显示两遍', async (t) => {
+  // 记录里那几条的时间戳在「现在」之后（模拟日志已经写进去了），
+  // 手里这份虽然也记着同样的事，但时间不比它新，就不该再接一遍
+  const query = fakeQuery({ 'sess-dup': logOf([['问', '答']], Date.now() + 60_000) })
+  const p = await bootPlugin({ sessionQuery: query })
+  t.after(p.stop)
+
+  const session = { id: 'sess-dup', header: { id: 'sess-dup' } }
+  const handle = p.handlers.get('session/event')
+  for (const e of logOf([['问', '答']])) handle(session, e)
+
+  await bindSession(p, 'sess-dup')
+  const snap = await waitSnap(p, (s) => s.history.length >= 1, '读回来')
+
+  assert.deepEqual(snap.history.map((m) => m.text), ['问', '答'],
+    '同一轮只能出现一次——接重了用户会以为自己问了两次')
+})
+
+test('没有会话记录服务时（headless 组合）：行为跟以前一样，不出错', async (t) => {
+  const p = await bootPlugin() // 不传 sessionQuery
+  t.after(p.stop)
+
+  const res = await bindSession(p, 'sess-noservice')
+  assert.equal(res.ok, true)
+  assert.deepEqual(res.state.history, [])
+  assert.equal(res.state.historyLoading, false)
 })

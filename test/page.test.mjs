@@ -125,6 +125,36 @@ test('指令里的引号不会把 data-copy 属性提前闭合', () => {
   assert.match(out, /data-copy="他说&quot;你好&quot;就行"/, '引号要转义成实体')
 })
 
+test('聊天模式：历史被截断时，要在内容最上面说清「这不是全部」', () => {
+  // 服务端读历史有上限（会话太大只读日志尾部）。这件事**说到内容里**才算数：
+  // 只把条数砍短、不吭声，用户就会以为这个会话只有这么点。
+  const out = renderChatWith({
+    running: false,
+    history: [
+      { role: 'user', text: '第一个问题', timestamp: 1 },
+      { role: 'assistant', text: '第一个回答', timestamp: 2 },
+    ],
+    historyTruncated: true,
+    historyNote: '这个会话很大，只显示了最近 2 条（读取上限：200 条 / 16MB 窗口）',
+  })
+  assert.match(out, /class="history-note"/, '要有那条提示')
+  assert.match(out, /只显示了最近 2 条/, '要说清为什么不是全部')
+  assert.ok(out.indexOf('history-note') < out.indexOf('第一个问题'), '提示要排在内容前面')
+})
+
+test('聊天模式：没截断就不许冒出那句提示（不许无病呻吟）', () => {
+  const out = renderChatWith({
+    running: false,
+    history: [
+      { role: 'user', text: '第一个问题', timestamp: 1 },
+      { role: 'assistant', text: '第一个回答', timestamp: 2 },
+    ],
+    historyTruncated: false,
+    historyNote: '',
+  })
+  assert.ok(!out.includes('history-note'), '完整的历史不该带截断提示')
+})
+
 test('聊天模式的气泡按文字收，不是固定撑满', () => {
   /**
    * 这条只能验 CSS 声明本身——气泡宽度是纯样式，渲染桩算不出真实布局。

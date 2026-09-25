@@ -488,6 +488,11 @@
      跟 .active（当前所在档位）用不同颜色区分——一个是「将要去」，一个是「已在」。 */
   .seg button.armed { background: var(--danger, #c0392b); color: #fff; }
   .nav-note { padding: 10px 16px; color: var(--muted); font-size: 12px; line-height: 1.6; }
+  /* 「这不是全部」：垫在聊天内容最上面，往上翻到顶才看得见，不抢内容。 */
+  .history-note {
+    margin: 0 0 14px; padding: 8px 12px; border: 1px dashed var(--line);
+    border-radius: 10px; color: var(--muted); font-size: 12.5px; line-height: 1.6;
+  }
 
   /* ---------- 设置抽屉 ---------- */
   #settings {
@@ -808,7 +813,12 @@
     // 只存服务端发回来的那张小票，不存附件本身——真正的东西已经在电脑上了。
     uploads: [],
     // 正在流出来的那一段。空字符串 = 这会儿没有东西要显示。
-    live: ''
+    live: '',
+    // 服务端正去读这个会话的完整记录（点开一个插件没看过的会话时会有这一下）。
+    historyLoading: false,
+    // 「这份历史只到最近一段」（服务端读历史有上限时会给这一句）。
+    historyTruncated: false,
+    historyNote: ''
   };
   if (params.get('token')) {
     localStorage.setItem('dshMiniToken', params.get('token'));
@@ -1452,6 +1462,13 @@
       replyEl.innerHTML = '';
       return;
     }
+    // 正在去读这个会话的记录：这时候说「在下面输入一条指令」是不对的——
+    // 这个会话其实有历史，只是还没读完。单帧模式只显示最后一条回复，
+    // 那一条也在这份记录里。
+    if (state.historyLoading) {
+      replyEl.innerHTML = '<div class="placeholder">正在读取这个会话的记录…</div>';
+      return;
+    }
     replyEl.innerHTML = '<div class="placeholder">在下面输入一条指令，'
       + '这里只会显示 AI 的最终回复。<br>中间的工具调用和执行过程不会传过来。</div>';
   }
@@ -1528,7 +1545,12 @@
       return !(m.role === 'user' && m.id && queuedIds[m.id]);
     });
     if (!list.length && !state.running && !state.live && !(state.queued || []).length) {
-      replyEl.innerHTML = '<div class="placeholder">还没有对话记录。</div>';
+      // 「正在读」和「确实没有」是两件事，分开说。点开一个插件没看过的会话时，
+      // 服务端要去 DSH 的会话记录里读它那一段（最大的那条 20 MB、约半秒），
+      // 这期间说「还没有对话记录」会让人以为这个会话本来就是空的。
+      replyEl.innerHTML = state.historyLoading
+        ? '<div class="placeholder">正在读取这个会话的记录…</div>'
+        : '<div class="placeholder">还没有对话记录。</div>';
       return;
     }
     var html = list.map(function (m) {
@@ -1552,6 +1574,13 @@
         + '<div class="reply-foot">' + copyBtn
         + '<span class="time">' + timeLabel(m.timestamp) + '</span></div></div>';
     }).join('');
+    // 「这不是全部」要说在**内容前面**：用户往上翻到顶时，第一眼看到的就是它，
+    // 免得以为这个会话只有这么点内容。读历史有上限（见服务端 HISTORY_MAX_*）。
+    if (state.historyTruncated) {
+      html = '<div class="history-note">'
+        + escapeHtml(state.historyNote || '这个会话很大，只显示了最近一段。')
+        + '</div>' + html;
+    }
     // 「正在执行」不再追加一个气泡——它是常驻的 #work，排在整串消息下面。
     // 两种模式共用同一块，改的时候两边都走一遍。
     if (state.live) html += liveBlock(state.live);
@@ -1638,6 +1667,13 @@
     // 不代表模型没在写，只代表「还不到显示的时候」。
     if ('live' in snap) state.live = snap.live || '';
     if (snap.history) state.history = snap.history;
+    // 「服务端正去读这个会话的完整记录」。点开一个没看过的会话时，那一串要读一会儿
+    // 才补上来（最大的那条日志 20 MB、约半秒），这期间不能装作「这个会话是空的」。
+    state.historyLoading = snap.historyLoading === true;
+    // 「这份历史只到最近一段」。服务端读历史有上限（会话太大只读日志尾部），
+    // 所以内容可能是截断的——**这件事必须跟着内容一起传上来**，不能只在服务端知道。
+    state.historyTruncated = snap.historyTruncated === true;
+    state.historyNote = snap.historyNote || '';
     if (snap.sessions) state.sessions = snap.sessions;
     if (Array.isArray(snap.queued)) state.queued = snap.queued;
     if ('boundSessionId' in snap) state.boundSessionId = snap.boundSessionId;
