@@ -563,6 +563,77 @@
   <button class="icon-btn" id="btnSettings" aria-label="设置">⚙</button>
 </header>
 
+<!-- 模型与思考强度（2026-09-25 用户要求：手机上要能改每个会话的模型和强度）。
+
+     这一步只做**显示**，不做修改：先把真数据摆出来、确认显示得对、确认刷新跟得上，
+     再把按钮加上去。顺序是故意的——不做「点了没用」的东西。
+
+     **整段是自包含的**：自己的 script 标签、自己的请求、自己的元素，不碰页面现有的
+     任何代码。唯一的对外依赖是 /mini/api/models 那条接口（已经验过真数据）。
+     这样即使这段整个坏掉，也不会影响已经能用的部分。
+
+     没拿到数据之前整条藏着——**宁可什么都不显示，也不显示一个占位的假值**。 -->
+<div id="modelBar" style="display:none;align-items:center;gap:8px;padding:6px 12px;font-size:12px;color:var(--dim,#888);border-bottom:1px solid var(--line,#e5e5e5)">
+  <span id="modelBarText"></span>
+</div>
+<script>
+(function () {
+  var bar = document.getElementById('modelBar')
+  var text = document.getElementById('modelBarText')
+  if (!bar || !text) return
+
+  // token：页面本来就是带着它打开的，直接沿用，不让用户再输一次。
+  function token() {
+    try {
+      var q = new URLSearchParams(location.search).get('token')
+      if (q) return q
+    } catch (e) { /* 老浏览器没有 URLSearchParams，走下面 */ }
+    var m = location.search.match(/[?&]token=([^&]+)/)
+    return m ? decodeURIComponent(m[1]) : ''
+  }
+
+  function show(selection) {
+    if (!selection || !selection.model) { bar.style.display = 'none'; return }
+    var parts = []
+    if (selection.provider) {
+      // 来源名用 DSH 给的那个（「DeepSeek」「opencode go」「mimo」），不是内部 id
+      parts.push(selection.provider)
+    }
+    parts.push(selection.model)
+    if (selection.reasoningEffort) parts.push('思考 ' + selection.reasoningEffort)
+    text.textContent = '📦 ' + parts.join(' · ')
+    bar.style.display = 'flex'
+  }
+
+  function load() {
+    var t = token()
+    if (!t) return
+    fetch('/mini/api/models?token=' + encodeURIComponent(t), { cache: 'no-store' })
+      .then(function (r) { return r.ok ? r.json() : null })
+      .then(function (d) {
+        if (!d || !d.ok) return
+        // 来源名要拿 id→name 的映射换一下，DSH 给的是内部 id（opencode-go-new）
+        // 和给人看的名字（opencode go）两套，显示用后者。
+        var s = d.current
+        if (s && s.provider && d.groups) {
+          for (var i = 0; i < d.groups.length; i++) {
+            if (d.groups[i].id === s.provider) { s.provider = d.groups[i].name; break }
+          }
+        }
+        show(s)
+      })
+      .catch(function () { /* 读不到就保持原样，不显示错的东西 */ })
+  }
+
+  load()
+  // 在电脑上改了模型，手机这边也要跟上。**轮询很土，但这里是诚实的做法**：
+  // 我们没法从这段独立代码挂进页面已有的那条 SSE，而显示一个过期的模型名
+  // 比不显示更糟——用户会以为自己改的没生效。15 秒一次，开销可以忽略。
+  setInterval(function () { if (!document.hidden) load() }, 15000)
+  document.addEventListener('visibilitychange', function () { if (!document.hidden) load() })
+})()
+</script>
+
 <main id="main">
   <div id="reply"></div>
   <!-- 「正在执行」是常驻元素，不参与 #reply 的整块重绘。
