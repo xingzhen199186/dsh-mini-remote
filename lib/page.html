@@ -577,11 +577,13 @@
   <span id="modelBarText"></span>
 </div>
 <!-- 这一段暂时**不执行**（标成非脚本），是有意的停手，不是忘了接上：
-     这个页面被设计成**只有一个 <script> 块**——测试钉住了这一条，因为抽取脚本的正则
+     这个页面被设计成**只有一个脚本块**——测试钉住了这一条，因为抽取脚本的正则
      是贪婪匹配，多一个块就会把中间的 HTML 整段当成 JS 去解析（这次就是这么炸的）。
+     另外**别在这段注释里写出那个标签的尖括号原文**：测试的正则只认字面量，
+     注释里的它照样会被当成脚本开头，一样会把中间的东西吃进去。
      所以这段代码要挪进上面那个唯一的 script 里才会生效。代码本身没问题，
      /mini/api/models 也验过真数据了。 -->
-<script type="text/plain">
+<template id="modelBarCode">
 (function () {
   var bar = document.getElementById('modelBar')
   var text = document.getElementById('modelBarText')
@@ -637,7 +639,7 @@
   setInterval(function () { if (!document.hidden) load() }, 15000)
   document.addEventListener('visibilitychange', function () { if (!document.hidden) load() })
 })()
-</script>
+</template>
 
 <main id="main">
   <div id="reply"></div>
