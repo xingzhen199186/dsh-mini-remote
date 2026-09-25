@@ -11,6 +11,9 @@ import { mkdtempSync, readFileSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createServer } from 'node:net'
+// 提问钩子要用的两个能力放在这里（模块级单例）——钩子的测试会临时替换它们，
+// 用完立刻还回去，免得串到别的用例上。
+import { miniControl } from '../lib/server.js'
 
 // 动态 import 要的是 file:// URL，不是 Windows 路径，所以这里全程保留 URL 形态。
 const ROOT_URL = new URL('..', import.meta.url)
@@ -56,6 +59,9 @@ function makeCtx(services, directNames) {
 
 function mockCtx({ attachments } = {}) {
   const handlers = new Map()
+  // `ctx.on` 的第三个参数（注册选项）也要留下来：提问钩子靠 `prepend` 才能排到
+  // 电脑浏览器前面，而漏掉它**不报错、只是永远轮不到**。这种错只能靠断言钉住。
+  const handlerOptions = new Map()
   const agents = new Map()
   // 插件会注册不止一个 effect（服务、配对路由各一个），全部收集起来——
   // 只记最后一个会导致服务关不掉、测试进程永远不退出。
@@ -63,6 +69,7 @@ function mockCtx({ attachments } = {}) {
   const routes = new Map()
   return {
     handlers,
+    handlerOptions,
     agents,
     routes,
     stop: () => {
@@ -81,9 +88,10 @@ function mockCtx({ attachments } = {}) {
           return () => routes.delete(route.path)
         },
       },
-      on: (name, fn) => {
+      on: (name, fn, options) => {
         handlers.set(name, fn)
-        return () => handlers.delete(name)
+        handlerOptions.set(name, options)
+        return () => { handlers.delete(name); handlerOptions.delete(name) }
       },
       effect: (fn) => {
         const dispose = fn()
@@ -105,7 +113,7 @@ async function bootPlugin({ agents = {}, config = {}, attachments = null } = {})
 
   const port = await freePort()
   const mock = mockCtx({ attachments })
-  const { ctx, handlers, agents: agentMap } = mock
+  const { ctx, handlers, handlerOptions, agents: agentMap } = mock
   for (const [id, agent] of Object.entries(agents)) agentMap.set(id, agent)
 
   // 每次重新 import，避免模块级缓存串味
@@ -126,7 +134,7 @@ async function bootPlugin({ agents = {}, config = {}, attachments = null } = {})
   }
 
   return {
-    home, base, token, handlers, agents: agentMap, ctx, routes: mock.routes,
+    home, base, token, handlers, handlerOptions, agents: agentMap, ctx, routes: mock.routes,
     stop: () => mock.stop(),
   }
 }
@@ -1246,4 +1254,145 @@ test('停止接口也要 token，没带就是 401', async (t) => {
 
   const res = await fetch(`${p.base}/mini/api/stop`, { method: 'POST' })
   assert.equal(res.status, 401)
+})
+
+// ---------------------------------------------------------------------------
+// 手机上答题：接管电脑那边的提问（`user-questions/request`）
+//
+// 这是插件里最安静的一段——接错了不报错，只是电脑照常弹窗、手机永远收不到问题。
+// 而它又是「手机能答题」这条功能的唯一入口，所以「接不接」的几种情形都钉在这里。
+//
+// 三个要点都是踩出来或想清楚了才这么写的，测试也就照着这三点钉：
+//   ① 必须 `{ prepend: true }`——那条瀑布遇到第一个愿意接的人就停，电脑浏览器
+//      （经 `dsh-api-remotes`）本来就在接，排在它后面就永远轮不到本插件；
+//   ② 必须是**普通函数**，不能是 async——「接不接」要在同步那一瞬间定下来，
+//      先 await 再 `return next()` 会**静默失效**，一句错都不报；
+//   ③ 任何一条不接的路，都要原样让给电脑。
+// ---------------------------------------------------------------------------
+
+/** 起一个插件、绑好一个会话，把提问钩子连着两个能力一起交给用例。 */
+async function bootQuestionHook({ phone = true, answer = null, rejects = false } = {}) {
+  const p = await bootPlugin()
+  const sessionId = 'sess-question'
+  await fetch(`${p.base}/mini/api/bind?token=${p.token}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sessionId }),
+  })
+
+  const saved = { hasPhone: miniControl.hasPhone, askPhone: miniControl.askPhone }
+  let asked = 0
+  miniControl.hasPhone = () => phone
+  miniControl.askPhone = () => {
+    asked += 1
+    // 接管的失败是**异步**的：真实的 askPhone 一上来就同步返回一个 Promise，
+    // 等待过程中手机全断了才会出结果。所以这里用 reject 来走那条 catch。
+    if (rejects) return Promise.reject(new Error('模拟：接管出错了'))
+    return Promise.resolve(answer)
+  }
+
+  return {
+    p,
+    sessionId,
+    askedCount: () => asked,
+    hook: p.handlers.get('user-questions/request'),
+    restore: () => {
+      miniControl.hasPhone = saved.hasPhone
+      miniControl.askPhone = saved.askPhone
+      p.stop()
+    },
+  }
+}
+
+/** 电脑那边递给钩子的那个请求，以及「让给下一个人」的回执。 */
+const askRequest = (agentId) => ({
+  agent: { id: agentId },
+  questions: [{ id: 'q1', question: '选哪个方案？', options: [{ label: 'A' }, { label: 'B' }] }],
+})
+
+test('提问钩子：插到队首注册，而且是普通函数（不能是 async）', async (t) => {
+  const p = await bootPlugin()
+  t.after(p.stop)
+
+  const hook = p.handlers.get('user-questions/request')
+  assert.ok(hook, '必须挂上这个钩子，否则手机永远收不到提问')
+  assert.equal(
+    p.handlerOptions.get('user-questions/request')?.prepend,
+    true,
+    '不插队就永远轮不到——电脑浏览器本来就接在这个瀑布上',
+  )
+  assert.notEqual(
+    hook.constructor.name,
+    'AsyncFunction',
+    'async 函数里「让路」交不回派发链条，而且不报错',
+  )
+})
+
+test('提问钩子：手机在，就把答案原样交回电脑', async (t) => {
+  const answer = { answers: [{ id: 'q1', selected: ['B'] }] }
+  const h = await bootQuestionHook({ answer })
+  t.after(h.restore)
+
+  const next = () => { throw new Error('手机在的时候不该让给电脑') }
+  const got = await h.hook(askRequest(h.sessionId), next)
+  assert.deepEqual(got, answer, '交回去的必须是手机上答的那份')
+  assert.equal(h.askedCount(), 1)
+})
+
+test('提问钩子：手机不在，原样让给电脑', async (t) => {
+  const h = await bootQuestionHook({ phone: false, answer: { answers: [] } })
+  t.after(h.restore)
+
+  let handed = 0
+  const next = () => { handed += 1; return '电脑来答' }
+  const got = await h.hook(askRequest(h.sessionId), next)
+  assert.equal(got, '电脑来答')
+  assert.equal(handed, 1)
+  assert.equal(h.askedCount(), 0, '手机不在时不该把问题推出去')
+})
+
+test('提问钩子：问的不是手机上绑着的那个会话，让路', async (t) => {
+  const h = await bootQuestionHook({ answer: { answers: [] } })
+  t.after(h.restore)
+
+  let handed = 0
+  const next = () => { handed += 1; return '电脑来答' }
+  const got = await h.hook(askRequest('sess-别的会话'), next)
+  assert.equal(got, '电脑来答')
+  assert.equal(handed, 1)
+  assert.equal(h.askedCount(), 0, '别的会话的提问不归手机管')
+})
+
+test('提问钩子：没有题目也让路（不能拿一个空提问去问手机）', async (t) => {
+  const h = await bootQuestionHook({ answer: { answers: [] } })
+  t.after(h.restore)
+
+  let handed = 0
+  const next = () => { handed += 1; return '电脑来答' }
+  const got = await h.hook({ agent: { id: h.sessionId }, questions: [] }, next)
+  assert.equal(got, '电脑来答')
+  assert.equal(handed, 1)
+  assert.equal(h.askedCount(), 0)
+})
+
+test('提问钩子：接管出错了，也要把问题还给电脑（不能吞掉）', async (t) => {
+  const h = await bootQuestionHook({ rejects: true })
+  t.after(h.restore)
+
+  let handed = 0
+  const next = () => { handed += 1; return '电脑来答' }
+  const got = await h.hook(askRequest(h.sessionId), next)
+  assert.equal(got, '电脑来答', '出了错也不能把提问吞掉，否则电脑上什么都不弹')
+  assert.equal(handed, 1)
+})
+
+test('提问钩子：手机上答不出来（返回空），把问题还给电脑', async (t) => {
+  const h = await bootQuestionHook({ answer: null })
+  t.after(h.restore)
+
+  let handed = 0
+  const next = () => { handed += 1; return '电脑来答' }
+  const got = await h.hook(askRequest(h.sessionId), next)
+  assert.equal(got, '电脑来答', '手机中途没了要还给电脑，不能两头都答不上')
+  assert.equal(handed, 1)
 })

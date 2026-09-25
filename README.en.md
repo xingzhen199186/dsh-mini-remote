@@ -47,6 +47,8 @@ dsh plugin --profile web add <the folder you put the source in>
 
 **You must restart DSH once after installing**, or nothing new shows up in the settings page. After the restart a "Phone Remote" entry appears in the left column, and the startup log prints the phone URL and password.
 
+**Which DSH versions it fits.** This plugin was developed on DSH **0.1.5-rc.2** and re-checked item by item on **0.1.7-rc.2** (every interface it uses was unchanged); **versions below 0.1.5 have not been tried**. `rc` is the tag the project puts on preview builds, and DSH as a whole is still a developer preview — minor versions may break things, so versions newer than 0.1.7 are not guaranteed either. If it ever does hit an incompatibility, the usual symptom is one entry point going missing (the model line at the top, say) while everything else keeps working: the plugin is written so that a missing service switches off that one feature rather than the whole thing.
+
 ---
 
 ## Configuration: three routes, pick what you need
@@ -101,7 +103,11 @@ Open the link and that's the whole interface: one input box, and the latest repl
 
 **Two display modes.** Tap the ⚙ in the top right to switch. "Single frame" (the default) keeps only the newest reply on screen — good for "I just want to see how this one turned out". "Chat" is a back-and-forth bubble list — good for several rounds of follow-up questions. Use it for a while and you'll know which you prefer.
 
-**You're reading conclusions, not the process.** There's no tool-call chain, no file diff, no approval dialog on the page — **anything that needs your confirmation cannot be confirmed from the phone**; you have to go back to the computer. Nor will it start new sessions, switch models, or change configuration for you. It's a remote control: the TV still has to be on for the remote to be any use.
+**Answer questions from the phone.** When the AI asks you to pick something (choose one of several plans, say), the question is pushed to the phone and a tap answers it — **one at a time, revisable if you change your mind, and you can type your own answer** when none of the options fit. If nobody is at the phone (locked, page closed, network gone), the question goes straight back to the computer and the dialog pops up there as usual.
+
+**Three things you can change in passing.** Tap the line at the top to switch the current session's model and reasoning effort; switch the permission preset (View Only / Workspace Write / Full Access); browse the computer's folders to register a new workspace and start a session in it.
+
+**You're reading conclusions, not the process.** There's no tool-call chain and no file diff on the page. **System-level confirmation dialogs cannot be answered from the phone** (approving a dangerous command, for instance) — those still need the computer. What the phone can answer is the multiple-choice question the AI puts to you; the two are not the same thing. It's a remote control: the TV still has to be on for the remote to be any use.
 
 ---
 
