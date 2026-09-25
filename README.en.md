@@ -103,6 +103,8 @@ Open the link and that's the whole interface: one input box, and the latest repl
 
 **Two display modes.** Tap the ⚙ in the top right to switch. "Single frame" (the default) keeps only the newest reply on screen — good for "I just want to see how this one turned out". "Chat" is a back-and-forth bubble list — good for several rounds of follow-up questions. Use it for a while and you'll know which you prefer.
 
+**Open a session and you see what was said in it before.** Switch to a session that has existed for a while and Chat mode lists every earlier round (the instructions you sent, the conclusion of each round); Single frame shows only the last conclusion. **Very large sessions show only the most recent stretch**: reading one of those in full — tens of thousands of events — would drag the DSH process on your computer down, so the plugin reads just the tail and says so at the top ("this is not everything, only the most recent stretch"). That line is not boilerplate; it is the truth.
+
 **Answer questions from the phone.** When the AI asks you to pick something (choose one of several plans, say), the question is pushed to the phone and a tap answers it — **one at a time, revisable if you change your mind, and you can type your own answer** when none of the options fit. If nobody is at the phone (locked, page closed, network gone), the question goes straight back to the computer and the dialog pops up there as usual.
 
 **Three things you can change in passing.** Tap the line at the top to switch the current session's model and reasoning effort; switch the permission preset (View Only / Workspace Write / Full Access); browse the computer's folders to register a new workspace and start a session in it.

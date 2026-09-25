@@ -135,10 +135,10 @@ test('聊天模式：历史被截断时，要在内容最上面说清「这不�
       { role: 'assistant', text: '第一个回答', timestamp: 2 },
     ],
     historyTruncated: true,
-    historyNote: '这个会话很大，只显示了最近 2 条（读取上限：200 条 / 16MB 窗口）',
+    historyNote: '这个会话很大，只显示最近一段（读取上限：200 条 / 16MB 窗口）',
   })
   assert.match(out, /class="history-note"/, '要有那条提示')
-  assert.match(out, /只显示了最近 2 条/, '要说清为什么不是全部')
+  assert.match(out, /只显示最近一段/, '要说清为什么不是全部')
   assert.ok(out.indexOf('history-note') < out.indexOf('第一个问题'), '提示要排在内容前面')
 })
 

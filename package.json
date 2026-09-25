@@ -1,6 +1,6 @@
 {
   "name": "dsh-mini-remote",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "DSH 极简移动端遥控器：只把「你的指令」和「AI 的最终回复」送到手机，屏蔽全部中间过程。",
   "type": "module",
   "main": "lib/index.js",

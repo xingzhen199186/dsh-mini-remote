@@ -2,7 +2,14 @@
 
 本文件记录每个版本改了什么。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-## [未发布]
+## [0.1.2] - 2026-09-25
+
+### 新加的
+
+- **手机点开一个会话，就能看到它之前每一轮。** 在这之前，手机上只有「插件亲眼看过」的内容：内存里那份历史从 DSH 启动、或者从手机开始遥控的那一刻才开始记，所以一个早就存在的会话点进去是空的。现在点开会话（以及在手机上刷新页面、切换会话）时，插件会去读那个会话的记录，把每一轮的用户指令和最终结论列出来；单帧模式仍然只显示最后一条结论。读不出来（老格式日志、写了一半的日志）就退回手里那份并记一条日志，**不编内容**。
+  - 重放和实时走的是**同一套判断**：`lib/history.js` 调的就是 `events.js` 里那个提取器（`createTurnTracker`），两条路的「哪条才算回答」不会走散。
+  - 读完就广播一份新快照。手机上看到的顺序是「先有手里那份，再自然补全」，不会空白等待。
+  - 顺手修掉了 `tools/peek-events.mjs` 的两个真 bug：多帧 zstd 日志只解第一帧（26MB 的日志只读出 196 字节，看着像「这个会话没内容」）、文件名写死 `session.v3.jsonl.zstd`（v4 的会话根本找不到）。它现在直接用 `lib/log-tail.js` 的帧扫描和文件查找。
 
 ### 修好的
 
@@ -67,3 +74,4 @@
 
 [0.1.0]: https://github.com/xingzhen199186/dsh-mini-remote/releases/tag/v0.1.0
 [0.1.1]: https://github.com/xingzhen199186/dsh-mini-remote/releases/tag/v0.1.1
+[0.1.2]: https://github.com/xingzhen199186/dsh-mini-remote/releases/tag/v0.1.2
