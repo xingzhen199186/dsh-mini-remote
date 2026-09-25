@@ -720,6 +720,18 @@ function buildWhale({ token = 'tok', reduced = false, apiRejects = false } = {})
     queue: makeEl('queue'),
     btnSend: makeEl('btnSend'),
     input: makeEl('input'),
+    // 答题卡片的元素（2026-09-25 新增）。真页面上它们永远在，这里补上同样的替身，
+    // 否则卡片的接线代码在测试里会拿到空、`addEventListener` 当场报错。
+    askCard: makeEl('askCard'),
+    askHead: makeEl('askHead'),
+    askText: makeEl('askText'),
+    askDetail: makeEl('askDetail'),
+    askOpts: makeEl('askOpts'),
+    askCustomWrap: makeEl('askCustomWrap'),
+    askCustom: makeEl('askCustom'),
+    askBack: makeEl('askBack'),
+    askOwn: makeEl('askOwn'),
+    askNext: makeEl('askNext'),
   }
   const created = []
   const timers = []
@@ -1597,7 +1609,14 @@ function feedReply(payload, { mode = 'minimal', history = [] } = {}) {
   )
   build(
     state, FakeEventSource, { hidden: false }, encodeURIComponent,
-    (id) => (els[id] || (els[id] = { textContent: '' })),
+    // 这个替身原来只造出 `{ textContent }`，够老代码用；答题卡片要在元素上
+    // 挂 `addEventListener`、改 `classList`/`style`/`value`，所以把这几样补齐。
+    // 真页面上这些元素本来就都有，这里只是让测试里的替身也具备同样的能力。
+    (id) => (els[id] || (els[id] = {
+      textContent: '', value: '', innerHTML: '', style: {},
+      classList: { add() {}, remove() {}, contains: () => false },
+      addEventListener() {}, appendChild() {}, focus() {},
+    })),
     () => {}, () => {}, () => {}, () => {}, () => {},
     (v) => { calls.push(v); state.running = v }, () => {}, () => {},
   )()

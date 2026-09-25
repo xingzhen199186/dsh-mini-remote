@@ -551,9 +551,48 @@
     transition: opacity .2s, transform .2s; z-index: 200; max-width: 86vw; text-align: center;
   }
   #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  /* ——— 回答电脑提问的卡片 ———
+     整屏遮住聊天区：手机上一次只专心答一题，答完自动消失。
+     之所以遮全屏而不是弹个小条：非技术用户看到"电脑在等你回答"时，
+     最怕的是不知道该点哪里；整屏只剩问题本身和按钮，没有第二个选择。 */
+  #askCard { position: fixed; inset: 0; z-index: 300; background: #0e1116;
+    display: none; flex-direction: column; padding: 18px 16px calc(18px + env(safe-area-inset-bottom)); overflow-y: auto; }
+  #askCard.on { display: flex; }
+  #askCard .qhead { font-size: 13px; opacity: .6; margin-bottom: 12px; }
+  #askCard .qtext { font-size: 18px; line-height: 1.6; margin-bottom: 10px; }
+  #askCard .qdetail { font-size: 14px; line-height: 1.65; opacity: .75; margin-bottom: 16px; white-space: pre-wrap; }
+  #askCard .opt { display: block; width: 100%; text-align: left; margin: 0 0 10px; padding: 15px 16px;
+    font-size: 16px; line-height: 1.5; border-radius: 12px; border: 1px solid #2a3140;
+    background: #161b23; color: inherit; font-family: inherit; }
+  #askCard .opt.sel { border-color: #3b82f6; background: #17243a; }
+  #askCard .opt small { display: block; opacity: .7; font-size: 13px; margin-top: 5px; }
+  #askCard textarea { width: 100%; box-sizing: border-box; font-size: 16px; line-height: 1.6;
+    border-radius: 12px; border: 1px solid #2a3140; background: #161b23; color: inherit;
+    padding: 12px; font-family: inherit; resize: vertical; }
+  #askCard .qfoot { margin-top: auto; display: flex; gap: 10px; padding-top: 16px; }
+  #askCard .qfoot button { flex: 1; padding: 15px 8px; font-size: 16px; border-radius: 12px;
+    border: 1px solid #2a3140; background: #161b23; color: inherit; font-family: inherit; }
+  #askCard .qfoot button#askNext { background: #2563eb; border-color: #2563eb; color: #fff; }
 </style>
 </head>
 <body>
+
+<!-- 电脑提问时弹出来的答题卡片。默认隐藏，收到 question 事件才显示。 -->
+<div id="askCard">
+  <div class="qhead" id="askHead"></div>
+  <div class="qtext" id="askText"></div>
+  <div class="qdetail" id="askDetail"></div>
+  <div id="askOpts"></div>
+  <div id="askCustomWrap" style="display:none;margin-bottom:10px">
+    <textarea id="askCustom" rows="3" placeholder="用你自己的话回答……"></textarea>
+  </div>
+  <div class="qfoot">
+    <button id="askBack" type="button">上一题</button>
+    <button id="askOwn" type="button">我自己说</button>
+    <button id="askNext" type="button">下一题</button>
+  </div>
+</div>
 
 <header>
   <button class="icon-btn" id="btnNav" aria-label="工作区与会话">☰</button>
@@ -2071,6 +2110,110 @@
         // 调用留着：开关不露出来了，state.notify 就永远是 false，这个函数会立刻返回。
         notifySystem(payload.text);
       }
+    });
+    // ——— 回答电脑的提问 ———
+    //
+    // 电脑那边提问时，插件把题目推一条 `question` 过来，答完 POST 回 /mini/api/answer。
+    // 三条是用户定下的：一个一个答（答完这题才出下一题）、点错了能回头改、能自己打字。
+    let ask = null
+    function askRender() {
+      if (!ask) return
+      const q = ask.questions[ask.i]
+      $('askHead').textContent = ask.questions.length > 1
+        ? '电脑问你第 ' + (ask.i + 1) + ' 题，一共 ' + ask.questions.length + ' 题'
+        : '电脑在问你一件事'
+      $('askText').textContent = q.question || ''
+      $('askDetail').textContent = q.detail || ''
+      $('askDetail').style.display = q.detail ? '' : 'none'
+      const picked = ask.picked[ask.i] || { selected: [], custom: '' }
+      const box = $('askOpts')
+      box.innerHTML = ''
+      const options = Array.isArray(q.options) ? q.options : []
+      options.forEach(function (o) {
+        const btn = document.createElement('button')
+        btn.type = 'button'
+        btn.className = 'opt' + (picked.selected.indexOf(o.label) >= 0 ? ' sel' : '')
+        const name = document.createElement('span')
+        name.textContent = o.label
+        btn.appendChild(name)
+        if (o.description) {
+          const sub = document.createElement('small')
+          sub.textContent = o.description
+          btn.appendChild(sub)
+        }
+        btn.addEventListener('click', function () {
+          // 允许多选的题就点一下选中、再点一下取消；单选的点谁就是谁。
+          if (q.multiSelect) {
+            const at = picked.selected.indexOf(o.label)
+            if (at >= 0) picked.selected.splice(at, 1)
+            else picked.selected.push(o.label)
+          } else {
+            picked.selected = [o.label]
+          }
+          // 选了选项就清掉"我自己说"——两者只留一个，免得电脑收到含糊的答案。
+          picked.custom = ''
+          ask.picked[ask.i] = picked
+          askRender()
+        })
+        box.appendChild(btn)
+      })
+      $('askCustomWrap').style.display = ask.custom ? '' : 'none'
+      $('askCustom').value = picked.custom || ''
+      $('askBack').style.display = ask.i > 0 ? '' : 'none'
+      $('askNext').textContent = ask.i === ask.questions.length - 1 ? '答好了，发回电脑' : '下一题'
+      $('askCard').classList.add('on')
+    }
+    $('askOwn').addEventListener('click', function () {
+      if (!ask) return
+      ask.custom = !ask.custom
+      $('askCustomWrap').style.display = ask.custom ? '' : 'none'
+      if (ask.custom) $('askCustom').focus()
+    })
+    $('askCustom').addEventListener('input', function () {
+      if (!ask) return
+      const picked = ask.picked[ask.i] || { selected: [], custom: '' }
+      picked.custom = $('askCustom').value
+      picked.selected = []
+      ask.picked[ask.i] = picked
+      askRender()
+    })
+    $('askBack').addEventListener('click', function () {
+      if (!ask || ask.i === 0) return
+      ask.i -= 1
+      askRender()
+    })
+    $('askNext').addEventListener('click', function () {
+      if (!ask) return
+      const picked = ask.picked[ask.i] || { selected: [], custom: '' }
+      if (!picked.selected.length && !(picked.custom || '').trim()) {
+        toast('先选一个，或者点「我自己说」写一句')
+        return
+      }
+      if (ask.i < ask.questions.length - 1) {
+        ask.i += 1
+        askRender()
+        return
+      }
+      // 最后一题答完：把所有题的答案一起交回去。
+      const answers = ask.questions.map(function (q, k) {
+        const one = ask.picked[k] || { selected: [], custom: '' }
+        const answer = { id: q.id, selected: one.selected.slice() }
+        if ((one.custom || '').trim()) answer.custom = one.custom.trim()
+        return answer
+      })
+      const id = ask.id
+      ask = null
+      $('askCard').classList.remove('on')
+      // 发失败也不弹窗打扰：电脑那边等不到答案会自己还给浏览器，用户不会卡住。
+      api('/mini/api/answer', { method: 'POST', body: JSON.stringify({ id: id, answers: answers }) })
+        .catch(function () {})
+    })
+    es.addEventListener('question', function (e) {
+      let payload = null
+      try { payload = JSON.parse(e.data) } catch (err) { return }
+      if (!payload || !payload.id || !Array.isArray(payload.questions) || !payload.questions.length) return
+      ask = { id: payload.id, questions: payload.questions, i: 0, picked: {}, custom: false }
+      askRender()
     });
     es.addEventListener('status', function (e) {
       try { setRunning(JSON.parse(e.data).running); } catch (err) {}
