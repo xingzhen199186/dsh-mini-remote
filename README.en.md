@@ -1,29 +1,43 @@
-# dsh-mini-remote
+# Minimal Remote · dsh-mini-remote
 
-> A [DeepSeek Harness](https://github.com/deepseek-ai/DeepSeek-Harness) (DSH) plugin that puts a **minimal remote control** on your mobile device — only the instruction you send, the AI's final conclusion, and the one line it mutters between steps (shown in the whale girl's speech bubble) reach it. Tool calls, file reads and writes, sub-agent dispatch, and the body of the reasoning trace all stay on the computer.
-
+[![npm](https://img.shields.io/npm/v/dsh-mini-remote)](https://www.npmjs.com/package/dsh-mini-remote)
 ![DSH plugin](https://img.shields.io/badge/DSH_plugin-dsh--plugin-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
-[中文说明 →](README.md)
+[中文说明](README.md)
+
+![Minimal Remote: only your instruction and the AI's conclusion reach the phone; everything in between stays on the computer](https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/promo.png)
+
+**You send one line; the phone gets one conclusion.**
+
+Tool calls, file reads and writes, sub-agent dispatch, and the body of the reasoning trace never reach the phone. This plugin exists for one situation: you're out, and all you want to do is send an instruction and read the result — a phone, one input box, the latest reply.
+
+[What it is](#what-it-is) ・ [When you'd use it](#when-youd-use-it) ・ [Install](#install) ・ [Connecting your phone](#connecting-your-phone-three-routes-pick-one) ・ [What the phone can do](#what-the-phone-can-do) ・ [FAQ](#faq) ・ [Security](#security) ・ [Why I built this](#why-i-built-this-plugin)
 
 ---
 
-## Why I built this plugin
+## What it is
 
-The idea came from this: an agent task often takes a long time to finish, and if you step out, you need the phone to drive it remotely.
+A plugin for [DeepSeek Harness](https://github.com/deepseek-ai/DeepSeek-Harness) (DSH, a plugin-extensible AI agent framework). Once installed:
 
-But the phone clients that exist show the PC's execution steps in faithful detail. You send one instruction; it may think for several minutes, read dozens of files, call tools a few times, and only then give you a conclusion. If you're out, or busy away from the computer, you simply don't have the time to watch the phone that closely.
+- a web page opens on your phone with exactly one input box and the latest reply;
+- instructions you send from the phone go straight to the session already running on your computer;
+- everything in between — tool calls, files read and written, sub-agents, the reasoning trace itself — **is never pushed to the phone**;
+- the only thing that "talks" is the whale girl: the line the model mutters between steps, spoken in her speech bubble.
 
-I don't think that approach is bad. It's complete and controllable, and if you're going to do serious work, it's the right one.
+On a real phone it looks like this:
 
-But when I'm out, what I want is something else — **a lighter way to interact that asks less of my attention**. The phone screen is small, and so is the attention I have to spare when I'm out. Most of the time I only need one thing: **this round is done, time to send the next instruction.** And even at my desk, I rarely read the AI's running commentary while it works.
+<img width="360" alt="Minimal Remote on a phone: one input box, one reply" src="https://github.com/user-attachments/assets/8befa186-3e20-4c0e-8efc-8ea523f77648" />
 
-So the interface here is deliberately crude: it drops the PC's execution steps entirely and puts only the AI's final conclusion in front of you.
+It is **not** a second screen for the desktop interface. Approval dialogs, file diffs and tool-call chains exist on the computer and nowhere on the phone — deliberately. It does very little.
 
-**In a sense, it exists so that you look at it less.**
+Other phone clients copy the computer's execution process over to the phone in full. This one does the opposite: **it sends only the two lines you asked for.** That is the single biggest difference between it and them.
 
-So you can spend your time more freely — instead of being stuck in that small screen while you're playing with your daughter or out on a trip.
+## When you'd use it
+
+- **You're out and a task is still running.** The computer is at your desk mid-round; you just want to glance at the phone to see whether it finished, and hand it the next line while you're at it.
+- **You're with your kid, eating, or out for a walk.** You don't want to touch the computer, but an idea shows up and you'd like it working on that already.
+- **The computer is in the study and you're in the living room.** Not worth walking back, and not worth pulling that whole screen of process onto the phone.
 
 ---
 
@@ -32,6 +46,13 @@ So you can spend your time more freely — instead of being stuck in that small 
 ```powershell
 dsh plugin --profile web add dsh-mini-remote
 ```
+
+**You must restart DSH once after installing** (close the `dsh web` window and start it again), or "Phone Remote" will not appear in the left column. The startup log then prints the phone URL and password.
+
+The `web` in that command is a DSH **profile name** — the folder under `~/.dsh/profiles/`. Most people's default profile is called `web`; if yours isn't, use your own name instead.
+
+<details>
+<summary>Installing from GitHub source, from a local folder, and which DSH versions it fits</summary>
 
 Or straight from GitHub, if you would rather pin the source:
 
@@ -45,17 +66,23 @@ If you already have the source on disk, you can point it at the folder:
 dsh plugin --profile web add <the folder you put the source in>
 ```
 
-**You must restart DSH once after installing**, or nothing new shows up in the settings page. After the restart a "Phone Remote" entry appears in the left column, and the startup log prints the phone URL and password.
-
 **Which DSH versions it fits.** This plugin was developed on DSH **0.1.5-rc.2** and re-checked item by item on **0.1.7-rc.2** (every interface it uses was unchanged); **versions below 0.1.5 have not been tried**. `rc` is the tag the project puts on preview builds, and DSH as a whole is still a developer preview — minor versions may break things, so versions newer than 0.1.7 are not guaranteed either. If it ever does hit an incompatibility, the usual symptom is one entry point going missing (the model line at the top, say) while everything else keeps working: the plugin is written so that a missing service switches off that one feature rather than the whole thing.
 
 Settings follow the same rule: the settings are declared the standard DSH way, and on the 0.1.5-era library that ability does not exist yet — the plugin **still installs and works exactly as before**, it just loses the "applies immediately" behaviour mentioned below. On the **0.1.7 generation** that ability is fully there.
 
+</details>
+
 ---
 
-## Configuration: three routes, pick what you need
+## Connecting your phone: three routes, pick one
 
 All three connection methods **exist at the same time**. Pick one, or leave several on.
+
+| Route | When to use it | What you install | What it costs |
+| --- | --- | --- | --- |
+| **LAN** | Phone and computer on the same Wi-Fi — at home only | Nothing at all | It stops the moment you leave the house |
+| **Tailscale** | You need it outside, and you want the address to stay fixed | Tailscale on the computer and on the phone | An app on both sides |
+| **Public tunnel** | Nothing installed, reachable on any network | Nothing at all | The address changes on every restart; the first run downloads a ~50 MB component |
 
 Open DSH settings (bottom of the sidebar) → "Phone Remote" in the left column. Every route on that page has a QR code and a link, and the small text under each QR code says **when to use that route**. That's all you need to read.
 
@@ -63,27 +90,19 @@ The plugin's own settings (default mode, external notifications, port, password 
 
 ### 1. LAN: at home only
 
-When the phone and the computer are on the same Wi-Fi, scan the "LAN" code and you're in. **Nothing extra to install** — the least fuss of the three.
-
-The cost is that it stops working the moment you leave: the phone switches to mobile data and this route is gone.
+When the phone and the computer are on the same Wi-Fi, scan the "LAN" code and you're in. **Nothing extra to install** — the least fuss of the three. The cost is that it stops working the moment you leave: the phone switches to mobile data and this route is gone.
 
 ### 2. Tailscale: works outside, and the address stays fixed
 
-Install [Tailscale](https://tailscale.com) on both the computer and the phone, sign in to the same account, and this route appears on the pairing page by itself. The address is fixed — set it up once and forget it.
+Install [Tailscale](https://tailscale.com) on both the computer and the phone, sign in to the same account, and this route appears on the pairing page by itself. The address is fixed — set it up once and forget it. The cost is an app on each side; if you don't mind installing it, **this is the steadiest route when you're out**.
 
-The cost is an app on each side. If you don't mind installing it, **this is the steadiest route when you're out**.
+There's a switch on the pairing page that gets you an encrypted address as well (shaped like `https://your-machine.your-tailnet.ts.net/`). It is **the same computer over the same tunnel** as the entry above; the only difference is that the connection is encrypted. It is not a fourth route — the plain `http://` entry keeps working and keeps showing.
 
-You can take this route one step further and get an encrypted address as well (shaped like `https://your-machine.your-tailnet.ts.net/`). It is **the same computer over the same tunnel** as the entry above; the only difference is that the connection is encrypted. It is not a fourth route — the plain `http://` entry keeps working and keeps showing.
+The first time, you have to confirm it in Tailscale's admin console: it is a tailnet-wide switch, and the plugin cannot click it for you. So the pairing page puts the exact link Tailscale hands out right in front of you — one click and you're there. If this computer isn't signed in to Tailscale yet, it says so and gives you a sign-in link instead.
 
-What encryption buys is a private connection: the address bar shows the https padlock, and what travels the wire is encrypted. **That does not depend on which route you pick** — the public tunnel in route 3 below also gives you an `https://` address, equally encrypted.
+### 3. Public tunnel: nothing to install
 
-The two encrypted routes have different prerequisites, so it's worth being precise. This one uses a name shaped like `your-machine.your-tailnet.ts.net`, and **that name only resolves inside your Tailscale network**, via MagicDNS on the phone's client. **But some clients don't have that capability** — MeshArc, the third-party client for HarmonyOS, states in its own README that MagicDNS is not enabled and you should use Tailscale IP addresses; on such a phone this encrypted route simply won't work, and it isn't a matter of a setting being switched off. The tunnel route uses a Cloudflare name that resolves for anyone and doesn't care about the phone; its cost is that the address changes on every restart.
-
-There's a switch on the pairing page — just turn it on. The first time, you have to confirm it in Tailscale's admin console: it is a tailnet-wide switch, and the plugin cannot click it for you. So the pairing page puts the exact link Tailscale hands out right in front of you — one click and you're there. If this computer isn't signed in to Tailscale yet, it says so and gives you a sign-in link instead.
-
-### 3. Public access: nothing to install
-
-There's a switch at the bottom of the pairing page. Turn it on and Cloudflare hands you a public URL (shaped like `https://random-words.trycloudflare.com/`). The phone can reach it on any network, **with nothing installed**. It is an **encrypted connection**, just like the encrypted Tailscale route above — if your phone can't resolve your tailnet's name, this is how you still get encryption.
+There's a switch at the bottom of the pairing page. Turn it on and Cloudflare hands you a public URL (shaped like `https://random-words.trycloudflare.com/`). The phone can reach it on any network, **with nothing installed**.
 
 Two costs, worth knowing before you decide:
 
@@ -92,12 +111,15 @@ Two costs, worth knowing before you decide:
 
 Once it's on, **wait half a minute before scanning.** Cloudflare needs a moment to publish the address. Scanning too early reports that it can't be opened — that's not breakage, it's just too soon.
 
+### About that "encrypted address"
+
+Two of the routes above can hand you an `https://` address, and what encryption covers is **the connection itself**: the address bar shows the https padlock, and what travels the wire is encrypted. That does not depend on which route you pick — both give the same thing.
+
+The difference is who can resolve the name. The Tailscale one uses a name shaped like `your-machine.your-tailnet.ts.net`, and **that name only resolves inside your Tailscale network**, via MagicDNS on the phone's client. **But some clients don't have that capability** — MeshArc, the third-party client for HarmonyOS, states in its own README that you should use Tailscale IP addresses instead; on such a phone this encrypted route simply won't work, and it isn't a matter of a setting being switched off. The tunnel route uses a Cloudflare name that resolves for anyone and doesn't care about the phone; its cost is that the address changes on every restart.
+
 ---
 
-<img width="1314" height="2186" alt="screenshot_20260922_233535_com huawei hmos brows" src="https://github.com/user-attachments/assets/8befa186-3e20-4c0e-8efc-8ea523f77648" />
-
-
-## What the mobile side does
+## What the phone can do
 
 Open the link and that's the whole interface: one input box, and the latest reply.
 
@@ -148,6 +170,24 @@ Change it in the password section of "Settings → Phone Remote". **At least 12 
 **The pairing page carries the password — don't screenshot it and send it around.** The password is encoded straight into the QR code so you never have to type it. That's convenient, and the price is that whoever holds that image can get in.
 
 Beyond that: every endpoint requires the password; password comparison is constant-time; five wrong attempts from one source blocks that source for a minute; pairing information is **readable only from the local machine**, so other devices on the same Wi-Fi can't get it; the public tunnel is off by default and you have to turn it on yourself in the settings page; the phone sees no file contents — when you pick a workspace it lists folder names only, and never lists or reads files. **One thing worth stating plainly: the phone can switch the agent's permission preset.** On Full Access, the agent can then modify any file on this computer. That path is open.
+
+---
+
+## Why I built this plugin
+
+The idea came from this: an agent task often takes a long time to finish, and if you step out, you need the phone to drive it remotely.
+
+But the phone clients that exist show the PC's execution steps in faithful detail. You send one instruction; it may think for several minutes, read dozens of files, call tools a few times, and only then give you a conclusion. If you're out, or busy away from the computer, you simply don't have the time to watch the phone that closely.
+
+I don't think that approach is bad. It's complete and controllable, and if you're going to do serious work, it's the right one.
+
+But when I'm out, what I want is something else — **a lighter way to interact that asks less of my attention**. The phone screen is small, and so is the attention I have to spare when I'm out. Most of the time I only need one thing: **this round is done, time to send the next instruction.** And even at my desk, I rarely read the AI's running commentary while it works.
+
+So the interface here is deliberately crude: it drops the PC's execution steps entirely and puts only the AI's final conclusion in front of you.
+
+**In a sense, it exists so that you look at it less.**
+
+So you can spend your time more freely — instead of being stuck in that small screen while you're playing with your daughter or out on a trip.
 
 ---
 
