@@ -36,10 +36,14 @@
     "url": "https://github.com/xingzhen199186/dsh-mini-remote/issues"
   },
   "peerDependencies": {
-    "@deepseek-ai/cordis": "^4.0.2"
+    "@deepseek-ai/cordis": "^4.0.2",
+    "@deepseek-ai/dsh": ">=0.1.5-rc.2 <0.2.0"
   },
   "peerDependenciesMeta": {
     "@deepseek-ai/cordis": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh": {
       "optional": true
     }
   },

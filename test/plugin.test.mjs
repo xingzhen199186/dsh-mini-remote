@@ -1967,3 +1967,27 @@ test('指令事件：收尾只改那一条，单帧模式显示的还是模型�
   assert.equal(snap.history.at(-1).text, '压不动')
   assert.equal(snap.latest.text, '答完了', '指令跑完不该顶掉单帧模式里模型那句回答')
 })
+
+// ---------------------------------------------------------------------------
+// 清单里的版本声明：DSH 的兼容门槛只读 peerDependencies（2026-09-27 补）
+// ---------------------------------------------------------------------------
+
+test('版本要求要写在门槛真正会读的那一格：peerDependencies', () => {
+  // DSH 0.1.7 起，profile 导入插件**之前**会拿插件 manifest 里 `@deepseek-ai/dsh` /
+  // `@deepseek-ai/dsh-*` 的 peerDependencies 去比运行时版本；对不上就在导入前拦下、
+  // 给那一行标 disabled、打印一句诊断，Harness 照常启动。
+  //
+  // 它**不看 `engines.dsh`**（官方 README 原话：These checks use peer declarations,
+  // not `engines.dsh`）。我们原来只写了 engines.dsh——等于这道程序对我们完全不设限：
+  // 版本真错位时没人拦、也没有那句诊断，只会安静地加载不起来。
+  //
+  // engines.dsh 保留：npm 之外的市场/巡检工具读它做适配展示，两处一起写才完整。
+  const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
+  const peer = pkg.peerDependencies?.['@deepseek-ai/dsh']
+  assert.equal(typeof peer, 'string', '要在 peerDependencies 里声明 @deepseek-ai/dsh')
+  assert.ok(peer.trim() !== '' && peer !== '*', '范围不能空着或用通配——那等于没声明')
+  assert.ok(peer.includes('0.1.5-rc.2'), '下界要和 engines.dsh 一致（我们承诺的兼容起点）')
+  assert.equal(pkg.engines?.dsh, '>=0.1.5-rc.2', 'engines.dsh 保留，给市场显示用')
+  assert.ok(!pkg.dependencies?.['@deepseek-ai/dsh'],
+    '@deepseek-ai/* 绝不能进 dependencies：旧副本会遮蔽宿主')
+})
