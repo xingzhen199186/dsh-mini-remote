@@ -170,6 +170,12 @@
   /* 外层是 pre-wrap（用户消息和旧内容靠它），markdown 输出的是真块级元素，
      所以要在这里把 pre-wrap 收掉，否则段落之间会多出一堆空行。 */
   .md { white-space: normal; }
+  /* 回复里的图。地址有两种写法，见下面 mdInline() 里那段注释。
+     宽度只封顶不写死：窄屏上占满可用宽度、按比例缩，圆角沿用全站那 2 像素。 */
+  .md-img {
+    display: block; max-width: 100%; height: auto; margin: 10px 0;
+    border-radius: var(--r); border: 1px solid var(--line); background: var(--panel-2);
+  }
   .md > :first-child { margin-top: 0; }
   .md > :last-child { margin-bottom: 0; }
   .md p { margin: 0 0 .7em; }
@@ -1141,6 +1147,18 @@
       return CODE_SLOT + (codes.length - 1) + CODE_SLOT;
     });
     out = out
+      // 图片：![说明](地址)。地址两种写法——
+      //   ① 完整 http(s) 链接：原样用，手机直接去那个网站取图；
+      //   ② 一个名字：走本机的图片通道 /mini/art/<名字>.webp，跟立绘同一条路、
+      //      同一样要密码，也只认 lib/art/ 下「小写字母数字连字符 + .webp」的文件名。
+      //      想让手机看到电脑上的图，把图放进 lib/art/、名字以 out- 开头即可。
+      // 必须排在下面那条链接规则前面：否则 `![x](y)` 里的 `[x](y)` 会先被链接规则
+      // 吃掉，只剩下一个光秃秃的感叹号。
+      .replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, function (_, alt, src) {
+        var url = /^https?:\/\//.test(src) ? src : artUrl(src.replace(/\.webp$/, ''));
+        return '<img class="md-img" src="' + url + '" alt="' + alt + '"'
+          + ' loading="lazy" referrerpolicy="no-referrer">';
+      })
       .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
       .replace(/(^|[^*\w])\*([^*\n]+)\*/g, '$1<em>$2</em>')
       .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,

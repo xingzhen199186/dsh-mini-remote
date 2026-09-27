@@ -22,6 +22,10 @@ assert.ok(end > start, `在 page.html 里找不到锚点「${END}」，渲染器
 
 // eslint-disable-next-line no-new-func
 const md = new Function(html.slice(start, end)
+  // 渲染器拼图片地址要用 artUrl，它定义在切片范围之外（页面里在立绘那一段），
+  // 所以这里补一个桩。测试关心的是「名字 → /mini/art/<名字>.webp」这个形状，
+  // 不关心 token 的实际取值。若哪天 artUrl 被挪进切片，重复声明也是合法的。
+  + '\nfunction artUrl(f) { return "/mini/art/" + f + ".webp?token=TEST"; }'
   + '\nreturn { escapeHtml, mdInline, mdToHtml, ICON_COPY, ICON_DONE };')()
 
 /**
@@ -255,6 +259,26 @@ test('链接：markdown 写法与裸网址都变可点的 a 标签', () => {
     /<a href="https:\/\/a\.example\/x"[^>]*>点我<\/a>/)
   assert.match(md.mdToHtml('见 https://b.example/y 这里'),
     /<a href="https:\/\/b\.example\/y"[^>]*>/)
+})
+
+test('图片：本机名字和外链都认，且不给注入留口子', () => {
+  // ① 一个名字（带不带 .webp 都行）→ 走本机图片通道，和立绘同一条路、同样带 token。
+  assert.match(md.mdToHtml('![深色](out-demo)'),
+    /<img class="md-img" src="\/mini\/art\/out-demo\.webp\?token=/)
+  assert.match(md.mdToHtml('![深色](out-demo.webp)'),
+    /src="\/mini\/art\/out-demo\.webp\?token=/)
+  // ② 完整 http(s) 链接原样用，手机直接去那个网站取。
+  assert.match(md.mdToHtml('![图](https://a.example/x.png)'),
+    /src="https:\/\/a\.example\/x\.png"/)
+  // ③ 不是 http(s) 的一律当本机名字，所以 `javascript:` 这类进不了 src——
+  //    它只会被拼成 /mini/art/javascript:...webp 这么一个同源路径。
+  const out = md.mdToHtml('![x](javascript:alert(1))')
+  assert.match(out, /src="\/mini\/art\//)
+  assert.doesNotMatch(out, /src="javascript:/)
+  // ④ 图片规则必须排在链接规则前面。晚一步的话，`![x](y)` 里的 `[x](y)`
+  //    会先被链接规则吃掉，页面上只剩一个光秃秃的感叹号。
+  const body = html.slice(html.indexOf('function mdInline'), html.indexOf('function codeBlock'))
+  assert.ok(body.indexOf('md-img') < body.indexOf('<a href='), '图片规则要排在链接规则前面')
 })
 
 test('认不出来的语法原样留着，绝不吞内容', () => {
