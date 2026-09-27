@@ -1382,9 +1382,14 @@ test('队列空了就把那块收起来，不留个空框', () => {
   w.state.queued = [{ id: 'm1', text: '一条', placement: 'next-turn' }]
   w.paintQueue()
   assert.equal(w.els.queue.hidden, false)
+
+  // 2026-09-27 用户裁决：**跑着、但队列是空的，整块也不显示。**
+  // 上一版这里是「只要在跑就留着」（一个金点表示"你这一轮是第 1 步"），
+  // 用户实机看到的是「排队中 0 条」配一个孤零零的点，判定为噪音，撤销。
   w.state.queued = []
+  w.state.running = true
   w.paintQueue()
-  assert.equal(w.els.queue.hidden, true)
+  assert.equal(w.els.queue.hidden, true, '跑着但队列空着，不该出现')
   assert.equal(w.els.queue.innerHTML, '', '别留个空壳')
 })
 
