@@ -2755,3 +2755,33 @@ test('单帧模式：新回答到了，底下不该再挂着上一条指令', ()
   assert.ok(!out.includes('cmd-line'), '那条指令比手上的回答还旧，已经不是最新的事了')
 })
 
+
+/**
+ * 上下文用量那句人话（2026-09-27 新增：手机上要看上下文窗口用量）。
+ *
+ * 只测那个**纯函数**：缺字段怎么办、超过窗口怎么显示。取数本身（sessionQuery 的
+ * 会话投影）需要真环境，这里不测，留给真机验证——没有证据的部分不假装测过。
+ */
+const CTS = 'function contextLabel'
+const CTE = 'function sel('
+// 名字特意加前缀：这个文件上面已经用过 CS/CE/cs/ce 做另一处切片，
+// 重名会让整个文件在加载时就报 "Identifier has already been declared"——**一失败就是全文件失败**，
+// 而 node --test 的汇总里只看得到"文件级失败"，不容易看出是重名（2026-09-27 踩过）。
+const cts = html.indexOf(CTS)
+const cte = html.indexOf(CTE)
+assert.ok(cts > 0, `在 page.html 里找不到锚点「${CTS}」`)
+assert.ok(cte > cts, `在 page.html 里找不到锚点「${CTE}」，contextLabel 可能被挪走了`)
+
+// eslint-disable-next-line no-new-func
+const contextLabelOf = new Function(html.slice(cts, cte) + '\nreturn contextLabel;')()
+
+test('上下文用量：缺一半就不说，超过窗口按 100% 显示', () => {
+  assert.equal(contextLabelOf(42000, 200000), '上下文 21%')
+  assert.equal(contextLabelOf(1000, 200000), '上下文 1%')
+  assert.equal(contextLabelOf(0, 200000), '', '没用量就不显示，不写 0%')
+  assert.equal(contextLabelOf(42000, undefined), '', '窗口不知道就不显示')
+  assert.equal(contextLabelOf(undefined, 200000), '', '用量不知道就不显示')
+  assert.equal(contextLabelOf(42000, 0), '', '窗口为 0 不显示（也别除零）')
+  assert.equal(contextLabelOf(260000, 200000), '上下文 100%', '超过窗口按 100% 显示')
+  assert.equal(contextLabelOf(-5, 200000), '', '负数当没有')
+})

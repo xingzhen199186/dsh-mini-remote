@@ -3697,6 +3697,8 @@
 
     var catalog = null  // 服务端给的模型目录
     var current = null  // 服务端记的当前选择 {provider, model, reasoningEffort}
+    // 上下文窗口用量 {used, window}，服务端给。取不到就是 null——那时整段不显示。
+    var contextUsage = null
     // 刚改完、服务端还没确认的那个值。为什么要多这一个：服务端记的「当前模型」是在
     // **下一次请求**时才更新的，所以改完立刻回头去读，读到的还是旧名字。先信
     // set-model 的返回值，等服务端追上了再让它接管。
@@ -3709,6 +3711,21 @@
       for (var i = 0; i < gs.length; i++) { if (gs[i].id === id) return gs[i].name }
       return id || ''
     }
+    /**
+     * 上下文用量那一句人话。**不编**：分子分母缺任一个就返回空串，界面据此整段不显示
+     * （和「模型：还没问到」同一条口径——不知道就说不知道，不拿别的数凑）。
+     *
+     * 超过 100% 时按 100% 显示：它是"下一次请求大概要花多少"，压不压缩由电脑决定；
+     * 把 105% 端给用户，只会让人以为哪里出错了。
+     */
+    function contextLabel(used, capacity) {
+      if (typeof used !== 'number' || typeof capacity !== 'number') return ''
+      if (!(used > 0) || !(capacity > 0)) return ''
+      var pct = Math.round(used / capacity * 100)
+      if (pct > 100) pct = 100
+      return '上下文 ' + pct + '%'
+    }
+
     function sel() { return pending || current || null }
 
     function renderBar() {
@@ -3723,6 +3740,9 @@
       // 来源名要用 DSH 给的那个（「DeepSeek」「opencode go」「mimo」），不是内部 id
       var parts = [groupName(s.provider), s.model]
       if (s.reasoningEffort) parts.push('思考 ' + s.reasoningEffort)
+      // 上下文用得怎么样。取不到就什么都不加——不显示 0%，也不写"未知"占位。
+      var ctxText = contextLabel(contextUsage && contextUsage.used, contextUsage && contextUsage.window)
+      if (ctxText) parts.push(ctxText)
       text.textContent = parts.join(' · ')
       bar.style.display = 'flex'
     }
@@ -3845,6 +3865,9 @@
           // 目录那个默认值等于「上一次选过的模型」，于是用户切到一个用别的模型的
           // 会话，顶栏显示的还是上一个模型——一个像模像样的错答案，比空着坏得多。
           current = (d.current && d.current.model) ? d.current : null
+          // 用量跟着模型一起回来（同一条接口）。**不校验内容**：给它什么显示什么，
+          // 拿不准的由下面那个纯函数挡掉。刷新频率就是这一条接口的频率（15 秒一次）。
+          contextUsage = d.context || null
           // 服务端追上了就撤掉本地那个临时值，之后一律以服务端的为准
           if (pending && current && current.provider === pending.provider
               && current.model === pending.model) pending = null
