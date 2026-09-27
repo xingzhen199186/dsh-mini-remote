@@ -781,6 +781,22 @@
      整屏遮住聊天区：手机上一次只专心答一题，答完自动消失。
      之所以遮全屏而不是弹个小条：非技术用户看到"电脑在等你回答"时，
      最怕的是不知道该点哪里；整屏只剩问题本身和按钮，没有第二个选择。 */
+  /* 命令确认（审批）卡。形状与理由都同上面那张答题卡：整屏遮住，只剩「同意 / 拒绝」
+     两个选择。**主题交给令牌决定**——主按钮那一处用的就是「当底的强调色」令牌，
+     面板、文字、描边全沿用现有那几档，所以深色浅色自动都对，不用为两套主题各写一份。
+     （注释里**不写令牌本身那串字**：下面的检查是按"哪一块里出现了它"取材的，
+     注释里写上，这一块就会被当成一条规则，取自一个不存在的选择器。） */
+  #approveCard { position: fixed; inset: 0; z-index: 310; background: var(--bg);
+    display: none; flex-direction: column; padding: 18px 16px calc(18px + env(safe-area-inset-bottom)); overflow-y: auto; }
+  #approveCard.on { display: flex; }
+  #approveCard .ahead { font-size: 13px; color: var(--muted); margin-bottom: 12px; }
+  #approveCard .atool { font-size: 18px; line-height: 1.6; margin-bottom: 10px; }
+  #approveCard .areason { font-size: 14px; line-height: 1.65; color: var(--muted); margin-bottom: 16px; white-space: pre-wrap; }
+  #approveCard .afoot { margin-top: auto; display: flex; gap: 10px; padding-top: 16px; }
+  #approveCard .afoot button { flex: 1; padding: 15px 8px; font-size: 16px; border-radius: var(--r);
+    border: 1px solid var(--line); background: var(--panel-2); color: inherit; font-family: inherit; }
+  /* 这一屏唯一的主按钮走 --act：深色下暖金，浅色下宝蓝配白字。 */
+  #approveCard .afoot button#approveAllow { background: var(--act); border-color: var(--act); color: var(--on-act); font-weight: 600; }
   #askCard { position: fixed; inset: 0; z-index: 300; background: var(--bg);
     display: none; flex-direction: column; padding: 18px 16px calc(18px + env(safe-area-inset-bottom)); overflow-y: auto; }
   #askCard.on { display: flex; }
@@ -839,6 +855,17 @@
     <button id="askBack" type="button">上一题</button>
     <button id="askOwn" type="button">我自己说</button>
     <button id="askNext" type="button">下一题</button>
+  </div>
+</div>
+<!-- 电脑要做需要拍板的事时弹出来的审批卡。默认隐藏，收到 approval 事件才显示。
+     命令原文不在卡上：这个插件按设计只收「用户指令 + 最终回复」，中间步骤不传过来。 -->
+<div id="approveCard">
+  <div class="ahead">电脑被拦下来了，等你拍板</div>
+  <div class="atool" id="approveTool"></div>
+  <div class="areason" id="approveReason"></div>
+  <div class="afoot">
+    <button id="approveDeny" type="button">拒绝</button>
+    <button id="approveAllow" type="button">同意</button>
   </div>
 </div>
 
@@ -1753,6 +1780,18 @@
       });
   }
 
+
+  /** 手机把审批结论交回电脑。三种结果和上面那条一样：成了 / 晚了 / 没送出去。 */
+  function sendApproval(id, allow) {
+    return api('/mini/api/approval', {
+      method: 'POST',
+      body: JSON.stringify({ id: id, decision: allow ? 'allow' : 'deny' }),
+    })
+      .then(function () { return 'ok'; })
+      .catch(function (err) {
+        return err && err.status === 409 ? 'late' : 'failed';
+      });
+  }
   // ---------------- 排队中的指令 ----------------
   //
   // 跑着任务时接着发的那几条不会丢，而是排进 agent 的收件箱（`followup()` 的语义
@@ -2781,6 +2820,41 @@
         if (verdict === 'late') toast('这道题已经交回电脑了，去电脑上答')
       })
     })
+    // ——— 命令确认（审批）———
+    //
+    // 电脑要做需要拍板的事时，插件推一条 `approval` 过来，点了卡上的按钮再 POST 回
+    // /mini/api/approval。和答题卡同样的三条讲究：没送出去就不收卡片（收掉了就再也
+    // 没地方说这句话，用户看到的只会是"点了没反应"）；三种结果说三句不同的话；
+    // 只认有 id 的帧，别的形状一律不理。
+    let approve = null
+    function approveShow(payload) {
+      approve = { id: payload.id }
+      $('approveTool').textContent = '它要让「' + (payload.toolName || '某个工具') + '」动手'
+      $('approveReason').textContent = payload.reason || ''
+      $('approveReason').style.display = payload.reason ? '' : 'none'
+      $('approveCard').classList.add('on')
+    }
+    function approveDecide(allow) {
+      if (!approve) return
+      const id = approve.id
+      sendApproval(id, allow).then(function (verdict) {
+        if (verdict === 'failed') {
+          toast('没送出去，看一眼和电脑的连接，再点一次')
+          return
+        }
+        approve = null
+        $('approveCard').classList.remove('on')
+        if (verdict === 'late') toast('这条已经交回电脑了，去电脑上处理')
+      })
+    }
+    $('approveAllow').addEventListener('click', function () { approveDecide(true) })
+    $('approveDeny').addEventListener('click', function () { approveDecide(false) })
+    es.addEventListener('approval', function (e) {
+      let payload = null
+      try { payload = JSON.parse(e.data) } catch (err) { return }
+      if (!payload || !payload.id) return
+      approveShow(payload)
+    });
     es.addEventListener('question', function (e) {
       let payload = null
       try { payload = JSON.parse(e.data) } catch (err) { return }

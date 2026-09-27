@@ -63,6 +63,9 @@ test('强调色只许出现在清单里的这几处（一屏最多两处）', ()
     '.btn.primary',                                   // 设置：这一屏的主按钮
     '#gate button',                                   // 口令页：唯一的按钮
     '#askCard .qfoot button#askNext',                 // 答题卡：唯一的主按钮
+    // 审批卡：唯一的主按钮。它是**整屏一层**（fixed/inset:0），和主屏、设置页、
+    // 答题卡都不同时出现，所以这一屏上没有第二处当底的强调色（2026-09-27 加）。
+    '#approveCard .afoot button#approveAllow',
   ]
   const ALLOWED_INK = [
     '.queue .q-node.cur i',                           // 主屏：当前这一步的点
