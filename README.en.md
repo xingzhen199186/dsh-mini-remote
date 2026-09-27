@@ -49,6 +49,8 @@ dsh plugin --profile web add <the folder you put the source in>
 
 **Which DSH versions it fits.** This plugin was developed on DSH **0.1.5-rc.2** and re-checked item by item on **0.1.7-rc.2** (every interface it uses was unchanged); **versions below 0.1.5 have not been tried**. `rc` is the tag the project puts on preview builds, and DSH as a whole is still a developer preview — minor versions may break things, so versions newer than 0.1.7 are not guaranteed either. If it ever does hit an incompatibility, the usual symptom is one entry point going missing (the model line at the top, say) while everything else keeps working: the plugin is written so that a missing service switches off that one feature rather than the whole thing.
 
+Settings follow the same rule: the settings are declared the standard DSH way, and on the 0.1.5-era library that ability does not exist yet — the plugin **still installs and works exactly as before**, it just loses the "applies immediately" behaviour mentioned below. On the **0.1.7 generation** that ability is fully there.
+
 ---
 
 ## Configuration: three routes, pick what you need
@@ -56,6 +58,8 @@ dsh plugin --profile web add <the folder you put the source in>
 All three connection methods **exist at the same time**. Pick one, or leave several on.
 
 Open DSH settings (bottom of the sidebar) → "Phone Remote" in the left column. Every route on that page has a QR code and a link, and the small text under each QR code says **when to use that route**. That's all you need to read.
+
+The plugin's own settings (default mode, external notifications, port, password and so on) also have a standard declaration, so writing them in DSH's standard configuration works too. If the same item is set in both places, **the standard configuration wins**. One difference worth knowing: **"default mode" and "external notifications" apply immediately, with no plugin restart**; port, bind address, tunnel, password and history length make the plugin restart and the phone reconnect once — those genuinely need to re-bind or rebuild, and the plugin says so instead of pretending they can be changed live.
 
 ### 1. LAN: at home only
 

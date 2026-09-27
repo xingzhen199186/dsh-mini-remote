@@ -1996,11 +1996,31 @@ test('版本要求要写在门槛真正会读的那一格：peerDependencies', (
   assert.equal(pkg.engines?.dsh, '>=0.1.5-rc.2', 'engines.dsh 保留，给市场显示用')
   assert.ok(!pkg.dependencies?.['@deepseek-ai/dsh'],
     '@deepseek-ai/* 绝不能进 dependencies：旧副本会遮蔽宿主')
+  // schemastery 是唯一一个 import 了运行时值的 @deepseek-ai/* 包（用来声明 Config），
+  // 它也只许走 peer：由宿主提供，进了 dependencies 就会出现第二份副本。
+  assert.ok(pkg.peerDependencies?.['@deepseek-ai/schemastery'],
+    'schemastery 要声明在 peerDependencies 里')
+  assert.ok(!pkg.dependencies?.['@deepseek-ai/schemastery'],
+    'schemastery 不能进 dependencies：会出现第二份副本')
 })
 
 // ---------------------------------------------------------------------------
 // 标准化的配置声明（DSH 0.1.7 起：标了 volatile 的字段改了不用重载插件）
 // ---------------------------------------------------------------------------
+
+test('旧版 schemastery 上没有 volatile() 时，插件也要照样起得来', async () => {
+  const mod = await import(new URL(`lib/index.js?t=${Date.now()}`, ROOT_URL).href)
+  const z = (await import('@deepseek-ai/schemastery')).default
+
+  // 3.18.1／3.18.2 的 schema 上根本没有 volatile 这个方法；而且 DSH 0.1.5 声明的
+  // 依赖范围 `^3.18.2` 是可以落到那一版上的，直接调用会在加载插件的那一刻抛异常，
+  // 整个插件起不来——这个插件一贯是"少了哪样就关掉哪一块"，不能栽在一句标注上。
+  const old = { meta: {}, description: () => old }
+  assert.equal(mod.markVolatile(old), old, '没有 volatile() 就原样返回，绝不能抛异常')
+
+  // 有这个方法时要真的标上（本机装的就是有它的版本）
+  assert.equal(mod.markVolatile(z.string()).meta?.volatile, true, '有 volatile() 时要真的标上')
+})
 
 test('声明成 volatile 的字段只有那两个：能兑现的才标', async () => {
   const mod = await import(new URL(`lib/index.js?t=${Date.now()}`, ROOT_URL).href)
