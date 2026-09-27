@@ -13,7 +13,7 @@ import { join } from 'node:path'
 import { createHash } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 
-import { createTurnTracker } from '../lib/events.js'
+import { createTurnTracker, stepSelfTalk } from '../lib/events.js'
 import { createStore } from '../lib/store.js'
 import { createMiniServer } from '../lib/server.js'
 import { renderPage, readArt } from '../lib/page.js'
@@ -71,6 +71,78 @@ test('中间步骤的旁白不能当成回答（用户实机报的「显示的�
 
   const reply = tracker.feed('s1', ev('turn/end', { turn: 1, reason: { kind: 'completed' } }))
   assert.equal(reply, null, '这一轮压根没产出回答，就不该推任何东西——不能拿旁白顶替')
+})
+
+// ---------------------------------------------------------------------------
+// 自言自语（2026-09-26）：只给手机上的鲸鱼娘当台词，不进回答区
+// ---------------------------------------------------------------------------
+
+const toolCall = { type: 'tool-call', id: 'c1', name: 'read', arguments: '{}' }
+
+test('自言自语：先念旁白——那本来就是一句说给人听的话', () => {
+  const content = [...text('我先看看这个文件。'), toolCall]
+  assert.deepEqual(stepSelfTalk(content), { kind: 'narration', text: '我先看看这个文件。' })
+})
+
+test('自言自语：思考一个字都不上气泡——中文、英文都不上', () => {
+  // 用户 2026-09-27 两次收紧后的口径：先划掉英文思考（摆在中文界面里是噪音），
+  // 随后把话说到头——**思考首行整个不要展示**。于是这条路只剩旁白。
+  assert.equal(
+    stepSelfTalk([{ type: 'reasoning', text: '\n  先看一眼配置。\n然后再改那个参数。\n' }, toolCall]),
+    null,
+    '中文思考也不念',
+  )
+  assert.equal(
+    stepSelfTalk([{ type: 'reasoning', text: 'The watcher got HTTP 404 — wrong path.' }, toolCall]),
+    null,
+    '英文思考更不念',
+  )
+  assert.equal(
+    stepSelfTalk([{ type: 'reasoning', text: '跑 npm test：全过了。' }, toolCall]),
+    null,
+    '夹着英文的思考也不念——挡的是「思考」，不是「英文」',
+  )
+  // 旁白照念：气泡里出现的每一句，都是特意写给人看的。
+  assert.deepEqual(stepSelfTalk([...text('先看一眼配置。'), toolCall]),
+    { kind: 'narration', text: '先看一眼配置。' })
+})
+
+test('自言自语：回答那一步不算——那是给用户的话，不走气泡', () => {
+  assert.equal(stepSelfTalk([...text('都改好了。')]), null, '没有工具调用的那一步就是回答')
+  assert.equal(stepSelfTalk([{ type: 'reasoning', text: '收尾了。' }]), null,
+    '哪怕它想了最后一句，那也属于回答那一轮，不在执行步骤里')
+})
+
+test('自言自语：长旁白一个字都不砍——断句交给手机页面', () => {
+  // 用户 2026-09-27 报的：一句长话在手机上被切掉半行。原来这里掐到 80 字 +
+  // 省略号，现在整个不掐——「语句完全展现」，长句靠手机侧长高 + 滚动承接。
+  const long = '说'.repeat(300)
+  const out = stepSelfTalk([...text(long), toolCall])
+  assert.equal(out.text, long, '一个字都不许少')
+  assert.ok(!out.text.endsWith('…'), '也不许我们自己加省略号')
+  // 折叠内部空白照旧：一段话里的换行和缩进不必原样带进气泡。
+  assert.equal(
+    stepSelfTalk([...text('  先看这个。\n\n  再看那个。  '), toolCall]).text,
+    '先看这个。 再看那个。',
+  )
+})
+
+test('自言自语：夹着工具调用原始标记的旁白不能念出来，而且不退到思考', () => {
+  // 那种东西是协议，不是话——2026-09-21 用户在手机上看到过原文。
+  // 不能念之后**必须直接闭嘴**：退到思考就等于把草稿端出去了。
+  const content = [
+    ...text('<parameter name="edit">{"file":"a.js"}</parameter>'),
+    { type: 'reasoning', text: '我改用工具来改。' },
+    toolCall,
+  ]
+  assert.equal(stepSelfTalk(content), null)
+})
+
+test('自言自语：那时候它什么都没想，就不说话（气泡不出现，而不是空着）', () => {
+  assert.equal(stepSelfTalk([toolCall]), null, '既没旁白也没思考')
+  assert.equal(stepSelfTalk([{ type: 'reasoning', text: '   \n  ' }, toolCall]), null, '空白不算话')
+  assert.equal(stepSelfTalk(null), null)
+  assert.equal(stepSelfTalk([...text('   '), toolCall]), null)
 })
 
 test('最终回答（不带工具调用那一步）照常推给手机', () => {
@@ -202,7 +274,9 @@ test('构建指纹里的可疑字符会被洗掉，不能往 HTML 里注入', ()
 
 const POSES = [
   'work-1-ready', 'work-2-reading', 'work-3-typing', 'work-4-checking',
-  'work-5-thinking', 'work-6-running', 'work-7-waiting',
+  'work-5-thinking', 'work-6-running', 'work-7-waiting', 'work-8-sprinting',
+  // 说话那张（自言自语）不轮播，但它同样得有文件——缺了的话，模型一开口就是空白。
+  'work-9-talking',
 ]
 
 test('立绘要 token 才给看', async (t) => {
@@ -225,7 +299,7 @@ test('立绘取得到，而且是真的 WebP', async (t) => {
   assert.ok(buf.length > 5000, `太小了，不像真图：${buf.length} 字节`)
 })
 
-test('七个姿态的立绘一个都不能少', async (t) => {
+test('每个姿态的立绘一个都不能少（含说话那张）', async (t) => {
   const { server, base, token } = await startTestServer()
   t.after(() => server.close())
   for (const name of POSES) {
@@ -1212,6 +1286,64 @@ test('SSE 流：连上先收到 state，之后能收到广播的 reply', async (
   assert.ok(buffer.includes('全部通过'), '回复正文要原样送到手机')
 
   await reader.cancel()
+})
+
+test('提问推给手机：断线重连上来也能收到那道还在等的题', async (t) => {
+  const { server, base, token } = await startTestServer()
+  t.after(() => server.close())
+
+  // 题目先来。此刻手机上没有人连着，这一次广播发出去没人收——而题目只在推的时候发一次。
+  const pending = server.askPhone(
+    [{ id: 'q1', question: '选哪个方案？', options: [{ label: 'A' }, { label: 'B' }] }],
+    'sess-1',
+  )
+  pending.catch(() => {})
+
+  // 手机这会儿才连上来（页面重连、锁屏醒来都长这样）。
+  const res = await fetch(`${base}/mini/api/stream?token=${token}`)
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  // **等待必须有上限**：补发要是坏了，这个流上不会有下一个字节，没时限就不是「失败」
+  // 而是「永远挂着」——测试挂起比测试变红难查得多。所以每读一次最多等 500 毫秒，
+  // 到 5 秒还没等到就往下走，让下面那条断言去报红。
+  const deadline = Date.now() + 5000
+  while (!buffer.includes('event: question') && Date.now() < deadline) {
+    const chunk = await Promise.race([
+      reader.read(),
+      new Promise((resolve) => setTimeout(() => resolve('timeout'), 500)),
+    ])
+    if (chunk === 'timeout') continue
+    if (chunk.done) break
+    buffer += decoder.decode(chunk.value, { stream: true })
+  }
+  assert.match(buffer, /event: question/, '连上来之后要把还在等的那道题补给它')
+  assert.match(buffer, /选哪个方案/, '题目正文要原样带上，不能只补一个空壳')
+
+  await reader.cancel()
+})
+
+test('手机上的答案发回来：接住了交给电脑，答晚了如实回 409', async (t) => {
+  const { server, base, token } = await startTestServer()
+  t.after(() => server.close())
+
+  const post = (body) => fetch(`${base}/mini/api/answer?token=${token}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+
+  // ① 题还在等：接住，并把答案原样交给电脑（插件等的就是这个对象）。
+  const pending = server.askPhone([{ id: 'q1', question: '选哪个方案？' }], 'sess-1')
+  const res = await post({ id: 'q1', answers: [{ id: 'q1', selected: ['B'] }] })
+  assert.equal(res.status, 200)
+  assert.deepEqual(await pending, { answers: [{ id: 'q1', selected: ['B'] }] })
+
+  // ② 答晚了（这题已经交回电脑）：如实回 409，不能回 200 装作收下——
+  // 手机那一端就是靠这个 409 才能告诉用户「去电脑上答」，而不是静悄悄。
+  const late = await post({ id: 'q1', answers: [{ id: 'q1', selected: ['B'] }] })
+  assert.equal(late.status, 409)
+  assert.match((await late.json()).error, /已经结束/)
 })
 
 test('绑定会话后状态里能读到', async (t) => {

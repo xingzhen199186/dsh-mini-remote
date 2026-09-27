@@ -1,6 +1,6 @@
 # dsh-mini-remote
 
-> A [DeepSeek Harness](https://github.com/deepseek-ai/DeepSeek-Harness) (DSH) plugin that puts a **minimal remote control** on your mobile device — only the instruction you send and the AI's final conclusion reach it. Tool calls, file reads and writes, sub-agent dispatch, and reasoning traces all stay on the computer.
+> A [DeepSeek Harness](https://github.com/deepseek-ai/DeepSeek-Harness) (DSH) plugin that puts a **minimal remote control** on your mobile device — only the instruction you send, the AI's final conclusion, and the one line it mutters between steps (shown in the whale girl's speech bubble) reach it. Tool calls, file reads and writes, sub-agent dispatch, and the body of the reasoning trace all stay on the computer.
 
 ![DSH plugin](https://img.shields.io/badge/DSH_plugin-dsh--plugin-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
@@ -101,6 +101,8 @@ Open the link and that's the whole interface: one input box, and the latest repl
 
 **Wait for the conclusion.** While it runs, the page shows "running…". You can keep sending during that time — instructions queue up. When the task ends, the conclusion appears on the page, and the phone chimes and buzzes.
 
+**She speaks up while she works.** On the computer, the model often mutters a line between steps ("let me look at this file first"). That line is now spoken by the whale girl through her speech bubble — the talking pose is a newly drawn sprite, the rotation pauses for it, and afterwards picks up from where it stopped. It stays **in the bubble** and never bleeds into the answer area below. The model sometimes thinks in English, so the bubble may be English — no translation (translating would mean putting words in its mouth).
+
 **Two display modes.** Tap the ⚙ in the top right to switch. "Single frame" (the default) keeps only the newest reply on screen — good for "I just want to see how this one turned out". "Chat" is a back-and-forth bubble list — good for several rounds of follow-up questions. Use it for a while and you'll know which you prefer.
 
 **Open a session and you see what was said in it before.** Switch to a session that has existed for a while and Chat mode lists every earlier round (the instructions you sent, the conclusion of each round); Single frame shows only the last conclusion. **Very large sessions show only the most recent stretch**: reading one of those in full — tens of thousands of events — would drag the DSH process on your computer down, so the plugin reads just the tail and says so at the top ("this is not everything, only the most recent stretch"). That line is not boilerplate; it is the truth.
@@ -111,7 +113,7 @@ Open the link and that's the whole interface: one input box, and the latest repl
 
 **Three things you can change in passing.** Tap the line at the top to switch the current session's model and reasoning effort; switch the permission preset (View Only / Workspace Write / Full Access); browse the computer's folders to register a new workspace and start a session in it.
 
-**You're reading conclusions, not the process.** There's no tool-call chain and no file diff on the page. **System-level confirmation dialogs cannot be answered from the phone** (approving a dangerous command, for instance) — those still need the computer. What the phone can answer is the multiple-choice question the AI puts to you; the two are not the same thing. It's a remote control: the TV still has to be on for the remote to be any use.
+**You're reading conclusions, not the process.** There's no tool-call chain and no file diff on the page. The one exception is the line the whale girl says out loud — it goes into her bubble, never into the answer area (see above). **System-level confirmation dialogs cannot be answered from the phone** (approving a dangerous command, for instance) — those still need the computer. What the phone can answer is the multiple-choice question the AI puts to you; the two are not the same thing. It's a remote control: the TV still has to be on for the remote to be any use.
 
 ---
 

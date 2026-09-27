@@ -649,8 +649,12 @@ test('气泡贴着自己的词条，多长就多宽', () => {
 test('立绘站哪儿由行宽决定，跟气泡宽窄无关', () => {
   const row = html.slice(html.indexOf('.work-top {'), html.indexOf('.work-stage {'))
   // 行宽固定成「最长那句」的整组宽度，再把这一行居中 → 立绘永远在同一个位置。
-  assert.match(row, /width:\s*max-content/, '行宽跟着内容走，将来有更长的词条也不会溢出')
+  assert.match(row, /width:\s*max-content/, '行宽跟着内容走')
   assert.match(row, /min-width:\s*min\(299px, 100%\)/, '最少要有最长那句的整组宽度')
+  // 但 max-content 只有下限没有上限：再来一句更长的（自言自语就是我那几句英文思考），
+  // 这行会一直撑到屏幕外，手机上得横着划才看得见（2026-09-27 用户截图报的）。
+  // 气泡那条 `max-width: calc(100% - 128px)` 里的 100% 又是拿这一行自己算的，管不住它。
+  assert.match(row, /max-width:\s*100%/, '行宽必须有上限：再长的词条也不能把这行顶出屏幕')
   assert.match(row, /margin:\s*0 auto/, '这一行要居中')
   // 这条是坑：行宽固定之后**又**在行内 justify-content:center，等于把这一组
   // 重新居中一次，立绘照样被气泡推着走——白忙一场。
@@ -713,6 +717,16 @@ const WS = 'var POSES = ['
 const WE = '// ---------------- 渲染 ----------------'
 const ws = html.indexOf(WS)
 const we = html.indexOf(WE)
+
+// 气泡和回答区共用页面里那套行内 Markdown 渲染，而它写在切片之外（切片只从 POSES 起）。
+// 这里把**真货**原样编译一份丢进鲸鱼娘测试的沙箱，不写替身——替身会跟真货慢慢分家，
+// 测试就成了自我安慰（这一条是 `tasks/lessons.md` 里「假 DOM 没有排版」的同一个道理）。
+const MD = (() => {
+  const s = html.indexOf('function escapeHtml')
+  const e = html.indexOf('function codeBlock')
+  // eslint-disable-next-line no-new-func
+  return new Function(`${html.slice(s, e)}\nreturn { mdInline };`)()
+})()
 assert.ok(ws > 0, `在 page.html 里找不到锚点「${WS}」`)
 assert.ok(we > ws, `在 page.html 里找不到锚点「${WE}」`)
 
@@ -735,12 +749,28 @@ function makeEl(id) {
   let written = ''
   Object.defineProperty(el, 'innerHTML', {
     get: () => written,
-    set: (v) => { written = v == null ? '' : String(v); if (!written) el.children = [] },
+    set: (v) => {
+      written = v == null ? '' : String(v)
+      if (!written) el.children = []
+      // 真 DOM 里写 innerHTML，textContent 会跟着变（标签去掉、实体还原）。
+      // 这里是那个行为的最小复刻——气泡改走 innerHTML 之后，原先断言
+      // `textContent` 的那些用例才不会变成「测桩子」。
+      el.textContent = htmlToText(written)
+    },
   })
   return el
 }
 
-function buildWhale({ token = 'tok', reduced = false, apiRejects = false } = {}) {
+/** 把一段 HTML 还原成它显示出来的纯文字：标签去掉，实体还原。 */
+function htmlToText(htmlStr) {
+  return String(htmlStr)
+    .replace(/<[^>]*>/g, '')
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+    .replace(/&amp;/g, '&')
+}
+
+function buildWhale({ token = 'tok', reduced = false, apiRejects = false, apiError = '' } = {}) {
   const els = {
     work: makeEl('work'),
     workStage: makeEl('workStage'),
@@ -778,6 +808,8 @@ function buildWhale({ token = 'tok', reduced = false, apiRejects = false } = {})
     window: { matchMedia: () => ({ matches: reduced }) },
     BUILD: 'abc123',
     encodeURIComponent,
+    // 气泡写进 innerHTML，得先过一遍真的行内 Markdown 渲染（含"先转义、再上标签"）。
+    mdInline: MD.mdInline,
     // paintQueue 拼队列那几行时要转义指令文本——那也是用户自己敲的字，一样不能当 HTML。
     escapeHtml: (s) => String(s).replace(/[&<>"']/g, (c) => (
       { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
@@ -790,13 +822,21 @@ function buildWhale({ token = 'tok', reduced = false, apiRejects = false } = {})
     toast: (m) => toasts.push(m),
     api: (path, opts) => {
       calls.push({ path, opts })
-      return apiRejects ? Promise.reject(new Error('停不下来')) : Promise.resolve({ ok: true })
+      if (apiRejects) return Promise.reject(new Error('停不下来'))
+      // apiError 模拟服务端**说得出理由**的拒绝（{ status, message }）：
+      // 答题那一头靠 status 409 区分「这题已经交回电脑了」和「压根没发出去」。
+      if (apiError) {
+        const e = new Error(apiError.message || '出错')
+        e.status = apiError.status || 500
+        return Promise.reject(e)
+      }
+      return Promise.resolve({ ok: true })
     },
     $: (id) => els[id],
   }
   const names = ['POSES', 'state', 'work', 'posePool', 'poseSequence', 'paintPose', 'elapsedLabel',
     'artUrl', 'preloadPoses', 'startWork', 'stopWork', 'nextPose', 'paintWork', 'paintStop', 'requestStop',
-    'paintQueue', 'requestUnqueue']
+    'paintQueue', 'requestUnqueue', 'SPEAK_POSE', 'SPEAK_MAX_MS', 'speakDuration', 'paintSpeak', 'maybeSpeak', 'sendAnswer']
   // eslint-disable-next-line no-new-func
   const build = new Function(
     ...Object.keys(sandbox),
@@ -813,13 +853,15 @@ test('每个立绘都建了层，地址带着 token 和构建指纹', () => {
   const w = buildWhale({ token: 'abc def' })
   w.preloadPoses()
   const n = w.POSES.length
-  assert.equal(w.els.workStage.children.length, n, `${n} 个姿势各一层`)
+  // **比姿势多一层**：2026-09-26 加的「自言自语」那张（SPEAK_POSE）不在 POSES 里
+  // ——它不占轮播的格子，只在有台词时插播一下，所以是单独一层。
+  assert.equal(w.els.workStage.children.length, n + 1, `${n} 个姿势各一层，外加说话那张`)
   assert.equal(w.els.workStage.children[0].style.backgroundImage,
     'url("/mini/art/work-1-ready.webp?token=abc%20def&v=abc123")',
     'token 要转义，指纹要带上')
   // #work 是 hidden，浏览器不会为它下载背景图，所以必须另有游离的 <img> 主动拉
   const warmed = w.created.filter((e) => e.id === 'img')
-  assert.equal(warmed.length, n, '每一张都要主动预加载，不然第一次会闪空白')
+  assert.equal(warmed.length, n + 1, '每一张都要主动预加载，不然第一次会闪空白')
   assert.equal(warmed[0].src, '/mini/art/work-1-ready.webp?token=abc%20def&v=abc123')
 })
 
@@ -827,9 +869,14 @@ test('每个姿势的翻帧速度不一样，快的快、慢的慢', () => {
   // 敲键盘和小跑要快，端着茶等和托腮想事情要慢。一刀切的节奏看着像机器在闪。
   const w = buildWhale()
   w.preloadPoses()
-  const dur = w.els.workStage.children.map((c) => parseFloat(c.style.animationDuration))
+  // 最后一层是说话那张，它不参与轮播，单独看它自己的翻帧速度。
+  const dur = w.els.workStage.children.slice(0, w.POSES.length)
+    .map((c) => parseFloat(c.style.animationDuration))
   assert.deepEqual(dur, w.POSES.map((p) => p.flip), '动画时长要跟着 POSES 里的 flip 走')
   assert.ok(dur.every((d) => d > 0.2 && d < 3), `时长要落在合理区间，实际 ${dur}`)
+  const speakFlip = parseFloat(
+    w.els.workStage.children[w.POSES.length].style.animationDuration)
+  assert.ok(speakFlip > 0.2 && speakFlip < 3, `说话那张的翻帧也要落在同一区间，实际 ${speakFlip}`)
   const typing = w.POSES.findIndex((p) => p.file === 'work-3-typing')
   const waiting = w.POSES.findIndex((p) => p.file === 'work-7-waiting')
   assert.ok(dur[typing] < dur[waiting], '敲键盘该比端着茶快')
@@ -982,6 +1029,12 @@ test('不带词条的姿势，气泡整个收起来', () => {
   w.paintPose(0)
   assert.equal(w.els.workBubble.hidden, false, '有词条的姿势要正常显示')
   assert.equal(w.els.workBubble.textContent, w.POSES[0].line)
+
+  // 上面那两条只证明「把 hidden 置上了」——**它到底藏没藏住，这个假 DOM 看不出来**。
+  // 所以在这里补一句 CSS 的账：hidden 会被自己那条 display 盖掉，必须显式写一条
+  // （2026-09-27 用户截图报的正是这个空药丸）。静态查页面源码，不依赖浏览器。
+  assert.match(html, /\.work-bubble\[hidden\]\s*\{[^}]*display:\s*none/,
+    'hidden 得真能把气泡藏住：元素自己有 display，光靠 hidden 属性会被盖掉')
 })
 
 test('轮播序列是「姿势→冲刺→姿势→冲刺」，冲刺插在每一对之间', () => {
@@ -1027,6 +1080,242 @@ test('冲刺要停够时间，让用户看得清', () => {
   assert.equal(w.els.workBubble.hidden, true, '轮到冲刺时气泡是收起的')
   assert.equal(after.ms, 3600, '冲刺也停 3.6 秒——用户要看清这个动作')
   assert.ok(after.ms >= 2400, '不得少于上一版被嫌短的那个值')
+})
+
+// ---------------------------------------------------------------------------
+// 自言自语（2026-09-26）：模型执行步骤时说的那句话，用鲸鱼娘的气泡念出来
+// ---------------------------------------------------------------------------
+
+test('一句话说多久：短句 15 秒起步，长句按字数加，30 秒封顶', () => {
+  // 2026-09-27 用户问「能不能再久一些」——原来是一律 10 秒。长句从那天起会完整显示，
+  // 200 字的话念 10 秒根本念不完，所以时长改成跟句子长短走。
+  const w = buildWhale()
+  assert.equal(w.speakDuration(''), 15000, '空的一句也给起步时长')
+  assert.equal(w.speakDuration('这就去看。'), 15000, '短句：起步时长')
+  assert.equal(w.speakDuration('说'.repeat(66)), 15000, '66 字刚好还是起步时长')
+  assert.equal(w.speakDuration('说'.repeat(134)), 20100, '134 字按每字 0.15 秒算')
+  assert.equal(w.speakDuration('说'.repeat(200)), 30000, '200 字正好到天花板')
+  assert.equal(w.speakDuration('说'.repeat(400)), w.SPEAK_MAX_MS, '再长也不超过天花板')
+})
+
+test('新台词从那一刻重新计时，时长按这句自己的长短算', () => {
+  const w = buildWhale()
+  w.preloadPoses()
+  w.setClock(1000)
+  w.startWork()
+  w.state.thought = { text: '我先看看这个文件。', at: 111 }
+  w.maybeSpeak()
+  assert.equal(w.work.speakUntil, 1000 + w.speakDuration('我先看看这个文件。'),
+    '短句：起步时长（原来写死 10 秒）')
+  w.setClock(5000)
+  w.state.thought = { text: '说'.repeat(134), at: 222 }
+  w.maybeSpeak()
+  assert.equal(w.work.speakUntil, 5000 + w.speakDuration('说'.repeat(134)),
+    '长句：从这一刻按这句的字数重新算')
+})
+
+test('说话那张不进 POSES，也不进轮播序列', () => {
+  // 它是**按需插播**的，不是第 9 个节目。混进 POSES 就要连带改 posePool 那套
+  // 「靠位置认还在忙」的写法，还要占一个轮播格子——那是另一件事。
+  const w = buildWhale()
+  assert.ok(!w.POSES.some((p) => p.file === w.SPEAK_POSE.file), '不该混进轮播节目单')
+  assert.equal(w.POSES.length, 8, '节目单还是 8 个')
+  w.work.startedAt = 1000
+  w.setClock(1000)
+  const seq = w.poseSequence()
+  assert.ok(!seq.some((i) => w.POSES[i].file === w.SPEAK_POSE.file), '轮播序列里也不该有它')
+  // 单独声明：名字必须和磁盘上的立绘对得上（这一张由 make-pose.mjs 出）
+  assert.match(html, /var SPEAK_POSE = \{ file: 'work-9-talking'/, '要单独声明这一张')
+})
+
+test('台词一到就换成说话那张，气泡写下那句原话', () => {
+  const w = buildWhale()
+  w.preloadPoses()
+  w.setClock(1000)
+  w.startWork()
+  w.state.thought = { text: '我先看看这个文件。', at: 111 }
+  w.maybeSpeak()
+  assert.ok(w.work.speakLayer.classList.contains('on'), '说话那张要亮起来')
+  assert.ok(w.work.layers.every((l) => !l.classList.contains('on')), '轮播的姿势要全部让位')
+  assert.equal(w.els.workBubble.hidden, false)
+  assert.equal(w.els.workBubble.textContent, '我先看看这个文件。', '原话照写，不加文字也不减')
+  assert.ok(w.work.speakUntil > 1000, '要说一会儿——用户选的是「一直说到它结束」，最多 10 秒')
+})
+
+test('模型吐的尖括号不会变成标签，只当字面文字', () => {
+  // 台词是模型的原话，里面完全可能出现 < > 和引号。渲染那一步的顺序是"先转义、再上标签"，
+  // 所以原话里的标签不能生效——换了渲染入口之后，这条保证必须原样还在。
+  const w = buildWhale()
+  w.preloadPoses()
+  w.startWork()
+  w.state.thought = { text: '<b>这行不该变粗</b>', at: 5 }
+  w.maybeSpeak()
+  assert.ok(!w.els.workBubble.innerHTML.includes('<b>'), '原话里的标签不许生效')
+  assert.match(w.els.workBubble.innerHTML, /&lt;b&gt;/, '要原样显示成字面文字')
+  assert.equal(w.els.workBubble.textContent, '<b>这行不该变粗</b>', '读出来还是那句话')
+})
+
+test('气泡里的 markdown 要渲染出来，星号不许端给用户', () => {
+  // 用户 2026-09-27 报的：气泡里显示成 `**重启把连接掐断**`，星号原样摆着。
+  const w = buildWhale()
+  w.preloadPoses()
+  w.startWork()
+  w.state.thought = {
+    text: '最可能是**重启把连接掐断**，跑一下 `npm test` 就知道。',
+    at: 21,
+  }
+  w.maybeSpeak()
+  assert.match(w.els.workBubble.innerHTML, /<strong>重启把连接掐断<\/strong>/, '粗体要真的变粗')
+  assert.match(w.els.workBubble.innerHTML, /<code>npm test<\/code>/, '行内代码要真的变代码')
+  assert.ok(!w.els.workBubble.textContent.includes('**'), '星号不许留在字面上')
+  assert.ok(!w.els.workBubble.textContent.includes('`'), '反引号也不许留')
+  assert.ok(w.els.workBubble.textContent.includes('重启把连接掐断'), '内容一个字不能少')
+})
+
+test('词条也走同一个渲染入口（两条路各写各的早晚会分叉）', () => {
+  const w = buildWhale()
+  w.preloadPoses()
+  // 词条是我们自己写的、不含 markdown，之前是 textContent、台词是另一条路。
+  // 现在两边都过 paintBubble：断言词条写出来的是"渲染过的那一份"。
+  w.paintPose(2)
+  assert.equal(w.els.workBubble.innerHTML, MD.mdInline(w.POSES[2].line))
+  assert.equal(w.els.workBubble.textContent, w.POSES[2].line, '词条照旧显示成那句话')
+})
+
+test('说话那张加载不出来时：台词照说、人照轮播，不许把舞台清空', () => {
+  // 立绘还没画出来的那段时间里，说话那张是 404。要是照旧把正常那几张全关掉、
+  // 换上一张空的，她会当场从屏幕上消失——用户只会以为坏了。
+  const w = buildWhale()
+  w.preloadPoses()
+  w.setClock(1000)
+  w.startWork()
+  // 预热用的那张 <img> 报错：真机上 404 走的就是这条路。
+  const warmed = w.created.filter((e) => e.id === 'img')
+  const warmSpeak = warmed[warmed.length - 1]
+  assert.ok(warmSpeak.src.includes(w.SPEAK_POSE.file), '最后预热的那张就是说话立绘')
+  warmSpeak.onerror()
+  w.state.thought = { text: '我先看看这个文件。', at: 111 }
+  w.maybeSpeak()
+  assert.equal(w.els.workBubble.textContent, '我先看看这个文件。', '台词还是要说')
+  assert.ok(!w.work.speakLayer.classList.contains('on'), '那张空图不能点亮')
+  assert.ok(w.work.layers.some((l) => l.classList.contains('on')),
+    '轮播的立绘得留在台上——她在，只是没换姿势')
+})
+
+// ---------------------------------------------------------------------------
+// 答题卡片：答案要亲手交回电脑，交成了才算数
+//
+// 这几条钉的是同一件事：**没成事要说出来**。原来那段是按下就收卡片、失败咽着不说
+// （`catch(function () {})`），于是用户看到「手机上点了、电脑上什么也没发生」
+// ——2026-09-27 用户报的正是这一幕。
+// ---------------------------------------------------------------------------
+
+test('答案交回电脑：收下了 / 答晚了 / 没发出去，三种要分得开', async () => {
+  // 顺利：答案原样交出去，回 'ok'。
+  const ok = buildWhale()
+  assert.equal(await ok.sendAnswer('q1', [{ id: 'q1', selected: ['A'] }]), 'ok')
+  assert.equal(ok.calls.at(-1).path, '/mini/api/answer')
+  assert.deepEqual(JSON.parse(ok.calls.at(-1).opts.body),
+    { id: 'q1', answers: [{ id: 'q1', selected: ['A'] }] })
+
+  // 答晚了：插件那边回 409「这个提问已经结束了」——得让用户去电脑上答。
+  const late = buildWhale({ apiError: { status: 409, message: '这个提问已经结束了。' } })
+  assert.equal(await late.sendAnswer('q1', []), 'late')
+
+  // 压根没发出去（连不上）：卡片要留着，能再按一次。
+  const failed = buildWhale({ apiError: { status: 0, message: 'Failed to fetch' } })
+  assert.equal(await failed.sendAnswer('q1', []), 'failed')
+})
+
+test('答题卡片：没成事就不收卡片，而且要说一句——不能静悄悄', () => {
+  // 静态钉一遍那句「别咽下去」：发不出去时不收卡片、还要有话说。
+  assert.ok(!/api\('\/mini\/api\/answer'[\s\S]{0,240}\.catch\(function \(\) \{\}\)/.test(html),
+    '答案发出去失败，不能一声不吭')
+  assert.match(html, /if \(verdict === 'failed'\)/, '没发出去要单独一条路：卡片留着')
+  assert.match(html, /没送出去，看一眼和电脑的连接/, '发不出去要明说，让人知道这一下没生效')
+  assert.match(html, /这道题已经交回电脑了，去电脑上答/, '答晚了要指明去哪儿答')
+})
+
+test('同一句只说一次——快照广播来得很密', () => {
+  const w = buildWhale()
+  w.preloadPoses()
+  w.setClock(5000)
+  w.startWork()
+  w.state.thought = { text: '第一句', at: 1 }
+  w.maybeSpeak()
+  const first = w.work.speakUntil
+  w.setClock(5500)
+  w.maybeSpeak()
+  assert.equal(w.work.speakUntil, first, '同一条再广播十次也不该重新开始说')
+  // 来了新的一句就接着往下说（「一直说到它结束」就是这个意思）
+  w.state.thought = { text: '第二句', at: 2 }
+  w.maybeSpeak()
+  assert.equal(w.work.speakText, '第二句')
+  assert.ok(w.work.speakUntil > first, '新的那句从这一刻重新算时长')
+})
+
+test('说话期间轮播停住，到点回到被打断的那一格', () => {
+  const w = buildWhale()
+  w.preloadPoses()
+  w.setClock(1000)
+  w.startWork()
+  w.work.pose = 3
+  w.setClock(2000)
+  w.state.thought = { text: '等我一下', at: 7 }
+  w.maybeSpeak()
+
+  w.nextPose()
+  assert.equal(w.work.pose, 3, '说话期间轮播不许往前走')
+  assert.ok(w.work.speakLayer.classList.contains('on'), '还在这张上')
+
+  w.setClock(2000 + w.SPEAK_MAX_MS + 1)
+  w.nextPose()
+  assert.equal(w.work.pose, 4, '回到被打断的那一格接着走，不是从头来')
+  assert.ok(!w.work.speakLayer.classList.contains('on'), '说话那张要收掉')
+  const seq = w.poseSequence()
+  assert.ok(w.work.layers[seq[4]].classList.contains('on'), '画的是那一格该有的姿势')
+  assert.equal(w.els.workBubble.textContent, w.POSES[seq[4]].line || '', '气泡回到那个姿势的词条')
+})
+
+test('没在跑的时候不冒台词，闲下来也要收掉', () => {
+  const w = buildWhale()
+  w.preloadPoses()
+  w.state.running = false
+  w.state.thought = { text: '这句不该在她停下之后还挂着', at: 9 }
+  w.paintWork()
+  assert.ok(w.els.work.hidden, '没在跑，#work 本来就是藏着的')
+  assert.ok(!w.work.speakLayer.classList.contains('on'), '也不该点亮说话那张')
+})
+
+test('台词随快照进来时，paintWork 让她说——而且不能被「收到，这就去办」盖掉', () => {
+  const w = buildWhale()
+  w.preloadPoses()
+  w.state.running = true
+  w.state.thought = { text: '这就去看。', at: 12 }
+  w.paintWork()
+  assert.equal(w.els.work.hidden, false)
+  assert.ok(w.work.speakLayer.classList.contains('on'))
+  assert.equal(w.els.workBubble.textContent, '这就去看。')
+  // startWork 会先画第 0 张，台词必须随后盖上去。顺序反了，用户看到的就是开场白。
+  assert.ok(!w.work.layers[0].classList.contains('on'), '第 0 张要让位')
+})
+
+test('台词是长文本：一句都不能少，宁可让整页长高', () => {
+  // 用户 2026-09-27 报的：一句长话在手机上被切掉半行，第四行连省略号都没有。
+  // 所以这里验的正好跟原来相反——**不许限行数、不许 overflow:hidden**，
+  // 唯一的边界是 max-height + 内部滚动，只兜病态长文（几屏那种）。
+  const css = html.slice(html.indexOf('.work-bubble {'), html.indexOf('.work-bubble::before'))
+  assert.ok(!/-webkit-line-clamp/.test(css), '限行数就会截断，用户要的是完全展现')
+  assert.ok(!/overflow:\s*hidden/.test(css), 'overflow:hidden 也是截断的另一种写法')
+  assert.match(css, /max-height:\s*\d+vh/, '总得有一道兜底，别让一句跑飞的长文吃掉整屏')
+  assert.match(css, /overflow-y:\s*auto/, '真超过那道上限时要能滚到，而不是被切掉')
+  assert.match(css, /overflow-wrap:\s*anywhere/, '长英文串、URL 不认换行，会把气泡顶宽')
+  // 尖角原来钉在气泡的 50% 上，气泡一长高它就滑到立绘身子下边；现在钉在固定高度对着头。
+  const tail = html.slice(html.indexOf('.work-bubble::before, .work-bubble::after'),
+    html.indexOf('.work-bubble::before {'))
+  assert.match(tail, /top:\s*\d+px/, '尖角要固定对着她的头，不能跟着气泡高度跑')
+  assert.ok(!/top:\s*50%/.test(tail), '跟着高度跑就是长句时跑偏的根源')
+  assert.match(html, /'thought' in snap/, 'applySnapshot 要接住这门新字段')
 })
 
 test('「还在忙」那张必须留在数组最后——posePool 靠位置认它', () => {

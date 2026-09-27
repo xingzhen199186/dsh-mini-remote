@@ -198,6 +198,134 @@ test('一轮任务跑完，最终回复出现在 /mini/api/latest', async (t) =>
   assert.ok(!state.latest.text.includes('我先读一下文件'))
 })
 
+/**
+ * 自言自语（2026-09-26）：只走鲸鱼娘的气泡，不碰回答区、不进历史。
+ */
+test('中间步骤的自言自语会进快照，但回答区一个字都不变', async (t) => {
+  const p = await bootPlugin()
+  t.after(p.stop)
+
+  const feed = p.handlers.get('session/event')
+  const session = { id: 'sess-talk', header: { id: 'sess-talk' } }
+
+  // 手机先绑到这个会话上（现实里也是先有一条指令）
+  feed(session, ev('user/message', { source: { kind: 'user' }, content: text('看下这个项目') }))
+  feed(session, ev('turn/start', { turn: 1 }))
+  // 中间步骤：说一句给人听的旁白，然后就去调工具
+  feed(session, ev('assistant/message', {
+    turn: 1, step: 1,
+    message: {
+      content: [
+        ...text('先看一眼目录结构。'),
+        { type: 'tool-call', id: 'c1', name: 'read', arguments: '{}' },
+      ],
+    },
+  }))
+
+  const talk = await snapOf(p)
+  assert.equal(talk.thought.text, '先看一眼目录结构。', '旁白进气泡')
+  assert.ok(talk.thought.at > 0, '要带一个身份（at），手机靠它认「这句念过了」')
+  // **回答区一个字都不能变**：这才是 2026-09-22 那条裁决守的东西
+  assert.equal(talk.latest, null, '自言自语不是回答')
+  assert.equal(talk.history.filter((m) => m.role === 'assistant').length, 0,
+    '也不进历史——历史有上限，思考会把它挤爆')
+  assert.equal(talk.live, '', '更不能冒充「正在流出来的回答」')
+
+  // 再来一步：只想了、没写旁白 → 气泡**保持上一句**，思考不上手机
+  // （2026-09-27 用户裁掉的就是这条退路：思考首行整个不展示）
+  feed(session, ev('assistant/message', {
+    turn: 1, step: 2,
+    message: {
+      content: [
+        { type: 'reasoning', text: '先看一眼目录结构。\n然后再决定改哪儿。' },
+        { type: 'tool-call', id: 'c2', name: 'read', arguments: '{}' },
+      ],
+    },
+  }))
+  const still = await snapOf(p)
+  assert.equal(still.thought.text, '先看一眼目录结构。', '没旁白就不动气泡，留着上一句')
+  assert.equal(still.thought.at, talk.thought.at, '身份也没变——没有偷偷重播，更没有换成思考')
+
+  feed(session, ev('assistant/message', {
+    turn: 1, step: 3, message: { content: text('都改好了。') },
+  }))
+  feed(session, ev('turn/end', { turn: 1, reason: { kind: 'completed' } }))
+
+  const done = await snapOf(p)
+  assert.equal(done.latest.text, '都改好了。', '最后那一步才是回答')
+  assert.equal(done.thought, null, '一轮结束台词就作废——不然下一轮开口还挂着上一句')
+})
+
+/**
+ * 「别的会话」和「子代理」这两条，判据不是「快照里的 thought 是不是空」——那样写
+ * 是**摆设**：把守卫删掉它照样绿（反向验证抓到过，见 2026-09-26 那次）。
+ * 真正会出事的后果是**手机看的会话被拽走**：手机还没绑定时，「手机在看哪个会话」
+ * 取的是最近活跃的那个，别人一自言自语，屏幕上就换成别人的内容了。
+ */
+test('自言自语：别的会话在想什么，不许把手机的视线拽走', async (t) => {
+  const p = await bootPlugin()
+  t.after(p.stop)
+
+  const feed = p.handlers.get('session/event')
+  const mine = { id: 'sess-mine', header: { id: 'sess-mine' } }
+  const other = { id: 'sess-other', header: { id: 'sess-other' } }
+  const talkEvent = ev('assistant/message', {
+    turn: 1,
+    step: 1,
+    message: {
+      content: [
+        ...text('这是别的会话在说的话。'),
+        { type: 'reasoning', text: '这是别的会话在想的事。' },
+        { type: 'tool-call', id: 'c1', name: 'read', arguments: '{}' },
+      ],
+    },
+  })
+
+  // 手机连着、但还没绑（没发过指令）。这时候「手机在看哪个会话」取的是最近活跃的
+  // 那个——电脑上随便一个动静都会把它顶上去，所以这里让 mine 先落在前面。
+  feed(mine, ev('session/title', { title: 'mine 的会话' }))
+  assert.equal((await snapOf(p)).sessions[0].id, 'sess-mine', '前提：手机此刻看的是 mine')
+
+  feed(other, talkEvent)
+  const snap = await snapOf(p)
+  assert.equal(snap.sessions[0].id, 'sess-mine',
+    '别人的自言自语把「最近活跃」顶成了 other，手机看的会话就被悄悄换掉了')
+  assert.equal(snap.thought, null, '别人的台词也不该出现')
+
+  feed(mine, talkEvent)
+  assert.equal((await snapOf(p)).thought.text, '这是别的会话在说的话。', '自己这个会话的才推')
+})
+
+test('自言自语：子代理在想什么，一个字都不推', async (t) => {
+  const p = await bootPlugin()
+  t.after(p.stop)
+
+  const feed = p.handlers.get('session/event')
+  const sub = { id: 'sub-1', header: { id: 'sub-1', origin: 'subagent' } }
+
+  // 故意让手机盯着的就是那个分身：把指令直接发给它。
+  // （挡它的那道理在**收事件的入口**，所以它连绑都绑不上；这里必须走这条路，
+  //   否则「targetSessionId 不等于它」会把结果盖成绿的——那又是摆设了。）
+  feed(sub, ev('user/message', { source: { kind: 'user' }, content: text('你去干活') }))
+
+  feed(sub, ev('assistant/message', {
+    turn: 1,
+    step: 1,
+    message: {
+      content: [
+        ...text('我是派出去的小弟，我在说话。'),
+        { type: 'reasoning', text: '我是派出去的小弟，我在想。' },
+        { type: 'tool-call', id: 'c1', name: 'read', arguments: '{}' },
+      ],
+    },
+  }))
+
+  const snap = await snapOf(p)
+  assert.equal(snap.thought, null, '子代理的思考不该跑到手机上')
+  assert.equal(snap.latest, null, '它也不该在手机上凭空长出一轮回复')
+  assert.equal(snap.history.length, 0, '它那道墙挡的是**所有**事件，不只是自言自语')
+})
+
 test('被按停的那一轮：半句话留着，但带着 interrupted 标记', async (t) => {
   const p = await bootPlugin()
   t.after(p.stop)
@@ -1563,7 +1691,10 @@ test('合成：记录里那份 + 刚发生还没落进日志的那一条，接�
 
   const session = { id: 'sess-m', header: { id: 'sess-m' } }
   const handle = p.handlers.get('session/event')
-  for (const e of logOf([['刚问的', '刚答的']])) handle(session, e)
+  // 这批事件的时间戳得是**现在**：它代表「刚发生、日志里还没有」。
+  // 原来这里和上面那份用同一个默认起点（2023），只靠 Date.now() 让它显得新；
+  // 时间戳改成取自事件之后，这个「新」必须写在夹具里，否则它就真是 2023 的事了。
+  for (const e of logOf([['刚问的', '刚答的']], Date.now())) handle(session, e)
 
   await bindSession(p, 'sess-m')
   const snap = await waitSnap(p, (s) => s.history.length >= 2, '读回来')
@@ -1589,6 +1720,29 @@ test('合成：记录里已经有的那几条，不会因为手里也记着就�
 
   assert.deepEqual(snap.history.map((m) => m.text), ['问', '答'],
     '同一轮只能出现一次——接重了用户会以为自己问了两次')
+})
+
+test('合成：手里那份和记录里那份，用的是同一个钟——差一毫秒就会显示两遍', async (t) => {
+  // 2026-09-27 用户实机报的：一条指令在手机上显示两遍。
+  // 根源不是记了两笔，而是**两边各记一笔、时间戳差 1 毫秒**，合成就把同一条
+  // 当成了新的一条接在后面。硬件上实测的差是 .358 与 .359。
+  //
+  // 这条测试模拟的是最普通的一幕：插件**亲眼看见**了这一轮（session/event），
+  // 硬盘里也已经有了同一轮（读记录重放）。两边是同一批事件，时间戳就该一模一样。
+  const events = logOf([['问', '答']])
+  const query = fakeQuery({ 'sess-clock': events })
+  const p = await bootPlugin({ sessionQuery: query })
+  t.after(p.stop)
+
+  const session = { id: 'sess-clock', header: { id: 'sess-clock' } }
+  const handle = p.handlers.get('session/event')
+  for (const e of events) handle(session, e)
+
+  await bindSession(p, 'sess-clock')
+  const snap = await waitSnap(p, (s) => s.history.length >= 2, '读回来')
+
+  assert.deepEqual(snap.history.map((m) => m.text), ['问', '答'],
+    '同一轮只能出现一次——手里那份要是用了比记录晚的时间戳，就会再接一遍')
 })
 
 test('没有会话记录服务时（headless 组合）：行为跟以前一样，不出错', async (t) => {

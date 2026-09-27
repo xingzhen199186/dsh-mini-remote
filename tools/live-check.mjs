@@ -322,8 +322,11 @@ check('流式吐字时鲸鱼娘让位', /var busy = \(state\.running \|\| queued
     alarming.length ? `有问题的是：${alarming.join('、')}` : `${lines.length} 条，其中 ${lines.filter((l) => !l).length} 条故意留空`)
 }
 // 不带词条的姿势，气泡要整个收起来——留个空泡泡在那儿比不放更怪
+// 2026-09-27 改：词条和台词都走同一个入口 paintBubble（两条路各写各的早晚分叉），
+// 所以这里钉「那个入口 + 收起的动作」，不再钉某一种写法。
 check('空词条会把气泡收起来',
-  /\$\('workBubble'\)\.hidden = !line;/.test(html) && /var line = POSES\[index\]\.line \|\| ''/.test(html))
+  /function paintBubble\(line\)/.test(html) && /\$\('workBubble'\)\.hidden = !text;/.test(html)
+  && /paintBubble\(POSES\[index\]\.line\)/.test(html))
 // 冲刺是姿势之间的过渡，不是第 8 个姿势：序列得是「姿势→冲刺→姿势→冲刺」
 check('轮播把冲刺插在每一对姿势之间', html.includes('function poseSequence') &&
   /if \(POSES\[i\]\.gap\) continue;/.test(html))
@@ -336,6 +339,33 @@ check('冲刺有自己的停留时长，不跟姿势共用',
 // 单帧模式下「正在执行」要加在上一条回答下面，不能把它顶掉
 check('执行提示是加在下面的一条', html.includes('id="work"') && html.includes('work-progress'))
 check('发指令时不再清空上一条回答', !/state\.latest\s*=\s*null/.test(html))
+
+// 自言自语（2026-09-26）：模型执行步骤时说的那句话，用鲸鱼娘的气泡念出来。
+// 这条路和回答区**严格分开**——2026-09-22 用户否掉的是「过程的文字跑进回答区」。
+// 四条结构判据：单独一层/单独的字段/能不能念/轮播让位之后回得去。
+check('说话那张立绘不在轮播节目单里', /var SPEAK_POSE = \{ file: 'work-9-talking'/.test(html)
+  && !/file: 'work-9-talking'[^\n]*gap/.test(html))
+// 2026-09-27 改：气泡不再用 textContent（那样连 markdown 记号一起显示），改走
+// paintBubble → 行内渲染（先转义、再上标签）。这条要钉的是「台词进的是气泡，
+// 不冒充回答」，所以钉 paintSpeak → paintBubble 这条路 + thought 字段本身。
+check('台词走单独的 thought 字段，不冒充回答',
+  /function paintSpeak\(text\)/.test(html) && /paintBubble\(text\)/.test(html)
+  && html.includes("if ('thought' in snap) state.thought = snap.thought || null;"))
+check('说话期间轮播停住、过后回被打断的那一格', html.includes('function maybeSpeak')
+  && /if \(work\.speakUntil\)/.test(html) && /var left = work\.speakUntil - Date\.now\(\);/.test(html))
+// 2026-09-27 用户改的口径：话要**完整显示**——气泡长高、整页让位，三行截断撤掉了。
+// 所以这条不再钉「限三行」，改钉现在该有的样子：气泡自己不限行数、长串能断行、
+// 另留一道上限兜几屏长的病态文本。
+{
+  const bubbleCss = (html.match(/\.work-bubble \{[^}]*\}/) || [''])[0]
+  check('长台词不许把版面顶开', !/line-clamp/.test(bubbleCss)
+    && /overflow-wrap: anywhere/.test(bubbleCss) && /max-height:/.test(bubbleCss),
+    bubbleCss ? '' : '取不到 .work-bubble 那段样式')
+}
+// 2026-09-27 改：一句话说多久从「一律 10 秒」改成按字数算（短句 15 秒起步、30 秒封顶）。
+check('一句话说多久跟着字数走', /var SPEAK_MIN_MS = \d+/.test(html)
+  && /var SPEAK_PER_CHAR_MS = \d+/.test(html) && /function speakDuration/.test(html)
+  && /speakUntil = Date\.now\(\) \+ speakDuration\(t\.text\)/.test(html))
 
 // 6b. 停止：按钮得真送到手机上，路由得真在
 check('页面上有停止按钮', html.includes('id="btnStop"'))
@@ -427,10 +457,11 @@ if (br.status === 200) {
     `dirs = ${br.body?.dirs?.length ?? '?'}，顶层键 ${Object.keys(br.body ?? {}).join(',')}`)
 }
 
-// 6. 鲸鱼娘立绘：8 张都要真能取到，而且没登录的人拿不到
+// 6. 鲸鱼娘立绘：9 张都要真能取到（含说话那张），而且没登录的人拿不到
 const POSES = [
   'work-1-ready', 'work-2-reading', 'work-3-typing', 'work-4-checking',
   'work-5-thinking', 'work-6-running', 'work-8-sprinting', 'work-7-waiting',
+  'work-9-talking',
 ]
 for (const p of POSES) {
   const r = await fetch(`${base}/mini/art/${p}.webp?token=${token}`)

@@ -221,10 +221,15 @@
      那个 171 = 10 个全角字 × 14.5px，加左右内边距 24、边框 2。
      用 max-content 而不是写死 width：将来真加了更长的词条，这行会自己撑开——
      宁可立绘挪一点，也不能让字顶出屏幕。
-     min() 是窄屏退路：屏幕比 299 还窄时，这行跟着屏幕收，别溢出。 */
+     min() 是窄屏退路：屏幕比 299 还窄时，这行跟着屏幕收，别溢出。
+     **max-width 那一行是把上面那句话真正落实**（2026-09-27 补）：光有
+     `max-content` + `min-width` 只有下限没有上限，而气泡的 `max-width:
+     calc(100% - 128px)` 里的那个 100% 又是拿这一行自己算的——两头都靠对方，
+     谁也没被真正管住。结果是一句长话（尤其我那几句英文思考）把整行撑到屏幕外，
+     手机上得横着划才能看见（用户截图报的就是这个）。钉死在这一行的宽度上才算数。 */
   .work-top {
-    display: flex; align-items: center; gap: 6px;
-    width: max-content; min-width: min(299px, 100%);
+    display: flex; align-items: flex-start; gap: 6px;
+    width: max-content; min-width: min(299px, 100%); max-width: 100%;
     margin: 0 auto;
   }
 
@@ -262,7 +267,12 @@
      它推不动立绘——立绘的位置由上面 .work-top 的固定行宽管着，跟气泡宽窄无关。
      所以「词条每 3.6 秒换一次」这件事不会让立绘左右晃。
      max-width 是窄屏退路：立绘 122 + 间隙 6，剩下的都给气泡，宁可折行也别顶出屏幕。
-     抬到 flex-start 是让尖角对着她的头，而不是对着身子中间。 */
+
+     **竖着不限行数**（2026-09-27 用户报的：一句长话被切掉半行）。原来是
+     `-webkit-line-clamp: 3` + `overflow: hidden`——第四行连省略号都没有地截断，
+     看着像她话说了一半。现在让气泡自己长高，整页跟着让位（main 本来就能上下滚）。
+     留一道 `max-height` + 内部滚动只为兜病态长文（几屏）：正常一两句话够不到它。
+     `align-self: flex-start` 让气泡顶到行首、和她的头对齐。 */
   .work-bubble {
     position: relative; flex: 0 1 auto;
     max-width: calc(100% - 128px);
@@ -270,13 +280,31 @@
     background: var(--panel-2); border: 1px solid var(--line);
     border-radius: 12px; padding: 9px 12px;
     font-size: 14.5px; line-height: 1.5; color: var(--fg);
+    max-height: 50vh; overflow-y: auto;
+    /* 长英文串、URL 不认换行，会把气泡顶宽。中文本来就能任意断行，这条是给它们兜的。 */
+    overflow-wrap: anywhere;
   }
+  /* hidden 只是 UA 样式表里的一条 display:none，元素自己没写 display 时它才管用——
+     原来这里有个 `display: -webkit-box` 把它盖掉了，于是「词条是空串就把气泡收起来」
+     根本没生效，跑动那张旁边一直挂着一个没字的空药丸（2026-09-27 用户截图报的）。 */
+  .work-bubble[hidden] { display: none; }
+  /* 尖角固定在气泡**上部**（对准她的头），不跟着气泡高度跑。原来钉在 50%，气泡一长高，
+     尖角就滑到她身子下边去了——长句和短句都得指着头，所以要一个绝对值。 */
   .work-bubble::before, .work-bubble::after {
-    content: ''; position: absolute; top: 50%; width: 0; height: 0;
+    content: ''; position: absolute; top: 24px; width: 0; height: 0;
     border: 6px solid transparent; margin-top: -6px;
   }
   .work-bubble::before { left: -12px; border-right-color: var(--line); }
   .work-bubble::after { left: -11px; border-right-color: var(--panel-2); }
+  /* 气泡里的话走和回答区同一套行内渲染（`mdInline`）：`**加粗**`、`` `代码` ``、链接会变成样式。
+     代码的底色特意不用 --panel-2——那是气泡自己的底色，套上去等于看不见。 */
+  .work-bubble strong { font-weight: 650; }
+  .work-bubble a { color: var(--accent); word-break: break-all; }
+  .work-bubble code {
+    background: rgba(127, 127, 127, .18); border: 1px solid var(--line); border-radius: 5px;
+    padding: .1em .35em; font-size: .88em;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
 
   /* 进度条故意做成**不确定进度**的流动条，不是百分比。
      插件按设计只收「指令 + 最终回复」，拿不到 Agent 此刻跑到哪一步，
@@ -869,6 +897,14 @@
     uploads: [],
     // 正在流出来的那一段。空字符串 = 这会儿没有东西要显示。
     live: '',
+    /**
+     * 模型此刻的自言自语（鲸鱼娘的台词）：{ text, at } 或 null。
+     *
+     * **和 live 严格分开**：live 非空时整块 #work 会让位（那是「回答正在往外冒」的
+     * 规矩），台词要是塞进 live，会出现「该说话的时候鲸鱼娘不见了」。
+     * 它也不进 #reply——2026-09-22 用户否掉的就是「过程的文字跑进回答区」。
+     */
+    thought: null,
     // 服务端正去读这个会话的完整记录（点开一个插件没看过的会话时会有这一下）。
     historyLoading: false,
     // 「这份历史只到最近一段」（服务端读历史有上限时会给这一句）。
@@ -1115,7 +1151,13 @@
     opts.headers = Object.assign(authHeaders(!raw), opts.headers || {});
     return fetch(path, opts).then(function (r) {
       return r.json().catch(function () { return {}; }).then(function (body) {
-        if (!r.ok) throw new Error(body.error || ('HTTP ' + r.status));
+        if (!r.ok) {
+          var err = new Error(body.error || ('HTTP ' + r.status));
+          // 状态码挂在错上带出去：调用方要区分「服务端说这题已经结束了」（409）和
+          // 「压根没连上」（fetch 直接抛）——靠中文字面去猜太脆。
+          err.status = r.status;
+          throw err;
+        }
         return body;
       });
     });
@@ -1212,10 +1254,50 @@
   var GAP_MS = 3600;
   var SLOW_MS = 60000;
 
+  /**
+   * 说话那张立绘。**它不进 POSES。**
+   *
+   * POSES 是轮播的节目单，进去就要占一格（还要连带改 posePool 那套按位置认「还在忙」
+   * 的写法）。这张是**按需插播**的：只在宿主侧推来台词时出现，说完就回原来的顺序。
+   * 文件名里的 9 同样只是个名字，跟顺序无关。
+   */
+  var SPEAK_POSE = { file: 'work-9-talking', flip: 1.1 };
+  /**
+   * 一句台词占多久：**按字数算**，短的有起步时长，长的封顶。
+   *
+   * 用户 2026-09-26 选的是「一直说到它结束（最多 10 秒）」；2026-09-27 他觉得太短，
+   * 问能不能再久一点。原来是一律 10 秒——短句够用，可长句在 2026-09-27 起会**完整显示**
+   * （不再截断），一句 200 字的话念 10 秒根本念不完，她就已经回去干别的了。
+   *
+   * 所以：起步 15 秒，每多一个字多留 0.15 秒（≈ 一分钟 400 字，手机上舒服的默读速度），
+   * 30 秒封顶——封顶是为了防「某一轮她再没说话、画面却一直卡在说话那张」。
+   * 宿主侧只拿得到**整段**（一步一步来的，不是逐字），所以「结束」得自己收尾：
+   * 下一句台词来了就把表往后推，一直没有新的或这一轮结束了，就到点放回轮播。
+   */
+  var SPEAK_MIN_MS = 15000;
+  var SPEAK_PER_CHAR_MS = 150;
+  var SPEAK_MAX_MS = 30000;
+
+  /** 这句话该占多久（见上面三条）。 */
+  function speakDuration(text) {
+    var n = String(text || '').length;
+    return Math.min(SPEAK_MAX_MS, Math.max(SPEAK_MIN_MS, n * SPEAK_PER_CHAR_MS));
+  }
+
   var reducedMotion = false;
   try { reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) {}
 
-  var work = { startedAt: 0, pose: 0, poseTimer: null, tickTimer: null, layers: [] };
+  var work = {
+    startedAt: 0, pose: 0, poseTimer: null, tickTimer: null, layers: [],
+    // 说话那张立绘单独一层（不在 POSES 里，见 SPEAK_POSE）。
+    speakLayer: null,
+    // 正在说的那句台词，以及它最晚说到什么时候。
+    speakText: '',
+    speakUntil: 0,
+    // 已经念过的那句话的身份（宿主侧的 at）。快照来得很密，不认这个的话
+    // 同一句话会被反复「重新开始说」，动画一直从头播。
+    speakAt: null,
+  };
 
   /** 现在该用哪几条姿态：跑够一分钟才把「还在忙」放进来。 */
   function posePool() {
@@ -1254,16 +1336,65 @@
       + '&v=' + encodeURIComponent(BUILD);
   }
 
+  /**
+   * 把一句话写进气泡。
+   *
+   * 走的是和回答区同一个行内渲染（`mdInline`，见上面那段 Markdown 渲染）。它的顺序是
+   * **先转义、再上标签**：模型原话里的尖括号仍然只是字面上的尖括号，不会被当成标签；
+   * 只有它自己写的 `**粗体**`、`` `代码` ``、链接才会变成样式。留一个口子给"以后不加"。
+   *
+   * 之前这里是 `textContent`（一句纯文本），于是 `**重启把连接掐断**` 连星号一起端到了
+   * 用户面前（2026-09-27 用户报的）。词条那几种是我们自己写的、不含 markdown，也一起走
+   * 这个入口——两条路各写各的，早晚会分叉。
+   */
+  function paintBubble(line) {
+    var text = line || '';
+    $('workBubble').hidden = !text;
+    $('workBubble').innerHTML = mdInline(text);
+  }
+
   function paintPose(index) {
     for (var i = 0; i < work.layers.length; i += 1) {
       work.layers[i].classList.toggle('on', i === index);
     }
+    // 轮播回来时把说话那张收掉——它在 POSES 之外，不归上面那个循环管。
+    if (work.speakLayer) work.speakLayer.classList.toggle('on', false);
     // 有的姿势不带词条（比如那张冲刺）：词条是空串就把整个气泡收起来。
     // 留一个空泡泡在那儿比不放气泡更怪——那个尖角还指着她的头，像话没说出来。
     // 收起气泡不会让立绘挪位：.work-top 有 min-width 兜着，行宽不变。
-    var line = POSES[index].line || '';
-    $('workBubble').hidden = !line;
-    $('workBubble').textContent = line;
+    paintBubble(POSES[index].line);
+  }
+
+  /**
+   * 换成说话那张，把台词写进气泡。
+   *
+   * 台词是**模型的原话**（宿主机只从旁白里取，模型自己想的那些不上手机），
+   * 所以这里只做一件事：原样写出来，不加不减——渲染的那一步交给 `paintBubble`。
+   */
+  function paintSpeak(text) {
+    paintBubble(text);
+    // 说话那张没加载出来时（预热那次报错翻过这个开关）：台词照说，**但不动图层**——
+    // 把正常那几张全关掉、换上一张空的，她会当场从屏幕上消失（2026-09-27 立的闸）。
+    if (work.speakReady === false) return;
+    for (var i = 0; i < work.layers.length; i += 1) work.layers[i].classList.toggle('on', false);
+    if (work.speakLayer) work.speakLayer.classList.toggle('on', true);
+  }
+
+  /**
+   * 宿主侧送来的新台词要不要现在就说。
+   *
+   * 判据是 at（那句话的身份）：**同一句只说一次**。快照广播来得很密，每来一条就重说
+   * 一遍的话，说话这张立绘会一直从头播，看着像卡住不动。
+   */
+  function maybeSpeak() {
+    var t = state.thought;
+    if (!t || !t.text) return;
+    if (t.at === work.speakAt) return;
+    work.speakAt = t.at;
+    work.speakText = t.text;
+    // 每来一句新的就从这一刻重新算：时长按这句话有多长来（见 speakDuration）。
+    work.speakUntil = Date.now() + speakDuration(t.text);
+    paintSpeak(t.text);
   }
 
   function elapsedLabel(ms) {
@@ -1293,6 +1424,19 @@
       var warm = document.createElement('img');
       warm.src = artUrl(POSES[i].file);
     }
+    // 说话那张一起建好、一起预热：等台词来了再新建图层，会说第一个字之前先闪一下空白。
+    var speak = document.createElement('div');
+    speak.className = 'pose';
+    speak.style.backgroundImage = 'url("' + artUrl(SPEAK_POSE.file) + '")';
+    speak.style.animationDuration = SPEAK_POSE.flip + 's';
+    stage.appendChild(speak);
+    work.speakLayer = speak;
+    var warmSpeak = document.createElement('img');
+    // 说话那张要是加载不出来（图还没画好、或者网络半路断了）：**别把舞台清空**。
+    // 默认按「图在」处理，只有真报错才翻成 false——正常路径一个字都不变；
+    // 翻成 false 之后就退成「台词照说、人照轮播」，而不是她整个消失（见 paintSpeak）。
+    warmSpeak.onerror = function () { work.speakReady = false; };
+    warmSpeak.src = artUrl(SPEAK_POSE.file);
     paintPose(0);
   }
 
@@ -1304,6 +1448,20 @@
    * 停止时 stopWork 会把待排的那一次清掉，不会漏跑。
    */
   function nextPose() {
+    // 正在说话：这一格让给她，轮播停在这儿等（work.pose 不动，所以恢复时接着的那一格
+    // 就是被打断的那一格，而不是从头来）。到点或来了新台词都由 maybeSpeak 管。
+    if (work.speakUntil) {
+      var left = work.speakUntil - Date.now();
+      if (left > 0) {
+        paintSpeak(work.speakText);
+        // 睡到「该收尾的那一刻」为止，不多不少：按 3.6 秒一格睡的话，
+        // 这个上限会被拖到整格之后，最后那句台词要多挂将近一秒。
+        work.poseTimer = setTimeout(nextPose, Math.min(POSE_MS, left));
+        return;
+      }
+      work.speakUntil = 0;
+      work.speakText = '';
+    }
     var seq = poseSequence();
     work.pose = (work.pose + 1) % seq.length;
     var index = seq[work.pose];
@@ -1328,6 +1486,11 @@
 
   function stopWork() {
     work.startedAt = 0;
+    // 说话状态跟着收掉：这一轮的话已经说完了，下一轮不该接着上一句。
+    // **但 speakAt 留着**——那是对「哪句话已经念过」的记忆，清掉的话，万一宿主侧
+    // 还留着上一轮的台词（广播没到），新一轮一开场它就会被当成新话说一遍。
+    work.speakUntil = 0;
+    work.speakText = '';
     // 轮播现在是自己排下一次的 setTimeout（见 nextPose），用 clearInterval 清
     // setTimeout 在浏览器里也行，但写 clearTimeout 更不容易让人误会。
     if (work.poseTimer) { clearTimeout(work.poseTimer); work.poseTimer = null; }
@@ -1372,6 +1535,30 @@
   }
 
   $('btnStop').addEventListener('click', requestStop);
+
+  /**
+   * 把手机上答的题交回电脑，回一句实话。
+   *
+   * 回的是三种结果，不是一个「成没成」——因为两种失败要说不同的话：
+   *   'ok'      电脑收下了；
+   *   'late'    这题已经交回电脑了（插件回 409），得让用户去电脑上答；
+   *   'failed'  压根没发出去（连不上），卡片留着，手一按还能再试。
+   *
+   * 原来那一段是按下就先把卡片收掉、发失败也咽着不说（当时的理由是「电脑那边等不到
+   * 会自己还给浏览器」）。可电脑那边还在等着，手机上却静悄悄——用户看到的只有
+   * 「我点了，没反应」（2026-09-27 用户报的正是这一幕）。所以这里只做一件事：
+   * 把实情如实报出来，怎么显示由上面那张卡片决定。
+   */
+  function sendAnswer(id, answers) {
+    return api('/mini/api/answer', {
+      method: 'POST',
+      body: JSON.stringify({ id: id, answers: answers }),
+    })
+      .then(function () { return 'ok'; })
+      .catch(function (err) {
+        return err && err.status === 409 ? 'late' : 'failed';
+      });
+  }
 
   // ---------------- 排队中的指令 ----------------
   //
@@ -1431,7 +1618,12 @@
     // （比如正在调工具）时，鲸鱼娘还是要留着，那是它唯一该出现的时候。
     var busy = (state.running || queued > 0) && !state.live;
     el.hidden = !busy;
-    if (busy) startWork(); else stopWork();
+    if (busy) {
+      startWork();
+      // 台词每次随快照重算一遍。**必须放在 startWork 之后**：startWork 会先画第 0 张，
+      // 反过来的话它会把这句台词盖掉，用户看到的是「收到，这就去办」而不是她的自说自话。
+      maybeSpeak();
+    } else stopWork();
     paintQueue();
   }
 
@@ -1788,6 +1980,8 @@
     // 正在流出来的那一段。服务端只在自己决定要显示之后才写它，所以这里是空字符串
     // 不代表模型没在写，只代表「还不到显示的时候」。
     if ('live' in snap) state.live = snap.live || '';
+    // 模型此刻的自言自语（鲸鱼娘的台词）。null = 这会儿没话说，气泡回到该姿势自己的词条。
+    if ('thought' in snap) state.thought = snap.thought || null;
     if (snap.history) state.history = snap.history;
     // 「服务端正去读这个会话的完整记录」。点开一个没看过的会话时，那一串要读一会儿
     // 才补上来（最大的那条日志 20 MB、约半秒），这期间不能装作「这个会话是空的」。
@@ -2366,12 +2560,17 @@
         if ((one.custom || '').trim()) answer.custom = one.custom.trim()
         return answer
       })
-      const id = ask.id
-      ask = null
-      $('askCard').classList.remove('on')
-      // 发失败也不弹窗打扰：电脑那边等不到答案会自己还给浏览器，用户不会卡住。
-      api('/mini/api/answer', { method: 'POST', body: JSON.stringify({ id: id, answers: answers }) })
-        .catch(function () {})
+      // 三种结果说三句不同的话。**没成事就不收卡片**：收掉了就再也没地方说这句话，
+      // 用户看到的只会是「点了没反应」。
+      sendAnswer(ask.id, answers).then(function (verdict) {
+        if (verdict === 'failed') {
+          toast('没送出去，看一眼和电脑的连接，再点一次')
+          return
+        }
+        ask = null
+        $('askCard').classList.remove('on')
+        if (verdict === 'late') toast('这道题已经交回电脑了，去电脑上答')
+      })
     })
     es.addEventListener('question', function (e) {
       let payload = null
