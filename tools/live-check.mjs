@@ -13,37 +13,22 @@
  *   node tools/live-check.mjs --build <指纹>   # 手动指定要等的指纹
  */
 import { readFileSync, readdirSync } from 'node:fs'
-import { createHash } from 'node:crypto'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { buildId } from '../lib/build.js'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 
-/** 和 lib/build.js 算同一个指纹，用来确认应答我们的是不是这份代码。 */
+/**
+ * 指纹只认一份实现：直接问 `lib/build.js`。
+ *
+ * 这里原先照抄了一遍它的算法——两个副本迟早会走散（2026-09-27 就是：那边把绝对
+ * 路径揉进了哈希，同一份代码经目录链接和经真实路径算出来是两个数，于是这条检查
+ * 永远报"跑的不是这份代码"）。抄一份的代价不是省一次 import，是**两个真相**。
+ */
 function localBuild() {
-  const lib = join(HERE, '..', 'lib')
-  const hash = createHash('sha256')
-  const files = []
-  for (const f of readdirSync(lib).sort()) {
-    if (f.endsWith('.js') || f.endsWith('.html')) files.push(join(lib, f))
-  }
-  files.push(join(HERE, '..', 'client', 'client.js'))
-  // 立绘也算在里面（和 lib/build.js 保持一致）：换了图，指纹就该跟着变。
-  try {
-    for (const f of readdirSync(join(lib, 'art')).sort()) {
-      if (f.endsWith('.webp')) files.push(join(lib, 'art', f))
-    }
-  } catch { /* 没有 art 目录就当没有立绘 */ }
-  for (const file of files) {
-    hash.update(file)
-    try {
-      hash.update(readFileSync(file))
-    } catch {
-      hash.update('(读不到)')
-    }
-  }
-  return hash.digest('hex').slice(0, 12)
+  return buildId()
 }
 
 const argv = process.argv.slice(2)
