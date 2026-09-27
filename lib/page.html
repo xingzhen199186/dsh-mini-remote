@@ -13,10 +13,12 @@
      规格来自用户 2026-09-27 定的六关键词翻译表，改之前先读这一段：
        · 圆角只有两档：卡片一律 2px，状态点用 999px/50%。**没有中间档**。
        · 阴影只有两档，且都极浅；层次主要靠 --line 这条 1px 细线和间距建立。
-       · 唯一强调色是暖金 --gold，**一屏最多出现两处**（发送键、"当前这一步"）。
-         需要"显眼一点"的地方一律用鲸鱼娘的冰蓝 --ice，别动金。
-         --gold 是**当底色用**的金（按钮底），--gold-ink 是**当字用**的金：
-         浅色主题底下后者要压深，白底上的 #c9a55c 当字读不清。
+       · 强调色分两个角色，加起来**一屏最多两处**：
+         --gold 是**当字/点**用的（刻度上"当前这一步"）；--act 是**当底**用的（主按钮）。
+         深色下两个都是暖金 #c9a55c；浅色下 --gold 压深成 #8a6529（白底才读得清），
+         --act 换成宣传图的宝蓝 #3b6fc4——用户 2026-09-27 看过对照图后定的：浅色那套
+         底色本来就是从宣传图取的，冷底上再压一块饱和暖金，比在深色下更像外来物。
+         需要"显眼一点"的地方一律用鲸鱼娘的冰蓝 --ice，别动这两个。
        · --ok/--run/--err 是状态点的语义色，占的是 8px 一个小点，不算强调色。
        · 配色以鲸鱼娘为准心：深海墨蓝打底，她的冰蓝作次级色。
        · 两套主题：这套（默认，深色）和 [data-theme="light"]，色调跟宣传图
@@ -34,8 +36,8 @@
     --muted: #7b8a9b;
     --dim: #6c7a8b;
     --ice: #a9c8e8;
-    --gold: #c9a55c;
-    --gold-ink: #c9a55c;
+    --gold: #c9a55c;      /* 强调色当**字/点**用：刻度上"当前这一步" */
+    --act: #c9a55c;       /* 强调色当**底**用：一屏一个的主按钮 */
     --ok: #4fb477;
     --run: #a9c8e8;
     --err: #d4614f;
@@ -46,11 +48,12 @@
     --tint: rgba(24, 34, 47, .5);    /* 队列那块比面板再深一点的底 */
     --pop: rgba(24, 34, 47, .97);    /* 浮起来的小面板（指令菜单等） */
     --scrim: rgba(0, 0, 0, .55);     /* 弹出层背后压暗的那层；浅色主题里它得轻得多 */
-    --on-gold: #10161f;   /* 金色底上的字：白字对比不够，读不清 */
+    --on-act: #10161f;    /* 实心主按钮上的字：金底配白字读不清 */
   }
   /* 浅色主题：色调跟宣传图（docs/promo.png）统一——近白的冰蓝底、深宝蓝的字与状态色、
-     白色卡片、极浅的蓝投影。深色那边的规矩一条不改：圆角两档、层次靠 1px 细线、
-     暖金仍是唯一强调色（只把"当字用的金"压深到 #8a6529，白底上才读得清）。
+     白色卡片、极浅的蓝投影。深色那边的规矩一条不改：圆角两档、层次靠 1px 细线。
+     强调色在浅色下分了家：当字/点用的金压深到 #8a6529，当底用的主按钮换成宣传图的宝蓝
+     （#3b6fc4 配白字）——用户 2026-09-27 看过对照图后定的。
      切换入口在设置页「外观」；选择存在 localStorage，首屏之前就定好，不会闪一下。 */
   [data-theme="light"] {
     color-scheme: light;
@@ -64,8 +67,8 @@
     --muted: #6b7f9b;
     --dim: #8496ae;
     --ice: #3b6fc4;
-    --gold: #c9a55c;
-    --gold-ink: #8a6529;
+    --gold: #8a6529;      /* 白底上当字用，得压深才读得清 */
+    --act: #3b6fc4;       /* 主按钮底：用宣传图那个宝蓝（用户 2026-09-27 裁决） */
     --ok: #2e9a5f;
     --run: #3b6fc4;
     --err: #c0392b;
@@ -75,7 +78,7 @@
     --tint: rgba(59, 111, 196, .07);
     --pop: rgba(255, 255, 255, .98);
     --scrim: rgba(23, 52, 95, .30);
-    --on-gold: #10161f;
+    --on-act: #ffffff;    /* 宝蓝底上的字 */
   }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html, body {
@@ -435,13 +438,14 @@
     /* 全页唯一允许的动效：节点由"待"变"过"时 160ms 颜色过渡。 */
     transition: background .16s ease, border-color .16s ease;
   }
-  /* 刻度上"当前这一步"是**当字用**的金：浅色主题底下它要压深，所以走 --gold-ink。 */
-  .queue .q-node.cur i { background: var(--gold-ink); border-color: var(--gold-ink); }
+  /* 刻度上"当前这一步"是**当字用**的那个强调色（--gold）：浅色主题底下它要压深，
+     所以这里是 --gold 而不是 --act——--act 是"当底用"的，浅色下已经换成宝蓝了。 */
+  .queue .q-node.cur i { background: var(--gold); border-color: var(--gold); }
   .queue .q-node b {
     font-weight: 400; font-size: 10.5px; line-height: 1;
     color: var(--muted); font-variant-numeric: tabular-nums;
   }
-  .queue .q-node.cur b { color: var(--gold-ink); }
+  .queue .q-node.cur b { color: var(--gold); }
   .queue .q-row {
     display: flex; align-items: center; gap: 8px; padding: 3px 0;
     font-size: 13.5px; line-height: 1.45;
@@ -488,10 +492,10 @@
   }
   #input:focus { border-color: var(--ice); }
   /* 发送键是这一屏**唯一的暖金**（另一处是刻度上"正在跑的那一步"）。
-     金色底配白字读不清，所以字用近黑的 --on-gold。 */
+     金色底配白字读不清，所以字用近黑的 --on-act。（浅色下 --act 是宝蓝、--on-act 是白字。） */
   .send {
     flex: 0 0 auto; height: 42px; padding: 0 16px; border-radius: var(--r);
-    border: none; background: var(--gold); color: var(--on-gold);
+    border: none; background: var(--act); color: var(--on-act);
     font-size: 15px; font-weight: 600; cursor: pointer;
   }
   .send:disabled { opacity: .4; }
@@ -656,7 +660,7 @@
   .pick-here {
     display: block; width: calc(100% - 24px); margin: 10px 12px;
     padding: 11px; border: none; border-radius: var(--r);
-    background: var(--gold); color: var(--on-gold); font: inherit; font-size: 14px; cursor: pointer;
+    background: var(--act); color: var(--on-act); font: inherit; font-size: 14px; cursor: pointer;
   }
   .pick-here:active { opacity: .85; }
   .pick-here[disabled] { background: var(--line); color: var(--muted); cursor: default; }
@@ -716,13 +720,13 @@
     padding: 7px 12px; border: none; background: var(--panel-2); color: var(--muted);
     font-size: 13px; cursor: pointer;
   }
-  .seg button.active { background: var(--ice); color: var(--on-gold); }
+  .seg button.active { background: var(--ice); color: var(--on-act); }
   select, .btn {
     padding: 8px 12px; border-radius: var(--r); border: 1px solid var(--line);
     background: var(--panel-2); color: var(--fg); font: inherit; font-size: 14px;
   }
   .btn { cursor: pointer; }
-  .btn.primary { background: var(--gold); border-color: var(--gold); color: var(--on-gold); font-weight: 600; }
+  .btn.primary { background: var(--act); border-color: var(--act); color: var(--on-act); font-weight: 600; }
   .sheet .foot { margin-top: 18px; display: flex; gap: 10px; }
   .sheet .foot .btn { flex: 1 1 0; text-align: center; }
 
@@ -738,8 +742,8 @@
     background: var(--panel-2); color: var(--fg); font: inherit; font-size: 16px;
   }
   #gate button {
-    padding: 13px; border-radius: var(--r); border: none; background: var(--gold);
-    color: var(--on-gold); font-size: 16px; font-weight: 600;
+    padding: 13px; border-radius: var(--r); border: none; background: var(--act);
+    color: var(--on-act); font-size: 16px; font-weight: 600;
   }
   #gate .err { color: var(--err); font-size: 13px; min-height: 18px; }
 
@@ -775,7 +779,7 @@
   #askCard .qfoot button { flex: 1; padding: 15px 8px; font-size: 16px; border-radius: var(--r);
     border: 1px solid var(--line); background: var(--panel-2); color: inherit; font-family: inherit; }
   /* 这一屏唯一的主按钮，暖金。 */
-  #askCard .qfoot button#askNext { background: var(--gold); border-color: var(--gold); color: var(--on-gold); font-weight: 600; }
+  #askCard .qfoot button#askNext { background: var(--act); border-color: var(--act); color: var(--on-act); font-weight: 600; }
   /* 没有毛玻璃的浏览器：退回实色面板。别让界面变成一片糊住的半透明。 */
   @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
     header, footer, .attach-bar, .cmd-menu, .nav-panel, .sheet { background: var(--panel); }

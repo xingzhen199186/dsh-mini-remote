@@ -49,11 +49,13 @@ test('状态点不再闪动，只留 160ms 的颜色过渡', () => {
   assert.match(dot, /transition:\s*background\s*\.16s/, '状态变化是瞬时的：160ms 颜色过渡')
 })
 
-test('暖金只许出现在清单里的这几处（一屏最多两处）', () => {
-  // 金的两个用途分开钉：--gold 是**当底色用**的（按钮底），--gold-ink 是**当字用**的
-  // （浅色主题底下它要压深，否则白底上的 #c9a55c 读不清）。
-  // 两份都是冻结清单。要加一处，先回答"这一屏是不是已经有两处金了"，再改这里。
-  const ALLOWED_FILL = [
+test('强调色只许出现在清单里的这几处（一屏最多两处）', () => {
+  // 强调色分两个角色，各自冻结一份清单：
+  //   --act   当**底**用（一屏一个主按钮）；--gold 当**字/点**用（刻度上"当前这一步"）。
+  // 深色下两者都是暖金 #c9a55c；浅色下 --act 换成宣传图的宝蓝、--gold 压深到 #8a6529
+  // ——用户 2026-09-27 看过对照图后定的。
+  // 要加一处，先回答"这一屏是不是已经有两处强调色了"，再改这里。
+  const ALLOWED_ACT = [
     '.send',                                          // 主屏：发送键
     '.pick-here',                                     // 抽屉：选定这个工作区
     '.btn.primary',                                   // 设置：这一屏的主按钮
@@ -74,34 +76,39 @@ test('暖金只许出现在清单里的这几处（一屏最多两处）', () =>
     }
     return found
   }
-  const fill = selectorsUsing('--gold')
-  const ink = selectorsUsing('--gold-ink')
-  assert.ok(fill.length > 0, '一个暖金都没找到，令牌接错了')
-  for (const sel of fill) {
-    assert.ok(ALLOWED_FILL.includes(sel),
-      `当底用的暖金跑到清单外了：「${sel}」——先确认这一屏是不是已经有两处金`)
+  const act = selectorsUsing('--act')
+  const ink = selectorsUsing('--gold')
+  assert.ok(act.length > 0, '一个主按钮色都没找到，令牌接错了')
+  for (const sel of act) {
+    assert.ok(ALLOWED_ACT.includes(sel),
+      `当底用的强调色跑到清单外了：「${sel}」——先确认这一屏是不是已经有两处了`)
   }
   for (const sel of ink) {
     assert.ok(ALLOWED_INK.includes(sel),
-      `当字用的暖金跑到清单外了：「${sel}」——先确认这一屏是不是已经有两处金`)
+      `当字/点用的强调色跑到清单外了：「${sel}」——先确认这一屏是不是已经有两处了`)
   }
 })
 
 test('浅色主题覆盖了每一个颜色令牌（缺一个就有元素在那个主题下隐身）', () => {
   const darkFrom = css.indexOf(':root {')
   const dark = css.slice(darkFrom, css.indexOf('}', darkFrom))
-  const lightFrom = css.indexOf('[data-theme="light"]')
+  // 认**规则**，不是那串字——注释里也会提到 [data-theme="light"]，按字找会切到注释上。
+  const lightFrom = css.indexOf('[data-theme="light"] {')
   assert.ok(lightFrom > 0, '找不到浅色主题那一块')
   const light = css.slice(lightFrom, css.indexOf('}', lightFrom))
 
   const namesIn = (block) => [...block.matchAll(/(--[a-z0-9-]+)\s*:/g)].map((m) => m[1])
   // 只比"颜色"这一类：圆角 --r 是尺寸，两套主题共用一份，不该跟着主题变。
-  const COLOUR = /^--(bg|bg-top|bg-deep|panel|panel-2|line|fg|muted|dim|ice|gold|gold-ink|ok|run|err|sh-\d|glass|tint|pop|on-gold)$/
+  const COLOUR = /^--(bg|bg-top|bg-deep|panel|panel-2|line|fg|muted|dim|ice|gold|act|ok|run|err|sh-\d|glass|tint|pop|scrim|on-act)$/
   const want = namesIn(dark).filter((n) => COLOUR.test(n))
   const have = new Set(namesIn(light))
-  assert.ok(want.length >= 20, `颜色令牌只认出 ${want.length} 个，大概正则写歪了`)
+  assert.ok(want.length >= 21, `颜色令牌只认出 ${want.length} 个，大概正则写歪了`)
   assert.deepEqual(want.filter((n) => !have.has(n)), [],
     '浅色主题缺令牌：新加的颜色必须两套主题都写一份')
+  // 用户 2026-09-27 的裁决：浅色下主按钮底用宣传图那个宝蓝，不当字用的金压深。
+  assert.match(light, /--act:\s*#3b6fc4/, '浅色下主按钮底该是宝蓝')
+  assert.match(light, /--gold:\s*#8a6529/, '浅色下当字用的金要压深，白底才读得清')
+  assert.match(dark, /--act:\s*#c9a55c/, '深色下主按钮底还是暖金，别跟着变')
 })
 
 test('顶栏底栏是毛玻璃，且有不支持时的实色回落', () => {
