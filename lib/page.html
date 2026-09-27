@@ -792,6 +792,9 @@
   #approveCard .ahead { font-size: 13px; color: var(--muted); margin-bottom: 12px; }
   #approveCard .atool { font-size: 18px; line-height: 1.6; margin-bottom: 10px; }
   #approveCard .areason { font-size: 14px; line-height: 1.65; color: var(--muted); margin-bottom: 16px; white-space: pre-wrap; }
+  /* 命令原文：等宽感靠 1px 细线左边界和缩进，不引新字体；长命令照原样折行。 */
+  #approveCard .acmd { font-size: 13px; line-height: 1.55; color: var(--muted); margin-bottom: 16px;
+    white-space: pre-wrap; word-break: break-all; border-left: 2px solid var(--line); padding-left: 10px; }
   #approveCard .afoot { margin-top: auto; display: flex; gap: 10px; padding-top: 16px; }
   #approveCard .afoot button { flex: 1; padding: 15px 8px; font-size: 16px; border-radius: var(--r);
     border: 1px solid var(--line); background: var(--panel-2); color: inherit; font-family: inherit; }
@@ -858,11 +861,13 @@
   </div>
 </div>
 <!-- 电脑要做需要拍板的事时弹出来的审批卡。默认隐藏，收到 approval 事件才显示。
-     命令原文不在卡上：这个插件按设计只收「用户指令 + 最终回复」，中间步骤不传过来。 -->
+     命令原文来自会话事件 tool/call 的 arguments（模型原样产出的 JSON），
+     插件按调用编号记着，审批来的时候一起推过来。 -->
 <div id="approveCard">
   <div class="ahead">电脑被拦下来了，等你拍板</div>
   <div class="atool" id="approveTool"></div>
   <div class="areason" id="approveReason"></div>
+  <div class="acmd" id="approveCmd"></div>
   <div class="afoot">
     <button id="approveDeny" type="button">拒绝</button>
     <button id="approveAllow" type="button">同意</button>
@@ -2832,6 +2837,9 @@
       $('approveTool').textContent = '它要让「' + (payload.toolName || '某个工具') + '」动手'
       $('approveReason').textContent = payload.reason || ''
       $('approveReason').style.display = payload.reason ? '' : 'none'
+      // 命令原文：有就照原样显示。**没有就明说"没取到"，不静默藏起来**——
+      // 用户要的就是看见命令，藏起来等于骗他；真没取到时他也一眼看得出是这条链没走通。
+      $('approveCmd').textContent = payload.command || '（这条没取到命令原文）'
       $('approveCard').classList.add('on')
     }
     function approveDecide(allow) {
