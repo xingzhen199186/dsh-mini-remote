@@ -133,6 +133,10 @@ Open the link and that's the whole interface: one input box, and the latest repl
 
 <img width="290" alt="Settings (dark): display mode and appearance" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/settings-dark.png" /> <img width="290" alt="Settings (light): the selected states and the primary button turn royal blue too" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/settings-light.png" />
 
+**The screen while a task is running.** She is mid-stride, the progress bar is moving, and the queue lists what goes next once this round ends. No tool calls and no file diffs on this screen — only the fact that something is running.
+
+<img width="290" alt="Running (dark): the whale girl mid-stride, the progress bar moving, two instructions queued" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/running-dark.png" /> <img width="290" alt="Running (light): the same screen, with the primary button in royal blue and the current step dot in dark gold" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/running-light.png" />
+
 **Two display modes.** Tap the ⚙ in the top right to switch. "Single frame" (the default) keeps only the newest reply on screen — good for "I just want to see how this one turned out". "Chat" is a back-and-forth bubble list — good for several rounds of follow-up questions. Use it for a while and you'll know which you prefer.
 
 **Open a session and you see what was said in it before.** Switch to a session that has existed for a while and Chat mode lists every earlier round (the instructions you sent, the conclusion of each round); Single frame shows only the last conclusion. **Very large sessions show only the most recent stretch**: reading one of those in full — tens of thousands of events — would drag the DSH process on your computer down, so the plugin reads just the tail and says so at the top ("this is not everything, only the most recent stretch"). That line is not boilerplate; it is the truth.
