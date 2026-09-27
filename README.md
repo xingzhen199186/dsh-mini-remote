@@ -25,7 +25,7 @@
 - AI 干活的中间过程（工具调用、读写文件、子 Agent、思考正文）**一律不推给手机**；
 - 唯一会「说话」的是鲸鱼娘：模型在步骤之间自言自语的那一句，由她念出来，只进她的气泡。
 
-界面长这样——深色和浅色两套，设置里随手换（下面是按 390×844 的手机尺寸渲染的）：
+界面长这样——深色和浅色两套，设置里随手换：
 
 <img width="290" alt="深色：一段对话，手机上只留你的指令和它的结论" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/screen-dark.png" /> <img width="290" alt="浅色：同一段对话，色调跟宣传图那张画统一" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/screen-light.png" />
 
