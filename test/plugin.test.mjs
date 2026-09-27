@@ -57,7 +57,7 @@ function makeCtx(services, directNames) {
   })
 }
 
-function mockCtx({ attachments, sessionQuery, commands } = {}) {
+function mockCtx({ attachments, sessionQuery, commands, sessionController } = {}) {
   const handlers = new Map()
   // `ctx.on` 的第三个参数（注册选项）也要留下来：提问钩子靠 `prepend` 才能排到
   // 电脑浏览器前面，而漏掉它**不报错、只是永远轮不到**。这种错只能靠断言钉住。
@@ -109,12 +109,15 @@ function mockCtx({ attachments, sessionQuery, commands } = {}) {
       // DSH 明说无界面的组合不提供这个面，那时候手机上打 `/` 必须如实说没有指令，
       // 而不是显示一个空名单。
       ...(commands ? { commands } : {}),
+      // 同上：会话控制器（真机上是 DSH 的 sessionController，管"叫醒睡着的会话"）。
+      // 它可缺席也是一条要覆盖的路径：没有它的时候只能如实说叫不醒。
+      ...(sessionController ? { sessionController } : {}),
     }, ['agents', 'logger', 'on', 'effect']),
   }
 }
 
 /** 起一个被测插件实例，返回访问它所需的一切。 */
-async function bootPlugin({ agents = {}, config = {}, attachments = null, sessionQuery = null, commands = null, stored = null } = {}) {
+async function bootPlugin({ agents = {}, config = {}, attachments = null, sessionQuery = null, commands = null, stored = null, sessionController = null } = {}) {
   const home = mkdtempSync(join(tmpdir(), 'dsh-mini-home-'))
   process.env.DSH_HOME = home
 
@@ -125,7 +128,7 @@ async function bootPlugin({ agents = {}, config = {}, attachments = null, sessio
   }
 
   const port = await freePort()
-  const mock = mockCtx({ attachments, sessionQuery, commands })
+  const mock = mockCtx({ attachments, sessionQuery, commands, sessionController })
   const { ctx, handlers, handlerOptions, agents: agentMap } = mock
   for (const [id, agent] of Object.entries(agents)) agentMap.set(id, agent)
 
@@ -419,6 +422,71 @@ test('手机发指令 → 真的调用 agent.followup()，消息结构正确', a
   assert.equal(typeof msg.id, 'string')
   assert.ok(msg.id.length > 0, '消息必须有 id')
   assert.ok(Object.isFrozen(msg), '消息应冻结，和 createUserMessage 的语义一致')
+})
+
+test('手机上发指令：会话在睡着时要先叫醒，不能回「已经结束了」', async (t) => {
+  const calls = []
+  const slept = {
+    status: 'idle',
+    session: { id: 'sess-sleep', header: { id: 'sess-sleep' } },
+    followup: (msg) => calls.push(msg),
+  }
+  const asked = []
+  const sessionController = { resolveAgent: async (id) => { asked.push(id); return { agent: slept } } }
+  // **注册表里故意不放它**——这就是"睡着"的样子（真机上：一个工作区上百个会话，活的只有三两个）
+  const p = await bootPlugin({ agents: {}, sessionController })
+  t.after(p.stop)
+
+  // 照实机的样子来：用户是在手机导航里**挑**了一个会话（挑中的那个正在睡着），
+  // 不是靠事件流碰巧认识它——睡着的会话本来就不会产生任何事件。
+  const bind = await fetch(`${p.base}/mini/api/bind?token=${p.token}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sessionId: 'sess-sleep' }),
+  })
+  assert.ok(bind.status < 400, '绑定要成功：' + bind.status + ' ' + (await bind.text()))
+
+  const res = await fetch(`${p.base}/mini/api/send?token=${p.token}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text: '叫醒它' }),
+  })
+  const body = await res.json()
+  // 断言里带上服务端那句话：只说"409 !== 200"查不出为什么（本轮就这么瞎跑过一轮）
+  assert.equal(res.status, 200, '睡着的会话必须能发进去，服务端说：' + JSON.stringify(body))
+  assert.equal(body.ok, true)
+  assert.deepEqual(asked, ['sess-sleep'], '应该去叫醒它，而且叫的正是这个会话')
+  assert.equal(calls.length, 1, '叫醒之后要把这条指令交给它')
+})
+
+test('叫不醒和真没了是两回事，两句话必须分开说', async (t) => {
+  // 把"暂时叫不醒"也说成"已经结束了"，等于把用户支去重选一个其实还在的会话。
+  const cases = [
+    { name: '真没了', controller: { resolveAgent: async () => ({ error: { code: 'session/not-found' } }) }, expect: /不在了/ },
+    { name: '被电脑那边占着', controller: { resolveAgent: async () => ({ error: { code: 'session/agent-busy' } }) }, expect: /占着/ },
+    { name: '连控制器都没有', controller: null, expect: /叫不醒/ },
+  ]
+  for (const c of cases) {
+    const slept = { status: 'idle', session: { id: 'sess-dead', header: { id: 'sess-dead' } }, followup: () => {} }
+    const p = await bootPlugin({ agents: {}, sessionController: c.controller })
+    // 用 t.after 而不是在末尾手写 p.stop()：断言一挂，手写的那行就轮不到，
+    // 监听端口一直开着，测试进程会卡在等事件循环排空——本轮为此白等了两轮各十分钟。
+    t.after(p.stop)
+    const bind = await fetch(`${p.base}/mini/api/bind?token=${p.token}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId: 'sess-dead' }),
+    })
+    assert.ok(bind.status < 400, '绑定要成功：' + bind.status)
+    const res = await fetch(`${p.base}/mini/api/send?token=${p.token}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: '发得出去吗' }),
+    })
+    const body = await res.json()
+    assert.equal(res.status, 409, c.name)
+    assert.match(body.error, c.expect, c.name)
+  }
 })
 
 test('手机传上来的文件 → 消息里带一个附件块，引用原样来自附件服务', async (t) => {
