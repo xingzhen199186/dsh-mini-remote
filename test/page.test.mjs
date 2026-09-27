@@ -688,10 +688,18 @@ test('系统里设了「减少动态效果」就不轮播、不浮动', () => {
 
 test('进度条是不确定进度，不谎报百分比', () => {
   // 插件按设计拿不到 Agent 跑到哪一步，所以只能表达「在跑」，不能表达「跑到哪了」。
+  //
+  // 2026-09-27 改版：原来这条断言钉的是「那条来回扫的流光（workSweep）」这个**实现**，
+  // 而流光本身在 UI 规格里被砍掉了（属于"看起来在动"的廉价视觉套话）。规矩没变，
+  // 所以这里改成钉规矩本身：进度条不表演、长度是写死的常量、脚本从不按进度去改它。
   const css = html.slice(html.indexOf('.work-progress'), html.indexOf('.work-elapsed'))
-  assert.match(css, /workSweep/, '要有流动动画')
-  assert.match(css, /transform: translateX/, '靠位移流动，而不是靠改宽度')
+  assert.ok(!/animation:/.test(css), '进度条不表演：不该有动画')
   assert.ok(!/transition:\s*width/.test(css), '不该用宽度过渡假装进度在涨')
+  // 脚本那一侧才是关键：只要没有人按"跑到第几步"去改宽度，它就不可能谎报。
+  const js = html.slice(html.indexOf('function paintWork'), html.indexOf('function setStatus'))
+  assert.ok(js.length > 0, '找不到 paintWork')
+  assert.ok(!/work-progress|workProgress/.test(js),
+    '脚本不该去改进度条的长度——那等于在说"跑到哪了"，而插件根本不知道')
 })
 
 test('气泡词条里不出现假进度话术', () => {
