@@ -135,9 +135,9 @@ Open the link and that's the whole interface: one input box, and the latest repl
 
 **The screen while a task is running.** She is mid-stride, the progress bar is moving, and the queue lists what goes next once this round ends. No tool calls and no file diffs on this screen — only the fact that something is running.
 
-<img width="290" alt="Running (dark, rendered from the page styles): the whale girl mid-stride, the progress bar moving, two instructions queued" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/running-dark.png" /> <img width="290" alt="Running (light, photographed on a phone): the whale girl running, 7m43s elapsed, one instruction queued" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/running-light-phone.jpg" />
+<img width="290" alt="Running (dark, photographed on a phone): the whale girl running, 15s elapsed" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/running-dark-phone.jpg" /> <img width="290" alt="Running (light, photographed on a phone): the whale girl running, 7m43s elapsed, one instruction queued" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/running-light-phone.jpg" />
 
-The right-hand image is a phone photograph (the browser's own chrome is in frame, so it sits slightly taller than the render on the left); the dark one is still rendered from the page styles.
+Both are phone photographs (the browser's own chrome is in frame, so they sit slightly taller than a render would).
 
 **Two display modes.** Tap the ⚙ in the top right to switch. "Single frame" (the default) keeps only the newest reply on screen — good for "I just want to see how this one turned out". "Chat" is a back-and-forth bubble list — good for several rounds of follow-up questions. Use it for a while and you'll know which you prefer.
 
