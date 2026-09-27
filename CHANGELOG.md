@@ -2,7 +2,7 @@
 
 本文件记录每个版本改了什么。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-## [未发布]
+## [0.1.5] - 2026-09-27
 
 ### 新加的
 
@@ -125,3 +125,4 @@
 [0.1.2]: https://github.com/xingzhen199186/dsh-mini-remote/releases/tag/v0.1.2
 [0.1.3]: https://github.com/xingzhen199186/dsh-mini-remote/releases/tag/v0.1.3
 [0.1.4]: https://github.com/xingzhen199186/dsh-mini-remote/releases/tag/v0.1.4
+[0.1.5]: https://github.com/xingzhen199186/dsh-mini-remote/releases/tag/v0.1.5
