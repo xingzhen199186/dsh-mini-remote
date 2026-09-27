@@ -374,11 +374,18 @@
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   }
 
-  /* 进度条故意做成**不确定进度**的，不是百分比。
+  /* 进度条是**不确定进度**，不是百分比。
      插件按设计只收「指令 + 最终回复」，拿不到 Agent 此刻跑到哪一步，
      所以画一个填到 80% 的假进度条等于撒谎。它只表达「在跑」，不表达「跑到哪了」。
-     2026-09-27 按规格改法：那条来回扫的流光（`workSweep`）删掉——流光也是同一套
-     廉价视觉套话。现在是一根 1px 细线轨道 + 一段冰蓝标记，静态，不表演。 */
+
+     这一段前后改过三次，方向来回，写清楚免得再兜圈子：
+       ① 最初是一条来回扫的流光（`workSweep`），按 UI 规格删掉——流光属于"看起来在动"
+          的廉价套话；
+       ② 删完剩一根**定在 38% 的静态标记**。结果更糟：用户实机一看就问「底部的进度条
+          好像不会动」，而一根停在三成八的线，比一个会动的它**更**像在谎报百分比；
+       ③ 现在：宽度写死 38% 永不改变，动的是**位置**——十六格一轮、每格 160ms，
+          也就是全页那一个节奏。推进式（steps）而不是匀速流淌。
+     它仍然不知道跑了多少；它只是不再假装停住。 */
   .work-progress {
     margin-top: 10px; height: 1px;
     background: var(--line); overflow: hidden;
@@ -386,6 +393,14 @@
   .work-progress i {
     display: block; width: 38%; height: 100%;
     background: var(--ice);
+    animation: barStep 2.56s steps(16, end) infinite;
+  }
+  /* 从左外侧进来、从右外侧出去。38% 宽的块想走完一整条轨道，位移得是自身宽度的
+     263%（100 ÷ 38 ≈ 2.63）。用 steps 而不是匀速：一格一格地推进，
+     跟上面那把刻度尺是同一种秩序感。 */
+  @keyframes barStep {
+    from { transform: translateX(-100%); }
+    to   { transform: translateX(263%); }
   }
   /* 秒数在左、停止按钮在右。秒数原来是自己一行右对齐，现在跟按钮同一行。 */
   .work-foot {
@@ -471,7 +486,7 @@
   @media (prefers-reduced-motion: reduce) {
     .work-stage { animation: none; }
     .pose { animation: none; transition: none; }
-    .work-progress i { width: 100%; opacity: .45; }
+    .work-progress i { width: 100%; opacity: .45; animation: none; }
     .queue .q-node i { transition: none; }
     .dot { transition: none; }
   }

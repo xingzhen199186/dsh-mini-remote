@@ -37,10 +37,12 @@ test('圆角只有 2px / 999px / 50% 三档，没有中间值', () => {
   assert.deepEqual(bad, [], `圆角出现了规格外的档位：${JSON.stringify(bad)}`)
 })
 
-test('动效只剩三个：流式光标、立绘翻帧、上传转圈', () => {
+test('动效只剩四个：流式光标、立绘翻帧、上传转圈、进度条逐格推进', () => {
+  // 第四个是 2026-09-27 补回来的：进度条原来是静止的，用户实机看着像卡住了。
+  // 它动的只有位置、宽度写死，所以不违背"别表演"那条——原委写在 page.html 的注释里。
   const names = [...css.matchAll(/@keyframes\s+([A-Za-z0-9_-]+)/g)].map((m) => m[1]).sort()
-  assert.deepEqual(names, ['caret', 'poseFlip', 'spin'],
-    '只允许这三个：其余都是"界面在表演"，规格里明令砍掉')
+  assert.deepEqual(names, ['barStep', 'caret', 'poseFlip', 'spin'],
+    '只允许这四个：其余都是"界面在表演"，规格里明令砍掉')
 })
 
 test('状态点不再闪动，只留 160ms 的颜色过渡', () => {

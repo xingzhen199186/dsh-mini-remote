@@ -692,11 +692,15 @@ test('系统里设了「减少动态效果」就不轮播、不浮动', () => {
 test('进度条是不确定进度，不谎报百分比', () => {
   // 插件按设计拿不到 Agent 跑到哪一步，所以只能表达「在跑」，不能表达「跑到哪了」。
   //
-  // 2026-09-27 改版：原来这条断言钉的是「那条来回扫的流光（workSweep）」这个**实现**，
-  // 而流光本身在 UI 规格里被砍掉了（属于"看起来在动"的廉价视觉套话）。规矩没变，
-  // 所以这里改成钉规矩本身：进度条不表演、长度是写死的常量、脚本从不按进度去改它。
+  // 这一条前后改过三次，钉的都是**规矩**而不是某个实现：
+  //   ① 最初是一条来回扫的流光（workSweep）→ 按 UI 规格删掉（"看起来在动"的廉价套话）；
+  //   ② 删完剩一根定在 38% 的静态标记 → 用户实机问「底部的进度条好像不会动」，
+  //      而一根停在三成八的线，比一个会动的它更像在谎报百分比。于是：
+  //   ③ 现在动的是**位置**（translateX 逐格推进），宽度写死 38% 永不改变。
+  // 真正兜底的始终是最后一条：脚本从不按"跑到第几步"去改它，它就不可能谎报。
   const css = html.slice(html.indexOf('.work-progress'), html.indexOf('.work-elapsed'))
-  assert.ok(!/animation:/.test(css), '进度条不表演：不该有动画')
+  assert.match(css, /animation:\s*barStep/, '它得动——一根停住不动的进度条，看着像卡住了')
+  assert.match(css, /width:\s*38%/, '宽度是写死的常量，不许跟着时间涨')
   assert.ok(!/transition:\s*width/.test(css), '不该用宽度过渡假装进度在涨')
   // 脚本那一侧才是关键：只要没有人按"跑到第几步"去改宽度，它就不可能谎报。
   const js = html.slice(html.indexOf('function paintWork'), html.indexOf('function setStatus'))
