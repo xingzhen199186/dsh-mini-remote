@@ -6,7 +6,7 @@
 
 [中文说明](README.md)
 
-![Minimal Remote: only your instruction and the AI's conclusion reach the phone; everything in between stays on the computer](https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/promo.png)
+![Minimal Remote: only your instruction and the AI's conclusion reach the phone; everything in between stays on the computer](https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/promo.webp)
 
 **You send one line; the phone gets one conclusion.**
 
@@ -25,9 +25,9 @@ A plugin for [DeepSeek Harness](https://github.com/deepseek-ai/DeepSeek-Harness)
 - everything in between — tool calls, files read and written, sub-agents, the reasoning trace itself — **is never pushed to the phone**;
 - the only thing that "talks" is the whale girl: the line the model mutters between steps, spoken in her speech bubble.
 
-On a real phone it looks like this:
+Here is what the interface looks like — dark and light, switchable in settings (rendered at a phone size of 390×844):
 
-<img width="360" alt="Minimal Remote on a phone: one input box, one reply" src="https://github.com/user-attachments/assets/8befa186-3e20-4c0e-8efc-8ea523f77648" />
+<img width="290" alt="Dark: one conversation, carrying only your instruction and the conclusion" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/screen-dark.png" /> <img width="290" alt="Light: the same conversation, in the palette taken from the promo artwork" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/screen-light.png" />
 
 It is **not** a second screen for the desktop interface. Approval dialogs, file diffs and tool-call chains exist on the computer and nowhere on the phone — deliberately. It does very little.
 
@@ -129,6 +129,10 @@ Open the link and that's the whole interface: one input box, and the latest repl
 
 **She speaks up while she works.** On the computer, the model often mutters a line between steps ("let me look at this file first"). That line is now spoken by the whale girl through her speech bubble — the talking pose is a newly drawn sprite, the rotation pauses for it, and afterwards picks up from where it stopped. It stays **in the bubble** and never bleeds into the answer area below. Only the line it deliberately writes *for a human reader* is spoken; its own working thoughts — often English, often a whole paragraph — never reach the phone at all. Should that one narration line itself be in English, it is shown as-is, untranslated (translating would mean putting words in its mouth).
 
+**Two appearances, switchable anytime.** Settings has an "Appearance" row: **Dark** (the default), **Light**, and **Follow system**. Dark is deep-sea navy; the light palette is taken from the promo artwork — near-white ice blue for the ground, deep royal blue for the text, and the same royal blue on primary buttons. Your choice is stored on the phone, so it is still there next time you open the page.
+
+<img width="290" alt="Settings (dark): display mode and appearance" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/settings-dark.png" /> <img width="290" alt="Settings (light): the selected states and the primary button turn royal blue too" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/settings-light.png" />
+
 **Two display modes.** Tap the ⚙ in the top right to switch. "Single frame" (the default) keeps only the newest reply on screen — good for "I just want to see how this one turned out". "Chat" is a back-and-forth bubble list — good for several rounds of follow-up questions. Use it for a while and you'll know which you prefer.
 
 **Open a session and you see what was said in it before.** Switch to a session that has existed for a while and Chat mode lists every earlier round (the instructions you sent, the conclusion of each round); Single frame shows only the last conclusion. **Very large sessions show only the most recent stretch**: reading one of those in full — tens of thousands of events — would drag the DSH process on your computer down, so the plugin reads just the tail and says so at the top ("this is not everything, only the most recent stretch"). That line is not boilerplate; it is the truth.
@@ -169,7 +173,7 @@ Change it in the password section of "Settings → Phone Remote". **At least 12 
 
 **The pairing page carries the password — don't screenshot it and send it around.** The password is encoded straight into the QR code so you never have to type it. That's convenient, and the price is that whoever holds that image can get in.
 
-Beyond that: every endpoint requires the password; password comparison is constant-time; five wrong attempts from one source blocks that source for a minute; pairing information is **readable only from the local machine**, so other devices on the same Wi-Fi can't get it; the public tunnel is off by default and you have to turn it on yourself in the settings page; the phone sees no file contents — when you pick a workspace it lists folder names only, and never lists or reads files. **One thing worth stating plainly: the phone can switch the agent's permission preset.** On Full Access, the agent can then modify any file on this computer. That path is open.
+Beyond that: every endpoint requires the password; password comparison is constant-time; five wrong attempts from one source blocks that source for a minute; pairing information is **readable only from the local machine**, so other devices on the same Wi-Fi can't get it; the public tunnel is off by default and you have to turn it on yourself in the settings page; the phone sees no file contents — when you pick a workspace it lists folder names only, and never lists or reads files. **The one exception is images**: when something the AI wants to show you includes a picture (an interface screenshot, say), that image is placed under the plugin's `lib/art/` directory with a name starting with `out-`, and the page fetches it over the same password-protected image route the sprites use. Only that one class of file — an image, with that prefix — can be fetched; message bodies, configuration files and everything else stay unreadable, and directories still cannot be listed. **One thing worth stating plainly: the phone can switch the agent's permission preset.** On Full Access, the agent can then modify any file on this computer. That path is open.
 
 ---
 
