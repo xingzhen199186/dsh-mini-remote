@@ -7,7 +7,7 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, readFileSync, existsSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createServer } from 'node:net'
@@ -114,9 +114,15 @@ function mockCtx({ attachments, sessionQuery, commands } = {}) {
 }
 
 /** 起一个被测插件实例，返回访问它所需的一切。 */
-async function bootPlugin({ agents = {}, config = {}, attachments = null, sessionQuery = null, commands = null } = {}) {
+async function bootPlugin({ agents = {}, config = {}, attachments = null, sessionQuery = null, commands = null, stored = null } = {}) {
   const home = mkdtempSync(join(tmpdir(), 'dsh-mini-home-'))
   process.env.DSH_HOME = home
+
+  // 有些用例要验"用户自己那份 settings.json 还生不生效"，就得在 apply 之前把它摆好。
+  if (stored) {
+    mkdirSync(join(home, 'dsh-mini-remote'), { recursive: true })
+    writeFileSync(join(home, 'dsh-mini-remote', 'settings.json'), `${JSON.stringify(stored, null, 2)}\n`)
+  }
 
   const port = await freePort()
   const mock = mockCtx({ attachments, sessionQuery, commands })
@@ -1990,4 +1996,52 @@ test('版本要求要写在门槛真正会读的那一格：peerDependencies', (
   assert.equal(pkg.engines?.dsh, '>=0.1.5-rc.2', 'engines.dsh 保留，给市场显示用')
   assert.ok(!pkg.dependencies?.['@deepseek-ai/dsh'],
     '@deepseek-ai/* 绝不能进 dependencies：旧副本会遮蔽宿主')
+})
+
+// ---------------------------------------------------------------------------
+// 标准化的配置声明（DSH 0.1.7 起：标了 volatile 的字段改了不用重载插件）
+// ---------------------------------------------------------------------------
+
+test('声明成 volatile 的字段只有那两个：能兑现的才标', async () => {
+  const mod = await import(new URL(`lib/index.js?t=${Date.now()}`, ROOT_URL).href)
+  const dict = mod.Config?.dict
+  assert.ok(dict, '插件要导出 Config：标准那条编辑通道和 profile 补丁都按它来')
+
+  const volatile = Object.entries(dict).filter(([, s]) => s?.meta?.volatile).map(([k]) => k).sort()
+  assert.deepEqual(volatile, ['defaultMode', 'notify'],
+    '多标一个是谎话（DSH 就不再重载，而我们手里还是旧值），少标一个就白白多重载一次')
+
+  assert.deepEqual(Object.keys(dict).sort(),
+    ['bindAddress', 'defaultMode', 'maxHistory', 'notify', 'port', 'token', 'tunnel'],
+    '每个设置都该在声明里露面，否则标准通道看不见它')
+
+  // 只查标量字段：`z.object()` 这种整组字段天生带一个空对象默认值，而空对象合进
+  // deepMerge 等于没变（无害）；真正会盖住用户设置的是标量字段上的默认值。
+  for (const key of ['port', 'bindAddress', 'token', 'maxHistory', 'defaultMode']) {
+    assert.equal(dict[key].meta?.default, undefined,
+      `${key} 不许写 .default()：schema 默认值会被 Loader 落进 config，` +
+      '盖住用户存在 settings.json 里的值（内置默认值只写在 DEFAULTS 一处）')
+  }
+})
+
+test('volatile 字段是现读的：引用一变就生效，且标准配置没写时仍用我们自己那份', async (t) => {
+  // undefined = 标准 config 没显式写这个字段（schema 里没写 .default()，所以没写就是 undefined）
+  let mode
+  // 真机上 config 里的 volatile 字段是"引用"（`.get()` 取值），不是普通值——这里照着搭。
+  const p = await bootPlugin({
+    stored: { defaultMode: 'chat' },              // 用户自己那份 settings.json
+    config: { defaultMode: { get: () => mode } }, // profile 补丁给的那份（这里是引用）
+  })
+  t.after(() => p.stop())
+
+  const page = async () => (await fetch(`${p.base}/?token=${p.token}`)).text()
+
+  assert.match(await page(), /var DEFAULT_MODE = 'chat';/,
+    '标准 config 没显式写（get() 给 undefined）时，settings.json 那份照旧生效')
+  mode = 'minimal'
+  assert.match(await page(), /var DEFAULT_MODE = 'minimal';/,
+    '引用一变，下一页就是新值——说明是在用的时候现读，不是加载时抄了一份')
+
+  // notify 走的是同一个循环（liveConfig 按 Config 里标了 volatile 的字段统一接线），
+  // 所以上面这一条就够证明这套接线是活的；换成整组对象也走同一条路。
 })
