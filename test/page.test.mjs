@@ -286,12 +286,15 @@ test('未闭合的围栏代码块不会吃掉后面的内容或死循环', () =>
 // ---------------------------------------------------------------------------
 
 test('page.html 里的脚本能通过解析（改坏了要立刻发现）', () => {
-  const m = /<script>([\s\S]*)<\/script>/.exec(html)
-  assert.ok(m, '页面里应该有且只有一个 <script> 块')
-  const body = m[1]
-  assert.ok(body.length > 1000, '抽出来的脚本太短了，正则可能没匹配对')
+  // 页面里**故意有不止一块**脚本：<head> 里那一小块要在首屏之前定好主题，
+  // 不能等到页面底部的主体脚本。所以这里逐块解析，而不是"只取一块"。
+  const blocks = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1])
+  assert.ok(blocks.length >= 2, '该有两块脚本：首屏主题那块 + 主体那块')
+  assert.ok(blocks.join('').length > 1000, '抽出来的脚本太短了，正则可能没匹配对')
   // 只解析不执行：脚本顶层就要摸 DOM，这里要的只是「语法没过」这件事。
-  assert.doesNotThrow(() => new Function(body), '页面脚本有语法错误')
+  for (const body of blocks) {
+    assert.doesNotThrow(() => new Function(body), '页面脚本有语法错误')
+  }
 })
 
 test('页面里该有的元素都在（改了 id 要同步改这里）', () => {

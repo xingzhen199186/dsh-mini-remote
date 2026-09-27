@@ -50,28 +50,58 @@ test('状态点不再闪动，只留 160ms 的颜色过渡', () => {
 })
 
 test('暖金只许出现在清单里的这几处（一屏最多两处）', () => {
-  // 冻结清单。要加一处，先回答"这一屏是不是已经有两处金了"，再改这里。
-  const ALLOWED = [
+  // 金的两个用途分开钉：--gold 是**当底色用**的（按钮底），--gold-ink 是**当字用**的
+  // （浅色主题底下它要压深，否则白底上的 #c9a55c 读不清）。
+  // 两份都是冻结清单。要加一处，先回答"这一屏是不是已经有两处金了"，再改这里。
+  const ALLOWED_FILL = [
     '.send',                                          // 主屏：发送键
-    '.queue .q-node.cur i',                           // 主屏：当前这一步的点
-    '.queue .q-node.cur b',                           // 主屏：当前这一步的序号
     '.pick-here',                                     // 抽屉：选定这个工作区
     '.btn.primary',                                   // 设置：这一屏的主按钮
     '#gate button',                                   // 口令页：唯一的按钮
     '#askCard .qfoot button#askNext',                 // 答题卡：唯一的主按钮
   ]
-  const found = []
-  for (const chunk of css.split('}')) {
-    if (!chunk.includes('var(--gold)')) continue
-    const brace = chunk.lastIndexOf('{')
-    if (brace < 0) continue
-    found.push(chunk.slice(0, brace).trim().split('\n').pop().trim())
+  const ALLOWED_INK = [
+    '.queue .q-node.cur i',                           // 主屏：当前这一步的点
+    '.queue .q-node.cur b',                           // 主屏：当前这一步的序号
+  ]
+  function selectorsUsing(name) {
+    const found = []
+    for (const chunk of css.split('}')) {
+      if (!chunk.includes('var(' + name + ')')) continue
+      const brace = chunk.lastIndexOf('{')
+      if (brace < 0) continue
+      found.push(chunk.slice(0, brace).trim().split('\n').pop().trim())
+    }
+    return found
   }
-  assert.ok(found.length > 0, '一个暖金都没找到，令牌接错了')
-  for (const sel of found) {
-    assert.ok(ALLOWED.includes(sel),
-      `暖金跑到清单外了：「${sel}」——先确认这一屏是不是已经有两处金`)
+  const fill = selectorsUsing('--gold')
+  const ink = selectorsUsing('--gold-ink')
+  assert.ok(fill.length > 0, '一个暖金都没找到，令牌接错了')
+  for (const sel of fill) {
+    assert.ok(ALLOWED_FILL.includes(sel),
+      `当底用的暖金跑到清单外了：「${sel}」——先确认这一屏是不是已经有两处金`)
   }
+  for (const sel of ink) {
+    assert.ok(ALLOWED_INK.includes(sel),
+      `当字用的暖金跑到清单外了：「${sel}」——先确认这一屏是不是已经有两处金`)
+  }
+})
+
+test('浅色主题覆盖了每一个颜色令牌（缺一个就有元素在那个主题下隐身）', () => {
+  const darkFrom = css.indexOf(':root {')
+  const dark = css.slice(darkFrom, css.indexOf('}', darkFrom))
+  const lightFrom = css.indexOf('[data-theme="light"]')
+  assert.ok(lightFrom > 0, '找不到浅色主题那一块')
+  const light = css.slice(lightFrom, css.indexOf('}', lightFrom))
+
+  const namesIn = (block) => [...block.matchAll(/(--[a-z0-9-]+)\s*:/g)].map((m) => m[1])
+  // 只比"颜色"这一类：圆角 --r 是尺寸，两套主题共用一份，不该跟着主题变。
+  const COLOUR = /^--(bg|bg-top|bg-deep|panel|panel-2|line|fg|muted|dim|ice|gold|gold-ink|ok|run|err|sh-\d|glass|tint|pop|on-gold)$/
+  const want = namesIn(dark).filter((n) => COLOUR.test(n))
+  const have = new Set(namesIn(light))
+  assert.ok(want.length >= 20, `颜色令牌只认出 ${want.length} 个，大概正则写歪了`)
+  assert.deepEqual(want.filter((n) => !have.has(n)), [],
+    '浅色主题缺令牌：新加的颜色必须两套主题都写一份')
 })
 
 test('顶栏底栏是毛玻璃，且有不支持时的实色回落', () => {

@@ -15,11 +15,18 @@
        · 阴影只有两档，且都极浅；层次主要靠 --line 这条 1px 细线和间距建立。
        · 唯一强调色是暖金 --gold，**一屏最多出现两处**（发送键、"当前这一步"）。
          需要"显眼一点"的地方一律用鲸鱼娘的冰蓝 --ice，别动金。
+         --gold 是**当底色用**的金（按钮底），--gold-ink 是**当字用**的金：
+         浅色主题底下后者要压深，白底上的 #c9a55c 当字读不清。
        · --ok/--run/--err 是状态点的语义色，占的是 8px 一个小点，不算强调色。
-       · 配色以鲸鱼娘为准心：深海墨蓝打底，她的冰蓝作次级色。 */
+       · 配色以鲸鱼娘为准心：深海墨蓝打底，她的冰蓝作次级色。
+       · 两套主题：这套（默认，深色）和 [data-theme="light"]，色调跟宣传图
+         （docs/promo.png）统一。**颜色令牌两边必须一一对应**——缺一个，就有元素
+         在某个主题下"隐身"，而且只在那个主题下才看得出来。守卫在 test/ui.test.mjs。 */
   :root {
+    color-scheme: dark;
     --bg: #0a0f16;
     --bg-top: #101a27;
+    --bg-deep: #070b11;
     --panel: #121a25;
     --panel-2: #18222f;
     --line: #22303f;
@@ -28,6 +35,7 @@
     --dim: #6c7a8b;
     --ice: #a9c8e8;
     --gold: #c9a55c;
+    --gold-ink: #c9a55c;
     --ok: #4fb477;
     --run: #a9c8e8;
     --err: #d4614f;
@@ -35,14 +43,46 @@
     --sh-1: 0 1px 2px rgba(0, 0, 0, .28);
     --sh-2: 0 2px 6px rgba(0, 0, 0, .34);
     --glass: rgba(18, 26, 37, .72);
+    --tint: rgba(24, 34, 47, .5);    /* 队列那块比面板再深一点的底 */
+    --pop: rgba(24, 34, 47, .97);    /* 浮起来的小面板（指令菜单等） */
+    --scrim: rgba(0, 0, 0, .55);     /* 弹出层背后压暗的那层；浅色主题里它得轻得多 */
     --on-gold: #10161f;   /* 金色底上的字：白字对比不够，读不清 */
+  }
+  /* 浅色主题：色调跟宣传图（docs/promo.png）统一——近白的冰蓝底、深宝蓝的字与状态色、
+     白色卡片、极浅的蓝投影。深色那边的规矩一条不改：圆角两档、层次靠 1px 细线、
+     暖金仍是唯一强调色（只把"当字用的金"压深到 #8a6529，白底上才读得清）。
+     切换入口在设置页「外观」；选择存在 localStorage，首屏之前就定好，不会闪一下。 */
+  [data-theme="light"] {
+    color-scheme: light;
+    --bg: #eaf3fc;
+    --bg-top: #f7fbff;
+    --bg-deep: #dbe9f8;
+    --panel: #ffffff;
+    --panel-2: #f2f8ff;
+    --line: #d3e2f3;
+    --fg: #1b2c49;
+    --muted: #6b7f9b;
+    --dim: #8496ae;
+    --ice: #3b6fc4;
+    --gold: #c9a55c;
+    --gold-ink: #8a6529;
+    --ok: #2e9a5f;
+    --run: #3b6fc4;
+    --err: #c0392b;
+    --sh-1: 0 1px 2px rgba(28, 60, 110, .07);
+    --sh-2: 0 2px 8px rgba(28, 60, 110, .12);
+    --glass: rgba(255, 255, 255, .74);
+    --tint: rgba(59, 111, 196, .07);
+    --pop: rgba(255, 255, 255, .98);
+    --scrim: rgba(23, 52, 95, .30);
+    --on-gold: #10161f;
   }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html, body {
     margin: 0; height: 100%; overflow: hidden;
     /* 纵深：顶部略亮、底部更深，做出"空间"而不是一整块平色。
        设计稿参考的是沉浸式暗色流媒体那一套——界面浮在深色基底上，不是被切成几块。 */
-    background: linear-gradient(180deg, var(--bg-top) 0%, var(--bg) 55%, #070b11 100%);
+    background: linear-gradient(180deg, var(--bg-top) 0%, var(--bg) 55%, var(--bg-deep) 100%);
     color: var(--fg);
     font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
           "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
@@ -374,7 +414,7 @@
   .queue {
     margin-top: 12px; padding: 12px;
     border: 1px solid var(--line); border-radius: var(--r);
-    background: rgba(24, 34, 47, .5);
+    background: var(--tint);
   }
   .queue .q-head { font-size: 11.5px; color: var(--muted); margin-bottom: 10px; }
   .queue .q-scale {
@@ -395,12 +435,13 @@
     /* 全页唯一允许的动效：节点由"待"变"过"时 160ms 颜色过渡。 */
     transition: background .16s ease, border-color .16s ease;
   }
-  .queue .q-node.cur i { background: var(--gold); border-color: var(--gold); }
+  /* 刻度上"当前这一步"是**当字用**的金：浅色主题底下它要压深，所以走 --gold-ink。 */
+  .queue .q-node.cur i { background: var(--gold-ink); border-color: var(--gold-ink); }
   .queue .q-node b {
     font-weight: 400; font-size: 10.5px; line-height: 1;
     color: var(--muted); font-variant-numeric: tabular-nums;
   }
-  .queue .q-node.cur b { color: var(--gold); }
+  .queue .q-node.cur b { color: var(--gold-ink); }
   .queue .q-row {
     display: flex; align-items: center; gap: 8px; padding: 3px 0;
     font-size: 13.5px; line-height: 1.45;
@@ -647,7 +688,7 @@
 
   /* ---------- 设置抽屉 ---------- */
   #settings {
-    position: fixed; inset: 0; background: rgba(0,0,0,.55);
+    position: fixed; inset: 0; background: var(--scrim);
     display: none; align-items: flex-end; z-index: 50;
   }
   #settings.open { display: flex; }
@@ -704,7 +745,7 @@
 
   #toast {
     position: fixed; left: 50%; bottom: 84px; transform: translateX(-50%) translateY(8px);
-    background: rgba(24, 34, 47, .97); color: var(--fg); padding: 9px 16px;
+    background: var(--pop); color: var(--fg); padding: 9px 16px;
     border-radius: var(--r); font-size: 13.5px; opacity: 0; pointer-events: none;
     border: 1px solid var(--line);
     transition: opacity .2s, transform .2s; z-index: 200; max-width: 86vw; text-align: center;
@@ -745,6 +786,18 @@
     stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round;
   }
 </style>
+<script>
+  // 主题必须在**首屏画出来之前**定下来，否则浅色手机打开会先闪一下深色底。
+  // 所以这一段留在 <head> 里、样式表后面，**别挪到页面底部那段脚本区去**。
+  (function () {
+    try {
+      var pick = localStorage.getItem('dshMiniTheme') || 'dark';
+      var dark = !window.matchMedia || window.matchMedia('(prefers-color-scheme: dark)').matches;
+      document.documentElement.setAttribute('data-theme',
+        pick === 'auto' ? (dark ? 'dark' : 'light') : pick);
+    } catch (e) { /* 无痕模式下 localStorage 会抛；按默认深色走，不影响页面 */ }
+  })();
+</script>
 </head>
 <body>
 
@@ -852,6 +905,20 @@
       <div class="seg" id="segMode">
         <button data-mode="minimal">单帧</button>
         <button data-mode="chat">聊天</button>
+      </div>
+    </div>
+
+    <!-- 外观。深色是原来的样子；浅色的色调跟宣传图（docs/promo.png）统一：
+         近白冰蓝的底、深宝蓝的字与状态色、白色卡片。选择记在这台设备上。 -->
+    <div class="row">
+      <div>
+        <div class="label">外观</div>
+        <div class="hint">浅色的色调跟宣传图一致</div>
+      </div>
+      <div class="seg" id="segTheme">
+        <button data-theme="dark">深色</button>
+        <button data-theme="light">浅色</button>
+        <button data-theme="auto">跟随系统</button>
       </div>
     </div>
 
@@ -967,6 +1034,9 @@
   var state = {
     token: params.get('token') || localStorage.getItem('dshMiniToken') || '',
     mode: localStorage.getItem('dshMiniMode') || DEFAULT_MODE || 'minimal',
+    // 外观：'dark' | 'light' | 'auto'。默认深色——不给老用户换掉现在的样子；
+    // 要浅色或跟着系统走，去设置页「外观」点一下。
+    theme: localStorage.getItem('dshMiniTheme') || 'dark',
     sound: localStorage.getItem('dshMiniSound') !== 'off',
     // 锁屏也能提醒（系统通知）。默认关着——它要用户主动点一下才会申请权限，
     // 不能替他决定。明文连接下这一项永远是空转的，见下面「锁屏也能提醒」那一段。
@@ -3210,12 +3280,48 @@
       syncSeg();
     });
   });
+
+  // ---------------- 外观（深色 / 浅色 / 跟随系统） ----------------
+  // 只改 <html> 上的 data-theme，样式表里两套令牌各管各的。这里不碰任何具体颜色，
+  // 免得以后加第三套主题还要回来改这一段。
+  // 首屏那次由 <head> 里那一小段负责（不然会闪）；这一段管切换和"跟着系统变"。
+  function resolvedTheme() {
+    if (state.theme !== 'auto') return state.theme;
+    var dark = !window.matchMedia || window.matchMedia('(prefers-color-scheme: dark)').matches;
+    return dark ? 'dark' : 'light';
+  }
+  function applyTheme() {
+    var use = resolvedTheme() === 'light' ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-theme', use);
+    // 手机状态栏那块颜色也跟着走，否则浅色页配一条深色状态栏，像没画完。
+    var meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.setAttribute('content', use === 'light' ? '#eaf3fc' : '#0a0f16');
+  }
+  Array.prototype.forEach.call($('segTheme').children, function (btn) {
+    btn.addEventListener('click', function () {
+      state.theme = btn.dataset.theme;
+      localStorage.setItem('dshMiniTheme', state.theme);
+      applyTheme();
+      syncSeg();
+    });
+  });
+  if (window.matchMedia) {
+    var themeMq = window.matchMedia('(prefers-color-scheme: dark)');
+    var onThemeMq = function () { if (state.theme === 'auto') applyTheme(); };
+    if (themeMq.addEventListener) themeMq.addEventListener('change', onThemeMq);
+    else if (themeMq.addListener) themeMq.addListener(onThemeMq);
+  }
+  applyTheme();   // 补上首屏那次没做的一件事：把状态栏颜色对齐
+
   function syncSeg() {
     Array.prototype.forEach.call($('segMode').children, function (b) {
       b.classList.toggle('active', b.dataset.mode === state.mode);
     });
     Array.prototype.forEach.call($('segSound').children, function (b) {
       b.classList.toggle('active', (b.dataset.sound === 'on') === state.sound);
+    });
+    Array.prototype.forEach.call($('segTheme').children, function (b) {
+      b.classList.toggle('active', b.dataset.theme === state.theme);
     });
   }
 
@@ -3514,7 +3620,7 @@
 
     // 面板用代码建出来、挂在 body 末尾，而不是写进页面结构里——这样这一整块的
     // 改动全部落在脚本内部，不用动 HTML，也就不会碰到别的部分。
-    var mask = el('div', 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:69;display:none')
+    var mask = el('div', 'position:fixed;inset:0;background:var(--scrim);z-index:69;display:none')
     var sheet = el('div', 'position:fixed;left:0;right:0;bottom:0;z-index:70;display:none;'
       + 'max-height:72vh;overflow-y:auto;background:var(--bg,#1b1b1b);'
       + 'border-top:1px solid var(--line,#444);border-radius:var(--r,2px) var(--r,2px) 0 0;'
