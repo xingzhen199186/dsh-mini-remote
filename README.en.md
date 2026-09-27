@@ -75,7 +75,7 @@ The cost is an app on each side. If you don't mind installing it, **this is the 
 
 You can take this route one step further and get an encrypted address as well (shaped like `https://your-machine.your-tailnet.ts.net/`). It is **the same computer over the same tunnel** as the entry above; the only difference is that the connection is encrypted. It is not a fourth route — the plain `http://` entry keeps working and keeps showing.
 
-Encryption is what makes the browser willing to hand over system notifications, the microphone, and full clipboard access. **Those three need an encrypted connection — they do not specifically need Tailscale**: the public tunnel in route 3 below also gives you an `https://` address, and that is enough.
+What encryption buys is a private connection: the address bar shows the https padlock, and what travels the wire is encrypted. **That does not depend on which route you pick** — the public tunnel in route 3 below also gives you an `https://` address, equally encrypted.
 
 The two encrypted routes have different prerequisites, so it's worth being precise. This one uses a name shaped like `your-machine.your-tailnet.ts.net`, and **that name only resolves inside your Tailscale network**, via MagicDNS on the phone's client. **But some clients don't have that capability** — MeshArc, the third-party client for HarmonyOS, states in its own README that MagicDNS is not enabled and you should use Tailscale IP addresses; on such a phone this encrypted route simply won't work, and it isn't a matter of a setting being switched off. The tunnel route uses a Cloudflare name that resolves for anyone and doesn't care about the phone; its cost is that the address changes on every restart.
 
@@ -83,7 +83,7 @@ There's a switch on the pairing page — just turn it on. The first time, you ha
 
 ### 3. Public access: nothing to install
 
-There's a switch at the bottom of the pairing page. Turn it on and Cloudflare hands you a public URL (shaped like `https://random-words.trycloudflare.com/`). The phone can reach it on any network, **with nothing installed**. It is an **encrypted connection**, so the three browser capabilities (system notifications, microphone, clipboard) work on this route too — if the phone's Tailscale DNS setting can't be turned on, this is how you still get encryption.
+There's a switch at the bottom of the pairing page. Turn it on and Cloudflare hands you a public URL (shaped like `https://random-words.trycloudflare.com/`). The phone can reach it on any network, **with nothing installed**. It is an **encrypted connection**, just like the encrypted Tailscale route above — if your phone can't resolve your tailnet's name, this is how you still get encryption.
 
 Two costs, worth knowing before you decide:
 

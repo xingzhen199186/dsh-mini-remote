@@ -314,10 +314,11 @@ test('serve 开着时，配对面板多出一条加密的 Tailscale 地址', asy
   assert.equal(entry.url, 'https://desktop-gbsdc68.tail0429e3.ts.net/mini?token=abc123')
   assert.match(entry.qr, /^data:image\/png;base64,/)
   assert.match(entry.hint, /加密/, '要说清楚它和明文那条的区别在哪儿')
-  assert.match(
+  assert.match(entry.hint, /https/, '还要说清楚"加密"体现在哪儿（地址栏上那把锁）')
+  assert.doesNotMatch(
     entry.hint,
     /通知|麦克风/,
-    '还要说清楚加密能换来什么——否则用户看不出两条码为什么要并存',
+    '别再拿系统通知和麦克风当理由——那两样都没实现（2026-09-27 用户指出的口径问题）',
   )
 })
 

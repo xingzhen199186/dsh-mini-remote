@@ -551,9 +551,13 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
     await mount7(withServe({ installed: true, on: false, url: null, urlOfOtherPort: null, error: null }));
     const text = textOf(tree7);
     assert.match(text, /HTTPS 地址（Tailscale）/);
-    // 光说「没开」没用，得说清楚**开了能换来什么**，否则用户没理由去开它
-    assert.match(text, /通知/);
-    assert.match(text, /麦克风/);
+    // 光说「没开」没用，得说清楚**开了能换来什么**，否则用户没理由去开它。
+    // 换来的是"连接加密"（地址栏上那把 https 的锁）——**不要再写通知和麦克风**：
+    // 那两样我们都没实现（通知入口 2026-09-25 起藏着，麦克风图标已移除），
+    // 2026-09-27 用户指出这是拿不存在的功能招揽。
+    assert.match(text, /加密/);
+    assert.match(text, /https/i);
+    assert.doesNotMatch(text, /通知|麦克风/);
     // 还要说清楚它和上面那条明文 Tailscale 是同一台电脑，不是第四条路
     assert.match(text, /同一台电脑/);
   });
