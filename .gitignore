@@ -43,3 +43,6 @@ lib/art/out-*.webp
 Thumbs.db
 *.log
 .tmp/
+
+# 交付给用户看的成图（仓库里公开用的图在 docs/）
+screenshots/
