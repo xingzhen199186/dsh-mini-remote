@@ -7,10 +7,14 @@
 """
 import os
 import subprocess
+import tempfile
 from PIL import Image
 
 SRC = r"I:\极简遥控器\极简遥控器\lib\page.html"
 OUT = r"I:\极简遥控器\极简遥控器\docs"
+# 渲染用的包装页面是中间件，不是产物：放系统临时目录，别在 docs/ 里留垃圾。
+# 2026-09-27 踩过一次——手动删了之后重跑又生成，因为清理靠人手，不靠工具。
+TMP = os.path.join(tempfile.gettempdir(), 'approval-shot')
 CHROME = r"C:\Program Files\Google\Chrome\Application\chrome.exe"
 W, H = 390, 844
 
@@ -40,13 +44,14 @@ iframe{border:0;display:block;width:__W__px;height:__H__px}</style></head>
 <body><iframe id="f" src="__SRC__"></iframe></body></html>"""
 
 os.makedirs(OUT, exist_ok=True)
+os.makedirs(TMP, exist_ok=True)
 for name, theme in (('approval-card-dark', ''), ('approval-card-light', ' data-theme="light"')):
-    open(os.path.join(OUT, name + '.html'), 'w', encoding='utf-8').write(
+    open(os.path.join(TMP, name + '.html'), 'w', encoding='utf-8').write(
         WRAP.replace('__STYLE__', style).replace('__CARD__', CARD).replace('__THEME__', theme))
-    open(os.path.join(OUT, 'frame-' + name + '.html'), 'w', encoding='utf-8').write(
+    open(os.path.join(TMP, 'frame-' + name + '.html'), 'w', encoding='utf-8').write(
         FRAME.replace('__SRC__', name + '.html').replace('__W__', str(W)).replace('__H__', str(H)))
     png = os.path.join(OUT, name + '.png')
-    url = 'file:///' + os.path.join(OUT, 'frame-' + name + '.html').replace('\\', '/')
+    url = 'file:///' + os.path.join(TMP, 'frame-' + name + '.html').replace('\\', '/')
     subprocess.run([CHROME, '--headless=new', '--disable-gpu', '--hide-scrollbars',
                     '--allow-file-access-from-files', '--force-device-scale-factor=2',
                     '--virtual-time-budget=3000', '--window-size=500,%d' % H,
