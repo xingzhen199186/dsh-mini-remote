@@ -925,7 +925,7 @@
     <div class="row">
       <div>
         <div class="label">显示模式</div>
-        <div class="hint">单帧：只留最新一条回复</div>
+        <div class="hint" id="hintMode">单帧：只留最新一条回复</div>
       </div>
       <div class="seg" id="segMode">
         <button data-mode="minimal">单帧</button>
@@ -2179,7 +2179,8 @@
   }
 
   function render() {
-    if (state.mode === 'chat') renderChat(); else renderMinimal();
+    $('hintMode').textContent = state.mode === 'chat' ? '聊天：常规问答对话' : '单帧：只留最新一条回复';
+      if (state.mode === 'chat') renderChat(); else renderMinimal();
   }
 
   function applySnapshot(snap) {
@@ -3305,6 +3306,7 @@
   Array.prototype.forEach.call($('segMode').children, function (btn) {
     btn.addEventListener('click', function () {
       state.mode = btn.dataset.mode;
+        $('hintMode').textContent = state.mode === 'chat' ? '聊天：常规问答对话' : '单帧：只留最新一条回复';
       localStorage.setItem('dshMiniMode', state.mode);
       syncSeg();
       render();
