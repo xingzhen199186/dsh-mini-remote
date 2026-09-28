@@ -448,3 +448,17 @@ test('只把手机要的三项交出去，不把整个实体丢过去', async ()
   const out = await createWorkspaceAt({ registry, path: 'I:\\a' })
   assert.deepEqual(Object.keys(out.workspace).sort(), ['id', 'path', 'title'])
 })
+
+test('同一个工作区再展开一次，标题走缓存、不再重读日志', async () => {
+  // 真机上的病灶：冷会话的标题要加载它的日志才能折出来（一份份读，实测 3 秒），
+  // 而原先每次展开工作区都重付一次。这里把第二次的读日志这条腿直接打断——
+  // 还能拿到标题，就说明走的是缓存。
+  const registry = registryOf(ws('w1', 'I:\\a', '甲', ['s1']))
+  const query = queryOf([rec('s1', 1)], { s1: '读出来的标题' })
+  const first = await listSessionsOf({ registry, query, workspaceId: 'w1' })
+  assert.equal(first.sessions[0].title, '读出来的标题')
+
+  query.readTitleSnapshots = async () => { throw new Error('不该被调用：标题应该走缓存') }
+  const second = await listSessionsOf({ registry, query, workspaceId: 'w1' })
+  assert.equal(second.sessions[0].title, '读出来的标题', '第二次不该再读日志')
+})
