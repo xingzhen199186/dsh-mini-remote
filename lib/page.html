@@ -2594,6 +2594,24 @@
       });
   }
 
+  // 标题补齐的节奏。服务端只等 250 毫秒就把列表先给出来（超时的标题留给后台），
+  // 所以这里要接着问。**问几次由服务端说了算**，见 toggleWorkspace 里的说明。
+  var TITLE_FOLLOW_MS = 2500;        // 每隔这么久问一次
+  var TITLE_FOLLOW_LIMIT_MS = 30000; // 从展开算起，最多追这么久
+
+  /**
+   * 这份列表「还剩几条标题没读出来」。
+   *
+   * 优先用服务端给的 pending：那是事实（它知道还有几条日志没读完）。
+   * **服务端没给这个字段时才退回数空标题**——那是「改了要重启」的半新状态下
+   * （新页面配旧进程）唯一能用的判据。旧页面就是靠它补拉三次的，
+   * 退回去至少有原来的效果，不会因为服务端换了版本就反而不追了。
+   */
+  function pendingCount(body) {
+    if (body && typeof body.pending === 'number') return body.pending;
+    return ((body && body.sessions) || []).filter(function (s) { return !s.title; }).length;
+  }
+
   function toggleWorkspace(wsId) {
     if (navExpanded[wsId]) {
       delete navExpanded[wsId];
@@ -2603,32 +2621,37 @@
     navExpanded[wsId] = true;
     renderNav();
     if (navSessions[wsId]) return;
-    // 标题是服务端**后台**补的：它只等 250 毫秒，超时的那些先退回显示日期。
-    // 这里悄悄追几次，让标题自己长出来——不用用户退出去再进来。
-    function fillTitles(attempt) {
-      const cur = navSessions[wsId];
-      // 用户收起了、或者又被刷新替换过，就放手：别跟人抢这份数据。
-      if (!cur || !navExpanded[wsId]) return;
-      const pending = (cur.sessions || []).some(function (s) { return !s.title; });
-      if (!pending || attempt > 2) return;
+    /**
+     * 接着问，直到服务端说「一条都不剩」。
+     *
+     * 原来的写法是**固定补三次**（1.5 秒 / 3 秒 / 3 秒，共 7.5 秒），而一个工作区里
+     * 四五个冷会话实测要 19 秒才读完——三次补拉盖不住，标题就是长不出来，
+     * 用户只能退出去再进来。现在按服务端给的事实问：pending 归零就停。
+     *
+     * 30 秒是总时限：万一有一条日志坏了、永远读不出来，也不该没完没了地问下去。
+     */
+    function followTitles(cur, deadline) {
+      if (!(pendingCount(cur) > 0) || Date.now() >= deadline) return;
       setTimeout(function () {
+        // 用户收起了、或者这份数据已经被刷新换掉，就放手：别跟人抢。
+        if (navSessions[wsId] !== cur || !navExpanded[wsId]) return;
         api('/mini/api/workspaces/' + encodeURIComponent(wsId) + '/sessions')
           .then(function (body) {
             if (navSessions[wsId] !== cur || !navExpanded[wsId]) return;
             navSessions[wsId] = body;
             renderNav();
-            fillTitles(attempt + 1);
+            followTitles(body, deadline);
           })
           .catch(function () {
             // 追不到就算了：列表本身还在，日期也够用。
           });
-      }, attempt === 0 ? 1500 : 3000);
+      }, TITLE_FOLLOW_MS);
     }
     api('/mini/api/workspaces/' + encodeURIComponent(wsId) + '/sessions')
       .then(function (body) {
         navSessions[wsId] = body;
         renderNav();
-        fillTitles(0);
+        followTitles(body, Date.now() + TITLE_FOLLOW_LIMIT_MS);
       })
       .catch(function (err) {
         navSessions[wsId] = { sessions: [], total: 0 };

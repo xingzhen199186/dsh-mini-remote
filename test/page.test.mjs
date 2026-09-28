@@ -2052,7 +2052,9 @@ function navHarness({ apiImpl } = {}) {
     'state', 'escapeHtml', '$', 'api', 'toast', 'closeNav', 'loadWorkspaces',
     'applySnapshot', 'render',
     `${html.slice(a, b)}
-     return { renderNav, sessionsHtml, createSession, setSessions: (v) => { navSessions = v } };`,
+     return { renderNav, sessionsHtml, createSession, toggleWorkspace,
+              getSessions: () => navSessions,
+              setSessions: (v) => { navSessions = v } };`,
   )
   const scope = build(
     state,
@@ -2166,6 +2168,90 @@ test('导航栏：建失败时说人话，并且按钮要能再按', () => {
   }).then(() => {
     assert.equal(h.creates().length, 2, '失败之后必须解锁，不然以后都点不动了')
   })
+})
+
+// ---------------------------------------------------------------------------
+// 左侧导航栏：标题补齐按服务端说的「还剩几条」来，不再盲猜次数
+// ---------------------------------------------------------------------------
+
+/** 让挂起的 promise 落地。假时钟只接管 setTimeout / Date，setImmediate 还是真的。 */
+const flushMicro = () => new Promise((resolve) => setImmediate(resolve));
+
+/** 数「问某个工作区的会话列表」这个请求发了几次（建会话那类带 opts 的不算）。 */
+function sessionAsks(haz) {
+  return haz.calls.filter((c) => c.path.includes('/sessions') && !c.opts).length;
+}
+
+test('导航栏：标题补齐按服务端报的「还剩几条」接着问，归零就停', async (t) => {
+  // 一个工作区里四五个冷会话实测要 19 秒才读完，而原来固定补三次（1.5/3/3 秒）——
+  // 盖不住，标题就是长不出来。现在服务端说还剩几条，就问几次。
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] })
+  const answers = [
+    { pending: 2, sessions: [{ id: 's1', title: '', createdAt: 1 }] },
+    { pending: 0, sessions: [{ id: 's1', title: '长出来的标题', createdAt: 1 }] },
+  ]
+  const haz = navHarness({ apiImpl: () => Promise.resolve(answers.shift()) })
+
+  haz.scope.toggleWorkspace('w1')
+  await flushMicro()
+  assert.equal(sessionAsks(haz), 1, '展开就先问一次')
+
+  t.mock.timers.tick(2500)
+  await flushMicro()
+  assert.equal(sessionAsks(haz), 2, '服务端说还剩 2 条没读，就该接着问')
+  // 看状态而不是看渲染出来的 HTML：这个用例开着假时钟（Date 也在假的那边），
+  // 而列表里那条日期会走到 timeLabel——它在切片之外，渲染会因此炸。
+  assert.equal(
+    haz.scope.getSessions().w1.sessions[0].title, '长出来的标题',
+    '这一趟问回来的标题要落进列表状态（渲染画的就是它）',
+  )
+
+  t.mock.timers.tick(2500)
+  await flushMicro()
+  assert.equal(sessionAsks(haz), 2, 'pending 归零，一次都不许再问')
+})
+
+test('导航栏：一直没归零也不会问个没完（30 秒总时限兜底）', async (t) => {
+  // 万一有条日志坏了、永远读不出来，不能让它一直问下去。
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] })
+  const haz = navHarness({
+    apiImpl: () => Promise.resolve({
+      pending: 3,
+      sessions: [{ id: 's1', title: '', createdAt: 1 }],
+    }),
+  })
+
+  haz.scope.toggleWorkspace('w1')
+  await flushMicro()
+  for (let i = 0; i < 16; i += 1) {      // 走过 40 秒，早该越过总时限
+    t.mock.timers.tick(2500)
+    await flushMicro()
+  }
+  const settled = sessionAsks(haz)
+  assert.ok(settled >= 6, `该追的还是要追（只追了 ${settled} 次）`)
+
+  for (let i = 0; i < 8; i += 1) {       // 再给它 20 秒
+    t.mock.timers.tick(2500)
+    await flushMicro()
+  }
+  assert.equal(sessionAsks(haz), settled, '过了 30 秒总时限，一次都不该再问')
+})
+
+test('导航栏：服务端没给 pending 时退回数空标题（新页面配旧进程也要能追）', async (t) => {
+  // 「改了要重启」会出现半新状态：页面是新读的、进程还是旧的。旧服务端不给 pending，
+  // 那时就退回原来的判据（还有空标题就接着问），至少有旧行为，不会反而不追了。
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] })
+  const haz = navHarness({
+    apiImpl: () => Promise.resolve({ sessions: [{ id: 's1', title: '', createdAt: 1 }] }),
+  })
+
+  haz.scope.toggleWorkspace('w1')
+  await flushMicro()
+  assert.equal(sessionAsks(haz), 1)
+
+  t.mock.timers.tick(2500)
+  await flushMicro()
+  assert.equal(sessionAsks(haz), 2, '没有 pending 字段时，退回「还有空标题就接着问」')
 })
 
 // ---------------------------------------------------------------------------

@@ -8,7 +8,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { listWorkspaces, listSessionsOf, createSessionIn, createWorkspaceAt } from '../lib/tree.js'
+import { listWorkspaces, listSessionsOf, createSessionIn, createWorkspaceAt, TITLE_CONCURRENCY } from '../lib/tree.js'
 
 function ws(id, path, title, sessionIds) {
   return { id, path, title, sessionIds }
@@ -478,4 +478,181 @@ test('标题还没读出来时，列表也要立刻返回（不阻塞）', async
   assert.equal(out.sessions[0].title, '', '读没读完都不该挡住列表')
   release()
   await new Promise((r) => setTimeout(r, 0))
+})
+
+// ---------------------------------------------------------------------------
+// 标题落盘：读一次就该长期记住，跨 DSH 重启不必重读
+// ---------------------------------------------------------------------------
+
+/**
+ * 落盘缓存的最小替身。tree.js 只用它三个方法（all / get / set），
+ * 真正的读写盘由 test/title-cache.test.mjs 那一层管——这里验的是"接线对不对"。
+ */
+function persistedOf(initial = {}) {
+  const rows = new Map(
+    Object.entries(initial).map(([id, title]) => [id, { title, at: Date.now() }]),
+  )
+  return {
+    all: () => [...rows],
+    get: (id) => (rows.has(id) ? rows.get(id).title : null),
+    set(id, title) { rows.set(id, { title, at: Date.now() }) },
+    title: (id) => (rows.has(id) ? rows.get(id).title : null),
+  }
+}
+
+test('落盘过的标题跨重启也算数，不必再读一遍日志', async () => {
+  // DSH 一重启内存就清零，而读一条标题要加载整份会话日志（本机 1.4 GB）。
+  // 盘上那份就是为这件事存的：新进程第一次展开工作区，标题应当直接就出来。
+  const registry = registryOf(ws('w1', 'I:\\a', '甲', ['s1']))
+  const persisted = persistedOf({ s1: '上次读出来的' })
+  const query = {
+    listSessions: async () => [rec('s1', 1)],
+    readTitleSnapshots: async () => { throw new Error('不该被调用：盘上已经有了') },
+  }
+  const out = await listSessionsOf({ registry, query, persisted, workspaceId: 'w1' })
+  assert.equal(out.sessions[0].title, '上次读出来的')
+  assert.equal(out.pending, 0, '标题已经有了，就不该说「还有没读的」')
+})
+
+test('读出来的标题当场写进落盘那份', async () => {
+  const registry = registryOf(ws('w1', 'I:\\a', '甲', ['s1']))
+  const persisted = persistedOf()
+  const query = queryOf([rec('s1', 1)], { s1: '读出来的' })
+  await listSessionsOf({ registry, query, persisted, workspaceId: 'w1' })
+  assert.equal(persisted.title('s1'), '读出来的')
+})
+
+test('事件流见到的新标题要盖掉落盘那份里的旧说法', async () => {
+  // 只靠"下次展开工作区时顺手写一遍"不够：那时候插件可能已经重启过（内存清零），
+  // 手机上看到的就是盘上那个旧值了。所以事件一到就写。
+  const registry = registryOf(ws('w1', 'I:\\a', '甲', ['s1']))
+  const persisted = persistedOf({ s1: '盘上的旧标题' })
+  const query = { listSessions: async () => [rec('s1', 1)] }   // 连读日志的能力都没有
+  const out = await listSessionsOf({
+    registry, query, persisted, workspaceId: 'w1',
+    knownTitles: new Map([['s1', '事件流里的新标题']]),
+  })
+  assert.equal(out.sessions[0].title, '事件流里的新标题')
+  assert.equal(persisted.title('s1'), '事件流里的新标题', '盘上那份也要跟着改，否则下次重启就翻旧账')
+})
+
+test('内存那份被挤掉了也去盘上找，不回去重读日志', async () => {
+  // 内存缓存上限 500 条，而本机 36 个工作区全展开一遍就可能把它挤满。
+  // 被挤掉一条不该等于"回去读 5 秒日志"——盘上那份就是长期记忆。
+  // 这里 all() 故意给空，模拟"内存里没有、盘上有"。
+  const registry = registryOf(ws('w1', 'I:\\a', '甲', ['s1']))
+  const persisted = {
+    all: () => [],
+    get: (id) => (id === 's1' ? '盘上还有' : null),
+    set() {},
+  }
+  const query = {
+    listSessions: async () => [rec('s1', 1)],
+    readTitleSnapshots: async () => { throw new Error('不该被调用：盘上还有') },
+  }
+  const out = await listSessionsOf({ registry, query, persisted, workspaceId: 'w1' })
+  assert.equal(out.sessions[0].title, '盘上还有')
+  assert.equal(out.pending, 0, '盘上有就是有，不能说「还没读」')
+})
+
+// ---------------------------------------------------------------------------
+// 后台读标题的全局闸门
+// ---------------------------------------------------------------------------
+
+test('连续展开多个工作区时，后台读日志的趟数被压到上限', async () => {
+  // 图片式的证据：五份会话日志同时展开，没有闸门就是五趟一起跑，互相抢 CPU。
+  const workspaces = Array.from(
+    { length: 5 },
+    (_, i) => ws(`w${i}`, `I:\\${i}`, `W${i}`, [`s${i}`]),
+  )
+  const records = workspaces.map((w, i) => rec(w.sessionIds[0], i))
+  let live = 0
+  let peak = 0
+  let calls = 0
+  const query = {
+    listSessions: async () => records,
+    readTitleSnapshots: async (ids) => {
+      calls += 1
+      live += 1
+      peak = Math.max(peak, live)
+      await new Promise((r) => setTimeout(r, 5))
+      live -= 1
+      return ids.map((id) => ({
+        sessionId: id, status: 'fulfilled', value: { title: { title: '读出来的-' + id } },
+      }))
+    },
+  }
+  const registry = registryOf(...workspaces)
+  const outs = await Promise.all(
+    workspaces.map((w) => listSessionsOf({ registry, query, workspaceId: w.id })),
+  )
+  assert.equal(peak, TITLE_CONCURRENCY, '同时最多只许跑这么多趟（也不能串成一条：那样就白排队了）')
+  assert.equal(calls, 5, '排队的那几趟也要跑完，不能只压住不干活')
+  assert.deepEqual(
+    outs.map((o) => o.sessions[0].title).sort(),
+    ['读出来的-s0', '读出来的-s1', '读出来的-s2', '读出来的-s3', '读出来的-s4'],
+  )
+})
+
+// ---------------------------------------------------------------------------
+// 「还剩几条标题没读出来」——手机据此决定要不要接着问
+// ---------------------------------------------------------------------------
+
+test('还没读出来的标题算进 pending，读完了归零', async () => {
+  // 一个工作区里四五个冷会话实测要 19 秒才读完，而页面原来固定补三次（7.5 秒）——
+  // 盖不住，标题长不出来。pending 就是"还剩几条"这个事实，不再靠猜次数。
+  const registry = registryOf(ws('w1', 'I:\\a', '甲', ['s1', 's2']))
+  let release = null
+  const gate = new Promise((r) => { release = r })
+  const query = {
+    listSessions: async () => [rec('s1', 1), rec('s2', 2)],
+    readTitleSnapshots: async (ids) => {
+      await gate
+      return ids.map((id) => ({
+        sessionId: id, status: 'fulfilled', value: { title: { title: '读出来的-' + id } },
+      }))
+    },
+  }
+  const first = await listSessionsOf({ registry, query, workspaceId: 'w1' })
+  assert.equal(first.pending, 2, '两条都还没读出来')
+  assert.deepEqual(first.sessions.map((s) => s.title), ['', ''], '先显示日期，别干等')
+
+  release()
+  await new Promise((r) => setTimeout(r, 0))
+  const second = await listSessionsOf({ registry, query, workspaceId: 'w1' })
+  assert.equal(second.pending, 0, '读完了就该归零，手机才不会再问')
+  assert.deepEqual(second.sessions.map((s) => s.title).sort(), ['读出来的-s1', '读出来的-s2'])
+})
+
+test('读过了、确实没有标题的那条不再算 pending（不能让它一直问下去）', async () => {
+  const registry = registryOf(ws('w1', 'I:\\a', '甲', ['s1']))
+  const query = {
+    listSessions: async () => [rec('s1', 1)],
+    readTitleSnapshots: async (ids) => ids.map((id) => ({
+      sessionId: id, status: 'fulfilled', value: { session: { id }, title: { eventSeq: 1 } },
+    })),
+  }
+  const out = await listSessionsOf({ registry, query, workspaceId: 'w1' })
+  assert.equal(out.sessions[0].title, '')
+  assert.equal(out.pending, 0, '读完了就是读完了：空标题再问一万次也不会有')
+})
+
+test('读失败的那条仍然算 pending（下次还能重试）', async () => {
+  const registry = registryOf(ws('w1', 'I:\\a', '甲', ['s1', 's2']))
+  const query = {
+    listSessions: async () => [rec('s1', 1), rec('s2', 2)],
+    readTitleSnapshots: async () => [
+      { sessionId: 's1', status: 'rejected', reason: '日志坏了' },
+      { sessionId: 's2', status: 'fulfilled', value: { title: { title: '好的' } } },
+    ],
+  }
+  const out = await listSessionsOf({ registry, query, workspaceId: 'w1' })
+  assert.equal(out.pending, 1, '读失败的不算"读过"，留着下次再试')
+})
+
+test('没有读日志这个能力时 pending 是 0（不去读，就不能让手机一直问）', async () => {
+  const registry = registryOf(ws('w1', 'I:\\a', '甲', ['s1']))
+  const query = { listSessions: async () => [rec('s1', 1)] }
+  const out = await listSessionsOf({ registry, query, workspaceId: 'w1' })
+  assert.equal(out.pending, 0)
 })
