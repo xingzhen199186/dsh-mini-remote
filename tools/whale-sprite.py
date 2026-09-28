@@ -4,6 +4,7 @@
 
 用法：
     python tools/whale-sprite.py 生成图.png lib/art/work-9-talking.webp
+    python tools/whale-sprite.py 生成图.png 输出.webp --freeze-below 200   # 第 200 行以下取自第一帧
 
 为什么这么切：两帧**共用**同一套裁切与缩放（外框取两帧的并集），落点则从一张
 现成立绘里量出来——这样新出的这张和其余八张一样高、脚底一样齐。分别按各自外框裁，
@@ -108,11 +109,45 @@ def moved_ratio(a, b):
     return moved / float(w * h)
 
 
+def freeze_below(a, b, y):
+    """把 b 的第 y 行以下整段换成 a 的（含透明通道）。
+
+    一格出两帧的生成图里，两格是**各画一遍**，不是复制：裙子上的图案、袜口条纹、
+    腿和发丝都会各差一点。用户 2026-09-28 报「同一个动画的两张图片里裙子上的图案
+    不一致」就是指这个。按姿势只该动手臂的那些立绘，把这条线以下整段取自第一帧，
+    图案就不可能再"变"。
+    """
+    out = b.copy()
+    out.paste(a.crop((0, y, a.size[0], a.size[1])), (0, y))
+    return out
+
+
+def count_diff_below(a, b, y):
+    """两帧在第 y 行以下有多少像素不一致（任一通道差 > 24）。"""
+    pa, pb = a.load(), b.load()
+    w, h = a.size
+    n = 0
+    for yy in range(y, h):
+        for x in range(w):
+            ra, ga, ba, aa = pa[x, yy]
+            rb, gb, bb, ab = pb[x, yy]
+            if max(abs(ra - rb), abs(ga - gb), abs(ba - bb), abs(aa - ab)) > 24:
+                n += 1
+    return n
+
+
 def main():
     if len(sys.argv) < 3:
-        print('用法：python tools/whale-sprite.py 生成图 输出.webp')
+        print('用法：python tools/whale-sprite.py 生成图 输出.webp [--freeze-below 行号]')
         return 2
     src_path, out_path = sys.argv[1], sys.argv[2]
+    freeze_y = None
+    if '--freeze-below' in sys.argv:
+        i = sys.argv.index('--freeze-below')
+        if i + 1 >= len(sys.argv) or not sys.argv[i + 1].isdigit():
+            print('  ✗ --freeze-below 后面要跟一个行号')
+            return 2
+        freeze_y = int(sys.argv[i + 1])
 
     src = Image.open(src_path)
     w, h = src.size
@@ -142,7 +177,6 @@ def main():
     bottom = rb[3]
     print(f'  参照 {REF}：人物中心 x={cx}，脚底 y={bottom}')
 
-    out = Image.new('RGBA', (PANEL_W * 2, PANEL_H), (0, 0, 0, 0))
     frames = []
     for i, frame in enumerate((left, right)):
         cut = frame.crop(box).resize((fw, fh), Image.Resampling.LANCZOS)
@@ -150,6 +184,19 @@ def main():
         if n_mag:
             print(f'  第 {i + 1} 帧缩放后扫掉洋红 {n_mag} 个像素，位置外框 {mag_box}')
         frames.append(cut)
+
+    if freeze_y is not None:
+        before = count_diff_below(frames[0], frames[1], freeze_y)
+        frames[1] = freeze_below(frames[0], frames[1], freeze_y)
+        after = count_diff_below(frames[0], frames[1], freeze_y)
+        print(f'  第 {freeze_y} 行以下对齐到第一帧：原本 {before} 个不一致像素 → 现在 {after}')
+        if after:
+            print('  ✗ 对齐没生效，不写文件')
+            return 1
+
+    # 合成放在对齐之后：否则冻的是散帧，写出去的还是旧像素。
+    out = Image.new('RGBA', (PANEL_W * 2, PANEL_H), (0, 0, 0, 0))
+    for i, cut in enumerate(frames):
         out.alpha_composite(cut, (int(round(i * PANEL_W + cx - fw / 2.0)), bottom - fh))
 
     for i, f in enumerate(frames):
