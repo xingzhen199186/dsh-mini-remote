@@ -1,150 +1,112 @@
-# 鲸鱼娘形象设定（说话那张专用）
+# 鲸鱼娘形象设定（九张立绘共用）
 
-2026-09-28 立。起因：手机页"说话那张"立绘（`lib/art/work-9-talking.webp`）的衣服和其余
-八张不统一——它是当年**单独一次生成**的那张。根因不是模型不听话，而是那段"逐字重复的
-角色描述"当年没落在任何地方，全凭记忆，于是漂了。这份文件就是它的家：以后再出图，
-把下面第三节的提示词原文复制过去，不要凭记忆重写。
+2026-09-28 重立。起因：九张动画（每张两帧，共 18 帧）此前是**一张图里并排画两格**出的，
+模型两格各画一遍同一个角色——裙子上的图案、袜口条纹、腿和发丝都会各差一点；后来用
+`--freeze-below` 把第二帧的手臂以下整段取自第一帧去补，补丁落在腰上、胳膊上，于是又出现
+「上半身和下半身割裂」「书举起来和举起前割裂」。用户 2026-09-28 拍板：**十八帧全部重画，
+形象和动作由助手统一定制，姿势与角色定位不变**。
 
-## 一、其余八张的服装（照原图写死；生成时逐字重复）
+现在两帧不再同图生成：**先出第一帧，再由第一帧改出第二帧**（只改该动的那一处），
+两帧出自同一张画，除该动的部位外天生逐像素一致。切图之后的下半身差异实测 ≤5%（跑、冲刺按
+设计动腿，另算）。
+
+## 一、服装（生成时逐字重复，别凭记忆重写）
 
 | 部位 | 必须长这样 |
 | --- | --- |
-| 头饰 | 头顶正上方一枚**鲸鱼尾形状的结**（左右对称）；右侧一枚小的鲸鱼尾发夹 |
+| 头饰 | 头顶正上方一枚**鲸鱼尾形状的结**（左右对称）；侧面一枚小的**鲸尾**发夹（只有尾鳍，不是整只鲸） |
 | 头发 | 很长的冰蓝色（浅银蓝）波浪发，过腰，两侧长发丝贴着脸 |
 | 眼睛 | 大而圆，蓝色；张嘴笑 |
 | 领子 | **白色水手领**，边缘两道细藏青条纹，领口系一条藏青领结 |
 | 袖子 | **白色长袖**，袖口宝蓝色滚边（两道细条纹） |
-| 上衣 | **白色**水手衬衫——从领口到腰、连同后背**都是白的**，不是宝蓝马甲；领口系一条**中等矢车菊蓝**（同上 `#5B7FC9`）的缎带蝴蝶结，**不要藏青深蓝** |
-| 裙子 | **中等矢车菊蓝**（约 `#5B7FC9`，明显浅于藏青）；百褶有清楚的白色高光线，**裙摆下缘两道细白线**；腰上一道同色腰带压着一条细白线；**前左侧一枚白色鲸鱼尾图案** |
+| 上衣 | **白色**水手衬衫——从领口到腰、连同后背**都是白的**，不是宝蓝马甲；领口系一条**中等矢车菊蓝**（`#5B7FC9`）的缎带蝴蝶结，**不要藏青深蓝** |
+| 裙子 | **中等矢车菊蓝**（约 `#5B7FC9`，明显浅于藏青）；百褶有清楚的白色高光线，**裙摆下缘两道细白线**；腰上一道同色腰带压着一条细白线；**我们看过去的左半边一枚白色鲸尾图案**（只有尾鳍） |
 | 袜子 | 白色及膝袜，袜口一道细蓝条纹 |
 | 鞋 | 蓝色小皮鞋，白鞋底、细白鞋带，**鞋上没有蝴蝶结** |
 
-### 明确不要（说话那张走形的地方，就是下面这几条）
+比例：Q 版，约两个半头高，头大身子短。
 
-褶边裙、蕾丝、泡泡短袖、白色围裙式前襟、胸前大白蝴蝶结、袜子蕾丝褶口、
-鞋上蝴蝶结、头饰偏在一侧、头发更蓬更卷。
+**明确不要**：褶边裙、蕾丝、泡泡短袖、白色围裙式前襟、胸前大白蝴蝶结、袜子蕾丝褶口、
+鞋上蝴蝶结、头饰偏在一侧、头发更蓬更卷、宝蓝色上衣（马甲式前襟）。
 
-## 二、动作（2026-09-28 定）
+**底**：纯洋红 `#FF00FF` 平底，没有阴影、渐变、纹理、地面，也不要任何文字、水印、签名、格线。
 
-其余八张里有四张都是"站着、手在胸前"，所以说话这张要把剪影拉开：**举一只手挥手打招呼**，
-另一只手自然垂在身侧，嘴张开（在说话）。两帧之间只有这一只手的高度不同——
-一帧举在头侧，一帧摆到肩高，仍在挥。
+## 二、九种姿势与两帧动作（2026-09-28 定；姿势与角色定位不得更改）
 
-（若以后要退回原来的"手贴在脸边"，只改这一句就行；改回的理由要写在这儿。）
+| 图 | 姿势 | 第一帧 | 第二帧 | 动的部位 |
+| --- | --- | --- | --- | --- |
+| `work-1-ready` | 待命 | 双手举过头顶欢呼 | 双手收到胸前交握 | 双臂＋肩 |
+| `work-2-reading` | 读书 | 书捧在胸前、眼往下看、脸露着 | 书抬到下巴前，脸仍露在书上缘之上 | 双臂＋书 |
+| `work-3-typing` | 打字 | 坐在小书桌前打键盘 | 略前倾、手再按下去一下 | 上身少许＋手 |
+| `work-4-checking` | 检查 | 放大镜举到眼前看 | 放大镜略移开、头微转 | 手臂＋头 |
+| `work-5-thinking` | 思考 | 双手交握在下巴前、眼往上看 | 手略低、眼神再往上一点 | 手＋眼神 |
+| `work-6-running` | 跑 | 大步跑：一腿后蹬、一膝抬起、两臂在身侧摆 | 换腿，裙摆甩向另一边 | 腿＋裙摆＋臂 |
+| `work-7-waiting` | 等太久 | 捧着杯子、肩微塌、低头看杯子 | 抬头、杯子略举 | 手＋头 |
+| `work-8-sprinting` | 冲刺 | 弓身猛冲，一腿后蹬离地 | 换腿、身体再前倾、臂摆更大 | 腿＋上身＋臂 |
+| `work-9-talking` | 说话 | 一只手举在头侧挥手、嘴张开 | 那只手落到肩高，仍在挥 | 单臂 |
 
-## 三、生成提示词
+## 三、出图工艺（2026-09-28 起）
 
-英文那份是**直接喂给绘图模型的原文**，中文那份是同一件事的对照。两段必须一致；
-改的时候两边一起改。
+1. **母版**：先用"待命第一帧"当参考出一张单人格的高清基准图（形象基准，见 `docs/` 同目录的
+   历史记录或 `lib/art/out-canon.webp`）。九张的形象都照它，形象才统一。
+2. **第一帧**：两张参考图——第一张给形象（母版），第二张给动作（该姿势旧图的第一帧，从
+   `lib/art/work-N-*.webp` 左半格裁出来、铺在洋红底上、放大三倍）。
+3. **第二帧**：只喂刚出的第一帧，提示词只描述**该动的那一处**，并写死"其余一律不动"。
+4. **拼接与切图**：
 
-### 英文（原文，复制粘贴用）
+       python tools/whale-pair.py 第一帧.png 第二帧.png 拼接.png
+       python tools/whale-sprite.py 拼接.png lib/art/work-N-名字.webp
+
+   注意：切图脚本的落点参照是 `lib/art/work-1-ready.webp`，所以**待命那张放到最后切**，
+   或者接受"九张共用同一个参照"——两者不能混。
+
+出图的直连工具是 `tools/whale-draw.py`（走 OpenRouter 的 `/images/generations`，参考图用
+`input_references` 字段）。插件自带的 `edit_image` 在 OpenRouter 上没有可用的编辑路由
+（它固定打 `/images/edits`，实测 404），所以别走它。单张约 2～3 美分。
+
+### 第一帧的共享块（提示词原文，英文）
 
 ```
-A single wide image containing EXACTLY 2 frames of a chibi anime sprite sheet, arranged side by side
-in one horizontal row, two equal panels of the same width, evenly spaced, with no gap and no border
-between them. Flat solid pure magenta #FF00FF background covering the whole image, with no shadow,
-no gradient, no texture and no floor.
+The FIRST reference image shows the character design to reuse; the SECOND reference image shows the POSE and ACTION to draw (ignore its two-panel layout, draw only one girl). Draw ONE single full-body girl on a flat solid pure magenta #FF00FF background filling the whole canvas: no shadow, no gradient, no floor, no border, no panel divider, no second character, no text, no watermark.
 
-BOTH panels show the exact same character in the exact same pose, same camera angle, same scale and
-same position inside its own panel: a cute chibi anime girl, about 2.5 heads tall, full body standing
-and facing the viewer, big round blue eyes, cheerful open smile, very long wavy ice-blue hair (pale
-silvery blue, darker at the roots and lighter at the tips) falling past her waist with long side locks
-framing her face, a blue whale-tail shaped bow ornament centered on top of her head, and a small blue
-whale-tail hair clip on the right side of her hair.
+Character (keep exactly as in the first reference): a chibi anime girl with a big head and a short round body, about 2.5 head-heights tall, facing the viewer. Big round blue eyes, cheerful open smile. Very long wavy ice-blue hair (pale silvery blue) falling past her waist with long side locks framing her face. A blue WHALE-TAIL shaped bow ornament centred on top of her head, and a small WHALE-TAIL shaped hair clip (a tail fin only, not a whole whale) on the side of her hair. Outfit: a WHITE sailor blouse (the entire upper garment — collar to waist, front and back — is white, not blue); a WHITE sailor collar with two thin navy stripes; a medium cornflower-blue (#5B7FC9) ribbon bow at the front of the collar, never dark navy; long white sleeves with navy cuff trim; a pleated skirt in the same medium cornflower blue #5B7FC9 with clean white pleat highlight lines and TWO thin white stripes near the bottom hem; one WHITE WHALE-TAIL shaped emblem (a tail fin only) on the LOWER-LEFT of the skirt as we look at the image; white knee-high socks with a single thin blue stripe at the top; small blue shoes with white soles and a thin white strap, no bow on the shoes. No frills, no lace, no puffed sleeves, no white apron, no large white chest bow. Clean crisp anime line art with consistent soft shading, the same art style as the first reference. Character centred with a magenta margin all around, fully visible from the top of her hair to the soles of her shoes.
 
-Her outfit is identical in both panels and must not be altered:
-a WHITE sailor blouse (the entire upper garment — chest, shoulders and back, from the collar down to the
-waist — is WHITE, not blue); a WHITE sailor collar with two thin navy stripes along its edge; a royal-blue
-ribbon bow tied at the front of the collar in the same MEDIUM cornflower blue as the skirt (#5B7FC9, never dark navy); LONG white sleeves with slightly darker navy
-cuff trim (two thin stripes at each wrist); a waistband and a pleated skirt in the SAME medium cornflower blue
-with clean white pleat highlight lines and TWO thin white stripes along the bottom edge near the hem; one white whale-tail emblem printed on the lower-left of the skirt (on the left-hand side as we look at the image);
-white knee-high socks with a single thin blue
-stripe at the top; small blue shoes with white soles and a thin white strap, and no bow on the shoes.
-NO dark navy blue on the bow or the skirt, NO blue bodice, NO blue vest, NO blue pinafore over the chest, NO frills, NO lace, NO puffed sleeves, NO white apron, NO large white bow on the chest.
-
-The ONLY difference between the two panels is the arm on the left-hand side as we look at her:
-- Panel 1 (left): that arm is raised high beside her head, palm open, waving hello;
-- Panel 2 (right): that same arm has swung down to shoulder height, palm still open, mid-wave.
-Her other arm stays relaxed at her side in both panels, and her mouth stays open as if she is talking.
-
-Everything else — her face, hair, head ornament, collar, sleeves, skirt, socks, shoes, colours,
-lighting and scale — must be identical between the two panels. No text, no letters, no watermark,
-no speech bubbles, no signature, no frame numbers, no dividing line between the panels.
+Pose for this image — {第二节表格里的"第一帧"那句，用英文描述}
 ```
 
-### 中文（对照，给不看英文的人读）
+### 第二帧的块
 
-一张横向长图里**正好并排两格**，两格等宽、间隔均匀、中间没有缝也没有边框；整张图是纯洋红
-`#FF00FF` 平底，没有阴影、没有渐变、没有纹理、没有地面。
+```
+Take the reference image and change ONLY this: {第二节表格里的"第二帧"那句，用英文描述}.
 
-两格画的是**同一个人、同一个姿势、同一个机位、同一个大小、在自己格子里位置也一样**：
-一个可爱的 Q 版动漫女孩，大约两个半头高，全身站立，正面朝向观众；眼睛又大又圆、蓝色；
-张嘴笑；很长的冰蓝色（浅银蓝，发根深一点、发尾浅一点）波浪发，过腰，两侧长发丝贴着脸；
-**头顶正上方一枚鲸鱼尾形状的结**，右侧一枚小的鲸鱼尾发夹。
-
-她的衣服两格完全一样，不许改：**白色水手衬衫**（从领口到腰、连同后背都是白的，不是宝蓝马甲）；
-**白色水手领**，边缘两道细藏青条纹，领口系一条**中等矢车菊蓝**（约 `#5B7FC9`，不要藏青）的缎带蝴蝶结；**白色长袖**，袖口宝蓝滚边
-（每只手腕两道细条纹）；**中等矢车菊蓝**（约 `#5B7FC9`，不是藏青）的百褶裙，
-百褶带清楚的白色高光线，**裙摆下缘两道细白线**，腰上一道同色腰带压着一条细白线，
-**前左侧一枚白色鲸鱼尾图案**；白色及膝袜，袜口一道细蓝条纹；
-蓝色小皮鞋，白鞋底、细白鞋带，**鞋上没有蝴蝶结**。
-**不要**宝蓝色的上衣（马甲式前襟）、不要褶边、不要蕾丝、不要泡泡袖、不要白围裙、不要胸前的大白蝴蝶结。
-
-两格**唯一的差别**是"我们看过去在她左手边"的那只手臂：
-- 左格：那只手举在头侧，手掌摊开，在挥手打招呼；
-- 右格：同一只手摆到了肩膀高度，手掌仍摊开，还在挥。
-另一只手两格都自然垂在身侧，嘴两格都张着（在说话）。
-
-除此之外——脸、头发、头饰、领子、袖子、裙子、袜子、鞋、配色、光线、大小——两格必须
-一模一样。图里不要任何文字、字母、水印、气泡、签名、帧号，不要格与格之间的分隔线。
+Keep EVERYTHING else identical to the reference image: the same character, the same face and expression unless stated, the same hair and hair ornaments, the same outfit, the same colours, the same skirt with the same pleats, white stripes and whale-tail emblem in the same place, the same socks and shoes, the same scale, the same position in the canvas, the same flat pure magenta #FF00FF background, the same camera angle and the same lighting. Do NOT redesign, restyle or re-shade anything. {表格里的"动的部位"里除该动的以外，写明哪些不许动}. Output the same canvas size as the reference, still ONE single character on flat magenta, fully visible from the top of her hair to the soles of her shoes.
+```
 
 ## 四、尺寸与验收（出图后按这个量，不用肉眼下结论）
 
 - 一张图里并排两格；切图后合成 **760×330** 的 WebP（两帧并排，各 380×330），透明底。
-- 两帧"真的动过"的像素占比 **≥ 5%**（Pillow 量：任一通道差 > 24 的像素比例）。这条线是量出来的，
-  不是拍的：其余八张实测 3.8%～18.1%，只动一条手臂的姿势本来就是这个量级。
-- 缩放之后要**再扫一遍洋红**：插值振铃会把边缘像素推到洋红附近（实测每帧扫掉 130 个左右）。
-- 人物高度 **310px**（±2%）；洋红抠底残留 **0**。
-- 切图脚本 `tools/whale-sprite.py`：两帧必须**共用**同一套裁切与缩放——分别按各自外框裁，
-  两帧会差一两个像素，播起来整个角色在抖，比不动还难看（2026-09-21 已实测过这条）。
-- 出图脚本另外自报：人物外框、中缝 12px 内的非透明像素数（不越过中缝就无害）。
-- 颜色的验收：领结与裙摆各取一处取样框，算蓝色像素的中位色，与其余八张比三通道合计色差
-  **≤ 40**；裙摆近下缘的白线像素 **≥ 60**（参照 212～429）。**取样框别画错位置**——本轮把
-  "领结"框画到了腰带上，量出来的其实是裙子，白量一轮（领结在 y≈150～172，裙摆 y≈200～239）。
-  本次实测：领结 `#6D8AD4`、裙摆 `#708CD9`；参照两张分别是 `#517FCE`/`#7193CB` 与
-  `#6484CF`/`#6582C8`。
-切图还有一条硬规矩：**一格出两帧的图，两格是各画一遍，不是复制。** 裙子上的图案、袜口条纹、
-腿和发丝都会各差一点（用户 2026-09-28 报「同一个动画的两张图片里裙子上的图案不一致」）。
-按姿势只该动手臂的那些立绘，用 `--freeze-below 行号` 把手臂以下整段强制取自第一帧：
+- 人物高度 **310px**（±2%）；洋红抠底残留 **0**；离中缝 12px 内不透明像素 **0**（两格没挨太近）。
+- 两帧"真的动过"的像素占比 **≥ 5%**（任一通道差 > 24）。本次实测 8.5%～28%。
+- **下半身不该动的姿势，裙子以下那一段差异要接近 0**。本次实测（成图第 240～330 行）：
+  待命 0.6%、读书 0.5%、打字 2.1%、检查 5.4%、思考 0.7%、等太久 1.0%、说话 0.3%；
+  跑 83.3%、冲刺 45.8%——这两张按设计动腿，不算缺陷。
+- 比两帧差异**必须先要求两侧 alpha>128 再比颜色**，否则有损压缩在透明区留下的垃圾颜色值
+  会被当成画面变化（2026-09-28 因此误报 2810 个差异）。
+- 切图脚本两帧**共用**同一套裁切与缩放（外框取两帧并集），分别按各自外框裁会差一两个像素，
+  播起来整个角色在抖（2026-09-21 实测过）。
+- 拼接脚本 `tools/whale-pair.py` 另有一条自检：两帧各自的底必须都是纯洋红（四边非洋红占比
+  ≤2%），否则不出图，让人重出而不是在这里硬抠。
 
-    python tools/whale-sprite.py 生成图.png lib/art/work-9-talking.webp --freeze-below 200
+## 五、历史：冻结修补（已作废，2026-09-28 重画后不再需要）
 
-行号**按成图坐标**算（0～329，和量颜色用的是同一套坐标），取在手臂最低点之下、裙子起笔之处。
-说话的这张取 **168**：左半边手臂差异在 y164～167 那一档收住，往下是一条很低的平台。切图脚本会打印"原本多少个不一致
-像素 → 现在 0"，不为 0 就不写文件。跑、打字、冲刺这类本来就要动腿的姿势不用加这个参数。
-### 另外八张的裙摆（2026-09-28 一次性修补）
+以下记录的是重画之前的补丁做法，**现在不要再用**；`tools/whale-sprite.py --freeze-below`
+这个参数留在代码里没删，只是因为删它没有收益。
 
-用户报「我们这些鲸鱼娘动画的裙子上的图案好像都有些不一致」。量了九张：两帧之间裙摆那一段
-差异从 781 到 4633 个像素，而且不只是图案——**模型把裙子本身画成了两种设计**（一帧白色荷叶边、
-另一帧直摆白线），连轮廓都不同（占裙面 9%～37%）。
-
-这八张的**源图早就不在了**，没法重切，于是有了一次性工具：
-
-    python tools/whale-freeze-band.py lib/art/work-2-reading.webp
-
-两件事都不写死：
-
-* **切在哪一行**——在第 182～204 行之间挑"跨线的相邻两行差 ÷ 画面自然的相邻两行差"最小的
-  一条。第一帧的裙腰常比第二帧高一两行，切线压在那儿就是一条看得见的横线（实测读书那张
-  跨线差 65、自然差只有 14）。挑完再在切线上下各三行做渐变，免得留硬边。
-* **冻到哪一行**——从第 200 行往下，找"最后一行宽度还达最宽处 60%"的位置当裙边；再往下是
-  两条腿（或一条抬起来的腿），宽窄会掉下来。腿和手里的道具一律不碰。
-
-跳过条件：这一段两帧的轮廓差占裙面超过 45%。那是整条裙子在动，冻了会撕开，不属于缺陷。
-**跑和冲刺两张就是这一类，按设计不动**——跑本来就该让裙摆跟着腿荡。
-
-结果：待命、读书、打字、检查、思考、等太久六张的裙摆差异（781～4633）全部归零，腰部的
-动作保留（打字 2785→2469，只少被冻住的那五行，手和键盘都在线上）。说话本来就一致。
-
-接缝复检不看数字看现象：在**同一帧内部**找局部异常行（某行落差超过周围常态的四倍或 +35），
-第二帧有、第一帧没有的才算冻出来的缝。
+- 只动手臂的姿势，用 `--freeze-below 行号` 把该行以下整段取自第一帧（说话的这张取 168：
+  手臂差异在 y164～167 收住）。
+- 更早的八张裙摆不一致（源图已丢）用一次性工具 `tools/whale-freeze-band.py` 修补：切在图
+  182～204 行之间挑"跨线差 ÷ 自然差"最小的一条，冻到"最后一行宽度还达最宽处 60%"处，
+  上下各三行做渐变；这一段两帧轮廓差超过 45% 就跳过（跑、冲刺属于这一类）。
+- 教训：这类补丁永远会留下接缝（上半身/下半身割裂、书举起来和举起前割裂），**根因是两格各画
+  一遍，只能靠重画解决**。当时的数字与判别方法（领结/裙摆取样色差 ≤40、裙摆白线 ≥60 等）
+  记录在 git 历史里，需要时翻 `git log -- docs/character.md`。
