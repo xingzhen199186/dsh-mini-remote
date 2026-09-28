@@ -678,6 +678,101 @@ test('没轮到的那层停着不动，设了「减少动态效果」的人全�
   assert.match(rm, /\.pose \{ animation: none/, '减少动态效果时连翻帧都要停')
 })
 
+/**
+ * 读 WebP 的画布尺寸。
+ *
+ * 只为一件事：核对「页面上写的帧数」和「图里真并排了几帧」对不对得上。
+ * 立绘是雪碧图，页面的显示宽度是按帧数算出来的——图多一帧少一帧，人就会缺半张或
+ * 多出隔壁那帧的一条。这种错光看源码看不出来，必须落到文件本身。
+ */
+function webpSize(buf) {
+  assert.equal(buf.subarray(0, 4).toString('latin1'), 'RIFF', '不是 WebP：缺 RIFF')
+  assert.equal(buf.subarray(8, 12).toString('latin1'), 'WEBP', '不是 WebP：缺 WEBP')
+  let off = 12
+  while (off + 8 <= buf.length) {
+    const tag = buf.toString('latin1', off, off + 4)
+    const size = buf.readUInt32LE(off + 4)
+    // 带透明通道的图走 VP8X，画布尺寸在它自己的头里：1 字节标志 + 3 字节保留，
+    // 接着 24 位小端的「宽-1」「高-1」。
+    if (tag === 'VP8X') {
+      const p = off + 8
+      return {
+        w: 1 + (buf[p + 4] | (buf[p + 5] << 8) | (buf[p + 6] << 16)),
+        h: 1 + (buf[p + 7] | (buf[p + 8] << 8) | (buf[p + 9] << 16)),
+      }
+    }
+    // 不带透明通道的走 VP8（有损），尺寸在帧头里（14 位）。
+    if (tag === 'VP8 ') {
+      return { w: buf.readUInt16LE(off + 14) & 0x3fff, h: buf.readUInt16LE(off + 16) & 0x3fff }
+    }
+    off += 8 + size + (size % 2)
+  }
+  throw new Error('WebP 里找不到尺寸块')
+}
+
+test('帧数写在数据里，缺省 2 帧；冲刺是 6 帧', () => {
+  // 冲刺（work-8-sprinting）从 2026-09-29 起是 6 帧：那一趟头发是拿冻结基准帧当底、
+  // 用位移场程序化算出来的（tools/whale-sway.py），身体逐像素不动。
+  // 别的七个姿势仍是两帧，**缺省值就是 2**，所以它们一个字段都不用写。
+  const block = html.slice(html.indexOf('var POSES = ['), html.indexOf('var POSE_MS'))
+  const written = block.match(/frames:\s*\d+/g) || []
+  assert.equal(written.length, 1, '只有冲刺该写 frames，别的姿势吃缺省')
+  assert.match(block, /file: 'work-8-sprinting'[^}]*frames:\s*6/, '冲刺写 6 帧')
+  // 说话那张不进 POSES，也是两帧，不许悄悄写成别的
+  assert.match(html, /var SPEAK_POSE = \{ file: 'work-9-talking', flip: 1\.1 \}/,
+    '说话那张保持两帧')
+})
+
+test('帧数只驱动两处：显示宽度和用哪套翻帧关键帧', () => {
+  const css = html.slice(html.indexOf('.work-stage'), html.indexOf('.work-bubble'))
+  assert.match(css, /\.pose\[data-frames="6"\]\s*\{[^}]*background-size:\s*732px 106px/,
+    '6 帧并排的显示宽度是 122×6')
+  assert.match(css, /\.pose\[data-frames="6"\]\s*\{[^}]*animation-name:\s*poseFlip6/,
+    '6 帧要用自己那套关键帧')
+  const after = css.slice(css.indexOf('@keyframes poseFlip6'))
+  // 第一格是 `0 0`（没写单位），后面几格是 `-122px 0`——两种都认。
+  const steps = [...after.matchAll(/background-position:\s*(-?\d+)(?:px)?\s+-?\d+(?:px)?/g)]
+    .map((m) => Number(m[1]))
+  assert.deepEqual(steps, [0, -122, -244, -366, -488, -610],
+    'poseFlip6 要正好 6 格，每格右移一帧宽（122 像素），不能多出一格')
+  // 时长**不跟着帧数放大**：一圈还是 flip 秒。多出来的帧只是把头发那一趟切得更细，
+  // 腿脚换帧的快慢必须和两帧时一模一样。
+  assert.match(html, /layer\.setAttribute\('data-frames', POSES\[i\]\.frames \|\| 2\)/,
+    '帧数从数据里读，缺省 2')
+  assert.match(html, /layer\.style\.animationDuration = POSES\[i\]\.flip \+ 's'/,
+    '时长还是 flip 秒，不许乘帧数')
+  assert.match(html, /speak\.setAttribute\('data-frames', SPEAK_POSE\.frames \|\| 2\)/,
+    '说话那层也要按帧数挂对关键帧')
+})
+
+test('每个姿势声明的帧数，和图里真并排的帧数一致', () => {
+  const block = html.slice(html.indexOf('var POSES = ['), html.indexOf('var POSE_MS'))
+  const entries = block.match(/\{ file: '[a-z0-9-]+'[^}]*\}/g) || []
+  assert.equal(entries.length, 8, '姿态数应该是 8')
+  for (const entry of entries) {
+    const name = entry.match(/file: '([a-z0-9-]+)'/)[1]
+    const frames = Number((entry.match(/frames:\s*(\d+)/) || [0, 2])[1])
+    const buf = readFileSync(new URL(`../lib/art/${name}.webp`, import.meta.url))
+    const { w, h } = webpSize(buf)
+    assert.equal(h, 330, `${name} 每帧高 330`)
+    assert.equal(w, 380 * frames,
+      `${name} 声明 ${frames} 帧，图里就该并排 ${frames} 帧（宽 ${380 * frames}），实宽 ${w}`)
+  }
+})
+
+test('建出来的层上真的挂着 data-frames：冲刺 6，其余 2', () => {
+  // 上面那条查的是源码里写没写对，这条查的是**跑起来之后挂在层上的值**——
+  // 帧数要是没传到层上，CSS 会一直按两帧算宽度，图里六帧就只显示前两帧。
+  const w = buildWhale()
+  w.preloadPoses()
+  const layers = w.els.workStage.children
+  const got = layers.map((c) => c.getAttribute('data-frames'))
+  assert.deepEqual(got, w.POSES.map((p) => String(p.frames || 2)).concat('2'),
+    '每个姿势按自己的 frames 挂，说话那张（最后一层）吃缺省 2')
+  const sprint = w.POSES.findIndex((p) => p.file === 'work-8-sprinting')
+  assert.equal(got[sprint], '6', '冲刺那层是 6 帧')
+})
+
 test('气泡贴着自己的词条，多长就多宽', () => {
   const css = html.slice(html.indexOf('.work-bubble {'), html.indexOf('.work-bubble::before'))
   // 上一版是定宽的（min-width: min(180px, …)），短词条右边会空一大块。
@@ -787,12 +882,16 @@ assert.ok(we > ws, `在 page.html 里找不到锚点「${WE}」`)
 function makeEl(id) {
   const el = {
     id, textContent: '', src: '', children: [], hidden: false, disabled: false,
-    _cls: new Set(), style: {}, _on: {},
+    _cls: new Set(), style: {}, _on: {}, _attrs: {},
   }
   el.classList = {
     toggle(c, on) { if (on) el._cls.add(c); else el._cls.delete(c) },
     contains: (c) => el._cls.has(c),
   }
+  // 立绘那层用它告诉 CSS 该用哪套翻帧关键帧（data-frames，2026-09-29 加的）。
+  // 桩里存下来，测试才能断言「挂在层上的到底是 2 还是 6」。
+  el.setAttribute = (k, v) => { el._attrs[k] = String(v) }
+  el.getAttribute = (k) => (k in el._attrs ? el._attrs[k] : null)
   el.appendChild = (c) => { el.children.push(c); return c }
   el.addEventListener = (type, fn) => { (el._on[type] || (el._on[type] = [])).push(fn) }
   el.click = () => { for (const fn of el._on.click || []) fn() }
