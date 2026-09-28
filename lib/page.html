@@ -2603,10 +2603,32 @@
     navExpanded[wsId] = true;
     renderNav();
     if (navSessions[wsId]) return;
+    // 标题是服务端**后台**补的：它只等 250 毫秒，超时的那些先退回显示日期。
+    // 这里悄悄追几次，让标题自己长出来——不用用户退出去再进来。
+    function fillTitles(attempt) {
+      const cur = navSessions[wsId];
+      // 用户收起了、或者又被刷新替换过，就放手：别跟人抢这份数据。
+      if (!cur || !navExpanded[wsId]) return;
+      const pending = (cur.sessions || []).some(function (s) { return !s.title; });
+      if (!pending || attempt > 2) return;
+      setTimeout(function () {
+        api('/mini/api/workspaces/' + encodeURIComponent(wsId) + '/sessions')
+          .then(function (body) {
+            if (navSessions[wsId] !== cur || !navExpanded[wsId]) return;
+            navSessions[wsId] = body;
+            renderNav();
+            fillTitles(attempt + 1);
+          })
+          .catch(function () {
+            // 追不到就算了：列表本身还在，日期也够用。
+          });
+      }, attempt === 0 ? 1500 : 3000);
+    }
     api('/mini/api/workspaces/' + encodeURIComponent(wsId) + '/sessions')
       .then(function (body) {
         navSessions[wsId] = body;
         renderNav();
+        fillTitles(0);
       })
       .catch(function (err) {
         navSessions[wsId] = { sessions: [], total: 0 };
