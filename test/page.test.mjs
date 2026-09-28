@@ -2448,19 +2448,49 @@ test('聊天模式：他自己翻上去看历史时，回答来了也不动他',
 /**
  * 聊天记录是**一屏一屏铺**的（2026-09-30 改的，原委见 page.html 里 CHAT_PAGE 那段）。
  *
- * 这里要验的两件事，都得让假 DOM 有一点「高度」才验得出来：
+ * 这里要验的三件事，都得让假 DOM 有一点「高度」才验得出来：
  *   ① 首屏只铺最近 40 条；
- *   ② 往上滑再放一屏时，**位置要校回来**。
+ *   ② 往上滑再放一屏时，**位置要校回来**；
+ *   ③ 那句「往上滑看更早的」什么时候露、什么时候收。
  * 所以 mainEl.scrollHeight 不能是个死数，得跟着铺出来的条数长——这里按
  * 「顶上 40px + 每条 10px」估。真排版算不出精确像素，但「离底部的距离有没有变」
  * 这个不变量是准的，而真机上跳没跳，靠的就是它。
+ *
+ * 假 replyEl 还得能 `querySelector('.more-note')`：那颗提示的露 / 收是靠给它
+ * 加 classList 上的 hide 类做的，没有这一步就测不到「在底部时它收没收」。
  */
-function chatPager({ history, queued = [], boundSessionId = 's1' } = {}) {
+function chatPager({
+  history, queued = [], boundSessionId = 's1', clientHeight = 0, saidTop = 600,
+} = {}) {
   const replyEl = { innerHTML: '' }
+  // 假的 .more-note：只复刻真 DOM 里用得到的那点能力（classList）。
+  // 它贴不贴顶、长什么样是 CSS 的事，这里管不着，也不用管。
+  const note = (() => {
+    const cls = new Set()
+    return {
+      offsetHeight: 30,
+      classList: {
+        add: (c) => cls.add(c),
+        remove: (c) => cls.delete(c),
+        contains: (c) => cls.has(c),
+        toggle: (c, on) => { if (on) cls.add(c); else cls.delete(c) },
+      },
+    }
+  })()
+  replyEl.querySelector = (sel) => (
+    sel === '.more-note' && replyEl.innerHTML.includes('more-note') ? note : null
+  )
+  // 「回答落定对齐开头」那条路要数 `.said`。全给同一个位置：测试要的是「对齐到哪里」，
+  // 不是哪一条回答——真排版里最后那条的位置，这里用一个定值代替。
+  replyEl.querySelectorAll = (sel) => (
+    sel !== '.said' ? []
+      : Array.from({ length: (replyEl.innerHTML.match(/class="said"/g) || []).length },
+        () => ({ getBoundingClientRect: () => ({ top: saidTop }) }))
+  )
   const mainEl = {
     classList: { remove() {} },
     scrollTop: 0,
-    clientHeight: 0,
+    clientHeight,
     get scrollHeight() {
       const n = (replyEl.innerHTML.match(/class="(?:said|bubble)/g) || []).length
       return 40 + 10 * n
@@ -2474,19 +2504,27 @@ function chatPager({ history, queued = [], boundSessionId = 's1' } = {}) {
   const build = new Function(
     'state', 'replyEl', 'mainEl', 'timeLabel',
     `${html.slice(start, end)}\n${html.slice(lb, html.indexOf('function render()'))}
-     return { renderChat, maybeGrowChat };`,
+     return { renderChat, maybeGrowChat, onMainScroll };`,
   )
   const api = build(state, replyEl, mainEl, () => '12:00')
+  // 真 DOM 里 class 是重画 innerHTML 时建出来的，替身不会自己长——渲染完补这一步。
+  function syncNote() {
+    note.classList.toggle('hide', /class="more-note hide"/.test(replyEl.innerHTML))
+  }
   return {
     ...api, state, mainEl, replyEl,
     // 铺出来几条：数气泡和回答块，不数复制按钮和那两条提示。
     count: () => (replyEl.innerHTML.match(/class="(?:said|bubble)/g) || []).length,
     // 「打开这个会话」：第一次重画时页面还空着，按 atBottom 的判据那算「在底部」，
     // 于是铺完会黏到底——这正是真机上的样子（点开会话先看到最新的那条）。
-    // 所以「用户往上滑」要在这之后单独模拟：见下面各条里的 mainEl.scrollTop = …。
-    open() { api.renderChat(); return this },
-    // 往上滑到离顶 top 像素。
-    scrollUp(top) { mainEl.scrollTop = top; return this },
+    // 所以「用户往上滑」要在这之后单独模拟：见下面各条里的 scrollTo。
+    open() { api.renderChat(); syncNote(); return this },
+    render() { api.renderChat(); syncNote(); return this },
+    // 把滚动条放到离顶 top 像素（只动位置，不惊动滚动处理器）。
+    scrollTo(top) { mainEl.scrollTop = top; return this },
+    // 用户滚了一下：位置已经由 scrollTo 放好，这里跑那根 scroll 线上的真逻辑。
+    scrolled() { api.onMainScroll(); return this },
+    noteHidden: () => note.classList.contains('hide'),
   }
 }
 
@@ -2510,7 +2548,7 @@ test('聊天记录首屏只铺最近 40 条', () => {
 
 test('往上滑到接近顶部：再放一屏，并且位置原样不动', () => {
   const p = chatPager({ history: longHistory(200) }).open()
-  p.scrollUp(30)
+  p.scrollTo(30)
   const fromBottom = p.mainEl.scrollHeight - p.mainEl.scrollTop
   p.maybeGrowChat()
   assert.equal(p.count(), 80, '再放一屏：40 + 40')
@@ -2520,7 +2558,7 @@ test('往上滑到接近顶部：再放一屏，并且位置原样不动', () =>
     '离底部的距离要原样不动——他正看着的那几行一格都不该走（这是「不跳走」的唯一判据）')
 
   // 滑下来了就不再放：一屏一屏地来，不是一滑就哗啦啦铺完。
-  p.scrollUp(400)
+  p.scrollTo(400)
   p.maybeGrowChat()
   assert.equal(p.count(), 80, '没靠近顶部就不该再放')
 })
@@ -2529,7 +2567,7 @@ test('本地的记录放完了：不再放，那句提示也收起来', () => {
   const p = chatPager({ history: longHistory(50) }).open()
   assert.equal(p.count(), 40, '先铺 40 条')
   assert.match(p.replyEl.innerHTML, /往上滑看更早的/)
-  p.scrollUp(10)
+  p.scrollTo(10)
   p.maybeGrowChat()
   assert.equal(p.count(), 50, '只剩 10 条就全铺出来，不多不少')
   assert.ok(!p.replyEl.innerHTML.includes('往上滑看更早的'),
@@ -2541,29 +2579,75 @@ test('本地的记录放完了：不再放，那句提示也收起来', () => {
 test('换会话时窗口收回首屏：上一个会话铺到多少条都不带过来', () => {
   // 这条要修的就是「切会话慢」——铺开的量必须跟着会话走，不能攒着。
   const p = chatPager({ history: longHistory(100) }).open()
-  p.scrollUp(10)
+  p.scrollTo(10)
   p.maybeGrowChat()
   assert.equal(p.count(), 80)
   p.state.boundSessionId = 's2'
   p.state.history = longHistory(200)
-  p.renderChat()
+  p.render()
   assert.equal(p.count(), 40, '换到新会话就是新的一屏，不继承上一个会话铺开的量')
 })
 
 test('跑着的时候来的新消息，照旧铺在最后，不会被窗口挡在外面', () => {
   const p = chatPager({ history: longHistory(100) }).open()
   p.state.history = p.state.history.concat([{ role: 'assistant', text: '刚写完的那条', timestamp: 101 }])
-  p.renderChat()
+  p.render()
   assert.ok(p.replyEl.innerHTML.includes('刚写完的那条'), '新消息必须露出来（流式追加不能被窗口挡住）')
   assert.ok(p.replyEl.innerHTML.includes('第 62 条'), '窗口还是 40 条，整体往后挪一条')
   assert.ok(!p.replyEl.innerHTML.includes('第 61 条'), '最老的那条让出去')
 })
 
+test('滑到最下面读内容时，那句「往上滑看更早的」不许露脸', () => {
+  // 用户 2026-09-30 真机提的：都滑到最下面了，它还挂在顶上（它是 sticky 的，
+  // 跟用户滑到哪儿无关）。那句话是催人往上滑的，人已经在底部读内容，它就成了挡视线的。
+  const p = chatPager({ history: longHistory(200) }).open()
+  assert.ok(p.noteHidden(), '点开会话就在底部：一开始就得是收着的')
+  assert.match(p.replyEl.innerHTML, /class="more-note hide"/,
+    '光不显示还不够：它得是「收着」的这一档（那块地方留着，收 / 露之间不顶内容）')
+
+  // 往上滑到触发线以内：这时候它才该露（正是用得着它的时候）。
+  p.scrollTo(30).scrolled()
+  assert.ok(!p.noteHidden(), '靠近顶部了，该它出来说话了')
+
+  // 再滑回最下面：必须收起来。这一半只能靠滚动里那根线——中间不会来快照，
+  // 也就不会重画，不在滚动里收，它就一直挂在顶上（真机上就是这么发现的）。
+  p.scrollTo(p.mainEl.scrollHeight).scrolled()
+  assert.ok(p.noteHidden(), '滑回底部还不收，就是真机上那条反馈')
+
+  // 中间地带（离顶远、又没到底）也不露：那句提示只在够得着顶部时有意义。
+  p.scrollTo(600).scrolled()
+  assert.ok(p.noteHidden(), '离顶远了就不该再挂着')
+})
+
+test('内容只比一屏高一点点时，在底部同样不许露——「在底部」是独立的一条判据', () => {
+  // 单看「离顶近不近」是不够的：记录短的时候（比如最近这 40 条大多是短的指令行），
+  // 滚到底也还落在触发线以内，那句提示照样会挂在顶上——和真机报的是同一个毛病。
+  // 所以判据里「不在底部」这一条是独立的，不能由前者推出来。
+  const p = chatPager({ history: longHistory(200), clientHeight: 400 }).open()
+  // 假 mainEl 不会自己把 scrollTop 夹到合法范围（真浏览器会），这里手动摆成
+  // 真机上「滚到底」的位置：内容 440、一屏 400 → 40。
+  p.scrollTo(40).scrolled()
+  assert.ok(p.noteHidden(), '这个位置离顶确实很近，但它同时就是底部——在底部就不许露')
+})
+
+test('回答落定对齐开头时：那句提示收着，而且不为它多留一段空白', () => {
+  // 两颗牙齿合在一起才成立：pinToTop 只留 12px 空隙，**不给**那颗 sticky 条让高度
+  //（让了会凭空多出一段空白，所以 page.html 里特意没让）。那就必须保证——
+  // 「对齐开头」发生的那一刻（人本来就在底部），提示是收着的（见 chatNoteVisible）。
+  const p = chatPager({ history: longHistory(200), saidTop: 600 })
+  p.state.latest = { text: '答案', timestamp: 9 }
+  p.open()
+  assert.ok(p.noteHidden(), '在底部对齐回答开头时，提示必须是收着的')
+  assert.equal(p.mainEl.scrollTop, 600 - 12,
+    '回答开头(600)对齐到视野顶部、只留 12px 空隙；多留一段就是那颗收着的提示占的')
+})
+
 test('往上滑的接线在：main 上挂了 scroll，而不是只有一段没人喊的逻辑', () => {
   // 真机踩过的同类坏法：逻辑全对、就是没人喊它（见下面权限那一段）。这里是同样的坑，
   // 所以不测「函数返回什么」，测「这根线在不在」。
-  assert.match(html, /mainEl\.addEventListener\('scroll', maybeGrowChat\)/,
-    'main 的 scroll 要接到 maybeGrowChat，否则往上滑永远不加载')
+  // 这条线上挂的是两件事：那句提示的露 / 收，和再放一屏（见 onMainScroll）。
+  assert.match(html, /mainEl\.addEventListener\('scroll', onMainScroll\)/,
+    'main 的 scroll 要接到 onMainScroll，否则往上滑永远不加载、提示也永远不会收')
 })
 
 /**

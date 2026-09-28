@@ -717,8 +717,12 @@
     border-radius: var(--r); color: var(--muted); font-size: 12.5px; line-height: 1.6;
   }
   /* 「上面还有更早的」：聊天记录是一屏一屏铺的（见 renderChat 里 CHAT_PAGE 那段）。
-     它**贴在看得到的顶上**，不随内容走——随内容走就只有滑到顶那一瞬间才看得见，
-     而那一瞬间正好触发了自动再放一屏，那句话等于永远看不见。
+     两处讲究：
+     · **贴在看得到的顶上**（sticky），不随内容走——随内容走就只在滑到顶那一瞬间可见，
+       而那一瞬间正好触发了自动再放一屏，那句话等于永远看不见。
+     · **离顶远了就收起来**（.hide）。用户 2026-09-30 真机提的：都滑到最下面了，
+       它还挂在顶上。那时候上面确实还有没放出来的记录，这句话没说错；但它是催人
+       往上滑的，人已经在底部读内容了，挂在顶上就只剩挡视线。
      长相照抄底栏的 .chip，不为它新造一种元素。 */
   .more-note {
     position: sticky; top: 0; z-index: 1;
@@ -726,6 +730,9 @@
     border-radius: 999px; border: 1px solid var(--line); background: var(--panel-2);
     color: var(--muted); font-size: 12px; line-height: 1.7;
   }
+  /* 收起来用 visibility 而不是 display：这一条的高度始终留在内容里，
+     露和收之间就不会把下面的消息顶来顶去（那会是一次小跳）。 */
+  .more-note.hide { visibility: hidden; }
 
   /* ---------- 设置抽屉 ---------- */
   #settings {
@@ -2143,11 +2150,10 @@
     if (!el || typeof el.getBoundingClientRect !== 'function') return;
     if (typeof mainEl.getBoundingClientRect !== 'function') return;
     var gap = el.getBoundingClientRect().top - mainEl.getBoundingClientRect().top;
-    // 顶上那颗「往上滑看更早的」是 sticky 的，会一直压在视野最上面（见 .more-note）。
-    // 有它的时候得把它那一条高度也让出来，否则回答的第一行正好压在它底下。
-    var note = replyEl.querySelector ? replyEl.querySelector('.more-note') : null;
-    var noteH = note && note.offsetHeight ? note.offsetHeight : 0;
-    mainEl.scrollTop += gap - 12 - noteH;
+    // 这里**不用**为顶上那颗「往上滑看更早的」让高度：对齐开头只在「他本来就在底部」
+    // 的时候做（见 scrollChat），而那时候那颗提示是收着的（见 chatNoteVisible）——
+    // 让高度反而会凭空多出一段空白。
+    mainEl.scrollTop += gap - 12;
   }
 
   /**
@@ -2166,6 +2172,41 @@
   var chatWindowFor = null;     // 上面这个数是哪个会话的（换会话要收回首屏，见 renderChat）
   var chatLoaded = 0;           // 本地一共有多少条可铺（滤掉排队那条之后），由 renderChat 记
   var chatGrowArmed = true;     // 这一轮靠近顶部已经放过一屏没有（见 maybeGrowChat）
+
+  /** 触发线：离顶一屏的四分之一以内。放一屏和那颗提示共用这一条，别写成两个数。 */
+  function chatEdge() {
+    return Math.min(160, Math.max(60, (mainEl.clientHeight || 0) / 4));
+  }
+
+  /** 顶上那颗「往上滑看更早的」的元素（没铺出来就没有）。 */
+  function moreNoteEl() {
+    return replyEl.querySelector ? replyEl.querySelector('.more-note') : null;
+  }
+
+  /**
+   * 那句提示现在该不该露脸：**近了顶部、又不在底部**。
+   *
+   * 两个条件缺一不可——
+   *   · 离顶远了它就没用：再往上滑一下就自动放一屏，用不着它催；
+   *   · 在底部时它必须收起来（用户 2026-09-30 真机提的那条）：那句话是催人往上滑的，
+   *     人已经在最底下读内容了，它挂在那儿只剩挡视线。
+   */
+  function chatNoteVisible() {
+    if (atBottom()) return false;
+    return mainEl.scrollTop <= chatEdge();
+  }
+
+  /**
+   * 把提示的露 / 收跟当前位置对齐。
+   *
+   * 这是**滚动时**的那一半。重画只在快照来的时候发生，而用户从中间一路滑到底
+   * 是不会等快照的——不在滚动里收，那条提示就会一直挂在顶上（真机就是这么发现的）。
+   */
+  function paintChatNote() {
+    var el = moreNoteEl();
+    if (!el || !el.classList || typeof el.classList.toggle !== 'function') return;
+    el.classList.toggle('hide', !chatNoteVisible());
+  }
 
   function renderChat() {
     mainEl.classList.remove('center');
@@ -2232,11 +2273,11 @@
         + '<div class="reply-foot">' + copyBtn
         + '<span class="time">' + timeLabel(m.timestamp) + '</span></div></div>';
     }).join('');
-    // 「上面还有，往上滑」要贴在**看得到的顶上**（样子和道理见 .more-note 的样式注释）。
-    // 它和下面那条截断提示说的不是一件事：那条说「到这儿就是最早的了」，
-    // 这条说「还能往上，本地就有」——所以放完了它就该消失，不留一句空话。
+    // 「上面还有，往上滑」要贴在**看得到的顶上**，而且**离顶远了就收起来**——
+    // 两处讲究见 .more-note 的样式注释。露 / 收在这里先按当前位置定一次，
+    // 之后由滚动里的 paintChatNote 接着跟。
     var moreNote = older
-      ? '<div class="more-note">往上滑看更早的</div>'
+      ? '<div class="more-note' + (chatNoteVisible() ? '' : ' hide') + '">往上滑看更早的</div>'
       : '';
     // 「这不是全部」要说在**内容前面**：用户往上翻到顶时，第一眼看到的就是它，
     // 免得以为这个会话只有这么点内容。读历史有上限（见服务端 HISTORY_MAX_*）。
@@ -2266,8 +2307,7 @@
     // 本地都放完了也没什么可放的。
     if (state.mode !== 'chat' || chatLoaded <= 0) return;
     if (chatWindow >= chatLoaded) return;
-    var edge = Math.min(160, Math.max(60, (mainEl.clientHeight || 0) / 4));
-    if (mainEl.scrollTop > edge) {
+    if (mainEl.scrollTop > chatEdge()) {
       // 滑下来了，这一轮重新装填：**一次靠近只放一屏**。
       // 不装填的话，万一位置校正没顶住（iOS 顶上那截橡皮筋会把人拽回 0），
       // 一次手势就能把 200 条连着放完——那正好把这个改动白做了。
@@ -2277,6 +2317,12 @@
     if (!chatGrowArmed) return;
     chatGrowArmed = false;
     growChat();
+  }
+
+  /** main 每一次滚动：先对齐那句提示的露 / 收，再看要不要再放一屏。 */
+  function onMainScroll() {
+    paintChatNote();
+    maybeGrowChat();
   }
 
   /**
@@ -3849,12 +3895,12 @@
     copyText(btn.getAttribute('data-copy') || '', btn);
   });
 
-  // 往上滑到接近顶部，就再放一屏（见 maybeGrowChat）。
+  // main 的滚动：一句提示的露 / 收，和「再放一屏」，都挂在这一根线上（见 onMainScroll）。
   // **这根线不能省**：逻辑写得再对，没挂上去就是「一点反应都没有」，
   // 而这种坏光看代码是看不出来的。
   // 位置也有讲究：绑在这里，不绑在 atBottom 那片函数旁边——页面测试会把那一段
   // 整块抠出来求值，测试里的假 mainEl 没有 addEventListener，写在那边好几个测试当场报错。
-  mainEl.addEventListener('scroll', maybeGrowChat);
+  mainEl.addEventListener('scroll', onMainScroll);
 
   // ---------------- 启动 ----------------
   syncSeg();
