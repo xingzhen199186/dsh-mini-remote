@@ -119,5 +119,6 @@ no speech bubbles, no signature, no frame numbers, no dividing line between the 
 
     python tools/whale-sprite.py 生成图.png lib/art/work-9-talking.webp --freeze-below 200
 
-行号取在手臂最低点之下、裙子起笔之处（说话的这张是 200）。切图脚本会打印"原本多少个不一致
+行号**按成图坐标**算（0～329，和量颜色用的是同一套坐标），取在手臂最低点之下、裙子起笔之处。
+说话的这张取 **168**：左半边手臂差异在 y164～167 那一档收住，往下是一条很低的平台。切图脚本会打印"原本多少个不一致
 像素 → 现在 0"，不为 0 就不写文件。跑、打字、冲刺这类本来就要动腿的姿势不用加这个参数。

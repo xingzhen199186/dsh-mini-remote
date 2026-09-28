@@ -4,7 +4,7 @@
 
 用法：
     python tools/whale-sprite.py 生成图.png lib/art/work-9-talking.webp
-    python tools/whale-sprite.py 生成图.png 输出.webp --freeze-below 200   # 第 200 行以下取自第一帧
+    python tools/whale-sprite.py 生成图.png 输出.webp --freeze-below 168   # 成图第 168 行以下取自第一帧
 
 为什么这么切：两帧**共用**同一套裁切与缩放（外框取两帧的并集），落点则从一张
 现成立绘里量出来——这样新出的这张和其余八张一样高、脚底一样齐。分别按各自外框裁，
@@ -186,9 +186,17 @@ def main():
         frames.append(cut)
 
     if freeze_y is not None:
-        before = count_diff_below(frames[0], frames[1], freeze_y)
-        frames[1] = freeze_below(frames[0], frames[1], freeze_y)
-        after = count_diff_below(frames[0], frames[1], freeze_y)
+        # 参数按**成图坐标**算（0～329，和量颜色、量差异时用的坐标一致）。帧本身只有 fh 高，
+        # 贴在成图第 (bottom - fh) 行起，所以要减掉这段偏移——2026-09-28 就是这里差了 12 行，
+        # 冻晚一截，裙子最上面十几行没罩住，量出来还有 2525 个不一致像素。
+        cut_y = freeze_y - (bottom - fh)
+        if cut_y <= 0:
+            print(f'  ✗ --freeze-below {freeze_y} 太高了：人物从成图第 {bottom - fh} 行起，这条线会连手臂一起冻掉')
+            return 2
+        print(f'  成图第 {freeze_y} 行 = 这一帧的第 {cut_y} 行（帧贴在成图第 {bottom - fh} 行起）')
+        before = count_diff_below(frames[0], frames[1], cut_y)
+        frames[1] = freeze_below(frames[0], frames[1], cut_y)
+        after = count_diff_below(frames[0], frames[1], cut_y)
         print(f'  第 {freeze_y} 行以下对齐到第一帧：原本 {before} 个不一致像素 → 现在 {after}')
         if after:
             print('  ✗ 对齐没生效，不写文件')
