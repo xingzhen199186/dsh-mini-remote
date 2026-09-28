@@ -458,7 +458,24 @@ test('同一个工作区再展开一次，标题走缓存、不再重读日志',
   const first = await listSessionsOf({ registry, query, workspaceId: 'w1' })
   assert.equal(first.sessions[0].title, '读出来的标题')
 
+  await new Promise((r) => setTimeout(r, 0))   // 等后台那次读取落地
   query.readTitleSnapshots = async () => { throw new Error('不该被调用：标题应该走缓存') }
   const second = await listSessionsOf({ registry, query, workspaceId: 'w1' })
   assert.equal(second.sessions[0].title, '读出来的标题', '第二次不该再读日志')
+})
+
+test('标题还没读出来时，列表也要立刻返回（不阻塞）', async () => {
+  // 真机实测：一个工作区里几条冷会话，读标题要十几秒，用户就盯着"正在读取…"干等。
+  // 这里把读取卡住不放：列表必须马上带日期返回，标题留给后台。
+  const registry = registryOf(ws('w1', 'I:\\a', '甲', ['s1']))
+  let release = null
+  const gate = new Promise((r) => { release = r })
+  const query = {
+    listSessions: async () => [rec('s1', 1)],
+    readTitleSnapshots: async () => { await gate; return [] },
+  }
+  const out = await listSessionsOf({ registry, query, workspaceId: 'w1' })
+  assert.equal(out.sessions[0].title, '', '读没读完都不该挡住列表')
+  release()
+  await new Promise((r) => setTimeout(r, 0))
 })
