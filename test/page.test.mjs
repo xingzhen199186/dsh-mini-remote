@@ -2446,6 +2446,127 @@ test('聊天模式：他自己翻上去看历史时，回答来了也不动他',
 })
 
 /**
+ * 聊天记录是**一屏一屏铺**的（2026-09-30 改的，原委见 page.html 里 CHAT_PAGE 那段）。
+ *
+ * 这里要验的两件事，都得让假 DOM 有一点「高度」才验得出来：
+ *   ① 首屏只铺最近 40 条；
+ *   ② 往上滑再放一屏时，**位置要校回来**。
+ * 所以 mainEl.scrollHeight 不能是个死数，得跟着铺出来的条数长——这里按
+ * 「顶上 40px + 每条 10px」估。真排版算不出精确像素，但「离底部的距离有没有变」
+ * 这个不变量是准的，而真机上跳没跳，靠的就是它。
+ */
+function chatPager({ history, queued = [], boundSessionId = 's1' } = {}) {
+  const replyEl = { innerHTML: '' }
+  const mainEl = {
+    classList: { remove() {} },
+    scrollTop: 0,
+    clientHeight: 0,
+    get scrollHeight() {
+      const n = (replyEl.innerHTML.match(/class="(?:said|bubble)/g) || []).length
+      return 40 + 10 * n
+    },
+    getBoundingClientRect: () => ({ top: 0 }),
+  }
+  const state = { mode: 'chat', history, queued, live: '', boundSessionId }
+  const lb = html.indexOf('function liveBlock')
+  assert.ok(lb > 0, '在 page.html 里找不到 liveBlock')
+  // eslint-disable-next-line no-new-func
+  const build = new Function(
+    'state', 'replyEl', 'mainEl', 'timeLabel',
+    `${html.slice(start, end)}\n${html.slice(lb, html.indexOf('function render()'))}
+     return { renderChat, maybeGrowChat };`,
+  )
+  const api = build(state, replyEl, mainEl, () => '12:00')
+  return {
+    ...api, state, mainEl, replyEl,
+    // 铺出来几条：数气泡和回答块，不数复制按钮和那两条提示。
+    count: () => (replyEl.innerHTML.match(/class="(?:said|bubble)/g) || []).length,
+    // 「打开这个会话」：第一次重画时页面还空着，按 atBottom 的判据那算「在底部」，
+    // 于是铺完会黏到底——这正是真机上的样子（点开会话先看到最新的那条）。
+    // 所以「用户往上滑」要在这之后单独模拟：见下面各条里的 mainEl.scrollTop = …。
+    open() { api.renderChat(); return this },
+    // 往上滑到离顶 top 像素。
+    scrollUp(top) { mainEl.scrollTop = top; return this },
+  }
+}
+
+/** 一串够长的历史，text 是「第 N 条」，方便断言哪一条在、哪一条还没铺出来。 */
+function longHistory(n) {
+  return Array.from({ length: n }, (_, i) => ({
+    role: 'assistant', text: `第 ${i + 1} 条`, timestamp: i + 1,
+  }))
+}
+
+test('聊天记录首屏只铺最近 40 条', () => {
+  // 用户报的「点一个没选中的会话切换很慢」：不是网络也不是服务端（本机实测那三个
+  // 接口 168 / 36 / 107 毫秒），是这一页一次把推上来的 200 条全铺出来。
+  const p = chatPager({ history: longHistory(200) }).open()
+  assert.equal(p.count(), 40, '首屏只摊 40 条，剩下的等他往上滑')
+  assert.ok(p.replyEl.innerHTML.includes('第 200 条'), '最新那条必须在')
+  assert.ok(p.replyEl.innerHTML.includes('第 161 条'), '从最新往回数满 40 条')
+  assert.ok(!p.replyEl.innerHTML.includes('第 160 条'), '第 41 条要留给下一屏')
+  assert.match(p.replyEl.innerHTML, /往上滑看更早的/, '本地还有更早的，就得说一句')
+})
+
+test('往上滑到接近顶部：再放一屏，并且位置原样不动', () => {
+  const p = chatPager({ history: longHistory(200) }).open()
+  p.scrollUp(30)
+  const fromBottom = p.mainEl.scrollHeight - p.mainEl.scrollTop
+  p.maybeGrowChat()
+  assert.equal(p.count(), 80, '再放一屏：40 + 40')
+  assert.ok(p.replyEl.innerHTML.includes('第 121 条'), '往回多铺了一屏出来')
+  assert.ok(!p.replyEl.innerHTML.includes('第 120 条'), '再多就没有了，一屏就是一屏')
+  assert.equal(p.mainEl.scrollHeight - p.mainEl.scrollTop, fromBottom,
+    '离底部的距离要原样不动——他正看着的那几行一格都不该走（这是「不跳走」的唯一判据）')
+
+  // 滑下来了就不再放：一屏一屏地来，不是一滑就哗啦啦铺完。
+  p.scrollUp(400)
+  p.maybeGrowChat()
+  assert.equal(p.count(), 80, '没靠近顶部就不该再放')
+})
+
+test('本地的记录放完了：不再放，那句提示也收起来', () => {
+  const p = chatPager({ history: longHistory(50) }).open()
+  assert.equal(p.count(), 40, '先铺 40 条')
+  assert.match(p.replyEl.innerHTML, /往上滑看更早的/)
+  p.scrollUp(10)
+  p.maybeGrowChat()
+  assert.equal(p.count(), 50, '只剩 10 条就全铺出来，不多不少')
+  assert.ok(!p.replyEl.innerHTML.includes('往上滑看更早的'),
+    '本地都放完了就别再催他往上滑（服务端截断那句另说，见 .history-note）')
+  p.maybeGrowChat()
+  assert.equal(p.count(), 50, '再滑也不动了')
+})
+
+test('换会话时窗口收回首屏：上一个会话铺到多少条都不带过来', () => {
+  // 这条要修的就是「切会话慢」——铺开的量必须跟着会话走，不能攒着。
+  const p = chatPager({ history: longHistory(100) }).open()
+  p.scrollUp(10)
+  p.maybeGrowChat()
+  assert.equal(p.count(), 80)
+  p.state.boundSessionId = 's2'
+  p.state.history = longHistory(200)
+  p.renderChat()
+  assert.equal(p.count(), 40, '换到新会话就是新的一屏，不继承上一个会话铺开的量')
+})
+
+test('跑着的时候来的新消息，照旧铺在最后，不会被窗口挡在外面', () => {
+  const p = chatPager({ history: longHistory(100) }).open()
+  p.state.history = p.state.history.concat([{ role: 'assistant', text: '刚写完的那条', timestamp: 101 }])
+  p.renderChat()
+  assert.ok(p.replyEl.innerHTML.includes('刚写完的那条'), '新消息必须露出来（流式追加不能被窗口挡住）')
+  assert.ok(p.replyEl.innerHTML.includes('第 62 条'), '窗口还是 40 条，整体往后挪一条')
+  assert.ok(!p.replyEl.innerHTML.includes('第 61 条'), '最老的那条让出去')
+})
+
+test('往上滑的接线在：main 上挂了 scroll，而不是只有一段没人喊的逻辑', () => {
+  // 真机踩过的同类坏法：逻辑全对、就是没人喊它（见下面权限那一段）。这里是同样的坑，
+  // 所以不测「函数返回什么」，测「这根线在不在」。
+  assert.match(html, /mainEl\.addEventListener\('scroll', maybeGrowChat\)/,
+    'main 的 scroll 要接到 maybeGrowChat，否则往上滑永远不加载')
+})
+
+/**
  * 权限档位的点击接线。
  *
  * 真机踩到过：三档**画得出来、点下去毫无反应**——因为 `#segPerm` 上根本没绑点击，

@@ -716,6 +716,16 @@
     margin: 0 0 14px; padding: 8px 12px; border: 1px dashed var(--line);
     border-radius: var(--r); color: var(--muted); font-size: 12.5px; line-height: 1.6;
   }
+  /* 「上面还有更早的」：聊天记录是一屏一屏铺的（见 renderChat 里 CHAT_PAGE 那段）。
+     它**贴在看得到的顶上**，不随内容走——随内容走就只有滑到顶那一瞬间才看得见，
+     而那一瞬间正好触发了自动再放一屏，那句话等于永远看不见。
+     长相照抄底栏的 .chip，不为它新造一种元素。 */
+  .more-note {
+    position: sticky; top: 0; z-index: 1;
+    width: fit-content; margin: 0 auto 14px; padding: 4px 12px;
+    border-radius: 999px; border: 1px solid var(--line); background: var(--panel-2);
+    color: var(--muted); font-size: 12px; line-height: 1.7;
+  }
 
   /* ---------- 设置抽屉 ---------- */
   #settings {
@@ -2133,11 +2143,38 @@
     if (!el || typeof el.getBoundingClientRect !== 'function') return;
     if (typeof mainEl.getBoundingClientRect !== 'function') return;
     var gap = el.getBoundingClientRect().top - mainEl.getBoundingClientRect().top;
-    mainEl.scrollTop += gap - 12;
+    // 顶上那颗「往上滑看更早的」是 sticky 的，会一直压在视野最上面（见 .more-note）。
+    // 有它的时候得把它那一条高度也让出来，否则回答的第一行正好压在它底下。
+    var note = replyEl.querySelector ? replyEl.querySelector('.more-note') : null;
+    var noteH = note && note.offsetHeight ? note.offsetHeight : 0;
+    mainEl.scrollTop += gap - 12 - noteH;
   }
+
+  /**
+   * 聊天记录**一次铺多少条**，以及这次已经铺到多少条。
+   *
+   * 用户 2026-09-30 报的：在导航栏点一个没选中的会话，切过去很慢。查下来不是网络、
+   * 也不是服务端取数（本机实测那三个接口 168 / 36 / 107 毫秒），而是这一页**一次把
+   * 推上来的 200 条记录全铺出来**。这 200 条本来就已经在页面手里了——所以「往上多放
+   * 一点」是个纯本地动作，不用再问服务端，也该是瞬时的。
+   *
+   * 40 这个数：一屏通常放得下三到五段长回答，40 条够铺六七屏；首屏只干五分之一的活，
+   * 而往上翻的人一次也就看一屏，翻不到边界。
+   */
+  var CHAT_PAGE = 40;
+  var chatWindow = CHAT_PAGE;   // 从最新那条往回数，这次铺了多少条
+  var chatWindowFor = null;     // 上面这个数是哪个会话的（换会话要收回首屏，见 renderChat）
+  var chatLoaded = 0;           // 本地一共有多少条可铺（滤掉排队那条之后），由 renderChat 记
+  var chatGrowArmed = true;     // 这一轮靠近顶部已经放过一屏没有（见 maybeGrowChat）
 
   function renderChat() {
     mainEl.classList.remove('center');
+    // 换了会话就把窗口收回首屏：上一个会话铺到多少条都不该跟过来——那正是这次要修的慢。
+    // 判据用会话 id 而不是 history 的引用：服务端每次推的都是整份新数组，比引用永远「变了」。
+    if (chatWindowFor !== state.boundSessionId) {
+      chatWindowFor = state.boundSessionId;
+      chatWindow = CHAT_PAGE;
+    }
     // **还在排队的那条不算「已发出」，这里要把它从聊天记录里滤掉。**
     //
     // 用户 2026-09-22 实机提的：「排队的指令在轮到之前不该出现在指令气泡里，
@@ -2155,6 +2192,9 @@
     var list = (state.history || []).filter(function (m) {
       return !(m.role === 'user' && m.id && queuedIds[m.id]);
     });
+    // 先记「本地一共有多少条」再分支：下面那条「还没有对话记录」的路也要把数记成 0，
+    // 不然中途清空一次（服务端正在重读）会留着一个旧的条数，让 maybeGrowChat 白忙一场。
+    chatLoaded = list.length;
     if (!list.length && !state.running && !state.live && !(state.queued || []).length) {
       // 「正在读」和「确实没有」是两件事，分开说。点开一个插件没看过的会话时，
       // 服务端要去 DSH 的会话记录里读它那一段（最大的那条 20 MB、约半秒），
@@ -2164,6 +2204,10 @@
         : '<div class="placeholder">还没有对话记录。</div>';
       return;
     }
+    // **只铺最近那几十条**，剩下的留在手里等用户往上滑（来由见 CHAT_PAGE 那段）。
+    // 切在**滤掉排队那条之后**：不然被滤掉的那条会白占一个名额。
+    var older = Math.max(0, chatLoaded - chatWindow);
+    if (older) list = list.slice(older);
     var html = list.map(function (m) {
       // 指令行：这是会话做的一个动作，不是谁说的话，单独一种长相——
       // 不套气泡、不给复制按钮（见 commandBlock 的说明）。
@@ -2188,6 +2232,12 @@
         + '<div class="reply-foot">' + copyBtn
         + '<span class="time">' + timeLabel(m.timestamp) + '</span></div></div>';
     }).join('');
+    // 「上面还有，往上滑」要贴在**看得到的顶上**（样子和道理见 .more-note 的样式注释）。
+    // 它和下面那条截断提示说的不是一件事：那条说「到这儿就是最早的了」，
+    // 这条说「还能往上，本地就有」——所以放完了它就该消失，不留一句空话。
+    var moreNote = older
+      ? '<div class="more-note">往上滑看更早的</div>'
+      : '';
     // 「这不是全部」要说在**内容前面**：用户往上翻到顶时，第一眼看到的就是它，
     // 免得以为这个会话只有这么点内容。读历史有上限（见服务端 HISTORY_MAX_*）。
     if (state.historyTruncated) {
@@ -2200,8 +2250,50 @@
     if (state.live) html += liveBlock(state.live);
     // 先问「在不在底部」，再改内容——顺序反了永远是「在」（见 atBottom 的注释）。
     var stick = atBottom();
-    replyEl.innerHTML = html;
+    replyEl.innerHTML = moreNote + html;
     scrollChat(stick);
+  }
+
+  /**
+   * 往上滑到接近顶部，就再放一屏出来。
+   *
+   * 判据是「离顶部一屏的四分之一以内」，不要求真滑到 0：手机上惯性滚动会滑过头，
+   * 卡在 0 反而要等一次回弹才触发。60 是下限（矮屏上四分之一太小，拇指一带就滑过），
+   * 160 是上限（高屏上别放得太早，太早等于提前干了下一屏的活）。
+   */
+  function maybeGrowChat() {
+    // 单帧模式那边也在往 main 上滚（回答落定要跳到页面顶端），别把那一下当成「他在往上翻」；
+    // 本地都放完了也没什么可放的。
+    if (state.mode !== 'chat' || chatLoaded <= 0) return;
+    if (chatWindow >= chatLoaded) return;
+    var edge = Math.min(160, Math.max(60, (mainEl.clientHeight || 0) / 4));
+    if (mainEl.scrollTop > edge) {
+      // 滑下来了，这一轮重新装填：**一次靠近只放一屏**。
+      // 不装填的话，万一位置校正没顶住（iOS 顶上那截橡皮筋会把人拽回 0），
+      // 一次手势就能把 200 条连着放完——那正好把这个改动白做了。
+      chatGrowArmed = true;
+      return;
+    }
+    if (!chatGrowArmed) return;
+    chatGrowArmed = false;
+    growChat();
+  }
+
+  /**
+   * 往前多放一屏。纯本地动作：那些记录本来就在页面手里，不再问服务端。
+   *
+   * **放完必须立刻把位置校回来**，这是整件事最容易做坏的一步：往前面插内容，
+   * 浏览器不会替你补偿，用户正看着的那一屏会被整个推下去一屏。
+   *
+   * 补偿用「离底部多远」：这次加的东西全在顶上，底部那一截一个字没动，
+   * 所以只要这个距离不变，他眼前那几行就一格都不会走。别去量「原来那条消息」的
+   * 矩形来对齐——重画是整块换 innerHTML，那条消息已经不在文档里了，量不着。
+   */
+  function growChat() {
+    var fromBottom = mainEl.scrollHeight - mainEl.scrollTop;
+    chatWindow += CHAT_PAGE;
+    renderChat();
+    mainEl.scrollTop = mainEl.scrollHeight - fromBottom;
   }
 
   /**
@@ -3756,6 +3848,13 @@
     e.preventDefault();
     copyText(btn.getAttribute('data-copy') || '', btn);
   });
+
+  // 往上滑到接近顶部，就再放一屏（见 maybeGrowChat）。
+  // **这根线不能省**：逻辑写得再对，没挂上去就是「一点反应都没有」，
+  // 而这种坏光看代码是看不出来的。
+  // 位置也有讲究：绑在这里，不绑在 atBottom 那片函数旁边——页面测试会把那一段
+  // 整块抠出来求值，测试里的假 mainEl 没有 addEventListener，写在那边好几个测试当场报错。
+  mainEl.addEventListener('scroll', maybeGrowChat);
 
   // ---------------- 启动 ----------------
   syncSeg();
