@@ -2886,6 +2886,15 @@ test('上下文用量：缺一半就不说，超过窗口按 100% 显示', () =>
   assert.equal(contextLabelOf(-5, 200000), '', '负数当没有')
 })
 
+test('上下文用量：页面上是从接口的 context 字段取，再交给 contextLabel 说人话', () => {
+  // 这条钉的是**接线**（服务端给 `context: {used, window}`，页面得真去读它、真拼进顶栏）。
+  // 用户 2026-09-28 报「看不到这个数字」时，页面这段其实是好的，断在服务端取数上；
+  // 但接线本身也该有断言看守，不然哪天被改断了没人知道。
+  assert.match(html, /contextUsage = d\.context \|\| null/, '页面要说得出这份数从接口的哪个字段来')
+  assert.match(html, /contextLabel\(contextUsage && contextUsage\.used, contextUsage && contextUsage\.window\)/,
+    '取到的两半要原样交给那个纯函数，别在中间自己算一个')
+})
+
 test('排队框的叉号：要从被点的元素往上找按钮，不能直接读 e.target', () => {
   // 用户 2026-09-28 实机报「排队框的 ✗ 点了没反应」。成因不在接口，在接线：
   // ✗ 是按钮里的 SVG 图形，手指落上去 e.target 就是图形本身，直接读它身上的

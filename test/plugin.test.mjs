@@ -2161,3 +2161,72 @@ test('上下文用量：窗口来自 request/context，分子把缓存读缓存�
   feed(other, ev('assistant/message', { turn: 1, step: 1, usage: { inputTokens: 500 }, message: { content: text('喂') } }))
   assert.equal(ctxOf(await readState(), 'sess-nowin'), null, '缺分母就别写，宁可空着')
 })
+
+test('上下文用量：插件起来晚了，分母要从会话自己折叠的那份补上', async (t) => {
+  // 用户 2026-09-28 报「手机上看不到上下文用量」。根因不在页面上：`request/context`
+  // 这条事件一个会话**只写一次**（DSH 只在路由变了时才写，本机实测两千多步的会话
+  // 也只有一条），就在会话第一次发请求那一刻。插件要是晚一步起来，那条早进日志了，
+  // 光等事件的分母永远是空的 → 分子分母凑不齐 → 页面上那句就永远不出现。
+  //
+  // 所以分母还有第二条来源：`session.requestContext()`（DSH 把日志里最后那条
+  // request/context 折叠在会话对象上，重启也在）。这条用例就是钉住它：
+  // **一条 request/context 都不发**，照样要有数。
+  const p = await bootPlugin()
+  t.after(p.stop)
+
+  const feed = p.handlers.get('session/event')
+  const readState = async () => (await fetch(`${p.base}/mini/api/state?token=${p.token}`)).json()
+  const ctxOf = (state, id) => (state.sessions || []).find((s) => s.id === id)?.context ?? null
+
+  const late = {
+    id: 'sess-late',
+    header: { id: 'sess-late' },
+    requestContext: () => ({ provider: 'deepseek', model: 'm', contextWindow: 200000 }),
+  }
+  feed(late, ev('assistant/message', {
+    turn: 1, step: 1,
+    usage: { inputTokens: 1000, cacheReadTokens: 40000, cacheWriteTokens: 2000 },
+    message: { content: text('好') },
+  }))
+  assert.deepEqual(ctxOf(await readState(), 'sess-late'), { used: 43000, window: 200000 },
+    '没等到 request/context 也要有数：分母问会话自己要，且缓存读写一起算')
+
+  // 会话对象上没有这条折叠（老接口、假会话）时，仍旧不许编。
+  const noFold = { id: 'sess-nofold', header: { id: 'sess-nofold' }, requestContext: () => undefined }
+  feed(noFold, ev('assistant/message', { turn: 1, step: 1, usage: { inputTokens: 500 }, message: { content: text('喂') } }))
+  assert.equal(ctxOf(await readState(), 'sess-nofold'), null, '折叠里没有窗口就还是没有，别拿别的数顶上')
+})
+
+test('上下文用量：内存里没有就问日志要一份（插件起来晚了也有数可看）', async (t) => {
+  // 上一条修的是「会话正在跑」时的那条路。这一条修的是「会话还没跑、手机已经在看」：
+  // /mini/api/models 是手机每 15 秒问一次的接口，插件刚起来时内存里空着，
+  // 得能从 DSH 的会话记录里翻出**同样真实**的一份（最后一条 request/context 是分母，
+  // 最后一次 usage 是分子），否则用户看到的还是空。
+  const logs = {
+    'sess-sleep': [
+      { ...ev('request/context', { provider: 'deepseek', model: 'm', contextWindow: 262144 }), seq: 1 },
+      { ...ev('user/message', { source: { kind: 'user' }, content: text('干活') }), seq: 2 },
+      { ...ev('assistant/message', {
+        turn: 1, step: 1,
+        usage: { inputTokens: 2000, cacheReadTokens: 60000 },
+        message: { content: text('好') },
+      }), seq: 3 },
+    ],
+    'sess-half': [
+      // 只有 usage、没有窗口：缺一半 → 一个字都不给
+      { ...ev('assistant/message', { turn: 1, step: 1, usage: { inputTokens: 800 }, message: { content: text('喂') } }), seq: 1 },
+    ],
+  }
+  const sessionController = { modelCatalog: async () => ({ groups: [] }) }
+  const p = await bootPlugin({ sessionQuery: fakeQuery(logs), sessionController })
+  t.after(p.stop)
+
+  const models = async () => (await fetch(`${p.base}/mini/api/models?token=${p.token}`)).json()
+
+  await bindSession(p, 'sess-sleep')
+  assert.deepEqual((await models()).context, { used: 62000, window: 262144 },
+    '日志里两半都齐就该给出来——这就是手机上要显示的那个数')
+
+  await bindSession(p, 'sess-half')
+  assert.equal((await models()).context, null, '只有分子没有分母时仍旧空着，不拿别的数凑')
+})
