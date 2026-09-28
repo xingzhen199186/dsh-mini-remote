@@ -11,6 +11,7 @@ import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync } from 
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createServer } from 'node:net'
+import { zstdCompressSync } from 'node:zlib'
 // 提问钩子要用的两个能力放在这里（模块级单例）——钩子的测试会临时替换它们，
 // 用完立刻还回去，免得串到别的用例上。
 import { miniControl } from '../lib/server.js'
@@ -1667,6 +1668,25 @@ async function bindSession(p, sessionId) {
   return res.json()
 }
 
+/**
+ * 把一串事件写成**盘上的会话日志**（拼接 zstd 帧，跟真机一个形状：每批一个帧）。
+ *
+ * 为什么测试需要它：切一个没选中的会话，读历史有两条路——盘上有日志就走自己那条窗口读
+ * （lib/log-tail.js），盘上没有才回退内核那条。前面那些用例用的是假会话记录服务，
+ * 等于只在测回退那条；有了这个函数才测得到日常那条。
+ */
+function writeSessionLog(home, sessionId, events) {
+  const dir = join(home, 'sessions', '--tmp-ws--', sessionId)
+  mkdirSync(dir, { recursive: true })
+  const frames = []
+  for (let i = 0; i < events.length; i += 5) {
+    frames.push(zstdCompressSync(Buffer.from(
+      events.slice(i, i + 5).map((e) => JSON.stringify(e)).join('\n') + '\n',
+    )))
+  }
+  writeFileSync(join(dir, 'session.v4.jsonl.zstd'), Buffer.concat(frames))
+}
+
 /** 等快照满足条件：读记录是后台动作，读完才广播新快照。 */
 async function waitSnap(p, ok, what) {
   for (let i = 0; i < 100; i += 1) {
@@ -1709,6 +1729,42 @@ test('点开一个没看过的会话：单帧模式显示最后一条最终回�
 
   assert.equal(snap.latest.text, '第二答', '单帧模式要的是最后那一条，不是最前面那条')
   assert.ok(snap.latest.timestamp > 0, '时间戳要带出来，手机上显示的是这个会话发生的时间')
+})
+
+test('点开一个睡着的会话：日志在盘上就自己读，不去惊动内核那条整份读', async (t) => {
+  // 假会话记录服务里一条日志都没有 → 只要它被叫到就会抛。所以 query.calls 为 0
+  // 这件事本身，就是「没有走内核 readSession」的证据。
+  const query = fakeQuery({})
+  const p = await bootPlugin({ sessionQuery: query })
+  t.after(p.stop)
+
+  writeSessionLog(p.home, 'sess-cold', logOf([['第一问', '第一答'], ['第二问', '第二答']]))
+  const res = await bindSession(p, 'sess-cold')
+
+  // 自己读那条是同步的（解压 + 重放，微秒到百毫秒级），所以 bind 的响应里就该带着历史，
+  // 不必再等一趟 SSE——这也是「手机上点一下就该看到」的一部分。
+  assert.deepEqual(res.state.history.map((m) => `${m.role}:${m.text}`), [
+    'user:第一问', 'assistant:第一答', 'user:第二问', 'assistant:第二答',
+  ], '盘上有日志就该把它读出来，内容一条不少')
+  assert.equal(query.calls.length, 0,
+    '盘上有日志时不许走内核那条整份读：实测它要先把全部会话列两遍（1.7–3.6 秒）')
+  assert.equal(res.state.historyLoading, false, '读完了就该是「读完了」，不能还挂在「正在读」')
+})
+
+test('小会话只是被条数上限截断时，不许对用户说「这个会话很大」', async (t) => {
+  const pairs = []
+  for (let i = 1; i <= 205; i += 1) pairs.push([`问${i}`, `答${i}`])
+  const p = await bootPlugin({ sessionQuery: fakeQuery({}) })
+  t.after(p.stop)
+
+  writeSessionLog(p.home, 'sess-long', logOf(pairs))
+  await bindSession(p, 'sess-long')
+  const snap = await waitSnap(p, (s) => s.history.length === 200, '截到上限那 200 条')
+
+  assert.equal(snap.historyTruncated, true, '少了就是少了，要如实说')
+  assert.ok(snap.historyNote.includes('读取上限'), '要告诉用户为什么不是全部')
+  assert.ok(!snap.historyNote.includes('很大'),
+    '窗口盖住了整份日志、只是条数到上限——这时候说「这个会话很大」是假话')
 })
 
 test('读记录的这一会儿，要告诉手机「正在读」，不能让它显示成空会话', async (t) => {

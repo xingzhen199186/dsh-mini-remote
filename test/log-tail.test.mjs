@@ -114,6 +114,9 @@ test('读尾部：窗口够大就是全部，且不谎报截断', () => {
     assert.equal(got.events[0].type, 'turn/start')
     // 整个文件都读到了、一条没丢，就不该对用户说「这不是全部」。
     assert.equal(got.truncated, false)
+    // 窗口盖住了整份。调用方靠这个字段决定「不是全部」那句话怎么说：
+    // 是「这个会话很大」，还是「聊天记录条数到上限了」——两者不能混。
+    assert.equal(got.whole, true, '整份都读到了就得说 whole，不能让人以为只读了尾部')
   })
 })
 
@@ -130,6 +133,8 @@ test('读尾部：窗口小就只给尾部那几帧，且是**最近**的', () =
     const lastTail = tailOnly.events[tailOnly.events.length - 1]
     assert.equal(lastTail.time, lastAll.time, '尾部读的末条必须是整个日志的末条')
     assert.equal(tailOnly.truncated, true)
+    assert.equal(tailOnly.whole, false, '窗口没盖住整份，这才是「这个会话很大」那一类')
+    assert.equal(all.whole, true, '同一个日志，窗口够大时就是整份')
   })
 })
 
