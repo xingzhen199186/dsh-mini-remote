@@ -4,6 +4,7 @@
 
 用法：
     python tools/whale-pair.py 第一帧.png 第二帧.png 拼接.png
+    python tools/whale-pair.py --anchor-head 第一帧.png 第二帧.png 拼接.png
     python tools/whale-sprite.py 拼接.png lib/art/work-2-reading.webp
 
 为什么要多这一道：过去是**一张图里画两格**，模型两格各画一遍，于是图案、条纹、
@@ -14,6 +15,15 @@
 
 拼的时候两帧**共用同一个缩放因子**（高的那张定到 TARGET_H，另一张按同比例），
 这样"第二帧的人忽然大了一圈"不可能发生；脚底对齐在同一个基线上。
+
+`--anchor-head`（2026-09-29 加，为"跑"那张会把头发甩到一侧的动作）：
+默认的横向落点是**把人物的外框居中**（外框＝非洋红像素的范围）。头发一甩到某一侧，
+外框就跟着往那一侧长，人物本身反被挤到另一侧——两帧各甩一边时，同一张脸在两帧里
+会横向挪开。实测"跑"的旧版是 65 像素、候选版 73 像素（其他八张基准帧 ≤4，只有按设计
+前倾的冲刺是 22），播起来就是整个角色左右跳。这个开关改成**把头部居中**：
+取外框上 45% 那段里肤色像素的中位 x（脸），两帧都把它对到格子中线上。
+九张冻结基准帧量下来这个锚点两帧相差 0～1 像素（冲刺那种真前倾是 22），足够稳；
+认不出肤色时打一行提示、退回原来的外框居中，不猜。
 """
 import sys
 
@@ -71,11 +81,36 @@ def alpha_box(img):
     return (x0, y0, x1 + 1, y1 + 1)
 
 
+def head_anchor(img, box):
+    """脸（肤色）的横向中位数 x——`--anchor-head` 用的落点参照。
+
+    只在外框上 45% 里找：Q 版角色的头占上半身一大截，而手臂和拳头在更下面，
+    把它们算进来会把锚点往握拳那一侧拽。取中位数而不是平均数，几个散点不影响它。
+    认不出来返回 None，由调用方决定退路。
+    """
+    px = img.load()
+    y1 = box[1] + int((box[3] - box[1]) * 0.45)
+    xs = []
+    for y in range(box[1], y1):
+        for x in range(box[0], box[2]):
+            r, g, b = px[x, y]
+            if r > 205 and g > 165 and b > 150 and (r - b) > 18 and (r - g) < 70:
+                xs.append(x)
+    if not xs:
+        return None
+    xs.sort()
+    return xs[len(xs) // 2]
+
+
 def main():
-    if len(sys.argv) < 4:
-        print('用法：python tools/whale-pair.py 第一帧 第二帧 输出.png')
+    argv = sys.argv[1:]
+    anchor_head = '--anchor-head' in argv
+    if anchor_head:
+        argv = [a for a in argv if a != '--anchor-head']
+    if len(argv) < 3:
+        print('用法：python tools/whale-pair.py [--anchor-head] 第一帧 第二帧 输出.png')
         return 2
-    paths = sys.argv[1:3]
+    paths = argv[:2]
     imgs = [Image.open(p).convert('RGB') for p in paths]
 
     for p, im in zip(paths, imgs):
@@ -94,6 +129,10 @@ def main():
             print(f'  ✗ {p} 里找不到人物（整张都是洋红）')
             return 1
 
+    anchors = [head_anchor(im, b) if anchor_head else None for im, b in zip(imgs, boxes)]
+    if anchor_head and None in anchors:
+        print('  ! 有一张认不出脸（肤色像素一片都没有），这一张退回外框居中')
+
     tallest = max(b[3] - b[1] for b in boxes)
     scale = TARGET_H / float(tallest)
     for p, b in zip(paths, boxes):
@@ -109,11 +148,18 @@ def main():
         if w > PANEL - MARGIN * 2:
             print(f'  ✗ 第 {i + 1} 帧缩放后宽 {w} 顶到了格子边，重出（姿势别张这么开）')
             return 1
-        out.paste(cut, (i * PANEL + (PANEL - w) // 2, BASE - h))
+        if anchors[i] is None:
+            left = i * PANEL + (PANEL - w) // 2
+        else:
+            # 让脸落在这一格的中线上：脸在外框里偏左/偏右多少，落点就补回多少。
+            left = i * PANEL + PANEL // 2 - int(round((anchors[i] - b[0]) * scale))
+            print(f'  第 {i + 1} 帧按脸对齐：脸在外框里偏 {anchors[i] - b[0]:+d} 像素（源图），'
+                  f'落点 x={left}（格中线 {i * PANEL + PANEL // 2}）')
+        out.paste(cut, (left, BASE - h))
 
-    out.save(sys.argv[3], 'PNG')
-    print(f'  ✓ {sys.argv[3]}（{out.size[0]}×{out.size[1]}，两帧共用缩放 {scale:.3f}）')
-    print('    下一步：python tools/whale-sprite.py ' + sys.argv[3] + ' 输出.webp')
+    out.save(argv[2], 'PNG')
+    print(f'  ✓ {argv[2]}（{out.size[0]}×{out.size[1]}，两帧共用缩放 {scale:.3f}）')
+    print('    下一步：python tools/whale-sprite.py ' + argv[2] + ' 输出.webp')
     return 0
 
 
