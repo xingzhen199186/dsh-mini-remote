@@ -26,6 +26,8 @@ const md = new Function(html.slice(start, end)
   // 所以这里补一个桩。测试关心的是「名字 → /mini/art/<名字>.webp」这个形状，
   // 不关心 token 的实际取值。若哪天 artUrl 被挪进切片，重复声明也是合法的。
   + '\nfunction artUrl(f) { return "/mini/art/" + f + ".webp?token=TEST"; }'
+  // 写路径那种图片地址会带上 token（imageSrc 里读 state.token），给个桩就够。
+  + '\nvar state = { token: "TEST" };'
   + '\nreturn { escapeHtml, mdInline, mdToHtml, ICON_COPY, ICON_DONE };')()
 
 /**
@@ -267,6 +269,18 @@ test('图片：本机名字和外链都认，且不给注入留口子', () => {
     /<img class="md-img" src="\/mini\/art\/out-demo\.webp\?token=/)
   assert.match(md.mdToHtml('![深色](out-demo.webp)'),
     /src="\/mini\/art\/out-demo\.webp\?token=/)
+  // ①b 写成 lib/art/out-demo.webp 这种带前缀的也认——2026-09-28 助手在正文里就是这么写的，
+  //    手机上成了破图标，用户第三次为此来问。写法不该这么脆。
+  assert.match(md.mdToHtml('![深色](lib/art/out-demo.webp)'),
+    /src="\/mini\/art\/out-demo\.webp\?token=/)
+  assert.match(md.mdToHtml('![深色](./lib/art/out-demo.webp)'),
+    /src="\/mini\/art\/out-demo\.webp\?token=/)
+  // ①c 直接写一张图在电脑上的位置（相对项目根，或者 Windows 绝对路径）→ 走 ?p=，
+  //    PNG/JPG 也行，不要求先把图拷进 lib/art。
+  assert.match(md.mdToHtml('![截图](dsh-image-gen/a.png)'),
+    /src="\/mini\/art\/\?p=dsh-image-gen%2Fa\.png&token=TEST"/)
+  assert.match(md.mdToHtml('![截图](C:\\Users\\me\\shot.png)'),
+    /src="\/mini\/art\/\?p=C%3A%5CUsers%5Cme%5Cshot\.png&token=TEST"/)
   // ② 完整 http(s) 链接原样用，手机直接去那个网站取。
   assert.match(md.mdToHtml('![图](https://a.example/x.png)'),
     /src="https:\/\/a\.example\/x\.png"/)

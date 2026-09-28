@@ -1175,6 +1175,24 @@
   // 认不出来的语法原样留着：宁可少渲染，不能吃掉内容。
   var CODE_SLOT = '\u0000';
 
+  /**
+   * 正文里的图片地址 → 真正去取的地址。三种写法见下面 mdInline 那段注释。
+   *
+   * 判据只有一条：**不是 http(s) 就走同源**。所以 `javascript:`、`data:` 这类
+   * 永远不会出现在 src 里；认不出的地址最多是取回来 404，不会变成别的东西。
+   *
+   * 放在这里而不是立绘那一段（artUrl 旁边）：页面测试是从 escapeHtml 抠到复制按钮
+   * 那一小段的，放外面就测不到真代码了。
+   */
+  function imageSrc(src) {
+    if (/^https?:\/\//i.test(src)) return src;
+    var name = src.replace(/\\/g, '/').replace(/^\.\//, '');
+    if (/^lib\/art\//i.test(name)) name = name.slice(8);
+    if (/^[a-z0-9-]+(\.webp)?$/i.test(name)) return artUrl(name.replace(/(\.webp)?$/i, ''));
+    return '/mini/art/?p=' + encodeURIComponent(src)
+      + '&token=' + encodeURIComponent(state.token);
+  }
+
   function mdInline(raw) {
     // 行内代码先挖出来换成占位符。不这么做的话，`**x**` 这种字面量
     // 会被后面的粗体规则吃掉，代码里写的东西就显示错了。
@@ -1184,16 +1202,18 @@
       return CODE_SLOT + (codes.length - 1) + CODE_SLOT;
     });
     out = out
-      // 图片：![说明](地址)。地址两种写法——
+      // 图片：![说明](地址)。地址三种写法，判断在 imageSrc 里——
       //   ① 完整 http(s) 链接：原样用，手机直接去那个网站取图；
-      //   ② 一个名字：走本机的图片通道 /mini/art/<名字>.webp，跟立绘同一条路、
-      //      同一样要密码，也只认 lib/art/ 下「小写字母数字连字符 + .webp」的文件名。
-      //      想让手机看到电脑上的图，把图放进 lib/art/、名字以 out- 开头即可。
+      //   ② 一个名字（如 out-demo，`.webp` 可带可不带）：走立绘通道 /mini/art/<名字>.webp，
+      //      只认 lib/art/ 下「小写字母数字连字符 + .webp」的文件名；写成
+      //      `lib/art/out-demo.webp` 这样带前缀的也认（2026-09-28 助手这么写过，手机上成了破图标）；
+      //   ③ 电脑上一张图的位置（绝对路径，或相对项目根）：走 /mini/art/?p=…，PNG/JPG/WEBP/GIF 都行，
+      //      不要求先拷进 lib/art。
+      // 三者之外的一律按 ③ 拼成同源路径，所以 `javascript:`、`data:` 这类进不了 src。
       // 必须排在下面那条链接规则前面：否则 `![x](y)` 里的 `[x](y)` 会先被链接规则
       // 吃掉，只剩下一个光秃秃的感叹号。
       .replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, function (_, alt, src) {
-        var url = /^https?:\/\//.test(src) ? src : artUrl(src.replace(/\.webp$/, ''));
-        return '<img class="md-img" src="' + url + '" alt="' + alt + '"'
+        return '<img class="md-img" src="' + imageSrc(src) + '" alt="' + alt + '"'
           + ' loading="lazy" referrerpolicy="no-referrer">';
       })
       .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
@@ -1364,9 +1384,9 @@
   /**
    * 图片没加载出来时要说一声。
    *
-   * 手机页只认两种图片地址：完整的 http(s) 网址，或者一个裸名字（页面拼成
-   * /mini/art/<名字>.webp）。写成 Windows 路径、或者 lib/art 里没有这个文件，浏览器只会
-   * 画一个破图标——用户看到的是"图没了"，却不知道原因（2026-09-28 他两次因为这个来问）。
+   * 手机页认三种图片地址：完整的 http(s) 网址、一个裸名字（页面拼成 /mini/art/<名字>.webp），
+   * 或者一张图在电脑上的路径（绝对路径或相对项目根）。三种都认不出来、或者那个文件根本不在，
+   * 浏览器只会画一个破图标——用户看到的是"图没了"，却不知道原因（2026-09-28 他为此来过三次）。
    *
    * 为什么挂**捕获**阶段：图片的 error 事件不冒泡，挂冒泡阶段一个也收不到。
    */
@@ -1374,7 +1394,7 @@
     var el = e.target
     if (!el || el.tagName !== 'IMG' || !el.classList || !el.classList.contains('md-img')) return
     el.classList.add('md-img-bad')
-    toast('这张图手机看不到：地址不在白名单里——要么写完整网址，要么把图放进 lib/art 并以 out- 开头')
+    toast('这张图手机看不到：那个位置没有这张图，或者它不是 PNG/JPG/WEBP/GIF')
   }, true)
 
   function toast(msg) {

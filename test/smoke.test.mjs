@@ -7,7 +7,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
-import { mkdtempSync, writeFileSync, readFileSync, readdirSync, existsSync } from 'node:fs'
+import { mkdtempSync, writeFileSync, readFileSync, readdirSync, existsSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createHash } from 'node:crypto'
@@ -331,6 +331,40 @@ test('立绘路径穿越和非法文件名一律 404', async (t) => {
   const artDir = fileURLToPath(new URL('../lib/art/', import.meta.url))
   assert.ok(existsSync(join(artDir, '../../package.json')),
     '参照文件不存在了，路径穿越测试失去了意义，要重新挑一个靶子')
+})
+
+test('正文里直接写路径的图也发得出去，但只发图片类型', async (t) => {
+  const { server, base, token } = await startTestServer()
+  t.after(() => server.close())
+
+  // 造一张真 PNG 放在项目之外——这正是 ?p= 这条路要解决的场景：图不必先拷进 lib/art。
+  const dir = mkdtempSync(join(tmpdir(), 'mini-shot-'))
+  const shot = join(dir, 'shot.png')
+  const png = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg==',
+    'base64')
+  writeFileSync(shot, png)
+  t.after(() => rmSync(dir, { recursive: true, force: true }))
+
+  const ok = await fetch(`${base}/mini/art/?p=${encodeURIComponent(shot)}&token=${token}`)
+  assert.equal(ok.status, 200, '一张真图不该被拒绝')
+  assert.equal(ok.headers.get('content-type'), 'image/png')
+  assert.equal((await ok.arrayBuffer()).byteLength, png.length)
+
+  // 相对项目根的写法也认（正文里写 dsh-image-gen/a.png、lib/art/x.webp 这种）。
+  const rel = await fetch(`${base}/mini/art/?p=${encodeURIComponent('lib/art/work-1-ready.webp')}&token=${token}`)
+  assert.equal(rel.status, 200)
+  assert.equal(rel.headers.get('content-type'), 'image/webp')
+
+  // 不是图片的一律不发——这条通道不能变成读文件的口子（扩展名是唯一的闸门，所以要真测）。
+  for (const bad of ['package.json', 'lib/art/../package.json', 'nope.png', 'lib/art/page.html']) {
+    const res = await fetch(`${base}/mini/art/?p=${encodeURIComponent(bad)}&token=${token}`)
+    assert.equal(res.status, 404, `「${bad}」不该被发出去`)
+  }
+
+  // 没有 token 一样挡住。
+  const anon = await fetch(`${base}/mini/art/?p=${encodeURIComponent(shot)}`)
+  assert.equal(anon.status, 401)
 })
 
 test('立绘也算进构建指纹（换了图，手机就该拿到新的）', () => {
