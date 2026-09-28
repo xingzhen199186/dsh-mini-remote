@@ -3816,7 +3816,7 @@
       if (!(used > 0) || !(capacity > 0)) return ''
       var pct = Math.round(used / capacity * 100)
       if (pct > 100) pct = 100
-      return '上下文 ' + pct + '%'
+      return '上下文已用 ' + pct + '%'
     }
 
     function sel() { return pending || current || null }
