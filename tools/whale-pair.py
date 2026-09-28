@@ -135,6 +135,24 @@ def main():
 
     tallest = max(b[3] - b[1] for b in boxes)
     scale = TARGET_H / float(tallest)
+
+    # 按脸对齐时，两帧的头发各甩一边，落点又被钉在同一处，于是"最长的左半 + 最长的右半"
+    # 可能比一格还宽。PIL 的 paste 出界是**静默裁掉**（2026-09-29 冲刺那版就这么被削平了
+    # 一条边才发现），所以这里先算清楚：放不下就整体缩小（成图高度由 whale-sprite 统一
+    # 定到 310，这里的缩放只影响中间图，不影响最终尺寸），并把落点从格中线挪到恰好容得下。
+    anchor_x = PANEL // 2
+    if anchor_head and None not in anchors:
+        left_ext = max(a - b[0] for a, b in zip(anchors, boxes))
+        right_ext = max(b[2] - a for a, b in zip(anchors, boxes))
+        fit = (PANEL - MARGIN * 2) / float(left_ext + right_ext)
+        if fit < scale:
+            print(f'  ! 按脸对齐后头发比一格还宽（需要 {int((left_ext + right_ext) * scale)} 像素，'
+                  f'一格只有 {PANEL - MARGIN * 2}）：缩放从 {scale:.3f} 降到 {fit:.3f}，'
+                  f'成图高度不受影响')
+            scale = fit
+        anchor_x = min(max(anchor_x, MARGIN + int(round(left_ext * scale))),
+                       PANEL - MARGIN - int(round(right_ext * scale)))
+
     for p, b in zip(paths, boxes):
         print(f'  {p}：人物 {b[2] - b[0]}×{b[3] - b[1]} → 缩放 {scale:.3f} 后 '
               f'{int(round((b[2] - b[0]) * scale))}×{int(round((b[3] - b[1]) * scale))}')
@@ -151,10 +169,13 @@ def main():
         if anchors[i] is None:
             left = i * PANEL + (PANEL - w) // 2
         else:
-            # 让脸落在这一格的中线上：脸在外框里偏左/偏右多少，落点就补回多少。
-            left = i * PANEL + PANEL // 2 - int(round((anchors[i] - b[0]) * scale))
+            # 让两帧的脸落在**同一处** anchor_x：脸在外框里偏左/偏右多少，落点就补回多少。
+            left = i * PANEL + anchor_x - int(round((anchors[i] - b[0]) * scale))
             print(f'  第 {i + 1} 帧按脸对齐：脸在外框里偏 {anchors[i] - b[0]:+d} 像素（源图），'
-                  f'落点 x={left}（格中线 {i * PANEL + PANEL // 2}）')
+                  f'落点 x={left}（两帧的脸都对在格内 x={anchor_x}）')
+            if left < i * PANEL or left + w > (i + 1) * PANEL:
+                print(f'  ✗ 第 {i + 1} 帧对齐后仍顶出格子（{left}~{left + w}），重出（头发再收一点）')
+                return 1
         out.paste(cut, (left, BASE - h))
 
     out.save(argv[2], 'PNG')

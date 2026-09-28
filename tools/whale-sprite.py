@@ -138,7 +138,7 @@ def count_diff_below(a, b, y):
 
 def main():
     if len(sys.argv) < 3:
-        print('用法：python tools/whale-sprite.py 生成图 输出.webp [--freeze-below 行号]')
+        print('用法：python tools/whale-sprite.py 生成图 输出.webp [--freeze-below 行号] [--dx2 像素]')
         return 2
     src_path, out_path = sys.argv[1], sys.argv[2]
     freeze_y = None
@@ -148,6 +148,17 @@ def main():
             print('  ✗ --freeze-below 后面要跟一个行号')
             return 2
         freeze_y = int(sys.argv[i + 1])
+    # 第 2 帧整体横移多少像素（正数=往右）。给"基准帧本来就两帧站位不同"的动作复现站位用：
+    # 冲刺的基准帧第 2 帧整个人比第 1 帧靠左 22 像素（按脸对齐会把这个差抹平，等于偷偷改了
+    # 站位）。默认 0 = 两帧完全对齐。
+    dx2 = 0
+    if '--dx2' in sys.argv:
+        i = sys.argv.index('--dx2')
+        v = sys.argv[i + 1] if i + 1 < len(sys.argv) else ''
+        if not v.lstrip('-').isdigit():
+            print('  ✗ --dx2 后面要跟一个整数像素数（正数=第 2 帧往右挪）')
+            return 2
+        dx2 = int(v)
 
     src = Image.open(src_path)
     w, h = src.size
@@ -205,7 +216,10 @@ def main():
     # 合成放在对齐之后：否则冻的是散帧，写出去的还是旧像素。
     out = Image.new('RGBA', (PANEL_W * 2, PANEL_H), (0, 0, 0, 0))
     for i, cut in enumerate(frames):
-        out.alpha_composite(cut, (int(round(i * PANEL_W + cx - fw / 2.0)), bottom - fh))
+        dx = dx2 if i == 1 else 0
+        out.alpha_composite(cut, (int(round(i * PANEL_W + cx - fw / 2.0)) + dx, bottom - fh))
+    if dx2:
+        print(f'  第 2 帧整体横移 {dx2:+d} 像素（复现基准帧两帧之间本来就有的站位差）')
 
     for i, f in enumerate(frames):
         bb = f.getchannel('A').getbbox()
