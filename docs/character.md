@@ -14,7 +14,8 @@
 | 眼睛 | 大而圆，蓝色；张嘴笑 |
 | 领子 | **白色水手领**，边缘两道细藏青条纹，领口系一条藏青领结 |
 | 袖子 | **白色长袖**，袖口宝蓝色滚边（两道细条纹） |
-| 连衣裙 | 宝蓝色水手连衣裙；腰部一条细白线，裙摆白色百褶，**前左侧一枚白色鲸鱼尾图案** |
+| 上衣 | **白色**水手衬衫——从领口到腰、连同后背**都是白的**，不是宝蓝马甲；领口系一条宝蓝色缎带蝴蝶结 |
+| 裙子 | 宝蓝色百褶裙，腰上一道宝蓝腰带压着一条细白线，**前左侧一枚白色鲸鱼尾图案** |
 | 袜子 | 白色及膝袜，袜口一道细蓝条纹 |
 | 鞋 | 蓝色小皮鞋，白鞋底、细白鞋带，**鞋上没有蝴蝶结** |
 
@@ -52,12 +53,14 @@ framing her face, a blue whale-tail shaped bow ornament centered on top of her h
 whale-tail hair clip on the right side of her hair.
 
 Her outfit is identical in both panels and must not be altered:
-a royal-blue sailor dress; a WHITE sailor collar with two thin navy stripes along its edge and a small
-navy-blue ribbon tied at the front of the collar; LONG white sleeves with royal-blue cuff trim (two thin
-stripes at each wrist); a royal-blue pleated skirt with a thin white waistband line and one white
-whale-tail emblem printed on the front-left of the skirt; white knee-high socks with a single thin blue
+a WHITE sailor blouse (the entire upper garment — chest, shoulders and back, from the collar down to the
+waist — is WHITE, not blue); a WHITE sailor collar with two thin navy stripes along its edge; a royal-blue
+ribbon bow tied at the front of the collar, and the bow stays royal blue; LONG white sleeves with royal-blue
+cuff trim (two thin stripes at each wrist); a royal-blue waistband above a royal-blue pleated skirt, with one
+white whale-tail emblem printed on the lower-left of the skirt (on the left-hand side as we look at the image);
+white knee-high socks with a single thin blue
 stripe at the top; small blue shoes with white soles and a thin white strap, and no bow on the shoes.
-NO frills, NO lace, NO puffed sleeves, NO white apron, NO large white bow on the chest.
+NO blue bodice, NO blue vest, NO blue pinafore over the chest, NO frills, NO lace, NO puffed sleeves, NO white apron, NO large white bow on the chest.
 
 The ONLY difference between the two panels is the arm on the left-hand side as we look at her:
 - Panel 1 (left): that arm is raised high beside her head, palm open, waving hello;
@@ -79,11 +82,12 @@ no speech bubbles, no signature, no frame numbers, no dividing line between the 
 张嘴笑；很长的冰蓝色（浅银蓝，发根深一点、发尾浅一点）波浪发，过腰，两侧长发丝贴着脸；
 **头顶正上方一枚鲸鱼尾形状的结**，右侧一枚小的鲸鱼尾发夹。
 
-她的衣服两格完全一样，不许改：宝蓝色水手连衣裙；**白色水手领**，边缘两道细藏青条纹，
-领口系一条小藏青领结；**白色长袖**，袖口宝蓝滚边（每只手腕两道细条纹）；宝蓝色百褶裙，
+她的衣服两格完全一样，不许改：**白色水手衬衫**（从领口到腰、连同后背都是白的，不是宝蓝马甲）；
+**白色水手领**，边缘两道细藏青条纹，领口系一条宝蓝色缎带蝴蝶结；**白色长袖**，袖口宝蓝滚边
+（每只手腕两道细条纹）；宝蓝色百褶裙，
 腰部一条细白线，**裙摆前左侧一枚白色鲸鱼尾图案**；白色及膝袜，袜口一道细蓝条纹；
 蓝色小皮鞋，白鞋底、细白鞋带，**鞋上没有蝴蝶结**。
-**不要**褶边、不要蕾丝、不要泡泡袖、不要白围裙、不要胸前的大白蝴蝶结。
+**不要**宝蓝色的上衣（马甲式前襟）、不要褶边、不要蕾丝、不要泡泡袖、不要白围裙、不要胸前的大白蝴蝶结。
 
 两格**唯一的差别**是"我们看过去在她左手边"的那只手臂：
 - 左格：那只手举在头侧，手掌摊开，在挥手打招呼；
@@ -96,7 +100,9 @@ no speech bubbles, no signature, no frame numbers, no dividing line between the 
 ## 四、尺寸与验收（出图后按这个量，不用肉眼下结论）
 
 - 一张图里并排两格；切图后合成 **760×330** 的 WebP（两帧并排，各 380×330），透明底。
-- 两帧"真的动过"的像素占比 **≥ 10%**（Pillow 量：灰度差 > 24 的像素比例）。
+- 两帧"真的动过"的像素占比 **≥ 5%**（Pillow 量：任一通道差 > 24 的像素比例）。这条线是量出来的，
+  不是拍的：其余八张实测 3.8%～18.1%，只动一条手臂的姿势本来就是这个量级。
+- 缩放之后要**再扫一遍洋红**：插值振铃会把边缘像素推到洋红附近（实测每帧扫掉 130 个左右）。
 - 人物高度 **310px**（±2%）；洋红抠底残留 **0**。
 - 切图脚本 `tools/whale-sprite.py`：两帧必须**共用**同一套裁切与缩放——分别按各自外框裁，
   两帧会差一两个像素，播起来整个角色在抖，比不动还难看（2026-09-21 已实测过这条）。
