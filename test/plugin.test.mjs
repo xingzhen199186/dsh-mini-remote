@@ -2133,3 +2133,31 @@ test('volatile 字段是现读的：引用一变就生效，且标准配置没�
   // notify 走的是同一个循环（liveConfig 按 Config 里标了 volatile 的字段统一接线），
   // 所以上面这一条就够证明这套接线是活的；换成整组对象也走同一条路。
 })
+
+test('上下文用量：窗口来自 request/context，分子把缓存读缓存写一起算上', async (t) => {
+  const p = await bootPlugin()
+  t.after(p.stop)
+
+  const feed = p.handlers.get('session/event')
+  const session = { id: 'sess-ctx', header: { id: 'sess-ctx' } }
+  const readState = async () => (await fetch(`${p.base}/mini/api/state?token=${p.token}`)).json()
+  const ctxOf = (state, id) => (state.sessions || []).find((s) => s.id === id)?.context ?? null
+
+  // 只报了窗口、还没跑过任何一步：用量还不知道，此时**不能**凭空给一个数
+  feed(session, ev('request/context', { provider: 'deepseek', model: 'm', contextWindow: 200000 }))
+  assert.equal(ctxOf(await readState(), 'sess-ctx'), null, '只知道窗口时宁可空着，也不编')
+
+  // 走一步：usage 的三块计数互不重叠，加起来才是这次请求的输入
+  feed(session, ev('assistant/message', {
+    turn: 1, step: 1,
+    usage: { inputTokens: 1000, outputTokens: 50, cacheReadTokens: 40000, cacheWriteTokens: 2000 },
+    message: { content: text('好') },
+  }))
+  assert.deepEqual(ctxOf(await readState(), 'sess-ctx'), { used: 43000, window: 200000 },
+    '缓存读、缓存写要一起算——少加一块，量出来的用量会偏小，越长的一轮偏得越多')
+
+  // 没走过 request/context 的会话没有分母，就不该有数
+  const other = { id: 'sess-nowin', header: { id: 'sess-nowin' } }
+  feed(other, ev('assistant/message', { turn: 1, step: 1, usage: { inputTokens: 500 }, message: { content: text('喂') } }))
+  assert.equal(ctxOf(await readState(), 'sess-nowin'), null, '缺分母就别写，宁可空着')
+})

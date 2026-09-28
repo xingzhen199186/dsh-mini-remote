@@ -2799,3 +2799,11 @@ test('排队框的叉号：要从被点的元素往上找按钮，不能直接�
   const code = block.replace(/\/\/[^\n]*/g, '')
   assert.ok(!/e\.target\.getAttribute\(\s*'data-drop'/.test(code), '不能直接读被点元素身上的编号')
 })
+test('图没加载出来要说一声：error 挂捕获阶段，只认正文图片', () => {
+  const at = html.indexOf("addEventListener('error'")
+  assert.ok(at > 0, '没有监听图片加载失败：手机页里写错图片地址时，用户只会看到一个破图标')
+  const block = html.slice(at, at + 900)
+  assert.match(block, /classList\.contains\('md-img'\)/, '只该管正文里的图片，别把别的加载失败也报出来')
+  assert.match(block, /,\s*true\)/, '图片的 error 不冒泡，挂在冒泡阶段一个也收不到')
+  assert.match(block, /toast\(/, '要让用户知道为什么看不到，而不是只画个破图标')
+})

@@ -172,6 +172,12 @@
   .md { white-space: normal; }
   /* 回复里的图。地址有两种写法，见下面 mdInline() 里那段注释。
      宽度只封顶不写死：窄屏上占满可用宽度、按比例缩，圆角沿用全站那 2 像素。 */
+  /* 图片没加载出来时的那一圈虚线。用中性灰，不动暖金——那是唯一的强调色，一屏最多两次。 */
+  .md-img-bad {
+    outline: 1px dashed rgba(0, 0, 0, .35);
+    outline-offset: 2px;
+  }
+
   .md-img {
     display: block; max-width: 100%; height: auto; margin: 10px 0;
     border-radius: var(--r); border: 1px solid var(--line); background: var(--panel-2);
@@ -1355,6 +1361,22 @@
     return p(d.getHours()) + ':' + p(d.getMinutes());
   }
   var toastTimer;
+  /**
+   * 图片没加载出来时要说一声。
+   *
+   * 手机页只认两种图片地址：完整的 http(s) 网址，或者一个裸名字（页面拼成
+   * /mini/art/<名字>.webp）。写成 Windows 路径、或者 lib/art 里没有这个文件，浏览器只会
+   * 画一个破图标——用户看到的是"图没了"，却不知道原因（2026-09-28 他两次因为这个来问）。
+   *
+   * 为什么挂**捕获**阶段：图片的 error 事件不冒泡，挂冒泡阶段一个也收不到。
+   */
+  document.addEventListener('error', function (e) {
+    var el = e.target
+    if (!el || el.tagName !== 'IMG' || !el.classList || !el.classList.contains('md-img')) return
+    el.classList.add('md-img-bad')
+    toast('这张图手机看不到：地址不在白名单里——要么写完整网址，要么把图放进 lib/art 并以 out- 开头')
+  }, true)
+
   function toast(msg) {
     var el = $('toast');
     el.textContent = msg;
