@@ -2785,3 +2785,17 @@ test('上下文用量：缺一半就不说，超过窗口按 100% 显示', () =>
   assert.equal(contextLabelOf(260000, 200000), '上下文 100%', '超过窗口按 100% 显示')
   assert.equal(contextLabelOf(-5, 200000), '', '负数当没有')
 })
+
+test('排队框的叉号：要从被点的元素往上找按钮，不能直接读 e.target', () => {
+  // 用户 2026-09-28 实机报「排队框的 ✗ 点了没反应」。成因不在接口，在接线：
+  // ✗ 是按钮里的 SVG 图形，手指落上去 e.target 就是图形本身，直接读它身上的
+  // data-drop 只能拿到 null，于是静默什么都不做。这条把它钉住。
+  const from = html.indexOf("$('queue').addEventListener('click'");
+  const to = html.indexOf('function paintWork');
+  assert.ok(from > 0 && to > from, '排队框那段的锚点变了，先修测试')
+  const block = html.slice(from, to)
+  assert.ok(block.includes("closest('.q-drop')"), '点叉号时要往上找按钮，不能只看被点的那个元素')
+  // 扫描前先剔掉注释：这段代码的注释里就引用着旧写法，不剔掉会把自己绊倒（本轮绊过一次）。
+  const code = block.replace(/\/\/[^\n]*/g, '')
+  assert.ok(!/e\.target\.getAttribute\(\s*'data-drop'/.test(code), '不能直接读被点元素身上的编号')
+})

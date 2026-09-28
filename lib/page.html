@@ -1850,9 +1850,15 @@
   }
 
   $('queue').addEventListener('click', function (e) {
-    var t = e.target;
-    var id = t && t.getAttribute ? t.getAttribute('data-drop') : null;
-    if (id) requestUnqueue(id);
+    // **必须从被点的元素往上找到那个真按钮。** ✗ 是画在按钮里面的 SVG 图形，手指落上去
+    // 时 e.target 是图形本身，读不到按钮身上的编号。用户 2026-09-28 实机报「排队框的 ✗
+    // 点了没反应」就是这么来的：旧写法 `e.target.getAttribute('data-drop')` 拿到 null，
+    // 然后静默什么都不做。按钮只有 24×24、图形 12×12，所以旧写法几乎必然踩中。
+    var hit = e.target && e.target.closest ? e.target.closest('.q-drop') : null;
+    var id = hit ? hit.getAttribute('data-drop') : null;
+    if (id) { requestUnqueue(id); return; }
+    // 找到了按钮却没有编号：这是代码毛病。说一声，别静默——静默失败是最难查的那一类。
+    if (hit) toast('这条撤不了：没带上编号');
   });
 
   /** 让「正在执行」那块跟着 state.running 显隐。 */
