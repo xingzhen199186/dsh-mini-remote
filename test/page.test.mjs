@@ -2876,13 +2876,13 @@ assert.ok(cte > cts, `在 page.html 里找不到锚点「${CTE}」，contextLabe
 const contextLabelOf = new Function(html.slice(cts, cte) + '\nreturn contextLabel;')()
 
 test('上下文用量：缺一半就不说，超过窗口按 100% 显示', () => {
-  assert.equal(contextLabelOf(42000, 200000), '上下文已用 21%')
-  assert.equal(contextLabelOf(1000, 200000), '上下文已用 1%')
+  assert.equal(contextLabelOf(42000, 200000), '21%')
+  assert.equal(contextLabelOf(1000, 200000), '1%')
   assert.equal(contextLabelOf(0, 200000), '', '没用量就不显示，不写 0%')
   assert.equal(contextLabelOf(42000, undefined), '', '窗口不知道就不显示')
   assert.equal(contextLabelOf(undefined, 200000), '', '用量不知道就不显示')
   assert.equal(contextLabelOf(42000, 0), '', '窗口为 0 不显示（也别除零）')
-  assert.equal(contextLabelOf(260000, 200000), '上下文已用 100%', '超过窗口按 100% 显示')
+  assert.equal(contextLabelOf(260000, 200000), '100%', '超过窗口按 100% 显示')
   assert.equal(contextLabelOf(-5, 200000), '', '负数当没有')
 })
 
