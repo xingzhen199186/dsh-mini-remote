@@ -745,19 +745,111 @@ test('帧数只驱动两处：显示宽度和用哪套翻帧关键帧', () => {
     '说话那层也要按帧数挂对关键帧')
 })
 
-test('每个姿势声明的帧数，和图里真并排的帧数一致', () => {
+test('切帧的三个数必须自洽，而且和真图的画布宽度对得上', () => {
+  // 三个数各写一处，谁也管不住谁：
+  //   ① .work-stage 的宽 = 每格**显示**宽度（122）
+  //   ② .pose[data-frames="N"] 的 background-size 宽 = 122 × N
+  //   ③ @keyframes 里每一步的位移 = 122
+  // 只改其中一个，窗口就会切到隔壁那一格：切少了看不出，切多了会同时露出两格。
+  // 2026-09-29 真机上出过「两条腿变成四条腿」——旧页面（两格写法、244 像素宽）去切新的
+  // 六格图，122 像素的窗口里挤进三个压扁的小人。所以这条测试**不拿页面里的常数互相印证**，
+  // 而是把真图的画布宽度读出来一起验算（图多一格少一格、页面漏改一处，都会当场红）。
+  const cell = Number(html.match(/\.work-stage \{[^}]*width:\s*(\d+)px/)[1])
+  assert.ok(cell > 0, '没读到 .work-stage 的宽度')
+  for (const frames of [2, 6]) {
+    const name = frames === 2 ? 'poseFlip' : 'poseFlip6'
+    const rule = frames === 2
+      ? html.match(/\.pose \{([^}]*)\}/)[1]          // 两帧那套是默认规则，不带属性选择器
+      : html.match(new RegExp(`\\.pose\\[data-frames="6"\\]\\s*\\{([^}]*)\\}`))[1]
+    assert.match(rule, new RegExp(`background-size:\\s*${cell * frames}px`),
+      `${frames} 帧的显示宽度必须是 ${cell}×${frames}`)
+    assert.match(rule, new RegExp(`animation-name:\\s*${name}\\b`))
+    const after = html.slice(html.indexOf(`@keyframes ${name} `))
+    const steps = [...after.slice(0, 600)
+      .matchAll(/background-position:\s*(-?\d+)(?:px)?\s+-?\d+(?:px)?/g)]
+      .map((m) => Math.abs(Number(m[1])))
+    const want = frames === 2 ? [0, cell] : Array.from({ length: frames }, (_, k) => cell * k)
+    assert.deepEqual(steps.slice(0, want.length), want,
+      `${name} 每一步的位移必须是 ${cell} 的整数倍：${want}`)
+  }
+  // 图里真并排几格：冲刺六格（2280 = 6×380），其余八张两格（760 = 2×380）
+  const sprint = webpSize(readFileSync(new URL('../lib/art/work-8-sprinting.webp', import.meta.url)))
+  assert.equal(sprint.h, 330, '每帧高 330')
+  assert.equal(sprint.w / 6, 380, `冲刺该是 6 格 × 380，实宽 ${sprint.w}`)
   const block = html.slice(html.indexOf('var POSES = ['), html.indexOf('var POSE_MS'))
   const entries = block.match(/\{ file: '[a-z0-9-]+'[^}]*\}/g) || []
   assert.equal(entries.length, 8, '姿态数应该是 8')
   for (const entry of entries) {
     const name = entry.match(/file: '([a-z0-9-]+)'/)[1]
+    if (name === 'work-8-sprinting') continue
+    const { w, h } = webpSize(readFileSync(new URL(`../lib/art/${name}.webp`, import.meta.url)))
+    assert.equal(h, 330, `${name} 每帧高 330`)
+    assert.equal(w, 380 * 2, `${name} 声明 2 帧，图宽该是 ${380 * 2}，实宽 ${w}`)
+  }
+})
+
+test('声明的帧数、CSS 里的规则、图里的格子数，三者必须两两对上', () => {
+  // 这条管的是另一类漏：`.pose[data-frames="6"]` 那套规则是**按帧数写死**的，
+  // 数据里写一个没有对应规则的帧数（比如 8），属性挂上去也没有关键帧可匹配，
+  // 浏览器就退回默认那套（244 像素、两格）——切出来正好是"两格图里塞六格图"的反面。
+  const block = html.slice(html.indexOf('var POSES = ['), html.indexOf('var POSE_MS'))
+  const entries = block.match(/\{ file: '[a-z0-9-]+'[^}]*\}/g) || []
+  assert.equal(entries.length, 8, '姿态数应该是 8')
+  const declared = new Set()
+  for (const entry of entries) {
+    const name = entry.match(/file: '([a-z0-9-]+)'/)[1]
     const frames = Number((entry.match(/frames:\s*(\d+)/) || [0, 2])[1])
-    const buf = readFileSync(new URL(`../lib/art/${name}.webp`, import.meta.url))
-    const { w, h } = webpSize(buf)
+    declared.add(frames)
+    const { w, h } = webpSize(readFileSync(new URL(`../lib/art/${name}.webp`, import.meta.url)))
     assert.equal(h, 330, `${name} 每帧高 330`)
     assert.equal(w, 380 * frames,
       `${name} 声明 ${frames} 帧，图里就该并排 ${frames} 帧（宽 ${380 * frames}），实宽 ${w}`)
   }
+  for (const frames of declared) {
+    if (frames === 2) continue                    // 两帧走 .pose 默认那套
+    assert.ok(html.includes(`.pose[data-frames="${frames}"]`),
+      `数据里声明了 ${frames} 帧，就必须有 .pose[data-frames="${frames}"] 那套规则`)
+    assert.ok(html.includes(`@keyframes poseFlip${frames}`),
+      `${frames} 帧要有自己的关键帧 poseFlip${frames}`)
+  }
+  // 反过来：CSS 里备着的那套规则，数据里也得真有人用（否则是没人管的死规则）
+  for (const m of html.matchAll(/\.pose\[data-frames="(\d+)"\]/g)) {
+    assert.ok(declared.has(Number(m[1])), `CSS 里有 ${m[1]} 帧的规则，却没有姿势声明 ${m[1]} 帧`)
+  }
+})
+
+test('服务器构建号变了，页面要自己刷一次（不然会拿旧规则切新图）', async () => {
+  // 见 lib/page.html 里 watchBuild 的注释：页面是启动时读进内存发的，立绘是每次现读盘的，
+  // 这两件事不同步时，旧页面会把新图切成好几个小人（真机上表现为「四条腿」）。
+  const from = html.indexOf('  function watchBuild() {')
+  const to = html.indexOf('  // 复制按钮：')
+  assert.ok(from > 0 && to > from, '没切到 watchBuild 那段源码')
+  const make = (api, build, inputValue, token) => {
+    const reloads = []
+    const fn = new Function('api', 'BUILD', 'state', 'inputEl', 'location',
+      `${html.slice(from, to)}\nreturn watchBuild;`)(
+      api, build, { token }, { value: inputValue }, { reload: () => reloads.push(1) })
+    return { fn, reloads }
+  }
+  const same = make(() => Promise.resolve({ build: 'abc' }), 'abc', '', 't')
+  await same.fn()
+  assert.equal(same.reloads.length, 0, '构建号一样就不该刷')
+
+  const stale = make(() => Promise.resolve({ build: 'def' }), 'abc', '', 't')
+  await stale.fn()
+  assert.equal(stale.reloads.length, 1, '构建号变了要刷一次')
+
+  const typing = make(() => Promise.resolve({ build: 'def' }), 'abc', '还没发出去的话', 't')
+  await typing.fn()
+  assert.equal(typing.reloads.length, 0, '正在打字时不能刷——不能把用户没发出去的话吞掉')
+
+  const offline = make(() => Promise.reject(new Error('连不上')), 'abc', '', 't')
+  await offline.fn()
+  assert.equal(offline.reloads.length, 0, '读不到就什么都不做，别把页面弄崩')
+
+  const noToken = make(() => { throw new Error('不该发请求') }, 'abc', '', '')
+  await noToken.fn()
+  assert.equal(noToken.reloads.length, 0, '没 token 时不发请求')
 })
 
 test('建出来的层上真的挂着 data-frames：冲刺 6，其余 2', () => {

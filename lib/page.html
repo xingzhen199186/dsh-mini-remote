@@ -3912,6 +3912,28 @@
     connect();
   }
 
+  /**
+   * 服务器换过代码就自己刷新一次。
+   *
+   * 为什么非要有：这个页面是**启动时读进内存**才发出去的（改了要重启 DSH），而立绘是
+   * **每次请求现读盘**的（文件一改就生效）。于是"页面和图不是同一时刻换的"这件事真的
+   * 会发生——2026-09-29 用户在手机上看到「原来的两条腿变成 4 条腿了」：手里那份页面还是
+   * 旧的（写死按两格、244 像素宽去切），硬盘上的图已经是六格的了，122 像素的窗口里于是
+   * 挤进三个压扁的小人，看着就是一堆腿。
+   *
+   * `/mini/api/version` 报的是**服务器现在这份代码**的构建号：和手里这份一样就什么都不做，
+   * 不一样说明页面过期了，刷一次就好（刷新后拿到的新页面自带正确的切帧规则）。
+   * **正在打字就先不刷**——用户没发出去的话不能被吞掉，等下一轮再说。
+   */
+  function watchBuild() {
+    if (!state.token) return;
+    api('/mini/api/version').then(function (r) {
+      if (!r || !r.build || r.build === BUILD) return;
+      if (inputEl.value && inputEl.value.trim()) return;
+      location.reload();
+    }).catch(function () { /* 读不到就当没这回事，别把页面弄崩 */ });
+  }
+
   // 复制按钮：整篇、单条气泡、代码块共用一套。
   // 用事件委托——回复区每次都是整块重绘的，逐个绑会漏。
   // （原来这里是「点回复区任意位置复制全文」，它直接用了 navigator.clipboard，
@@ -4165,6 +4187,12 @@
     // 显示一个过期的模型名比不显示更糟——用户会以为自己改的没生效。
     setInterval(function () { if (!document.hidden) load() }, 15000)
     document.addEventListener('visibilitychange', function () { if (!document.hidden) load() })
+    // 上面那个轮询管"显示的东西新不新"，这个管"**手里这份页面**是不是过期了"——
+    // 插件重启过就要刷一次，不然页面会拿着旧的切帧规则去切新的立绘（见 watchBuild 注释）。
+    // 30 秒的间隔够用：它防的是"重启之后一直拿着旧页面"，不是实时性。
+    setInterval(watchBuild, 30000)
+    // 手机把页面挂到后台时定时器会被压住，切回来那一刻补一次检查。
+    document.addEventListener('visibilitychange', function () { if (!document.hidden) watchBuild() })
   })();
 })();
 </script>
