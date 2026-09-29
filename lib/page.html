@@ -294,23 +294,15 @@
     margin-top: 20px; padding-top: 14px;
     border-top: 1px dashed var(--line);
   }
-  /* 立绘和气泡是**一组**。这里把两件事拆开：
-       立绘站哪儿 → 由**这一行的宽度**决定，跟词条无关；
-       气泡多宽   → 由词条自己的长短决定。
-     行宽取「最长那句」的整组宽度，再把这一行居中，于是立绘永远站在同一个位置。
-     算账：立绘 122 + 间隙 6 + 最长那句的气泡 171 = 299。
-     那个 171 = 10 个全角字 × 14.5px，加左右内边距 24、边框 2。
-     用 max-content 而不是写死 width：将来真加了更长的词条，这行会自己撑开——
-     宁可立绘挪一点，也不能让字顶出屏幕。
-     min() 是窄屏退路：屏幕比 299 还窄时，这行跟着屏幕收，别溢出。
-     **max-width 那一行是把上面那句话真正落实**（2026-09-27 补）：光有
-     `max-content` + `min-width` 只有下限没有上限，而气泡的 `max-width:
-     calc(100% - 128px)` 里的那个 100% 又是拿这一行自己算的——两头都靠对方，
-     谁也没被真正管住。结果是一句长话（尤其我那几句英文思考）把整行撑到屏幕外，
-     手机上得横着划才能看见（用户截图报的就是这个）。钉死在这一行的宽度上才算数。 */
+  /* 立绘和气泡**上下排**：立绘在上、在这一行里居中；气泡在下面、用整行宽度。
+     2026-09-29 改（用户报「人偏左、右边空着一大块」）：原来是左右并排，一行按
+     「立绘 122 + 间隙 6 + 最长气泡 171 = 299」固定行宽、再把这一行整体居中，
+     于是立绘被钉在**这一行的左端**——气泡没词时右边那 177 像素的预留位置整块空着，
+     手机上看就是人缩在偏左。改成上下排之后，立绘在自己的行里居中，气泡用整行宽度、
+     长句自己折行，也就**不再需要**给气泡预留横向宽度了（那笔预留是左右并排时的算法）。
+     代价是立绘区变高（立绘 + 气泡相加，不再是取两者的高者），这是知道的、接受的。 */
   .work-top {
-    display: flex; align-items: flex-start; gap: 6px;
-    width: max-content; min-width: min(299px, 100%); max-width: 100%;
+    display: flex; flex-direction: column; align-items: center; gap: 6px;
     margin: 0 auto;
   }
 
@@ -360,21 +352,19 @@
     83.333% { background-position: -610px 0; }
   }
 
-  /* 气泡：左边一个小尖角指向立绘。
-     宽度**贴着自己的词条**，多长就多宽，右边不留空。
-     它推不动立绘——立绘的位置由上面 .work-top 的固定行宽管着，跟气泡宽窄无关。
-     所以「词条每 3.6 秒换一次」这件事不会让立绘左右晃。
-     max-width 是窄屏退路：立绘 122 + 间隙 6，剩下的都给气泡，宁可折行也别顶出屏幕。
+  /* 气泡在立绘**下方**，用整行宽度、长句自己折行。
+     它和立绘是上下关系，所以气泡多宽都推不动立绘——立绘的位置由上面 .work-top 管着。
+     2026-09-29 之前是左右并排（气泡贴着自己的词条宽，并给立绘让出 128 像素），
+     改成上下排是因为「立绘 122 + 间隙 6 + 最长气泡 171 = 299」那笔横向预留
+     会把立绘挤到偏左（用户报的「人偏左、右边空着一大块」）。
 
      **竖着不限行数**（2026-09-27 用户报的：一句长话被切掉半行）。原来是
      `-webkit-line-clamp: 3` + `overflow: hidden`——第四行连省略号都没有地截断，
      看着像她话说了一半。现在让气泡自己长高，整页跟着让位（main 本来就能上下滚）。
-     留一道 `max-height` + 内部滚动只为兜病态长文（几屏）：正常一两句话够不到它。
-     `align-self: flex-start` 让气泡顶到行首、和她的头对齐。 */
+     留一道 `max-height` + 内部滚动只为兜病态长文（几屏）：正常一两句话够不到它。 */
   .work-bubble {
-    position: relative; flex: 0 1 auto;
-    max-width: calc(100% - 128px);
-    align-self: flex-start; margin-top: 6px;
+    position: relative;
+    align-self: stretch;                 /* 撑满整行；窄屏也顶不出屏幕（有 overflow-wrap 兜底） */
     background: var(--panel-2); border: 1px solid var(--line);
     border-radius: var(--r); padding: 9px 12px;
     font-size: 14.5px; line-height: 1.5; color: var(--fg);
@@ -386,14 +376,17 @@
      原来这里有个 `display: -webkit-box` 把它盖掉了，于是「词条是空串就把气泡收起来」
      根本没生效，跑动那张旁边一直挂着一个没字的空药丸（2026-09-27 用户截图报的）。 */
   .work-bubble[hidden] { display: none; }
-  /* 尖角固定在气泡**上部**（对准她的头），不跟着气泡高度跑。原来钉在 50%，气泡一长高，
-     尖角就滑到她身子下边去了——长句和短句都得指着头，所以要一个绝对值。 */
+  /* 尖角朝**上**、对准立绘（水平居中处）。左右并排的时候它朝左指着她的头；
+     2026-09-29 气泡挪到下方，尖角跟着翻上来。
+     一个已知的疑点写在明处：气泡自带 `overflow-y: auto`，按 CSS 规则另一个方向也会
+     算成 auto，于是伸出盒子之外的尖角会被裁掉——改版前朝左那个大概也一样没显示。
+     翻过来是为了跟新版式一致，不是为了让它出现；要不要真显示，是另一件事。 */
   .work-bubble::before, .work-bubble::after {
-    content: ''; position: absolute; top: 24px; width: 0; height: 0;
-    border: 6px solid transparent; margin-top: -6px;
+    content: ''; position: absolute; left: 50%; width: 0; height: 0;
+    border: 6px solid transparent; margin-left: -6px;
   }
-  .work-bubble::before { left: -12px; border-right-color: var(--line); }
-  .work-bubble::after { left: -11px; border-right-color: var(--panel-2); }
+  .work-bubble::before { top: -12px; border-bottom-color: var(--line); }
+  .work-bubble::after { top: -11px; border-bottom-color: var(--panel-2); }
   /* 气泡里的话走和回答区同一套行内渲染（`mdInline`）：`**加粗**`、`` `代码` ``、链接会变成样式。
      代码的底色特意不用 --panel-2——那是气泡自己的底色，套上去等于看不见。 */
   .work-bubble strong { font-weight: 650; }
@@ -1670,7 +1663,8 @@
     if (work.speakLayer) work.speakLayer.classList.toggle('on', false);
     // 有的姿势不带词条（比如那张冲刺）：词条是空串就把整个气泡收起来。
     // 留一个空泡泡在那儿比不放气泡更怪——那个尖角还指着她的头，像话没说出来。
-    // 收起气泡不会让立绘挪位：.work-top 有 min-width 兜着，行宽不变。
+    // 收起气泡不会让立绘挪位：立绘在 .work-top 里自己居中，气泡是它下面的一行，
+    // 气泡在不在只影响这一块的高度，动不了立绘的横向位置（2026-09-29 改成上下排之后）。
     paintBubble(POSES[index].line);
   }
 

@@ -59,11 +59,18 @@ test('图层正好盖住窗口，而且不重复平铺', () => {
   assert.match(pose, /background-position:\s*0\s+0/, '起始位置必须在窗口左上角')
 })
 
-test('装窗口的那一行不许拉伸它', () => {
+test('窗口在那一行里居中，而且不许被拉伸、不许被挤到一边', () => {
   assert.match(row, /display:\s*flex/, '这一行是弹性布局')
-  assert.match(row, /align-items:\s*flex-start/,
-    '必须是 flex-start：用 stretch 的话，窗口会被撑到行高，取景窗口就落到格子外面了')
+  assert.match(row, /flex-direction:\s*column/, '立绘在上、气泡在下')
+  assert.match(row, /align-items:\s*center/,
+    '横向居中。用 flex-start 会让窗口贴左、右边空出一块（用户报的「人偏左」）；'
+    + '用 stretch 又把它撑到整行宽，窗口就不等于一格了')
   assert.ok(!/align-items:\s*stretch/.test(row), 'stretch 会把窗口撑开')
+  // 「偏左」的根源在这里：只要这一行还给气泡预留宽度（min-width / max-content），
+  // 立绘就被钉在行的左端。上下排之后那笔预留必须不存在。
+  assert.ok(!/min-width/.test(row), '不能再给气泡预留行宽，否则立绘又被挤到偏左')
+  assert.ok(!/max-content/.test(row), '行宽不再跟着气泡的长短走')
+  assert.match(stage, /width:\s*122px/, '窗口宽度仍是写死的一格')
 })
 
 const py = process.env.PYTHON || (process.platform === 'win32' ? 'python' : 'python3')
