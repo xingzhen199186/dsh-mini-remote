@@ -50,6 +50,10 @@ BODY_W = 0.05
 Y0, Y1 = 40.0, 230.0
 # 渐隐：贴住身体的那几像素不动（否则会跟身体之间裂出一道缝），离开约 14 像素后完全自由。
 FADE_NEAR, FADE_FAR = 3, 14
+# 允许位移的最下面一行。基准帧里袜子从第 250 行左右开始、鞋到第 330 行，头发最低到第 255 行左右，
+# 所以切在 265：保住整片袜子和鞋，也留住头发的全部摆动范围。这个行号是人工看基准帧定的，
+# 不是脚本算的——判据不能用被测对象自己的遮罩来定义，否则遮罩错的时候判据一起失明。
+MOTION_Y = 265
 
 
 def load_measure():
@@ -119,9 +123,23 @@ def fade_map(frame):
     不用 scipy 的距离变换，是因为这一层只需要平滑过渡，不需要准确距离。
     """
     px = pixels_list(frame)
-    alpha = np.asarray(frame)[..., 3]
+    arr = np.asarray(frame)
+    alpha = arr[..., 3]
     w = np.array([[WM.hair_weight(px[y][x]) for x in range(PW)] for y in range(PH)])
     body = (alpha >= BODY_ALPHA) & (w < BODY_W)
+
+    # 「允许位移」的像素：淡蓝（头发）且在第 MOTION_Y 行以上。
+    # 为什么不能只判"不是身体"：立绘边缘是抗锯齿的，那些半透明轮廓像素既不是身体、也不是头发，
+    # 却会被 fade 判成"离身体够远"而拿到非零位移——摘走一点、原处留一圈淡痕，就是重影；
+    # 鞋底的软阴影同理，所以鞋底看起来像两片（用户 2026-09-29 报的"两条腿变四条腿"）。
+    # 为什么还要排除深蓝：鞋是饱和的深蓝，发色判据会把它当头发，于是整只鞋被挪走。
+    # r/g/b 都是 0~255，用 int16 免得相减溢出（踩过 uint8 溢出）。
+    r = arr[..., 0].astype(np.int16)
+    g = arr[..., 1].astype(np.int16)
+    b = arr[..., 2].astype(np.int16)
+    ys = np.arange(PH, dtype=np.int16)[:, None]
+    motion = (b - r > 15) & (np.minimum(np.minimum(r, g), b) > 100) & (ys < MOTION_Y)
+
     mask = Image.fromarray((body * 255).astype(np.uint8), 'L')
     grown = mask.filter(ImageFilter.MaxFilter(2 * FADE_NEAR + 1))
     blur = grown.filter(ImageFilter.GaussianBlur((FADE_FAR - FADE_NEAR) / 2.0))
@@ -129,7 +147,8 @@ def fade_map(frame):
     fade = np.clip((1.0 - d - 0.10) / 0.55, 0.0, 1.0)
     fade = fade * fade * (3.0 - 2.0 * fade)
     fade[body] = 0.0
-    return w, fade, body
+    fade[~motion] = 0.0
+    return w, fade, body, motion
 
 
 def field(fade, amp, lag_deg, phase):
@@ -220,11 +239,13 @@ def main():
     for k in range(n):
         half = 0 if k < n // 2 else 1
         src = srcs[half]
-        _w, fade, body = maps[half]
+        _w, fade, body, motion = maps[half]
         phase = 2.0 * math.pi * k / n
         dx, dyl = field(fade, args.amp, args.lag, phase)
         warped = warp(src, dx, dyl)
-        frame = np.where(body[..., None], src, warped)
+        # 身体、以及「不允许位移」的像素一律从原图逐字节拷贝，根本不经过重采样——
+        # 于是重影在构造上不可能出现，而不是靠事后的指标去发现它。
+        frame = np.where((body | ~motion)[..., None], src, warped)
         moved_body = int(np.count_nonzero(np.any(frame != src, axis=-1) & body))
         hair_moved = int(np.count_nonzero(np.any(frame != src, axis=-1) & ~body))
         alpha = frame[..., 3] > 128
@@ -282,9 +303,20 @@ def main():
         print(f'  {label:<14}' + ' '.join(f'{s:+.1f}' for s in steps)
               + f'   最大 {big:.1f}（第 {steps.index(max(steps, key=abs)) + 1} 步{mark}）')
     bad = sum(r[4] for r in report)
+    # 独立判据（顾问群 2026-09-29 的建议）：受保护区 = 第 MOTION_Y 行以下那片袜子和鞋，行号是
+    # 人工看基准帧定的，**不看脚本自己的遮罩**。原来只报"身体动过 0 个"——而遮罩错把腿脚算成
+    # 头发时，那条判据自动失明，重影就一路上了真机。必须在这里、在编码之前的内存里比。
+    # 不比对写出来的文件：存的是有损 webp，重编码会让几千个像素自变，比了也没有意义。
+    protected_bad = 0
+    for k, f in enumerate(frames):
+        src = srcs[0 if k < n // 2 else 1]
+        d = np.abs(np.asarray(f).astype(np.int16) - src.astype(np.int16)).max(axis=2)
+        protected_bad += int(np.count_nonzero(d[MOTION_Y:] > 0))
+    print(f'  {"✓" if protected_bad == 0 else "✗"} 受保护区（第 {MOTION_Y} 行以下：袜子和鞋）'
+          f'与冻结帧不一致的：{protected_bad} 个')
     print(f'  相邻帧最大步长 {worst:.1f} 像素')
     print(f'  {"✓" if bad == 0 else "✗"} 判定为身体的像素与冻结帧不一致的：{bad} 个')
-    return 0 if bad == 0 else 1
+    return 0 if bad == 0 and protected_bad == 0 else 1
 
 
 if __name__ == '__main__':
