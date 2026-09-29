@@ -7,7 +7,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
-import { mkdtempSync, writeFileSync, readFileSync, readdirSync, existsSync, rmSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createHash } from 'node:crypto'
@@ -16,7 +16,7 @@ import { fileURLToPath } from 'node:url'
 import { createTurnTracker, stepSelfTalk } from '../lib/events.js'
 import { createStore } from '../lib/store.js'
 import { createMiniServer } from '../lib/server.js'
-import { renderPage, readArt } from '../lib/page.js'
+import { renderPage, readArt, readImage } from '../lib/page.js'
 import { buildId } from '../lib/build.js'
 
 const ev = (type, data) => ({ type, seq: 0, time: Date.now(), data })
@@ -367,6 +367,67 @@ test('正文里直接写路径的图也发得出去，但只发图片类型', as
   assert.equal(anon.status, 401)
 })
 
+test('正文里写相对路径的图，也要按「那段对话的工作目录」找（2026-09-28 修复）', async (t) => {
+  // 病灶：出图那段对话的工作目录是别的项目（实测 I:\DSH\dsh-jev-ultrafast），
+  // 回复里写的是 `scratch/preview-0.2.3-settings.png`。相对的是**那个工作目录**，
+  // 插件原先只按自己的两个根（仓库根、lib/art）找，于是 404 —— 图在盘上、接口也没坏，
+  // 纯粹是没找对地方，手机上就显示成破图。
+  const dir = mkdtempSync(join(tmpdir(), 'mini-ws-'))
+  const scratch = join(dir, 'scratch')
+  mkdirSync(scratch)
+  const png = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg==',
+    'base64')
+  const relName = 'scratch/preview-0.2.3-settings.png'
+  writeFileSync(join(scratch, 'preview-0.2.3-settings.png'), png)
+  // 工作区根之外也放一张真图：用来验 `..` 逃逸是被真挡住，而不是"恰好找不到"。
+  writeFileSync(join(dir, 'outside.png'), png)
+  // 工作区里放一个非图片：额外根只放宽「在哪找」，不放宽「能发什么」。
+  writeFileSync(join(scratch, 'notes.txt'), '这不是图')
+  t.after(() => rmSync(dir, { recursive: true, force: true }))
+
+  // ① 没有额外根时必须是 404。先钉住这个前提，免得这条用例哪天"因为别处碰巧有一张同名图"
+  //    而假通过。
+  const plain = await startTestServer()
+  t.after(() => plain.server.close())
+  const miss = await fetch(`${plain.base}/mini/art/?p=${encodeURIComponent(relName)}&token=${plain.token}`)
+  assert.equal(miss.status, 404, '插件根里没有这张图——这是上面那个病灶的前提')
+
+  // ② 把工作区目录作为额外根之后要发得出去，而且字节数一模一样。
+  const roots = [dir]
+  const { server, base, token } = await startTestServer({ imageRoots: () => roots })
+  t.after(() => server.close())
+
+  const hit = await fetch(`${base}/mini/art/?p=${encodeURIComponent(relName)}&token=${token}`)
+  assert.equal(hit.status, 200, '工作目录里的相对路径图应该发得出去')
+  assert.equal(hit.headers.get('content-type'), 'image/png')
+  assert.equal((await hit.arrayBuffer()).byteLength, png.length)
+
+  // ③ 旧行为不回归：相对项目根／lib/art 的写法，在有额外根时照样认。
+  const pluginRoot = await fetch(
+    `${base}/mini/art/?p=${encodeURIComponent('lib/art/work-1-ready.webp')}&token=${token}`)
+  assert.equal(pluginRoot.status, 200, '多了一个根，插件自己的两个根不能反而失灵')
+  assert.equal(pluginRoot.headers.get('content-type'), 'image/webp')
+
+  // ④ `..` 逃逸被拒：工作区根之外那张图不许顺着相对路径翻出去。
+  const escape = await fetch(`${base}/mini/art/?p=${encodeURIComponent('../outside.png')}&token=${token}`)
+  assert.equal(escape.status, 404, '相对写法里的 .. 不该翻出工作区')
+
+  // ⑤ 额外根里也照样只发图片。
+  const txt = await fetch(`${base}/mini/art/?p=${encodeURIComponent('scratch/notes.txt')}&token=${token}`)
+  assert.equal(txt.status, 404, '不是图片的一律不发——额外根没放宽这一条')
+
+  // ⑥ 令牌这一道也没松。
+  const anon = await fetch(`${base}/mini/art/?p=${encodeURIComponent(relName)}`)
+  assert.equal(anon.status, 401)
+
+  // 直接问那个解析函数，别只靠路由那一层。
+  assert.equal(readImage(relName, roots)?.buf.length, png.length)
+  assert.equal(readImage('../outside.png', roots), null)
+  // 没给额外根时，同一个相对路径在读不到（和上面 ① 的 404 是同一件事）。
+  assert.equal(readImage(relName), null)
+})
+
 test('立绘也算进构建指纹（换了图，手机就该拿到新的）', () => {
   // build.js 如果漏了 art/，指纹会等于「只算 js/html」的那个。
   const hash = createHash('sha256')
@@ -405,6 +466,8 @@ async function startTestServer(overrides = {}) {
     onUpload: overrides.onUpload,
     tree: overrides.tree,
     browse: overrides.browse,
+    // 正文里相对路径图的额外候选根（真实运行时是「当前已注册工作区的目录」）。
+    imageRoots: overrides.imageRoots,
     build: overrides.build,
   })
   return { store, server, token, seen, base: `http://127.0.0.1:${server.port}` }
