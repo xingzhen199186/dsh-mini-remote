@@ -865,31 +865,28 @@ test('建出来的层上真的挂着 data-frames：冲刺 6，其余 2', () => {
   assert.equal(got[sprint], '6', '冲刺那层是 6 帧')
 })
 
-test('气泡在立绘下方，用整行宽度', () => {
+test('气泡贴着自己的词条，多长就多宽', () => {
   const css = html.slice(html.indexOf('.work-bubble {'), html.indexOf('.work-bubble::before'))
-  // 上下排之后气泡撑满整行：短词条不再留一块空的右边，长句自己折行。
-  assert.match(css, /align-self:\s*stretch/, '气泡要用整行宽度')
-  // `max-width: calc(100% - 128px)` 是左右并排时「给立绘让出 122 + 间隙 6」的算法，
-  // 上下排之后它只会无端把气泡缩窄，还重新引入一条依赖行宽的计算——不许留。
-  assert.ok(!/calc\(100% - 128px\)/.test(css), '不再给立绘预留横向空间')
-  assert.ok(!/min-width/.test(css), '不该给气泡定宽')
-  // 上一版那两条是左右并排的写法：贴着词条宽（flex 0 1 auto）、抬到头部高度。现在都是竖排。
-  assert.ok(!/flex:\s*0 1 auto/.test(css), '竖排里不再需要横向的 flex 伸缩')
-  assert.ok(!/margin-top/.test(css), '上下间距由那一行的 gap 管，气泡自己不再加一条')
+  // 上一版是定宽的（min-width: min(180px, …)），短词条右边会空一大块。
+  assert.ok(!/min-width/.test(css), '不该再给气泡定宽——它要自己贴住文字')
+  assert.match(css, /flex:\s*0 1 auto/, '不撑满整行，也不许被撑大')
+  assert.match(css, /max-width:\s*calc\(100% - 128px\)/, '窄屏退路：立绘 122 + 间隙 6')
+  assert.match(css, /align-self:\s*flex-start/, '气泡要抬到头部高度，别对着身子中间')
 })
 
-test('立绘居中：没有给气泡预留的横向空间', () => {
+test('立绘站哪儿由行宽决定，跟气泡宽窄无关', () => {
   const row = html.slice(html.indexOf('.work-top {'), html.indexOf('.work-stage {'))
-  // 立绘和气泡上下排，立绘因此在**自己的行里**居中，气泡宽窄完全推不动它。
-  assert.match(row, /flex-direction:\s*column/, '立绘在上、气泡在下')
-  assert.match(row, /align-items:\s*center/, '横向居中——立绘两侧不该有不对称的留白')
-  // 这条是 2026-09-29 用户报的「人偏左、右边空着一大块」的根源：原来按
-  // 「立绘 122 + 间隙 6 + 最长气泡 171 = 299」预留行宽，立绘被钉在这一行的左端，
-  // 气泡没词时右边那 177 像素整块空着。上下排之后这笔预留必须彻底消失。
-  assert.ok(!/min-width/.test(row), '不能再给气泡预留行宽：那会把立绘挤到一边')
-  assert.ok(!/max-content/.test(row), '行宽不再跟着最长词条走')
-  // 原来还要求在行内 justify-content:center —— 那是左右并排时的坑（等于把这一组
-  // 重新居中一次，立绘照样被推着走）。竖排里它管的是纵向，不再是那个坑，所以不设。
+  // 行宽固定成「最长那句」的整组宽度，再把这一行居中 → 立绘永远在同一个位置。
+  assert.match(row, /width:\s*max-content/, '行宽跟着内容走')
+  assert.match(row, /min-width:\s*min\(299px, 100%\)/, '最少要有最长那句的整组宽度')
+  // 但 max-content 只有下限没有上限：再来一句更长的（自言自语就是我那几句英文思考），
+  // 这行会一直撑到屏幕外，手机上得横着划才看得见（2026-09-27 用户截图报的）。
+  // 气泡那条 `max-width: calc(100% - 128px)` 里的 100% 又是拿这一行自己算的，管不住它。
+  assert.match(row, /max-width:\s*100%/, '行宽必须有上限：再长的词条也不能把这行顶出屏幕')
+  assert.match(row, /margin:\s*0 auto/, '这一行要居中')
+  // 这条是坑：行宽固定之后**又**在行内 justify-content:center，等于把这一组
+  // 重新居中一次，立绘照样被气泡推着走——白忙一场。
+  assert.ok(!/justify-content/.test(row), '行内不能再居中，否则立绘又被气泡推着走')
 })
 
 test('立绘地址由 artUrl 统一拼，带 token 和构建指纹', () => {
@@ -1557,19 +1554,10 @@ test('台词是长文本：一句都不能少，宁可让整页长高', () => {
   assert.match(css, /max-height:\s*\d+vh/, '总得有一道兜底，别让一句跑飞的长文吃掉整屏')
   assert.match(css, /overflow-y:\s*auto/, '真超过那道上限时要能滚到，而不是被切掉')
   assert.match(css, /overflow-wrap:\s*anywhere/, '长英文串、URL 不认换行，会把气泡顶宽')
-  // 尖角原来钉在气泡的 50% 高度上（气泡一长高就滑到她身子下边），后来改成固定对着头。
-  // 2026-09-29 气泡搬到立绘下方，尖角跟着翻成朝上、水平对着她：
+  // 尖角原来钉在气泡的 50% 上，气泡一长高它就滑到立绘身子下边；现在钉在固定高度对着头。
   const tail = html.slice(html.indexOf('.work-bubble::before, .work-bubble::after'),
     html.indexOf('.work-bubble::before {'))
-  // 注意：`.work-bubble::after {` 这个串在共用规则那一行（两个选择器写在一起）里就已经出现，
-  // 所以取「尖角本体」必须从**最后一条** before 规则切到下一个规则，不然会切出空串。
-  const tailTip = html.slice(html.lastIndexOf('.work-bubble::before {'),
-    html.indexOf('.work-bubble strong'))
-  assert.match(tail, /left:\s*50%/, '尖角要落在立绘那一列的中间')
-  assert.match(tailTip, /top:\s*-\d+px/, '朝上：伸到气泡上边去')
-  assert.match(tailTip, /border-bottom-color/, '朝上的角要用下边框上色')
-  // 只看 `left:` 这个属性本身，别把 `margin-left: -6px` 也算进去（那是居中的偏移）。
-  assert.ok(!/(?<![\w-])left:\s*-\d+px/.test(tail), '不再朝左——那是左右并排时指着头的写法')
+  assert.match(tail, /top:\s*\d+px/, '尖角要固定对着她的头，不能跟着气泡高度跑')
   assert.ok(!/top:\s*50%/.test(tail), '跟着高度跑就是长句时跑偏的根源')
   assert.match(html, /'thought' in snap/, 'applySnapshot 要接住这门新字段')
 })
