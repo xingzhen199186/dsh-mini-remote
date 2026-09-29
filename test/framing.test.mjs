@@ -76,7 +76,8 @@ test('每格里的人都完整：脚贴格底、头不顶边、左右留得住',
     assert.equal(r.status, 0, `量格工具跑不起来：${r.stderr}`)
     const rows = JSON.parse(r.stdout)
     const filled = rows.filter((x) => !x.empty)
-    assert.equal(filled.length, 22, `九张立绘应当一共 22 格有内容，量到 ${filled.length} 格`)
+    // 2026-09-28 起「跑」也是六帧，九张立绘的格数从 22 变成 26：冲刺 6 + 跑 6 + 其余七张各 2。
+    assert.equal(filled.length, 26, `九张立绘应当一共 26 格有内容，量到 ${filled.length} 格`)
     for (const p of filled) {
       const where = `${p.file} 第 ${p.panel + 1} 格`
       const cssOf = (px) => (px * 122 / 380).toFixed(1)

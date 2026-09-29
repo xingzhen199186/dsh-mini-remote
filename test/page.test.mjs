@@ -710,14 +710,17 @@ function webpSize(buf) {
   throw new Error('WebP 里找不到尺寸块')
 }
 
-test('帧数写在数据里，缺省 2 帧；冲刺是 6 帧', () => {
+test('帧数写在数据里，缺省 2 帧；冲刺和跑是 6 帧', () => {
   // 冲刺（work-8-sprinting）从 2026-09-29 起是 6 帧：那一趟头发是拿冻结基准帧当底、
   // 用位移场程序化算出来的（tools/whale-sway.py），身体逐像素不动。
-  // 别的七个姿势仍是两帧，**缺省值就是 2**，所以它们一个字段都不用写。
+  // 跑（work-6-running）从 2026-09-28 起也是 6 帧，同一套两步：先把两帧画出来的头发摆动收小
+  // （重画，甩幅 155.3 → 70.6），再用同一个工具把这一趟切成六帧补上流动（甩幅 74.9）。
+  // 别的六个姿势仍是两帧，**缺省值就是 2**，所以它们一个字段都不用写。
   const block = html.slice(html.indexOf('var POSES = ['), html.indexOf('var POSE_MS'))
   const written = block.match(/frames:\s*\d+/g) || []
-  assert.equal(written.length, 1, '只有冲刺该写 frames，别的姿势吃缺省')
+  assert.equal(written.length, 2, '只有冲刺和跑该写 frames，别的姿势吃缺省')
   assert.match(block, /file: 'work-8-sprinting'[^}]*frames:\s*6/, '冲刺写 6 帧')
+  assert.match(block, /file: 'work-6-running'[^}]*frames:\s*6/, '跑写 6 帧')
   // 说话那张不进 POSES，也是两帧，不许悄悄写成别的
   assert.match(html, /var SPEAK_POSE = \{ file: 'work-9-talking', flip: 1\.1 \}/,
     '说话那张保持两帧')
@@ -772,7 +775,8 @@ test('切帧的三个数必须自洽，而且和真图的画布宽度对得上',
     assert.deepEqual(steps.slice(0, want.length), want,
       `${name} 每一步的位移必须是 ${cell} 的整数倍：${want}`)
   }
-  // 图里真并排几格：冲刺六格（2280 = 6×380），其余八张两格（760 = 2×380）
+  // 图里真并排几格：逐张拿「页面写的帧数」去核。冲刺与跑都是六格（2280 = 6×380），
+  // 其余六张两格（760 = 2×380）。这里不再给冲刺开例外——六帧的姿势一视同仁。
   const sprint = webpSize(readFileSync(new URL('../lib/art/work-8-sprinting.webp', import.meta.url)))
   assert.equal(sprint.h, 330, '每帧高 330')
   assert.equal(sprint.w / 6, 380, `冲刺该是 6 格 × 380，实宽 ${sprint.w}`)
@@ -781,10 +785,11 @@ test('切帧的三个数必须自洽，而且和真图的画布宽度对得上',
   assert.equal(entries.length, 8, '姿态数应该是 8')
   for (const entry of entries) {
     const name = entry.match(/file: '([a-z0-9-]+)'/)[1]
-    if (name === 'work-8-sprinting') continue
+    const frames = Number((entry.match(/frames:\s*(\d+)/) || [0, 2])[1])
     const { w, h } = webpSize(readFileSync(new URL(`../lib/art/${name}.webp`, import.meta.url)))
     assert.equal(h, 330, `${name} 每帧高 330`)
-    assert.equal(w, 380 * 2, `${name} 声明 2 帧，图宽该是 ${380 * 2}，实宽 ${w}`)
+    assert.equal(w, 380 * frames,
+      `${name} 声明 ${frames} 帧，图里就该并排 ${frames} 帧（宽 ${380 * frames}），实宽 ${w}`)
   }
 })
 
