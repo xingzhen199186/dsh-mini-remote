@@ -78,6 +78,7 @@
     }
   },
   "dependencies": {
+    "@larksuiteoapi/node-sdk": "^1.74.0",
     "qrcode": "^1.5.4"
   }
 }

@@ -26,6 +26,7 @@ window.__ModuleLoader__.load({
     var TOKEN_PATH = '/mini-remote/token';
     var TUNNEL_PATH = '/mini-remote/tunnel';
     var SERVE_PATH = '/mini-remote/serve';
+    var FEISHU_PATH = '/mini-remote/feishu';
 
     // 颜色走 DSH 主题变量（真名前缀是 --dsw-alias-，深浅色自动跟随）。
     // 每个变量都带一个浅色兜底值，变量缺失时界面仍然可读。
@@ -79,6 +80,18 @@ window.__ModuleLoader__.load({
       var serveErrState = useState(null);
       var serveError = serveErrState[0];
       var setServeError = serveErrState[1];
+      // 飞书那一块的草稿：服务端那份到了先填进来，之后以用户在这一页改的为准。
+      var feishuDraftState = useState(null);
+      var feishuDraft = feishuDraftState[0];
+      var setFeishuDraft = feishuDraftState[1];
+      var feishuErrState = useState(null);
+      var feishuError = feishuErrState[0];
+      var setFeishuError = feishuErrState[1];
+      // 配置指引的展开状态。**默认收起，而且不持久化**：每次进这一页都从头收起，
+      // 免得给已经配好的人摊着一屏用不上的字。
+      var guideState = useState(false);
+      var guideOpen = guideState[0];
+      var setGuideOpen = guideState[1];
 
       // 同源 GET，不带任何 token：这台电脑自己读得到，别人的电脑读不到。
       useEffect(function () {
@@ -109,6 +122,22 @@ window.__ModuleLoader__.load({
         var timer = setTimeout(function () { setCopied(null); }, 1500);
         return function () { clearTimeout(timer); };
       }, [copied]);
+
+      // 服务端那份到了就把飞书的草稿填上。**只填一次**：用户在这一页改过之后，
+      // 刷新回来的那份不许把他的编辑抹掉。appSecret 永远是空的——服务端从不把它
+      // 送回来（见 saveFeishu 上面那段说明）。
+      useEffect(function () {
+        if (feishuDraft) return;
+        var f = info && info.feishu;
+        if (!f) return;
+        setFeishuDraft({
+          enabled: Boolean(f.enabled),
+          appId: typeof f.appId === 'string' ? f.appId : '',
+          appSecret: '',
+          openIds: typeof f.openIds === 'string' ? f.openIds : '',
+          chatIds: typeof f.chatIds === 'string' ? f.chatIds : '',
+        });
+      }, [info, feishuDraft]);
 
       var copy = function (url) {
         if (!url) return;
@@ -237,6 +266,53 @@ window.__ModuleLoader__.load({
           .then(function () { setBusy(false); });
       };
 
+      /**
+       * 存飞书那一块。
+       *
+       * **appSecret 那一格留空 = 不改动原来那份**。服务端从来不把它送回来（面板上
+       * 天生是空的），要是把「空」解释成「清空凭据」，用户每存一次都得重新贴一遍密码，
+       * 贴错一次就是一段查不出原因的鉴权失败。所以只在用户真填了东西时才把它发上去。
+       *
+       * 存完把那个框清掉：它已经落到服务端了，留在页面上只是多一份暴露面。
+       */
+      var saveFeishu = function () {
+        if (!feishuDraft || busy) return;
+        setFeishuError(null);
+        setBusy(true);
+        var body = {
+          enabled: Boolean(feishuDraft.enabled),
+          appId: feishuDraft.appId,
+          openIds: feishuDraft.openIds,
+          chatIds: feishuDraft.chatIds,
+        };
+        if (feishuDraft.appSecret) body.appSecret = feishuDraft.appSecret;
+        fetch(FEISHU_PATH, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(body),
+        })
+          .then(function (res) {
+            return res.json().then(
+              function (b) { return { status: res.status, body: b }; },
+              function () { return { status: res.status, body: null }; },
+            );
+          })
+          .then(function (r) {
+            var b = (r.body && typeof r.body === 'object') ? r.body : null;
+            if (!b) {
+              setFeishuError('保存飞书配置失败：服务返回了 HTTP ' + r.status + '。');
+              return;
+            }
+            setInfo(b);
+            setFeishuError(null);
+            setFeishuDraft(function (d) { return (d ? Object.assign({}, d, { appSecret: '' }) : d); });
+          })
+          .catch(function (err) {
+            setFeishuError('保存飞书配置失败：' + ((err && err.message) || String(err)));
+          })
+          .then(function () { setBusy(false); });
+      };
+
       return h('div', { style: styles.card },
         h('div', { style: styles.title }, '手机遥控'),
         h('div', { style: styles.muted }, '手机扫码就能用，不用输密码——密码已经编在二维码里了。'),
@@ -258,11 +334,19 @@ window.__ModuleLoader__.load({
           error: serveError ? serveError.error : null,
           enableLink: serveError ? serveError.enableLink : null,
           toggle: toggleServe,
+        }, {
+          draft: feishuDraft,
+          setDraft: setFeishuDraft,
+          error: feishuError,
+          busy: busy,
+          save: saveFeishu,
+          guideOpen: guideOpen,
+          toggleGuide: function () { setGuideOpen(function (v) { return !v; }); },
         }),
       );
     }
 
-    function content(info, failure, copied, copy, busy, toggle, pwd, serve) {
+    function content(info, failure, copied, copy, busy, toggle, pwd, serve, feishu) {
       if (failure) return h('div', { style: styles.error }, failure);
       if (!info) return h('div', { style: styles.loading }, '正在读取配对信息…');
 
@@ -290,7 +374,178 @@ window.__ModuleLoader__.load({
       // tailnet 没开 Serve 的时候，用户需要的正是那条开启链接，而那时候面板上
       // 其它东西多半也在报错，正好是他最需要指路的时候。
       if (info.serve || serve.error) blocks.push(serveBlock(info.serve, serve, busy));
+      // 飞书那一块：**只要服务端带了 feishu 就出现**（成功、失败、服务还没起来那几条
+      // 路径上都带着它）。它是独立的一条通路，手机服务有没有起来都不该拦着用户改它。
+      if (info.feishu) blocks.push(feishuBlock(info.feishu, feishu));
       return h('div', null, blocks);
+    }
+
+    /**
+     * 飞书那一块：开关、两个凭据、两个允许名单。
+     *
+     * 为什么两个名单必须摆在明面上：**都空着的时候谁都不认**（判据在 lib/lark.js 的
+     * admitSource）——这是刻意的默认值，但用户不会自己猜到。所以名单空着时当场说清，
+     * 并把「去哪儿抄自己的 open_id」写出来：发一条消息给这个机器人，DSH 那边的日志里
+     * 会打印出来。飞书后台要绕几层菜单才看得到那个 id，等于给非技术用户加门槛。
+     *
+     * 按钮**只在有改动时才可点**，反馈靠它自己的禁用态（保存中…），不发「已保存」这种话。
+     */
+    function feishuBlock(st, fs) {
+      var d = fs.draft;
+      if (!d) return null;
+      var status;
+      if (!d.enabled) status = '没开。开了之后，在飞书里给这个机器人发消息，指令会交给电脑上的会话，回答再回到那条消息下面。';
+      else if (st.error) status = '开着，但没连上。下面就是它说的话。';
+      else if (st.starting) status = '正在建立连接…';
+      else if (st.connected) status = '已连着。到飞书里给这个机器人发一条纯文本消息试试。';
+      else if (st.running) status = '连接挂上了，还没连上飞书。飞书那边一般要等几秒；一直这样多半是网络或者凭据的问题。';
+      else status = '开着，但连接还没挂上（保存一次试试）。';
+
+      var listed = d.openIds.trim() !== '' || d.chatIds.trim() !== '';
+      var changed = Boolean(
+        d.enabled !== Boolean(st.enabled)
+        || d.appId !== (st.appId || '')
+        || d.openIds !== (st.openIds || '')
+        || d.chatIds !== (st.chatIds || '')
+        || d.appSecret !== ''
+      );
+
+      return h('div', { key: 'feishu', style: styles.block },
+        h('div', { style: styles.entryTitle }, '飞书'),
+        h('div', { style: styles.muted }, '在飞书里跟这个机器人说话，等于在这里的会话里说话。走长连接，不需要公网地址、也不需要域名。'),
+        h('div', { style: styles.warn }, '要先在飞书开放平台建一个企业自建应用，并把它配成「用长连接收消息」。下面那份指引就是这件事的六步。'),
+        h('label', { style: styles.toggleRow },
+          h('input', {
+            type: 'checkbox',
+            checked: Boolean(d.enabled),
+            disabled: Boolean(fs.busy),
+            onChange: function (e) { fs.setDraft(Object.assign({}, d, { enabled: e.target.checked })); },
+          }),
+          h('span', null, d.enabled ? '已开启' : '开启'),
+        ),
+        h('div', { style: st.error ? styles.detail : styles.muted }, status),
+        // 上一次保存之后长连接没起来的原因，原文照登。**开关即使被关掉也留着它**——
+        // 那正说明用户刚才为什么把它关了，抹掉反而不好排查。
+        st.error ? h('div', { style: styles.detail }, st.error) : null,
+        // 上一次被白名单挡住的来源。**这一行是新用户能不能自己配通的关键**：
+        // 名单默认是空的（谁都不认），而他不可能凭空知道自己的 open_id 长什么样——
+        // 发一句、回到这一页刷新、照着抄进名单，再发一次就通了。
+        st.rejected ? h('div', { style: styles.warn },
+          '上一次被挡住的来源（照抄进下面的名单再保存）：' + (st.rejected.reason || '')) : null,
+        field('appId', d.appId, 'cli_ 开头的那一串', function (v) {
+          fs.setDraft(Object.assign({}, d, { appId: v }));
+        }, 'text'),
+        // appSecret 打码，而且**永远是空的**：服务端从不把它送回来。留空保存 = 不动原来那份。
+        field('appSecret', d.appSecret, st.hasSecret ? '已经存过一份了，留空就不改动它' : 'App Secret', function (v) {
+          fs.setDraft(Object.assign({}, d, { appSecret: v }));
+        }, 'password'),
+        field('允许的 open_id（一行一个，留空 = 这份名单不设限）', d.openIds, '', function (v) {
+          fs.setDraft(Object.assign({}, d, { openIds: v }));
+        }, 'text'),
+        field('允许的 chat_id（同上）', d.chatIds, '', function (v) {
+          fs.setDraft(Object.assign({}, d, { chatIds: v }));
+        }, 'text'),
+        listed ? null : h('div', { style: styles.warn },
+          '两个名单都空着 = 谁都不认。先给这个机器人发一条消息，再回到这一页刷新一下，'
+          + '这里就会显示你的 open_id 和 chat_id，照抄进来保存。'),
+        h('div', { style: styles.warn }, '只认单聊（你和他私聊），群里发的这一版不处理。'),
+        h('div', { style: { marginTop: 12 } },
+          h('button', {
+            type: 'button',
+            disabled: Boolean(fs.busy) || !changed,
+            onClick: fs.save,
+            style: styles.btn,
+          }, fs.busy ? '保存中…' : '保存'),
+        ),
+        // 失败才留一行，并写清是哪一环出的问题。
+        fs.error ? h('div', { style: styles.error }, fs.error) : null,
+        // 后台那六步：**默认收起**。配过一次的人不用再看，摊开着只会把要填的几个框挤下去；
+        // 第一次配的人被飞书后台绕住时，这里是他唯一不用另开文档的地方。
+        h('div', { style: { marginTop: 12 } },
+          h('button', { type: 'button', onClick: fs.toggleGuide, style: styles.btn },
+            fs.guideOpen ? '收起配置指引' : '配置指引（飞书后台六步）'),
+        ),
+        fs.guideOpen ? feishuGuide() : null,
+      );
+    }
+
+    /**
+     * 配置指引的正文。
+     *
+     * 文案照 `tasks/飞书配置六步.md` 那份原样搬过来，**不在代码里另编一套**：
+     * 两边写得不一样的话，用户按界面上说的做完，回头对着文档又会以为自己哪一步做错了。
+     * 第 8 步（第一次被白名单拒绝、插件把 open_id 报出来）和上面「被挡下的来源」那一行
+     * 是同一件事，两处必须对得上。
+     *
+     * 样式只复用这一页已有的那几种（标题、说明文字、链接），不新增颜色和圆角。
+     */
+    function feishuGuide() {
+      var sections = [
+        ['一、建应用并取凭据', [
+          '1. 打开飞书开放平台 →「开发者后台」→ 创建企业自建应用，名字随意。',
+          '2. 进「凭证与基础信息」页，复制 App ID 和 App Secret 两个值。',
+          '这两个值等下要填进上面那一块。App Secret 是密码性质的东西，别外传。',
+        ]],
+        ['二、告诉飞书「用长连接收消息」', [
+          '3. 进「事件与回调」页，订阅方式选「使用长连接接收事件」。',
+          '不要选需要填「请求地址」的那种——那种要求你的电脑能被公网访问，家用电脑做不到。',
+          '4. 同一页点「添加事件」，搜 im.message.receive_v1 加上（意思是「收到消息时通知我」）。',
+        ]],
+        ['三、开三项权限', [
+          '5. 进「权限管理」，开通这三项：',
+          'im:message:receive_as_bot —— 接收发给机器人的消息',
+          'im:message:send_as_bot —— 以机器人身份发消息',
+          'im:message —— 回复某条消息',
+        ]],
+        ['四、发布', [
+          '6. 进「版本管理与发布」→ 创建版本 → 申请发布。自己用就选「仅我可见」。',
+        ]],
+        ['五、在插件这边收尾', [
+          '7. 打开 DSH 设置页里的飞书那一块，把开关打开，把 App ID / App Secret 填进去。',
+          '8. 在飞书里搜到这个机器人，给它发一句话。第一次会被拒绝——这是正常的，'
+            + '白名单默认是空的（默认拒绝，防止别人也能遥控你的电脑）。'
+            + '插件会告诉你「来源不在白名单：open_id=ou_xxxxx」。',
+          '9. 把那个 open_id 照抄填进白名单，再发一次。这次回答就会回到飞书里。',
+        ]],
+        ['注意事项', [
+          '不要把机器人拉进群。现在只支持一对一私聊；而且一旦拉进群，群里任何人都能驱动你这台电脑。',
+          'App Secret 若在飞书后台重置过，插件这边要重新填一次。',
+          '飞书那边要求「三秒内响应」，我们是收到就记账、随后再答，所以偶尔会看到飞书重发同一条'
+            + '——插件按消息编号去重，不会重复进会话。',
+          '手机上那套（浏览器遥控）不受影响，两条路可以同时用。',
+        ]],
+      ];
+      var out = [h('a', {
+        key: 'guide-open',
+        href: 'https://open.feishu.cn/',
+        target: '_blank',
+        rel: 'noreferrer',
+        style: styles.link,
+      }, '打开飞书开放平台')];
+      for (var i = 0; i < sections.length; i += 1) {
+        out.push(h('div', { key: sections[i][0], style: styles.entryTitle }, sections[i][0]));
+        var lines = sections[i][1];
+        for (var j = 0; j < lines.length; j += 1) {
+          out.push(h('div', { key: sections[i][0] + j, style: styles.muted }, lines[j]));
+        }
+      }
+      return h('div', { key: 'guide' }, out);
+    }
+
+    /** 飞书那一块的一个输入行。标签在上、输入框在下，和这一页其它地方一致。 */
+    function field(label, value, placeholder, onChange, type) {
+      return h('div', { key: label, style: { marginTop: 10 } },
+        h('div', { style: styles.muted }, label),
+        h('input', {
+          type: type,
+          value: value,
+          placeholder: placeholder,
+          spellCheck: false,
+          autoComplete: 'off',
+          onChange: function (e) { onChange(e.target.value); },
+          style: Object.assign({}, styles.input, { marginTop: 4 }),
+        }),
+      );
     }
 
     /**

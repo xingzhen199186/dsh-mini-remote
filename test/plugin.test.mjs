@@ -2156,8 +2156,10 @@ test('声明成 volatile 的字段只有那两个：能兑现的才标', async (
     '多标一个是谎话（DSH 就不再重载，而我们手里还是旧值），少标一个就白白多重载一次')
 
   assert.deepEqual(Object.keys(dict).sort(),
-    ['bindAddress', 'defaultMode', 'maxHistory', 'notify', 'port', 'token', 'tunnel'],
+    ['bindAddress', 'defaultMode', 'feishu', 'maxHistory', 'notify', 'port', 'token', 'tunnel'],
     '每个设置都该在声明里露面，否则标准通道看不见它')
+  // 飞书那一块**故意不标 volatile**：它的长连接是拿 appId/appSecret 建的，改了凭据
+  // 就得把连接整个换掉，"就地改一个值"兑现不了。上面那条 volatile 清单因此不该有它。
 
   // 只查标量字段：`z.object()` 这种整组字段天生带一个空对象默认值，而空对象合进
   // deepMerge 等于没变（无害）；真正会盖住用户设置的是标量字段上的默认值。
@@ -2285,4 +2287,92 @@ test('上下文用量：内存里没有就问日志要一份（插件起来晚�
 
   await bindSession(p, 'sess-half')
   assert.equal((await models()).context, null, '只有分子没有分母时仍旧空着，不拿别的数凑')
+})
+
+// ---------------------------------------------------------------------------
+// 飞书那一块：设置页上的路由
+// ---------------------------------------------------------------------------
+// 这一版做的是「飞书里发消息 → 会话 → 回答回飞书」，入站出站的规矩在
+// test/lark.test.mjs 里钉着。这里钉的是**它怎么接到设置页上**：谁改得动、
+// 凭据不往外送、填错了要说清是哪一环。真连飞书需要用户自己的凭据，这里只走
+// 「填错形状」那条路——它在加载 SDK 之前就停住了，不会碰网络。
+
+const FEISHU_ROUTE = '/mini-remote/feishu'
+/** 形状正确但不存在的 appId：用来验证「形状不对」和「连不上」是两件事。 */
+const FEISHU_APP_ID = 'cli_0123456789abcdef'
+
+test('飞书配置：只有本机改得动，而且只接受 POST', async (t) => {
+  const p = await bootPlugin()
+  t.after(p.stop)
+  const route = p.routes.get(FEISHU_ROUTE)
+  assert.ok(route, '这一块要挂上路由，否则设置页里改不了')
+
+  const denied = fakeRes()
+  await route.handler(fakeReq('192.168.1.50', { method: 'POST', body: '{}' }), denied)
+  assert.equal(denied.out.status, 403, '那是一对凭据，不能让局域网里的别人替你做主')
+
+  const wrong = fakeRes()
+  await route.handler(fakeReq('127.0.0.1'), wrong)
+  assert.equal(wrong.out.status, 405)
+
+  const bad = fakeRes()
+  await route.handler(fakeReq('127.0.0.1', { method: 'POST', body: 'not json' }), bad)
+  assert.equal(bad.out.status, 400, '请求体不是 JSON 要给 400，而不是崩掉')
+})
+
+test('飞书配置：appSecret 不回显，留空保存 = 不动原来那份', async (t) => {
+  const p = await bootPlugin({
+    config: { feishu: { enabled: false, appId: FEISHU_APP_ID, appSecret: 'sec-do-not-leak', openIds: 'ou_me' } },
+  })
+  t.after(p.stop)
+
+  // 面板上不能出现那串凭据本身，只能说「有一份」。
+  const read = fakeRes()
+  await p.routes.get('/mini-remote/pairing').handler(fakeReq('127.0.0.1'), read)
+  assert.ok(!read.out.body.includes('sec-do-not-leak'), 'appSecret 绝不能进浏览器')
+  assert.equal(JSON.parse(read.out.body).feishu.hasSecret, true, '但要告诉界面「已经有一份了」')
+
+  // 界面上那个框天生是空的，所以「留空」只能解释成「不改动原来那份」。
+  const save = fakeRes()
+  await p.routes.get(FEISHU_ROUTE).handler(fakeReq('127.0.0.1', {
+    method: 'POST',
+    body: JSON.stringify({ enabled: false, appId: FEISHU_APP_ID, openIds: 'ou_me\nou_other', chatIds: '' }),
+  }), save)
+  const saved = JSON.parse(readFileSync(join(p.home, 'dsh-mini-remote', 'settings.json'), 'utf8'))
+  assert.equal(saved.feishu.appSecret, 'sec-do-not-leak', '留空不该把凭据清掉')
+  assert.equal(saved.feishu.openIds, 'ou_me\nou_other', '名单要落盘')
+  assert.equal(JSON.parse(save.out.body).feishu.hasSecret, true)
+})
+
+test('飞书配置：appId 形状不对时把原因透到面板上，而不是静默失败', async (t) => {
+  // 实测：SDK 的 start() 不抛错，appId 正则不匹配时只打一行日志就返回——
+  // 用户看到的现象是「开关开着、什么都没发生」。所以形状这一关要自己把话说清楚。
+  const p = await bootPlugin({
+    config: { feishu: { enabled: true, appId: 'cli_bad', appSecret: 's', openIds: 'ou_me' } },
+  })
+  t.after(p.stop)
+
+  const res = fakeRes()
+  await p.routes.get(FEISHU_ROUTE).handler(fakeReq('127.0.0.1', {
+    method: 'POST',
+    body: JSON.stringify({ enabled: true, appId: 'cli_bad', openIds: 'ou_me', chatIds: '' }),
+  }), res)
+
+  const payload = JSON.parse(res.out.body)
+  assert.equal(payload.feishu.enabled, true, '用户点了开关，这个意愿要认')
+  assert.equal(payload.feishu.running, false, '形状都不对，连接当然没挂上')
+  assert.match(payload.feishu.error, /appId/, '要指名道姓说是哪一环出的问题')
+})
+
+test('飞书配置：关着的时候不建连接，面板上也看得见「没开」', async (t) => {
+  const p = await bootPlugin({ config: { feishu: { enabled: false, appId: FEISHU_APP_ID, appSecret: 's' } } })
+  t.after(p.stop)
+  const read = fakeRes()
+  await p.routes.get('/mini-remote/pairing').handler(fakeReq('127.0.0.1'), read)
+  const feishu = JSON.parse(read.out.body).feishu
+  assert.equal(feishu.enabled, false)
+  assert.equal(feishu.running, false, '默认关：不许自己偷偷连出去')
+  assert.equal(feishu.error, null)
+  assert.equal(feishu.openIds, '', '名单空着——默认谁都不认')
+  assert.equal(feishu.chatIds, '')
 })

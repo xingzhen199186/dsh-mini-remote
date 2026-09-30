@@ -377,3 +377,29 @@ test('配对面板里始终带着 tailscale 这个字段，界面才有得判断
   })
   assert.ok('tailscale' in payload, '字段必须在，null 也要在——界面靠它决定那一行显不显示')
 })
+
+test('feishu 那个字段也要在**每一条**返回路径上都有（和 serve 栽的是同一个坑）', async () => {
+  // 飞书那一块是自己的一条通路，手机服务起没起来都不该拦着用户改它。
+  // 所以它和 serve 一样：早退的每一条路径上都得带着，界面才有得渲染。
+  const cases = [
+    ['成功', { port: 3090, token: 'a', bound: [], serve: { url: 'https://x.ts.net/' } }],
+    ['隧道报错', { port: 3090, token: 'a', bound: [], tunnel: { enabled: true, error: '炸了' } }],
+    ['绑定配置问题', { port: 3090, token: 'a', bound: [], tunnel: { enabled: false } }],
+  ]
+  for (const [name, opts] of cases) {
+    const payload = await buildPairing(opts)
+    assert.ok('feishu' in payload, `${name} 那条返回路径上缺了 feishu 字段`)
+    assert.equal(typeof payload.feishu.enabled, 'boolean', `${name}：enabled 该是布尔`)
+    assert.equal(payload.feishu.rejected, null, `${name}：没被挡过的时候这一格是空的`)
+  }
+
+  // 被挡过的时候，原值要原样递到界面上——新用户就是靠这一行抄自己的 open_id。
+  const blocked = await buildPairing({
+    port: 3090,
+    token: 'a',
+    bound: [],
+    feishu: { enabled: true, rejected: { reason: '不在名单：open_id=ou_x', at: 1 } },
+  })
+  assert.match(blocked.feishu.rejected.reason, /ou_x/)
+  assert.equal(blocked.feishu.hasSecret, false, '没给凭据就不该说有一份')
+})

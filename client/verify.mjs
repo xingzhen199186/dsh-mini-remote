@@ -705,6 +705,190 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
   });
 }
 
+// 4f. 飞书那一块：开关、两个凭据、两个名单，以及「被挡下的来源」那一行
+{
+  const withFeishu = (feishu, extra) => Object.assign({
+    ok: true,
+    port: 3090,
+    token: TOKEN,
+    entries: [{ kind: 'lan', label: '内网', hint: '手机连同一个 Wi-Fi 时用这个', url: URL_LAN, qr: QR }],
+    // **故意不给 tunnel / serve**：那两块也各有一个复选框，这里少给两块，
+    // 「抓到的复选框是飞书那个」就不再是个变量。
+    tunnel: null,
+    serve: null,
+    feishu,
+  }, extra || {});
+
+  const FEISHU = {
+    enabled: true,
+    appId: 'cli_0123456789abcdef',
+    openIds: 'ou_me',
+    chatIds: '',
+    hasSecret: true,
+    starting: false,
+    running: true,
+    connected: true,
+    rejected: null,
+    error: null,
+  };
+
+  let tree8 = null;
+  let posted8 = [];
+  /** POST 那条要回什么；undefined = 照常回整份配对信息。 */
+  let postReply8;
+
+  // 这一块里的按钮不止一个（密码那一块也叫「保存」），所以先按标题框出这一块，
+  // 再在块内找——按文案在全树里找会抓到别人家的按钮。
+  const feishuSel = () => {
+    const block = walk(tree8).find((n) => n.type === 'div' && textOf(n).trim().startsWith('飞书'));
+    assert.ok(block, '面板上该有飞书那一块');
+    const inputs = byType(block, 'input');
+    return {
+      block,
+      text: textOf(block),
+      box: inputs.filter((n) => n.props.type === 'checkbox'),
+      password: inputs.find((n) => n.props.type === 'password'),
+      save: byType(block, 'button').find((b) => /^保存/.test(textOf(b))),
+    };
+  };
+
+  const mount8 = async (payload) => {
+    const h = useHarness();
+    posted8 = [];
+    postReply8 = undefined;
+    h.onUpdate(() => { tree8 = h.draw(Comp); });
+    setGlobal('fetch', async (url, init) => {
+      if (init && init.method === 'POST') {
+        posted8.push({ url, body: JSON.parse(init.body) });
+        return jsonResponse(200, postReply8 === undefined ? payload : postReply8);
+      }
+      return jsonResponse(200, payload);
+    });
+    tree8 = h.draw(Comp);
+    h.runEffects();   // 读配对信息
+    await tick();     // 信息到了 → 重渲染，rerun 一次让草稿填进来
+    h.runEffects();
+    await tick();
+  };
+
+  await check('飞书默认关着：开关未选中，两个名单空着时给出「怎么拿到自己 id」的那条路', async () => {
+    await mount8(withFeishu(Object.assign({}, FEISHU, {
+      enabled: false, running: false, connected: false, hasSecret: false, appId: '', openIds: '',
+    })));
+    const sel = feishuSel();
+    assert.equal(sel.box.length, 1, '这一块该有一个开关');
+    assert.equal(sel.box[0].props.checked, false, '默认是关的，不许自己偷偷连出去');
+    assert.match(sel.text, /没开/);
+    // 名单默认是空的（谁都不认），用户不可能凭空知道自己的 open_id 长什么样：
+    // 面板必须当场告诉他「发一句 → 回这一页刷新 → 抄进来」这条流程。
+    assert.match(sel.text, /刷新/, '要写清楚怎么把来源 id 弄出来');
+    assert.match(sel.text, /open_id/);
+    // 后台那几步（该订阅哪个事件之类）全在收起的那份指引里，上面这一行只负责指路。
+    assert.match(sel.text, /指引/, '要告诉用户后台那些步骤在哪儿看');
+  });
+
+  await check('appSecret 是密码框，而且永远不回填（存过了也不显示）', async () => {
+    await mount8(withFeishu(FEISHU));
+    const sel = feishuSel();
+    assert.ok(sel.password, '凭据那一格该是打码的');
+    assert.equal(sel.password.props.value, '', '服务端不把 appSecret 送回来，这格就该是空的');
+    assert.match(sel.password.props.placeholder, /留空/, '已经存过一份时要说明「留空 = 不动它」');
+  });
+
+  await check('没改动时保存按钮是禁用的（反馈靠禁用态，不发「已保存」）', async () => {
+    await mount8(withFeishu(FEISHU));
+    const sel = feishuSel();
+    assert.ok(sel.save, '这一块要有一个保存按钮');
+    assert.equal(sel.save.props.disabled, true, '没改东西就没什么可存的');
+  });
+
+  await check('勾上开关就能存：POST /mini-remote/feishu，凭据框空着就不发 appSecret', async () => {
+    await mount8(withFeishu(Object.assign({}, FEISHU, { enabled: false })));
+    feishuSel().box[0].props.onChange({ target: { checked: true } });
+    await tick();
+    assert.equal(feishuSel().save.props.disabled, false, '改了东西就该能存');
+    feishuSel().save.props.onClick();
+    await tick();
+    assert.equal(posted8.length, 1);
+    assert.equal(posted8[0].url, '/mini-remote/feishu');
+    assert.equal(posted8[0].body.enabled, true);
+    assert.equal(posted8[0].body.openIds, 'ou_me', '名单要一起存上去');
+    assert.ok(!('appSecret' in posted8[0].body), '留空 = 不动原来那份，别拿空串把凭据覆盖掉');
+  });
+
+  await check('填了凭据才发上去，而且发完那一格要清空', async () => {
+    await mount8(withFeishu(FEISHU));
+    feishuSel().password.props.onChange({ target: { value: 'brand-new-secret' } });
+    await tick();
+    feishuSel().save.props.onClick();
+    await tick();
+    assert.equal(posted8[0].body.appSecret, 'brand-new-secret', '只有真填了才发上去');
+    assert.equal(feishuSel().password.props.value, '', '存进去之后就别再摆在页面上了');
+  });
+
+  await check('被挡下的来源照登到面板上（含 open_id 原值）', async () => {
+    // 这一行是整个配置流程能不能自己走通的关键：名单默认是空的，用户第一次发消息
+    // 必然被挡，那时把他的 open_id 印出来，他才抄得进去。
+    await mount8(withFeishu(Object.assign({}, FEISHU, {
+      rejected: { reason: '来源不在白名单：open_id=ou_stranger、chat_id=oc_abc', at: 1 },
+    })));
+    const text = feishuSel().text;
+    assert.match(text, /ou_stranger/, '原值要照登，不许加工');
+    assert.match(text, /oc_abc/);
+  });
+
+  await check('配置指引默认收起：按钮在，六步正文一个字都不在页面上', async () => {
+    await mount8(withFeishu(Object.assign({}, FEISHU, { enabled: false })));
+    const text = feishuSel().text;
+    assert.match(text, /配置指引/, '飞书这一块里要有那份指引的开关');
+    assert.match(text, /六步/, '要写明是「飞书后台六步」，不然用户不知道这是给谁看的');
+    // 按只可能出现在正文里的句子查，不按「事件与回调」这种别处也提过的词查。
+    assert.doesNotMatch(text, /仅我可见/, '默认收起：正文不该摊在页面上');
+    assert.doesNotMatch(text, /im:message:receive_as_bot/);
+    assert.doesNotMatch(text, /不要把机器人拉进群/);
+  });
+
+  await check('点开配置指引：六步与注意事项在场；再点一次收回去', async () => {
+    await mount8(withFeishu(Object.assign({}, FEISHU, { enabled: false })));
+    const guideBtn = () => byType(feishuSel().block, 'button').find((b) => /配置指引/.test(textOf(b)));
+    const closeBtn = () => byType(feishuSel().block, 'button').find((b) => /收起配置指引/.test(textOf(b)));
+
+    guideBtn().props.onClick();
+    await tick();
+    const text = feishuSel().text;
+    assert.match(text, /事件与回调/, '第二步要说清在哪儿设成长连接');
+    assert.match(text, /im\.message\.receive_v1/, '订阅哪个事件是最容易漏的一步');
+    assert.match(text, /im:message:receive_as_bot/);
+    assert.match(text, /仅我可见/);
+    assert.match(text, /来源不在白名单：open_id=ou_xxxxx/, '第 8 步要和插件真报的那句话对得上');
+    assert.match(text, /不要把机器人拉进群/, '注意事项也在这一份里');
+    assert.ok(closeBtn(), '点开之后按钮要变成「收起」');
+
+    closeBtn().props.onClick();
+    await tick();
+    assert.doesNotMatch(feishuSel().text, /仅我可见/, '再点一次就该收回去');
+  });
+
+  await check('保存失败时留一行，写清是哪一环', async () => {
+    await mount8(withFeishu(Object.assign({}, FEISHU, { enabled: false })));
+    postReply8 = 'not an object';
+    feishuSel().box[0].props.onChange({ target: { checked: true } });
+    await tick();
+    feishuSel().save.props.onClick();
+    await tick();
+    assert.match(feishuSel().text, /保存飞书配置失败：服务返回了 HTTP 200。/, '失败要说清是哪一步');
+  });
+
+  await check('整块面板报错时，飞书这一块仍然露得出来', async () => {
+    // 它是一条独立的通路，手机服务起没起来都不该拦着用户改它。
+    await mount8(withFeishu(Object.assign({}, FEISHU, { enabled: false }), {
+      ok: false, error: '没找到手机能连上的地址。', entries: undefined,
+    }));
+    assert.match(feishuSel().text, /飞书/);
+    assert.equal(feishuSel().box.length, 1);
+  });
+}
+
 // ---------------------------------------------------------------- 结果
 
 console.log(`\n通过 ${passed} 项，失败 ${failures.length} 项。`);
