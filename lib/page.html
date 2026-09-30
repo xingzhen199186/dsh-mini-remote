@@ -154,6 +154,9 @@
     background: transparent; color: var(--fg); font: inherit; text-align: left; cursor: pointer;
   }
   .sa-row:last-child { border-bottom: none; }
+  /* 清单还在读时那一行也在 .sa-list 里，会被那 -16px 拽到贴屏边，
+     和行的文字差着一档。补回 .sa-row 同一个 16px 才对齐。 */
+  .sa-none.sa-none-indent { padding-left: 16px; }
   /* 读不动的那一支只有说明、点不动，所以没有手指光标。 */
   .sa-plain { cursor: default; }
   .sa-main { flex: 1 1 auto; min-width: 0; }
@@ -3821,7 +3824,7 @@
   }
 
   function saLoad() {
-    $('subagentsList').innerHTML = '<div class="sa-none">正在读取…</div>';
+    $('subagentsList').innerHTML = '<div class="sa-none sa-none-indent">正在读取…</div>';
     api('/mini/api/subagents').then(saRenderList).catch(function (err) {
       $('subagentsList').innerHTML = '<div class="sa-none">'
         + escapeHtml(err && err.message || '没读出来。') + '</div>';
