@@ -845,6 +845,7 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
     // 按只可能出现在正文里的句子查，不按「事件与回调」这种别处也提过的词查。
     assert.doesNotMatch(text, /仅我可见/, '默认收起：正文不该摊在页面上');
     assert.doesNotMatch(text, /im:message:receive_as_bot/);
+    assert.doesNotMatch(text, /添加应用能力/, '漏加机器人能力这一步也在正文里，收起时同样不该出现');
     assert.doesNotMatch(text, /不要把机器人拉进群/);
   });
 
@@ -857,6 +858,8 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
     await tick();
     const text = feishuSel().text;
     assert.match(text, /事件与回调/, '第二步要说清在哪儿设成长连接');
+    assert.match(text, /添加应用能力/, '建应用那一步要写清去哪里加机器人能力，漏了这步飞书里搜不到机器人');
+    assert.match(text, /重新发布一次版本才生效/, '加了机器人能力之后还要再发一次版本，这句不能省');
     assert.match(text, /im\.message\.receive_v1/, '订阅哪个事件是最容易漏的一步');
     assert.match(text, /im:message:receive_as_bot/);
     assert.match(text, /仅我可见/);
