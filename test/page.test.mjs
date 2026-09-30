@@ -3211,6 +3211,46 @@ test('历史里的指令行：不是气泡、没有复制按钮，出错是红�
   assert.match(css, /\.cmd\.error \.cmd-res \{[^}]*--err/, '连结果那行字一起红')
 })
 
+test('命令结果太长要在框里折行，不许顶出屏幕', () => {
+  // 用户 2026-09-30 实机报的：手机上一条 /doctor 结果被切在屏幕右边，读不全。
+  // 根因是 `.cmd-res` 的 `flex: 0 0 auto`——那等于「这一格不许缩，一行放完」，
+  // 长结果就顶出 .cmd 的框；.cmd 不裁剪，溢出再顶到 main，main 的
+  // overflow-y:auto 会把横向也变成滚动区，结果是整页能左右拉、右边那截看不见。
+  // 这条钉的是「结果是正文」：可以缩、可以从任意处断开，但**不许**换成横向滚动或省略号。
+  const cssAt = html.indexOf('.cmd {')
+  const cssEnd = html.indexOf('.cmd-row')
+  assert.ok(cssAt > 0 && cssEnd > cssAt,
+    '找不到指令行的样式（锚点对不上，别让这条断言静悄悄地空跑）')
+  const css = html.slice(cssAt, cssEnd)
+  const resAt = css.indexOf('.cmd .cmd-res')
+  assert.ok(resAt > 0, '找不到命令结果的样式')
+  // 只取这一条规则本身（到它的 `}` 为止）：切太宽会把下面别的区块的
+  // `text-overflow: ellipsis`（比如 .chip .nm）也算进来，断言就不是这条规则的事了。
+  const rest = css.slice(resAt)
+  const res = rest.slice(0, rest.indexOf('}') + 1)
+  assert.ok(!/\.cmd \.cmd-res \{[^}]*flex:\s*0\s+0/.test(css),
+    'flex: 0 0 auto 就是「一行放完」，长结果必顶出框')
+  assert.match(res, /min-width:\s*0/, '不许窄于内容，就折不了行')
+  assert.match(res, /overflow-wrap:\s*anywhere/, '长英文串、路径不认换行，得允许从任意处断开')
+  assert.ok(!/overflow-x/.test(res), '结果是正文，不许横向滚动')
+  assert.ok(!/text-overflow/.test(res), '也不许省略号截断——用户要的是读全')
+})
+
+test('标签让位给结果：长结果那条不许把标签推出来', () => {
+  // 长结果那条命令里，DSH 给的结果文本本身已经带着「/doctor: …」，
+  // 所以标签这时候必须照旧让到 0（今天的观感），否则会重复显示一遍指令名。
+  const css = html.slice(html.indexOf('.cmd {'), html.indexOf('.cmd-row'))
+  const line = css.slice(css.indexOf('.cmd .cmd-line'), css.indexOf('.cmd .cmd-res'))
+  // 只取规则本身（到第一个 `}` 为止）：注释里会引用旧的 `flex: 0 0 auto` 当例子，
+  // 整段丢给正则会被那行例子先命中。
+  const rule = line.slice(0, line.indexOf('}') + 1)
+  const shrink = /flex:\s*0\s+(\d+)\s+auto/.exec(rule)
+  assert.ok(shrink, '标签要写清收缩权重，别用默认值')
+  assert.ok(Number(shrink[1]) >= 2,
+    '标签的收缩权重要明显大于结果，长结果才先挤标签、后折结果')
+  assert.match(rule, /text-overflow:\s*ellipsis/, '短行时标签照旧要能省略着显示')
+})
+
 test('单帧模式：历史里最后一条是指令时，也要显示出来', () => {
   // 用户点一下 /compact，单帧模式整屏只有「最新一条回复」——而指令不产生回复，
   // 不特意画它的话，屏幕上就是一动不动，看着像点了个没反应的按钮。

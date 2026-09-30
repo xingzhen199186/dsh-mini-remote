@@ -261,13 +261,25 @@
     border-left: 2px solid var(--line); border-radius: 0 var(--r) var(--r) 0;
     background: var(--panel-2); font-size: 13px; line-height: 1.5;
   }
-  /* 名字加参数排一行，太长就省略——它是「做了哪件事」的标签，不是正文。 */
+  /* 名字加参数排一行，太长就省略——它是「做了哪件事」的标签，不是正文。
+     收缩权重给到 10：位置要让给下面那条结果。挪不开的时候它先让到 0
+     （2026-09-30 之前就是这样：长结果把标签挤没了），这个观感这次不动它。 */
   .cmd .cmd-line {
+    flex: 0 10 auto;
     min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     color: var(--fg);
   }
-  .cmd .cmd-res { flex: 0 0 auto; color: var(--muted); }
+  /* 结果是**正文**，得能整段读全。原来是 `flex: 0 0 auto`——那等于「这一格不许缩，
+     一行放完」，于是长结果（2026-09-30 用户报的 /doctor 那条）直接顶出 .cmd 的框，
+     顶出去的半截连底色都没有；.cmd 不裁剪，溢出再顶到 main，而 main 的 overflow-y:auto
+     会把横向一起算成滚动区，整页于是能左右拉、右边那截得滑一下才看得见。
+     改成可以缩（min-width:0 拿掉「不许窄于内容」的下限）+ 允许从任意处断开，
+     长结果就在框里正常折行。不做横向滚动、也不做省略号截断：用户要的是读全。 */
+  .cmd .cmd-res {
+    flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere;
+    color: var(--muted);
+  }
   .cmd.success { border-left-color: var(--ok); }
   .cmd.success .cmd-res { color: var(--ok); }
   /* 出错的那一种必须是红的：整串历史里只有它需要用户抬眼看一下。 */
