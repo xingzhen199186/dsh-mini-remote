@@ -4,11 +4,12 @@
  * 这一层**不连真实飞书、不用真实凭据**：SDK 是注入进来的假对象，事件是手工造的。
  * 真的长连接和真机往返需要用户自己的飞书应用凭据，这里测不了——报告里如实写了这一条。
  *
- * 钉住的四件事（对应需求里点名的四条）：
+ * 钉住的五件事（对应需求里点名的几条）：
  *   1. 去重：同一条 event_id／message_id 只注入一次；
  *   2. 白名单：两个名单都空 → 谁都不认；不在名单 → 丢弃并留一行原因；在名单 → 放行；
- *   3. 纯文本化与超长分段：切成多段、顺序正确、每段不超上限；
- *   4. 生命周期：卸载后连接与定时器都停（假连接对象断言）。
+ *   3. 被拒时的回话：只在单聊、只回他本人的编号、同一来源 60 秒一次、发不出去也不崩；
+ *   4. 纯文本化与超长分段：切成多段、顺序正确、每段不超上限；
+ *   5. 生命周期：卸载后连接与定时器都停（假连接对象断言）。
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -24,9 +25,10 @@ const APP_ID = 'cli_0123456789abcdef'
  * 假的官方 SDK：只实现这一版真正用到的那几个方法，并把每次调用记下来。
  *
  * `reply` 默认返回 `{ code: 0 }`——飞书这套接口是「HTTP 200 + 业务 code」，
- * code 为 0 才算发成功。
+ * code 为 0 才算发成功。要试别的结局（抛错、卡住不回）就传一个 `reply` 进来：
+ * 每条调用**先记下来再交给它**，所以「调用发生了」这件事和它成没成无关。
  */
-function fakeSdk() {
+function fakeSdk({ reply } = {}) {
   const calls = { starts: 0, closes: [], replies: [], clientParams: null, wsParams: null }
   class Client {
     constructor(params) {
@@ -35,7 +37,7 @@ function fakeSdk() {
         message: {
           reply: async (payload) => {
             calls.replies.push(payload)
-            return { code: 0, msg: 'success' }
+            return reply ? reply(payload) : { code: 0, msg: 'success' }
           },
         },
       }
@@ -106,8 +108,8 @@ function inbound({ event_id = 'ev_1', openId = 'ou_me', message = {}, ...rest } 
   }
 }
 
-async function makeChannel({ config = {}, result = { ok: true } } = {}) {
-  const { calls, mod } = fakeSdk()
+async function makeChannel({ config = {}, result = { ok: true }, reply } = {}) {
+  const { calls, mod } = fakeSdk({ reply })
   const { live, timers } = fakeTimers()
   const logs = []
   const injected = []
@@ -300,6 +302,97 @@ test('入站：没交给会话的那条，不许留在等回答的名单里', as
   const r = await p.channel.reply('别处的回答', { userText: '你好' })
   assert.equal(r.ok, false)
   assert.equal(p.calls.replies.length, 0)
+})
+
+// ---------------------------------------------------------------------------
+// 被白名单挡下时的那句回话：只在单聊、只回他本人的编号、限流、发不出去也不崩
+// ---------------------------------------------------------------------------
+
+/**
+ * 那句回话是「发出去就撒手」的（见 lib/lark.js 的 sendHint：飞书只给三秒，不能挂在
+ * 那儿等一次 HTTP 往返）。等一轮宏任务让它落定——中间全是微任务，一轮就够。
+ */
+const flush = () => new Promise((resolve) => setImmediate(resolve))
+
+test('被拒且是单聊：回一句，编号是他自己的，并说清去哪儿填', async () => {
+  const p = await makeChannel({ config: { openIds: 'ou_me' } })
+  await p.channel.handleInbound(inbound({ openId: 'ou_stranger', message: { message_id: 'om_x', chat_id: 'oc_x' } }))
+  await flush()
+  assert.equal(p.calls.replies.length, 1, '被挡下的人该当场收到一句，而不是只能回电脑上翻日志')
+  const payload = p.calls.replies[0]
+  assert.equal(payload.path.message_id, 'om_x', '要用「回复某条消息」挂在他自己发的那条下面')
+  assert.equal(payload.data.msg_type, 'text')
+  const sent = JSON.parse(payload.data.content).text
+  assert.match(sent, /open_id=ou_stranger/, '必须带他自己的 open_id 原值——他要抄的就是这一串')
+  assert.match(sent, /设置页/, '要告诉他去哪儿填')
+  assert.match(sent, /允许的 open_id/, '要指名道姓说是设置页里的哪一个框')
+  assert.ok(!sent.includes('ou_me'), '别人的编号不许出现在这一句里')
+  assert.deepEqual(p.injected, [], '被挡下的消息照旧不进会话')
+  assert.equal(p.warns().length, 1, '回话发成功时不许再多写一行日志')
+})
+
+test('被拒但是在群里：一句话都不回', async () => {
+  const p = await makeChannel({ config: { openIds: '' } })
+  await p.channel.handleInbound(inbound({ message: { chat_type: 'group' } }))
+  await flush()
+  assert.equal(p.calls.replies.length, 0, '群里回一句 = 把他的编号贴给一屋子人')
+})
+
+test('被拒但载荷没说是不是单聊：也不回', async () => {
+  // 上面那条群聊挡板只拦「明确不是单聊」的（老载荷可能没这个字段），所以没带 chat_type
+  // 的消息会一路走到白名单；但回话这里把门关死：分不清单聊群聊，宁可不告诉他。
+  const p = await makeChannel({ config: { openIds: '' } })
+  await p.channel.handleInbound(inbound({ message: { chat_type: '' } }))
+  await flush()
+  assert.equal(p.calls.replies.length, 0)
+})
+
+test('放行的消息：不走这条拒绝回话', async () => {
+  const p = await makeChannel()
+  await p.channel.handleInbound(inbound())
+  await flush()
+  assert.equal(p.injected.length, 1)
+  assert.equal(p.calls.replies.length, 0, '放行的消息由「回答」那条路回，这里一句都不发')
+})
+
+test('同一个来源 60 秒内被拒多次：只回第一次', async () => {
+  const p = await makeChannel({ config: { openIds: '' } })
+  await p.channel.handleInbound(inbound({ message: { message_id: 'om_1' } }))
+  await p.channel.handleInbound(inbound({ event_id: 'ev_2', message: { message_id: 'om_2' } }))
+  await p.channel.handleInbound(inbound({ event_id: 'ev_3', message: { message_id: 'om_3' } }))
+  await flush()
+  assert.equal(p.calls.replies.length, 1, '连发三句不该收到三句一模一样的话')
+  // 换个人来问，还是各回各的：限流认的是来源，不是「全局只回一次」。
+  await p.channel.handleInbound(inbound({ event_id: 'ev_4', openId: 'ou_other', message: { message_id: 'om_4' } }))
+  await flush()
+  assert.equal(p.calls.replies.length, 2)
+})
+
+test('回话发不出去：吞掉、写一行日志，主流程照常', async () => {
+  const p = await makeChannel({
+    config: { openIds: '' },
+    reply: () => { throw new Error('没权限：99991672') },
+  })
+  await p.channel.handleInbound(inbound())
+  await flush()
+  assert.equal(p.calls.replies.length, 1, '试还是要试一下')
+  const warned = p.warns().join('\n')
+  assert.match(warned, /被挡下的提示没发出去/)
+  assert.match(warned, /99991672/, '发不出去的原因要留在日志里')
+  assert.match(p.logs.join('\n'), /来源不在白名单/, '白名单那一行日志照旧')
+})
+
+test('回话不等它：飞书那边一直不回，主流程也照常返回', async () => {
+  // 假的 reply 永不落定，模拟「飞书那边迟迟不回」。要是 sendHint 里 await 了它，这一句
+  // 就回不来了——而飞书只给三秒，超时就会把同一条事件重推一遍。
+  const p = await makeChannel({ config: { openIds: '' }, reply: () => new Promise(() => {}) })
+  const done = await Promise.race([
+    p.channel.handleInbound(inbound()).then(() => 'ok'),
+    new Promise((resolve) => setTimeout(() => resolve('等超时了'), 300)),
+  ])
+  assert.equal(done, 'ok')
+  assert.equal(p.calls.replies.length, 1, '照发，只是不等')
+  p.channel.close()
 })
 
 // ---------------------------------------------------------------------------
