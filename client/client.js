@@ -439,10 +439,10 @@ window.__ModuleLoader__.load({
         field('appSecret', d.appSecret, st.hasSecret ? '已经存过一份了，留空就不改动它' : 'App Secret', function (v) {
           fs.setDraft(Object.assign({}, d, { appSecret: v }));
         }, 'password'),
-        field('允许的 open_id（一行一个，留空 = 这份名单不设限）', d.openIds, '', function (v) {
+        field('允许的 open_id（一行一个，留空 = 不限这一项。两份都留空 = 谁都不认）', d.openIds, '', function (v) {
           fs.setDraft(Object.assign({}, d, { openIds: v }));
         }, 'text'),
-        field('允许的 chat_id（同上）', d.chatIds, '', function (v) {
+        field('允许的 chat_id（一行一个，留空 = 不限这一项）', d.chatIds, '', function (v) {
           fs.setDraft(Object.assign({}, d, { chatIds: v }));
         }, 'text'),
         listed ? null : h('div', { style: styles.warn },
