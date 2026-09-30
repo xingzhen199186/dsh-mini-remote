@@ -192,3 +192,71 @@ test('重放：指令不是回答，单帧模式拿的还是模型那句', () =>
   assert.equal(lastReply(rows, 'sess-1').text, '答一句',
     '指令的结果是系统动作，不是 AI 的回答——单帧模式显示它会让用户以为模型说了这句')
 })
+
+// ---------------------------------------------------------------------------
+// 子智能体完工的通知（2026-10-03）
+//
+// 这条通知在电脑端是一张可展开的卡片，在手机端原来是**整条不见了**：
+// 它挂在 `user/message` 上，而提取器只认 `source.kind === 'user'`，它就被一起挡掉了。
+// 下面几条钉住「它现在进得来」和「它没有被冒充成别的东西」这两件事。
+// ---------------------------------------------------------------------------
+
+/** 子智能体跑完，DSH 往父会话里追加的那条通知。 */
+const settledMsg = (summary, closing) => ev('user/message', {
+  id: 'notice-1',
+  source: { kind: 'subagent-settled', form: 'notice', summary, senderSessionId: 'session-child' },
+  // 通知的正文是**几个 text 块**（先说为什么结束，再接它的收尾原话），不是一整段。
+  content: [...text(summary), ...text('Its closing message:'), ...text(closing)],
+})
+
+test('重放：子智能体完工的通知进得来，而且不是「用户说的话」', () => {
+  // 原来它被过滤掉了（手机上从来没见过这张卡片）。现在要进得来，
+  // 而且**不能**是 role:'user'——那会变成「我说过这句话」，是假的。
+  const rows = replayHistory([
+    ...turn('派个活', '派出去了'),
+    settledMsg('Background subagent session-child finished.', '两条依赖重复，已经删掉一条。'),
+  ])
+
+  const row = rows.at(-1)
+  assert.equal(row.role, 'notice')
+  assert.notEqual(row.role, 'user', '通知不是用户说的话')
+  assert.equal(row.senderSessionId, 'session-child')
+  assert.match(row.summary, /finished/)
+  // 正文是**转述**：DSH 说清「谁、为什么结束」，再把它自己的收尾原话接上。
+  // 用户要读到的就是这段，一个字都不该在我们这边被加工掉。
+  assert.match(row.text, /Background subagent session-child finished\./)
+  assert.match(row.text, /Its closing message:/)
+  assert.match(row.text, /两条依赖重复，已经删掉一条。/)
+})
+
+test('重放：通知不抢「最新的回答」那个位置', () => {
+  // 单帧模式显示的是模型的回答。通知占了那个位置，用户会以为模型说了这串英文。
+  const rows = replayHistory([
+    ...turn('问一句', '答一句'),
+    settledMsg('Background subagent session-child finished.', '做完了'),
+  ])
+
+  assert.equal(lastReply(rows, 'sess-1').text, '答一句',
+    '完工通知不是回答——它是一件事的结局，不是模型对你说的话')
+})
+
+test('重放：没有内容的通知不占位（宁可没有，也不给一张空卡片）', () => {
+  const rows = replayHistory([
+    ...turn('问', '答'),
+    ev('user/message', { id: 'n', source: { kind: 'subagent-settled', senderSessionId: 'c' }, content: [] }),
+  ])
+
+  assert.deepEqual(rows.map((r) => r.role), ['user', 'assistant'])
+})
+
+test('重放：插件注入的合成上下文照旧丢掉，没被这条新规则带进来', () => {
+  // 新加的分支只管 subagent-settled 那一种。别的 source.kind（plugin 等）
+  // 还是得挡在外面——否则手机上会冒出「文件变更通知」这类莫名其妙的消息。
+  const rows = replayHistory([
+    ...turn('问', '答'),
+    ev('user/message', { id: 'p1', source: { kind: 'plugin' }, content: text('文件变了：a.js') }),
+  ])
+
+  assert.deepEqual(rows.map((r) => r.role), ['user', 'assistant'])
+  assert.deepEqual(rows.map((r) => r.text), ['问', '答'])
+})

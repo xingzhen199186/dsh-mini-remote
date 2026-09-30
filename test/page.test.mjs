@@ -53,13 +53,15 @@ function renderMinimalWith(state) {
   const mainEl = { classList: { remove() {} }, scrollTop: 0, scrollHeight: 0 }
   // eslint-disable-next-line no-new-func
   const build = new Function(
-    'state', 'replyEl', 'mainEl', 'escapeHtml', 'mdToHtml', 'ICON_COPY',
+    'state', 'replyEl', 'mainEl', 'escapeHtml', 'mdToHtml', 'ICON_COPY', 'timeLabel',
     `${html.slice(rs, re)}\nreturn renderMinimal;`,
   )
   // build(...) 返回的是 renderMinimal 本身，还得**调用一次**才真的渲染。
   // ICON_COPY 要从真实源码里取（见上面 md 那段）——切片是从 renderMinimal 开始的，
   // 拿不到它上面定义的东西；编一个假的值就等于在测桩，不是在测页面。
-  const renderMinimal = build(state, replyEl, mainEl, md.escapeHtml, md.mdToHtml, md.ICON_COPY)
+  // timeLabel 同理由：它定义在切片范围之外（在「复制」那一段后面），页面里是原函数，
+  // 这里给个固定桩——测试关心的是「时刻画出来了没有」，不关心它精确到几分。
+  const renderMinimal = build(state, replyEl, mainEl, md.escapeHtml, md.mdToHtml, md.ICON_COPY, () => '12:00')
   renderMinimal()
   return replyEl.innerHTML
 }
@@ -76,10 +78,10 @@ function minimalRunner(state) {
   const mainEl = { classList: { remove() {} }, scrollTop: 0, scrollHeight: 0 }
   // eslint-disable-next-line no-new-func
   const build = new Function(
-    'state', 'replyEl', 'mainEl', 'escapeHtml', 'mdToHtml', 'ICON_COPY',
+    'state', 'replyEl', 'mainEl', 'escapeHtml', 'mdToHtml', 'ICON_COPY', 'timeLabel',
     `${html.slice(rs, re)}\nreturn renderMinimal;`,
   )
-  const renderMinimal = build(state, replyEl, mainEl, md.escapeHtml, md.mdToHtml, md.ICON_COPY)
+  const renderMinimal = build(state, replyEl, mainEl, md.escapeHtml, md.mdToHtml, md.ICON_COPY, () => '12:00')
   return {
     state,
     mainEl,
@@ -3356,4 +3358,130 @@ test('图没加载出来要说一声：error 挂捕获阶段，只认正文图�
   assert.match(block, /classList\.contains\('md-img'\)/, '只该管正文里的图片，别把别的加载失败也报出来')
   assert.match(block, /,\s*true\)/, '图片的 error 不冒泡，挂在冒泡阶段一个也收不到')
   assert.match(block, /toast\(/, '要让用户知道为什么看不到，而不是只画个破图标')
+})
+
+// ---------------------------------------------------------------------------
+// 子智能体完工的卡片（2026-10-03）
+//
+// 这条通知原来在手机上**整条不见了**：它挂在 `user/message` 上，而提取器只认
+// `source.kind === 'user'`，于是被一起挡掉。现在它进得来了，这一组钉住的是
+// **它长得对**：一张能展开的卡片、不是用户气泡、正文是转述不是回答。
+// ---------------------------------------------------------------------------
+
+const noticeMsg = (extra = {}) => ({
+  role: 'notice',
+  text: 'Background subagent session-child finished.\n\nIts closing message:\n\n两条依赖重复，已经删掉一条。',
+  summary: 'Background subagent session-child finished.',
+  senderSessionId: 'session-1234abcd-5678',
+  timestamp: 300,
+  ...extra,
+})
+
+test('聊天模式：完工通知画成一张可展开的卡片，不是用户气泡', () => {
+  const out = renderChatWith({
+    running: false,
+    history: [
+      { role: 'user', text: '派个活', timestamp: 1 },
+      { role: 'assistant', text: '派出去了', timestamp: 2 },
+      noticeMsg(),
+    ],
+  })
+
+  // 展开/收起交给原生 <details>：不写一行脚本、不加一个关键帧，键盘和读屏也都认。
+  assert.match(out, /<details class="sa-card">/, '通知要是一张能展开/收起的卡片')
+  assert.match(out, /子智能体完工/, '要说清这是谁的消息')
+  // 正文是 DSH 生成的**转述**：先说清「谁、为什么结束」，再把它自己的收尾原话接上。
+  assert.match(out, /Background subagent session-child finished\./)
+  assert.match(out, /Its closing message:/)
+  assert.match(out, /两条依赖重复，已经删掉一条。/)
+  // **不能**套成用户气泡：那会变成「我说过这句话」，是假的。
+  assert.match(out, /<div class="sa-body">[\s\S]*?Background subagent/,
+    '通知的正文要落在卡片正文里')
+  const bubbles = [...out.matchAll(/class="bubble user"/g)].length
+  assert.equal(bubbles, 1, '只有那句真的用户消息该是气泡，通知不掺进去')
+})
+
+test('完工卡片里的会话 id 要抹掉人人相同的那截前缀', () => {
+  // 会话 id 都是 `session-xxxxxxxx-…` 开头。整段贴出来，一排卡片看着一模一样。
+  const out = renderChatWith({ running: false, history: [noticeMsg()] })
+  assert.ok(!out.includes('session-1234abcd'), '整段 id 贴出来，一排卡片看着一模一样')
+  assert.match(out, />1234abcd</, '要显示真能区分它们的那几个字符')
+})
+
+test('完工卡片的正文是文本，不是能执行的 HTML', () => {
+  const out = renderChatWith({
+    running: false,
+    history: [noticeMsg({ text: '<img src=x onerror=alert(1)> 收尾' })],
+  })
+  assert.ok(!/<img src=x/.test(out), '通知正文必须先转义再贴出来')
+  assert.match(out, /&lt;img src=x/, '转义过的原文要照着显示')
+})
+
+test('单帧模式：通知是最后一条时露出来，被新回答顶掉后就不露了', () => {
+  // 通知一到，父级通常会被唤醒作答。那条回答到了之后，通知就不该再占着最下面。
+  const withNoticeLast = renderMinimalWith({
+    running: false,
+    history: [noticeMsg()],
+    latest: null,
+  })
+  assert.match(withNoticeLast, /<details class="sa-card">/, '通知到了要看得见——那一段空窗里不能一动不动')
+
+  const withNewerReply = renderMinimalWith({
+    running: false,
+    history: [noticeMsg({ timestamp: 100 })],
+    latest: { text: '我看过了，没问题。', timestamp: 200 },
+  })
+  assert.ok(!withNewerReply.includes('sa-card'), '新回答到了，底下不该还挂着那条通知')
+})
+
+test('单帧模式：通知不占「最新一条回复」那个位置', () => {
+  // 单帧模式显示的是模型的回答。通知占了那儿，用户会以为模型说了这串英文。
+  const out = renderMinimalWith({
+    running: false,
+    history: [noticeMsg()],
+    latest: { text: '模型说的是这句。', timestamp: 50 },
+  })
+  assert.match(out, /模型说的是这句。/)
+  assert.ok(!/md[^>]*>[\s\S]{0,80}Background subagent/.test(out),
+    '通知不该被当成正文画出来')
+})
+
+test('子智能体入口：紧挨在设置齿轮左边，还是那套 24 格线性图标', () => {
+  // 用户点名要求：入口放在设置齿轮的**左边**。放在右边会把最右边那个惯用位置抢走。
+  const header = html.slice(html.indexOf('<header>'), html.indexOf('</header>'))
+  const sub = header.indexOf('id="btnSubagents"')
+  const gear = header.indexOf('id="btnSettings"')
+  assert.ok(sub > 0, '顶栏里没有子智能体入口')
+  assert.ok(sub < gear, '入口要在设置齿轮左边')
+  assert.ok(!header.slice(sub + 20, gear).includes('id="btn'), '这两个按钮之间不该再夹别的入口')
+  assert.match(header, /id="btnSubagents" aria-label="子智能体"/, '要有说得出口的名字（读屏靠它）')
+  // 和旁边那两个按钮同一套画法：24 格、只有描边、不填色。
+  const svg = header.slice(sub, header.indexOf('</button>', sub))
+  assert.match(svg, /viewBox="0 0 24 24"/, '要和旁边那两个同一套格子')
+  assert.match(svg, /<circle /, '三个端点要画出来')
+})
+
+test('子智能体面板：外壳复用设置抽屉那一套，没有另起一套样式', () => {
+  // 用户要求「复用既有抽屉与视觉样式」。这里钉住它确实复用了 .sheet，
+  // 而不是又写了一个长得像的。
+  const from = html.indexOf('<div id="subagents">')
+  assert.ok(from > 0, '页面里没有子智能体面板')
+  const block = html.slice(from, html.indexOf('<div id="gate">'))
+  assert.match(block, /<div class="sheet">/, '面板外壳要用设置那一套 .sheet')
+  for (const id of ['subagentsList', 'subagentsDoc', 'subagentsBack', 'subagentsClose', 'subagentsTitle']) {
+    assert.ok(block.includes(`id="${id}"`), `面板里少了 id="${id}"`)
+  }
+})
+
+test('完工卡片和列表行只用了既有令牌，一个新颜色都没造', () => {
+  const css = html.slice(html.indexOf('<style>'), html.indexOf('</style>'))
+  // 新造令牌要在深浅两套主题各写一份，漏一边就有元素在某个主题下隐身。
+  // 这一块的做法是**一个都不造**，全用主屏已有的那几个。
+  const sa = css.slice(css.indexOf('/* ---------- 子智能体'), css.indexOf('/* ---------- 显示区'))
+  assert.ok(sa.length > 0, '找不到子智能体那段样式，锚点变了先修测试')
+  const declared = [...sa.matchAll(/(--[a-z0-9-]+)\s*:/g)].map((m) => m[1])
+  assert.deepEqual(declared, [], `子智能体那段不该声明新令牌：${JSON.stringify(declared)}`)
+  // 强调色是**一屏最多两处**的稀缺资源，这一屏没有它。
+  assert.ok(!sa.includes('var(--act)'), '子智能体这屏没有主按钮色的位置')
+  assert.ok(!sa.includes('var(--gold)'), '子智能体这屏没有暖金字的位置')
 })

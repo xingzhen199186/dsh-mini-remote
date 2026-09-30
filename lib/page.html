@@ -125,6 +125,76 @@
   }
   .icon-btn:active { transform: scale(.94); }
 
+  /* ---------- 子智能体（2026-10-03） ----------
+     整块**只新增两条外观**：列表里的一行、聊天记录里那张完工卡片。其余全部复用：
+     抽屉外壳用设置那一套（#subagents 的骨架和 .sheet 完全一样），状态点用既有 .dot，
+     主按钮用既有 .btn.primary，气泡用既有 .bubble / .said。
+
+     **一个颜色令牌都没新加**：全用主屏已有的那几个，浅色主题下跟着变就行——
+     令牌是两套主题各写一份的，新造一个就等于在浅色下多挖一个坑。
+
+     也没有新的关键帧：卡片能不能展开交给原生 <details>，不写一行脚本去演它。 */
+  #subagents {
+    position: fixed; inset: 0; background: var(--scrim);
+    display: none; align-items: flex-end; z-index: 50;
+  }
+  #subagents.open { display: flex; }
+  .sa-head { display: flex; align-items: center; gap: 10px; margin: 0 0 14px; }
+  .sa-head h2 { margin: 0; font-size: 16px; flex: 1 1 auto; }
+  .sa-back {
+    flex: 0 0 auto; border: none; background: transparent; color: var(--muted);
+    font: inherit; font-size: 14px; cursor: pointer; padding: 0;
+  }
+  .sa-none { color: var(--muted); font-size: 14px; padding: 6px 0 2px; }
+  /* 行负着左右两边的 16px：让分隔线横贯整个抽屉，而不是在里面缩一截。 */
+  .sa-list { margin: 0 -16px; }
+  .sa-row {
+    display: flex; align-items: center; gap: 10px; width: 100%;
+    padding: 12px 16px; border: none; border-bottom: 1px solid var(--line);
+    background: transparent; color: var(--fg); font: inherit; text-align: left; cursor: pointer;
+  }
+  .sa-row:last-child { border-bottom: none; }
+  /* 读不动的那一支只有说明、点不动，所以没有手指光标。 */
+  .sa-plain { cursor: default; }
+  .sa-main { flex: 1 1 auto; min-width: 0; }
+  .sa-name { display: block; font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sa-sub { display: block; font-size: 12px; color: var(--muted); margin-top: 3px; }
+  /* 数字用等宽数位：几行并排时小数点对齐，扫一眼就能比大小。 */
+  .sa-num {
+    flex: 0 0 auto; text-align: right; font-size: 12px; color: var(--muted);
+    font-variant-numeric: tabular-nums; line-height: 1.5;
+  }
+  .sa-acts { display: flex; gap: 10px; margin-top: 16px; }
+  .sa-acts .btn { flex: 1 1 0; text-align: center; }
+  .sa-ask { display: flex; gap: 10px; margin-top: 16px; align-items: flex-end; }
+  .sa-ask input {
+    flex: 1 1 auto; min-width: 0; padding: 10px 12px; border-radius: var(--r);
+    border: 1px solid var(--line); background: var(--panel-2); color: var(--fg);
+    font: inherit; font-size: 16px; line-height: 1.5; outline: none;
+  }
+  .sa-ask input:focus { border-color: var(--ice); }
+  .sa-ask .btn { flex: 0 0 auto; }
+  .sa-doc { max-height: 52vh; overflow-y: auto; margin: 0 -16px; padding: 0 16px; }
+  .sa-doc .bubble, .sa-doc .said { max-width: 100%; }
+
+  /* 完工卡片。展开/收起用原生 <details>：不写脚本、不加关键帧，键盘和读屏也都认。
+     样子和主会话里那张卡片同一个思路——单薄一层边框，不抢回答的气泡感。 */
+  .sa-card {
+    margin: 10px 0; border: 1px solid var(--line); border-radius: var(--r);
+    background: var(--panel-2); overflow: hidden;
+  }
+  .sa-card > summary {
+    display: flex; align-items: center; gap: 8px; list-style: none;
+    padding: 10px 12px; font-size: 13px; color: var(--muted); cursor: pointer;
+  }
+  .sa-card > summary::-webkit-details-marker { display: none; }
+  .sa-card > summary b { color: var(--fg); font-weight: 600; }
+  .sa-card[open] > summary { border-bottom: 1px solid var(--line); }
+  .sa-card .sa-body {
+    padding: 10px 12px; font-size: 14px; white-space: pre-wrap;
+    word-break: break-word; max-height: 240px; overflow: auto;
+  }
+
   /* ---------- 显示区 ---------- */
   main { flex: 1 1 auto; overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 16px 14px; }
   main.center { display: grid; place-items: center; }
@@ -932,6 +1002,7 @@
   <span class="dot" id="dot"></span>
   <span class="brand">极简遥控器</span>
   <span class="status" id="status">连接中…</span>
+  <button class="icon-btn" id="btnSubagents" aria-label="子智能体"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8.2 12H11M11 6v12M11 6h4.8M11 18h4.8"/><circle cx="6" cy="12" r="2.2"/><circle cx="18" cy="6" r="2.2"/><circle cx="18" cy="18" r="2.2"/></svg></button>
   <button class="icon-btn" id="btnSettings" aria-label="设置"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h8M16 7h4M4 17h4M12 17h8"/><circle cx="14" cy="7" r="2.2"/><circle cx="10" cy="17" r="2.2"/></svg></button>
 </header>
 
@@ -1111,6 +1182,28 @@
       <button class="btn" id="btnForget">清除 token</button>
       <button class="btn primary" id="btnClose">完成</button>
     </div>
+  </div>
+</div>
+
+<!-- 子智能体（2026-10-03 用户要求：把电脑端「子智能体」搬到手机）。
+
+     入口在顶栏，紧挨着设置齿轮的左边。面板外壳和设置抽屉**是同一套**（#subagents
+     的骨架和 .sheet 一个样），不新建样式体系；这一块独有的外观只有两条——列表里的
+     一行，和聊天记录里那张完工卡片（见 CSS 那段注释）。
+
+     **列表取的是手机当前绑定的那个会话**名下的子智能体，和 send / stop 同一套口径：
+     手机上遥控的是你正看着的那个会话，不该牵动你在电脑上另开的那个。
+
+     一个面板两种视图：清单；点某一行换成它**自己的运行记录**（返回键换回来）。 -->
+<div id="subagents">
+  <div class="sheet">
+    <div class="sa-head">
+      <button class="sa-back" id="subagentsBack" hidden>‹ 返回</button>
+      <h2 id="subagentsTitle">子智能体</h2>
+      <button class="btn" id="subagentsClose">关闭</button>
+    </div>
+    <div class="sa-list" id="subagentsList"></div>
+    <div class="sa-doc" id="subagentsDoc" hidden></div>
   </div>
 </div>
 
@@ -2055,6 +2148,11 @@
     // 「正在执行」那块照旧：它是常驻的 #work，跟这里没关系。
     var tail = commandTail();
     if (tail) parts.push(commandBlock(tail));
+    // 子智能体刚完工的那条通知同理（判据见 noticeTail）。它出现在这里的时机很窄——
+    // 通知一到，父级通常会被唤醒作答，那条回答很快就会把它顶掉——但那一段空窗里
+    // 屏幕上什么都不变的话，用户会以为子智能体那边没消息。
+    var note = noticeTail();
+    if (note) parts.push(noticeBlock(note));
     if (live) parts.push(liveBlock(live));
     if (parts.length) {
       var stick = atBottom();
@@ -2157,6 +2255,61 @@
     var h = state.history || [];
     var last = h.length ? h[h.length - 1] : null;
     if (!last || last.role !== 'command') return null;
+    var lt = (state.latest && state.latest.timestamp) || 0;
+    if (lt && last.timestamp && last.timestamp < lt) return null;
+    return last;
+  }
+
+  /**
+   * 一个会话 id 的「能区分人的那一段」。
+   *
+   * **不能直接取 id 的开头几位**：本机的会话 id 长这样 `session-80fd8f3c-…`，
+   * 开头八位永远是 `session-`，一排子智能体就会全叫同一个名字。导航栏那边踩过
+   * 同一个坑，page.test.mjs 里有一条守卫专门钉着它。所以先把 `session-` 这段
+   * 人人相同的前缀去掉，再取一段开头——留下的才是真能区分它们的字符。
+   */
+  function shortSessionId(id) {
+    var s = String(id || '');
+    if (s.slice(0, 8) === 'session-') s = s.slice(8);
+    if (!s) s = String(id || '');
+    return s.slice(0, 8);
+  }
+
+  /**
+   * 子智能体完工的那张卡片（聊天记录里的一种条目）。
+   *
+   * 它是**第三样东西**：不是用户说的话，也不是模型的回答，而是「这个会话派出去的
+   * 一件事有结果了」。所以既不套用户气泡、也不画成回答正文——套上气泡就变成
+   * 「我说过这句话」，混进正文又会被读成模型的话，两种都是假的。
+   *
+   * 展开/收起交给原生 `<details>`：不写一行脚本、不加一个关键帧，键盘和读屏也都认。
+   *
+   * 正文**原样贴出来**（`white-space: pre-wrap`，见 .sa-card .sa-body），不再解析：
+   * 这段话是 DSH 生成的——它先说清「谁、为什么结束」，再把子智能体最后的原话接上。
+   * 那是**转述**，不该由我们这边的渲染器再加工一遍。
+   */
+  function noticeBlock(m) {
+    var who = m.senderSessionId ? shortSessionId(m.senderSessionId) : '';
+    var when = m.timestamp ? timeLabel(m.timestamp) : '';
+    return '<details class="sa-card"><summary><b>子智能体完工</b>'
+      + (who ? '<span>' + escapeHtml(who) + '</span>' : '')
+      + (when ? '<span>' + escapeHtml(when) + '</span>' : '')
+      + '</summary><div class="sa-body">' + escapeHtml(m.text || '') + '</div></details>';
+  }
+
+  /**
+   * 单帧模式要跟着显示的那条通知：**历史里最后一条**，而且得真的是一条通知。
+   *
+   * 判据和 commandTail 完全一样，连那道时间判断都照抄，理由也一样：
+   *   - 用「最后一条」而不是「最近一条」：中间要是夹了别的消息（父级被唤醒后又答了
+   *     一句），那条通知已经不是最新的事了，再贴在最下面就成了过期通知；
+   *   - 单帧模式的回答走 SSE 的 reply 那条路，**不往 history 里塞**，所以 history
+   *     的尾巴会一直停在那条通知上——不挡一下，新回答到了之后底下还挂着它。
+   */
+  function noticeTail() {
+    var h = state.history || [];
+    var last = h.length ? h[h.length - 1] : null;
+    if (!last || last.role !== 'notice') return null;
     var lt = (state.latest && state.latest.timestamp) || 0;
     if (lt && last.timestamp && last.timestamp < lt) return null;
     return last;
@@ -2297,6 +2450,9 @@
       // 指令行：这是会话做的一个动作，不是谁说的话，单独一种长相——
       // 不套气泡、不给复制按钮（见 commandBlock 的说明）。
       if (m.role === 'command') return commandBlock(m);
+      // 子智能体完工的通知：同一类「会话做的事」，画成一张可展开的卡片
+      // （见 noticeBlock 的说明）。它没有复制按钮，也没有气泡。
+      if (m.role === 'notice') return noticeBlock(m);
       // 被按停的那一轮：标一句，别让人以为模型答到一半断了。
       var stopped = m.interrupted ? '<span class="stopped">已停止</span>' : '';
       // 两种消息都给复制按钮。自己敲的指令也常有「再发一遍」「拿去别处用」的时候，
@@ -3572,6 +3728,231 @@
   });
   $('btnClose').addEventListener('click', function () { sheet.classList.remove('open'); });
   sheet.addEventListener('click', function (e) { if (e.target === sheet) sheet.classList.remove('open'); });
+
+  // ---------------- 子智能体 ----------------
+  //
+  // 数据全从 /mini/api/subagents 那三条来（见 lib/server.js）。三条都在电脑上的
+  // **同一个进程里直接问 DSH**，不经过 WebSocket——靠进程里这层关系拿到的东西
+  // （清单、某一道自己的运行记录）反而比桌面前端更直接：桌面那边只能隔着一条
+  // 只开了两个口子的线路，清单和记录得靠投影另推一份过来。
+  //
+  // 两条纪律，和主会话一模一样：**读不到就说读不到，不编**；**数字算不出来就空着**。
+  var saPanel = $('subagents');
+  var saRows = [];        // 最近一次读到的清单，点行时按 id 找回来
+  var saCurrent = null;   // 正在看运行记录的那一道；null = 现在在看清单
+
+  function saToList() {
+    saCurrent = null;
+    $('subagentsDoc').hidden = true;
+    $('subagentsList').hidden = false;
+    $('subagentsBack').hidden = true;
+    $('subagentsTitle').textContent = '子智能体';
+  }
+  function saToDoc(row) {
+    saCurrent = row;
+    $('subagentsList').hidden = true;
+    $('subagentsDoc').hidden = false;
+    $('subagentsBack').hidden = false;
+    $('subagentsTitle').textContent = row.label || shortSessionId(row.id);
+  }
+
+  /** 用量（token 数）。读不到就是 null，页面上写「—」——写 0 会被读成「一次都没跑过」。 */
+  function saTokens(n) {
+    if (typeof n !== 'number' || !isFinite(n) || n < 0) return '—';
+    if (n < 1000) return String(n);
+    if (n < 1000000) return (n / 1000).toFixed(1) + 'k';
+    return (n / 1000000).toFixed(1) + 'M';
+  }
+  /** 耗时。同样：读不到写「—」。 */
+  function saDuration(ms) {
+    if (typeof ms !== 'number' || !isFinite(ms) || ms < 0) return '—';
+    var s = Math.round(ms / 1000);
+    if (s < 60) return s + ' 秒';
+    var m = Math.floor(s / 60);
+    if (m < 60) return m + ' 分 ' + (s % 60) + ' 秒';
+    return Math.floor(m / 60) + ' 时 ' + (m % 60) + ' 分';
+  }
+  /** 目录读不动的那三种原因，翻成人话。认不出来就照原样说，不编一个像样的理由。 */
+  function saReason(r) {
+    if (r === 'corrupt') return '那一支的目录坏了';
+    if (r === 'unsupported') return '那条记录是更新的格式，这个版本读不了';
+    return '那一支暂时读不到（' + r + '）';
+  }
+
+  function saRowHtml(s) {
+    // 有一支目录读不动：DSH 会以一行「诊断」如实说原因。这里也如实转达，
+    // 不假装那一支里没有人——吞掉的表现是「明明有子代理却一个都不显示」。
+    if (s.diagnostic) {
+      return '<div class="sa-row sa-plain"><span class="dot err"></span>'
+        + '<span class="sa-main"><span class="sa-name">有一支读不出来</span>'
+        + '<span class="sa-sub">' + escapeHtml(saReason(s.diagnostic)) + '</span></span></div>';
+    }
+    // 状态点用既有 .dot，和顶栏那颗同一套：在跑 = run；没在跑但最近跑完过 = ok；
+    // 其余 = 灰。**没有动画**——那圈呼吸闪动在规格里已经被砍掉了（见 .dot 的注释）。
+    var dot = s.running ? 'dot run' : (s.lastTurnCompleted ? 'dot ok' : 'dot');
+    var kind = s.mode === 'continuable' ? '可续接' : '一次性';
+    return '<button class="sa-row" type="button" data-sa="' + escapeHtml(s.id) + '">'
+      + '<span class="' + dot + '"></span>'
+      + '<span class="sa-main"><span class="sa-name">' + escapeHtml(s.label || shortSessionId(s.id)) + '</span>'
+      + '<span class="sa-sub">' + kind + ' · ' + (s.running ? '在跑' : '已结束') + '</span></span>'
+      + '<span class="sa-num">' + saTokens(s.tokens) + '<br>' + saDuration(s.durationMs) + '</span>'
+      + '</button>';
+  }
+
+  function saRenderList(body) {
+    var listEl = $('subagentsList');
+    if (!body || !body.ok) {
+      listEl.innerHTML = '<div class="sa-none">'
+        + escapeHtml((body && body.error) || '读不到子智能体。') + '</div>';
+      return;
+    }
+    saRows = body.subagents || [];
+    if (!saRows.length) {
+      listEl.innerHTML = '<div class="sa-none">这个会话还没有派出过子智能体。</div>';
+      return;
+    }
+    listEl.innerHTML = saRows.map(saRowHtml).join('');
+    var btns = listEl.querySelectorAll('[data-sa]');
+    for (var i = 0; i < btns.length; i++) {
+      (function (btn) {
+        btn.addEventListener('click', function () { saOpenDoc(btn.getAttribute('data-sa')); });
+      })(btns[i]);
+    }
+  }
+
+  function saLoad() {
+    $('subagentsList').innerHTML = '<div class="sa-none">正在读取…</div>';
+    api('/mini/api/subagents').then(saRenderList).catch(function (err) {
+      $('subagentsList').innerHTML = '<div class="sa-none">'
+        + escapeHtml(err && err.message || '没读出来。') + '</div>';
+    });
+  }
+
+  /** 点开某一道：换成它**自己的运行记录**（和主会话同一套重放，见 lib/history.js）。 */
+  function saOpenDoc(childId) {
+    var row = null;
+    for (var i = 0; i < saRows.length; i++) if (saRows[i].id === childId) row = saRows[i];
+    if (!row) return;
+    saToDoc(row);
+    $('subagentsDoc').innerHTML = '<div class="sa-none">正在读取它的记录…</div>';
+    api('/mini/api/subagent?id=' + encodeURIComponent(childId)).then(function (body) {
+      // 读的过程中用户可能已经返回、或点开了另一道——那这一份就别再往上贴了。
+      if (saCurrent !== row) return;
+      saRenderDoc(body);
+    }).catch(function (err) {
+      if (saCurrent !== row) return;
+      $('subagentsDoc').innerHTML = '<div class="sa-none">'
+        + escapeHtml(err && err.message || '没读出来。') + '</div>';
+    });
+  }
+
+  /** 运行记录里的一条。长相和主会话**完全一样**：气泡/正文/指令行/完工卡片共用同一批样式。 */
+  function saEntryHtml(e) {
+    if (e.role === 'notice') return noticeBlock(e);
+    if (e.role === 'command') return commandBlock(e);
+    if (e.role === 'user') {
+      return '<div class="bubble user">' + escapeHtml(e.text || '')
+        + '<span class="meta">' + timeLabel(e.timestamp) + '</span></div>';
+    }
+    return '<div class="said"><div class="md">' + mdToHtml(e.text || '') + '</div>'
+      + '<div class="reply-foot"><span class="time">' + timeLabel(e.timestamp) + '</span></div></div>';
+  }
+
+  function saRenderDoc(body) {
+    var docEl = $('subagentsDoc');
+    if (!body || !body.ok) {
+      docEl.innerHTML = '<div class="sa-none">'
+        + escapeHtml((body && body.error) || '没读出来。') + '</div>';
+      return;
+    }
+    var html = '';
+    if (body.reclaimed) {
+      // 一次性子智能体跑完、记录已经被回收：**如实说没有记录**，不拿它冒充
+      // 「它没干过活」——那两件事对用户含义不同。
+      html += '<div class="sa-none">它的运行记录已经不在电脑上了，'
+        + '只能看到它当时发回来的那条完工通知。</div>';
+    } else if (!body.entries || !body.entries.length) {
+      html += '<div class="sa-none">它还没有任何记录。</div>';
+    } else {
+      if (body.truncated) {
+        html += '<div class="history-note">'
+          + escapeHtml(body.note || '只显示最近一段。') + '</div>';
+      }
+      html += body.entries.map(saEntryHtml).join('');
+    }
+    // 底部：能做什么**由类型和状态决定**，不写死。三条失败理由都由服务端翻成人话
+    // （见 lib/index.js 的 SUBAGENT_FAILURES），页面只负责把它们显示出来。
+    html += body.mode === 'continuable' ? saActsHtml(body)
+      : '<div class="sa-none">这是一次性子智能体：跑完就结束了，接不了话，'
+        + '只能看它跑过什么。</div>';
+    docEl.innerHTML = html;
+    saBindActs(body);
+  }
+
+  function saActsHtml(body) {
+    var html = '';
+    // 停：只对「正在跑的、可续接的」那一轮有意义。已经停稳的子智能体没有可停的东西。
+    if (body.running) {
+      html += '<div class="sa-acts"><button class="btn" id="saStop">停止这一轮</button></div>';
+    }
+    // 继续说话：只有「可续接」才有这一栏。父会话不在线、并发满了，DSH 都会明确拒绝，
+    // 那时候服务端把理由翻成人话给回来，这里照原样弹出来。
+    html += '<div class="sa-ask">'
+      + '<input id="saAskText" type="text" placeholder="跟它说一句…" autocomplete="off"'
+      + ' autocapitalize="off" autocorrect="off" spellcheck="false">'
+      + '<button class="btn primary" id="saSend">发送</button></div>';
+    return html;
+  }
+
+  function saBindActs(body) {
+    var stop = $('saStop');
+    if (stop) stop.addEventListener('click', function () { saStop(body, stop); });
+    var send = $('saSend');
+    if (send) send.addEventListener('click', function () { saAsk(body, send); });
+  }
+
+  function saStop(body, btn) {
+    btn.disabled = true;
+    api('/mini/api/subagent/stop', {
+      method: 'POST',
+      body: JSON.stringify({ id: body.id, mode: body.mode }),
+    }).then(function () {
+      // 递进去不等于停稳（和主会话那条一样）：重读一次，等它的状态自己翻过来。
+      toast('已经让它停下这一轮。');
+      saOpenDoc(body.id);
+    }).catch(function (err) {
+      toast(err && err.message || '停不下来。');
+      btn.disabled = false;
+    });
+  }
+
+  function saAsk(body, btn) {
+    var input = $('saAskText');
+    var text = input ? input.value.trim() : '';
+    if (!text) { toast('先说点什么。'); return; }
+    btn.disabled = true;
+    api('/mini/api/subagent/ask', {
+      method: 'POST',
+      body: JSON.stringify({ id: body.id, mode: body.mode, text: text }),
+    }).then(function () {
+      toast('已经递过去了。');
+      saOpenDoc(body.id);
+    }).catch(function (err) {
+      toast(err && err.message || '没送出去。');
+      btn.disabled = false;
+    });
+  }
+
+  $('btnSubagents').addEventListener('click', function () {
+    saToList();
+    saPanel.classList.add('open');
+    saLoad();
+  });
+  $('subagentsClose').addEventListener('click', function () { saPanel.classList.remove('open'); });
+  $('subagentsBack').addEventListener('click', saToList);
+  saPanel.addEventListener('click', function (e) {
+    if (e.target === saPanel) saPanel.classList.remove('open');
+  });
 
   // ---------------- 权限档位 ----------------
   //

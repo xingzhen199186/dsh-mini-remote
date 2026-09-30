@@ -2149,3 +2149,264 @@ test('/mini/api/history 也按会话分开', async (t) => {
   const body = await (await fetch(`${base}/mini/api/history?token=${token}`)).json()
   assert.deepEqual(body.history.map((m) => m.text), ['问乙'])
 })
+
+// ---------------------------------------------------------------------------
+// 子智能体（2026-10-03）
+//
+// 这一层只钉**接口契约**：父会话 id 从哪儿来、失败用什么状态码、能力缺位怎么说话。
+// 「这些调用能不能真的驱动 DSH」由 lib/index.js 那一段负责，那一层在真机上验。
+// ---------------------------------------------------------------------------
+
+/**
+ * 一个只会吐子智能体的假 nav。每一次调用都记一笔，好断言**参数是从哪来的**。
+ * 这几条用例的重点全在参数来源上——同一个功能，参数取错地方就是权限漏洞。
+ */
+function fakeSubagentNav(overrides = {}) {
+  const calls = []
+  return {
+    calls,
+    nav: {
+      subagents: async (sessionId) => {
+        calls.push(['list', sessionId])
+        return overrides.list
+          ? overrides.list(sessionId)
+          : {
+            ok: true,
+            boundSessionId: sessionId,
+            subagents: [
+              {
+                id: 'session-a1', parentId: sessionId, depth: 1, mode: 'continuable',
+                label: '查重复依赖', running: true, tokens: 1234, durationMs: 65000,
+                lastTurnCompleted: null,
+              },
+              {
+                id: 'session-b2', parentId: sessionId, depth: 1, mode: 'one-shot',
+                label: '', running: false, tokens: null, durationMs: null,
+                lastTurnCompleted: true,
+              },
+            ],
+          }
+      },
+      subagentTranscript: async (childId, sessionId) => {
+        calls.push(['transcript', childId, sessionId])
+        return overrides.transcript
+          ? overrides.transcript(childId, sessionId)
+          : {
+            ok: true, mode: 'continuable', running: true, reclaimed: false,
+            entries: [
+              { role: 'user', text: '看看有没有重复依赖', timestamp: 1 },
+              { role: 'assistant', text: '有两条重复，已经删掉一条。', timestamp: 2 },
+            ],
+            truncated: false, note: null,
+          }
+      },
+      stopSubagent: async (childId, sessionId, mode) => {
+        calls.push(['stop', childId, sessionId, mode])
+        return overrides.stop
+          ? overrides.stop(childId, sessionId, mode)
+          : { ok: true }
+      },
+      askSubagent: async (childId, sessionId, mode, textContent) => {
+        calls.push(['ask', childId, sessionId, mode, textContent])
+        return overrides.ask
+          ? overrides.ask(childId, sessionId, mode, textContent)
+          : { ok: true, messageId: 'm-1' }
+      },
+    },
+  }
+}
+
+test('子智能体清单取的是「手机绑着的那个会话」名下的，不是全局的', async (t) => {
+  const store = tempStore()
+  store.bind('session-parent')
+  const { nav, calls } = fakeSubagentNav()
+  const { server, base, token } = await startTestServer({ store, tree: nav })
+  t.after(() => server.close())
+
+  const body = await (await fetch(`${base}/mini/api/subagents?token=${token}`)).json()
+
+  assert.equal(body.ok, true)
+  assert.deepEqual(calls, [['list', 'session-parent']],
+    '父会话 id 必须取自服务端绑定的那个——手机上遥控的是你正看着的会话')
+  assert.deepEqual(body.subagents.map((s) => s.mode), ['continuable', 'one-shot'])
+  assert.deepEqual(body.subagents.map((s) => s.running), [true, false])
+  // 读不到的数就如实是 null，页面才写得出「—」。写成 0 会被读成「一次都没跑过」。
+  assert.equal(body.subagents[1].tokens, null)
+  assert.equal(body.subagents[1].durationMs, null)
+})
+
+test('运行记录：也要按服务端绑定的会话去要，不能拿手机传的当凭据', async (t) => {
+  const store = tempStore()
+  store.bind('session-parent')
+  const { nav, calls } = fakeSubagentNav()
+  const { server, base, token } = await startTestServer({ store, tree: nav })
+  t.after(() => server.close())
+
+  const body = await (await fetch(
+    `${base}/mini/api/subagent?id=${encodeURIComponent('session-a1')}&token=${token}`,
+  )).json()
+
+  assert.equal(body.ok, true)
+  assert.deepEqual(calls, [['transcript', 'session-a1', 'session-parent']])
+  assert.deepEqual(body.entries.map((e) => e.role), ['user', 'assistant'])
+  assert.equal(body.mode, 'continuable')
+})
+
+test('读不到记录时如实说读不到，不是给一份空记录', async (t) => {
+  // 「它没干过活」和「记录读不出来」是两件事，用户看到的话不该混成一句。
+  const store = tempStore()
+  store.bind('sp')
+  const { server, base, token } = await startTestServer({
+    store,
+    tree: fakeSubagentNav({
+      transcript: async () => ({ ok: false, error: '读不到它的记录：日志坏了' }),
+    }).nav,
+  })
+  t.after(() => server.close())
+
+  const body = await (await fetch(`${base}/mini/api/subagent?id=x&token=${token}`)).json()
+  assert.equal(body.ok, false)
+  assert.match(body.error, /读不到它的记录/)
+})
+
+test('停：父会话 id 由服务端自己填，请求体里塞什么都不认', async (t) => {
+  // 权限凭据是「谁的父会话」。让手机自己填，就等于谁都能停掉别人的子智能体。
+  const store = tempStore()
+  store.bind('session-parent')
+  const { nav, calls } = fakeSubagentNav()
+  const { server, base, token } = await startTestServer({ store, tree: nav })
+  t.after(() => server.close())
+
+  const res = await fetch(`${base}/mini/api/subagent/stop?token=${token}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ id: 'session-a1', mode: 'continuable', parentId: '别处的会话' }),
+  })
+
+  assert.equal(res.status, 200)
+  assert.deepEqual(calls, [['stop', 'session-a1', 'session-parent', 'continuable']],
+    '那个 parentId 必须被丢掉，用的是服务端绑定的会话')
+})
+
+test('停失败时把理由原样带回来，而且回 409 不是 500', async (t) => {
+  // 409 是「你的请求没毛病，但这件事现在做不了」。用 500 会让页面当成故障去重试。
+  const store = tempStore()
+  store.bind('sp')
+  const { server, base, token } = await startTestServer({
+    store,
+    tree: fakeSubagentNav({
+      stop: async () => ({ ok: false, error: '这是一次性子智能体，跑完就结束，没有可停的轮次。' }),
+    }).nav,
+  })
+  t.after(() => server.close())
+
+  const res = await fetch(`${base}/mini/api/subagent/stop?token=${token}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ id: 'x', mode: 'one-shot' }),
+  })
+
+  assert.equal(res.status, 409)
+  assert.match((await res.json()).error, /一次性子智能体/)
+})
+
+test('跟子智能体说话：话和模式原样传下去', async (t) => {
+  const store = tempStore()
+  store.bind('session-parent')
+  const { nav, calls } = fakeSubagentNav()
+  const { server, base, token } = await startTestServer({ store, tree: nav })
+  t.after(() => server.close())
+
+  const res = await fetch(`${base}/mini/api/subagent/ask?token=${token}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ id: 'session-a1', mode: 'continuable', text: '  顺手把测试也补上  ' }),
+  })
+
+  assert.equal(res.status, 200)
+  assert.deepEqual(calls, [['ask', 'session-a1', 'session-parent', 'continuable', '顺手把测试也补上']],
+    '两端空白要去掉，中间那段要原样留着')
+})
+
+test('跟子智能体说话：空话在门口就挡掉，不递下去', async (t) => {
+  const store = tempStore()
+  store.bind('sp')
+  const { nav, calls } = fakeSubagentNav()
+  const { server, base, token } = await startTestServer({ store, tree: nav })
+  t.after(() => server.close())
+
+  const res = await fetch(`${base}/mini/api/subagent/ask?token=${token}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ id: 'session-a1', mode: 'continuable', text: '   ' }),
+  })
+
+  assert.equal(res.status, 400)
+  assert.deepEqual(calls, [])
+})
+
+test('子智能体那几条接口一律要 token', async (t) => {
+  const store = tempStore()
+  store.bind('sp')
+  const { nav } = fakeSubagentNav()
+  const { server, base } = await startTestServer({ store, tree: nav })
+  t.after(() => server.close())
+
+  const gets = ['/mini/api/subagents', '/mini/api/subagent?id=x']
+  for (const path of gets) {
+    assert.equal((await fetch(`${base}${path}`)).status, 401, `${path} 没挡住`)
+  }
+  for (const path of ['/mini/api/subagent/stop', '/mini/api/subagent/ask']) {
+    const res = await fetch(`${base}${path}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ id: 'x', mode: 'continuable', text: '喂' }),
+    })
+    assert.equal(res.status, 401, `${path} 没挡住`)
+  }
+})
+
+test('没传 tree 时子智能体接口如实说「没这个能力」，不是假装空清单', async (t) => {
+  // 假装空清单会让人以为「这个会话真的没派过子智能体」——那是另一句话。
+  const { server, base, token } = await startTestServer()
+  t.after(() => server.close())
+
+  const body = await (await fetch(`${base}/mini/api/subagents?token=${token}`)).json()
+  assert.equal(body.ok, false)
+  assert.match(body.error, /没提供子智能体/)
+
+  const res = await fetch(`${base}/mini/api/subagent/stop?token=${token}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ id: 'x', mode: 'continuable' }),
+  })
+  assert.equal(res.status, 409, '能力缺位也是「做不了」，不是 500')
+})
+
+test('子智能体完工的通知进聊天记录，是第三种条目', async (t) => {
+  // 它既不是用户说的话，也不是模型的回答，而是「这个会话派出去的一件事有结果了」。
+  // 混进用户气泡就变成「我说过这句话」，混进回答又会被读成模型的话，两种都是假的。
+  const store = tempStore()
+  store.touchSession('s1')
+  store.pushNotice({
+    sessionId: 's1',
+    text: 'Background subagent session-child finished.\n\nIts closing message:\n\n做完了',
+    summary: 'Background subagent session-child finished.',
+    senderSessionId: 'session-child',
+    timestamp: 1234,
+  })
+  store.bind('s1')
+
+  const { server, base, token } = await startTestServer({ store })
+  t.after(() => server.close())
+
+  const body = await (await fetch(`${base}/mini/api/history?token=${token}`)).json()
+  assert.equal(body.history.length, 1)
+  assert.equal(body.history[0].role, 'notice')
+  assert.equal(body.history[0].senderSessionId, 'session-child')
+  // 时间戳用事件自己的 `time`：硬盘重放出来那份用的是同一个钟，两边才合成得成一条。
+  assert.equal(body.history[0].timestamp, 1234)
+  // **通知不占「最新一条回复」那个位置**：单帧模式显示的是模型的回答。
+  // 通知占了那儿，用户会以为模型说了这串英文。
+  assert.equal(store.snapshot().latest, null)
+})

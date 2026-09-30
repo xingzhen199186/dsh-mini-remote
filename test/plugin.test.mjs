@@ -58,7 +58,7 @@ function makeCtx(services, directNames) {
   })
 }
 
-function mockCtx({ attachments, sessionQuery, commands, sessionController } = {}) {
+function mockCtx({ attachments, sessionQuery, commands, sessionController, subagents, sessionProjections, sessions } = {}) {
   const handlers = new Map()
   // `ctx.on` 的第三个参数（注册选项）也要留下来：提问钩子靠 `prepend` 才能排到
   // 电脑浏览器前面，而漏掉它**不报错、只是永远轮不到**。这种错只能靠断言钉住。
@@ -113,12 +113,18 @@ function mockCtx({ attachments, sessionQuery, commands, sessionController } = {}
       // 同上：会话控制器（真机上是 DSH 的 sessionController，管"叫醒睡着的会话"）。
       // 它可缺席也是一条要覆盖的路径：没有它的时候只能如实说叫不醒。
       ...(sessionController ? { sessionController } : {}),
+      // 子智能体那三件：编排服务（列表/停/继续）、投影注册表（耗时/用量）、
+      // 会话存储（拿 Session 对象）。**三个都可缺席**也是要覆盖的路径：
+      // 缺席时要如实说「这台电脑没提供」，而不是给一份空清单。
+      ...(subagents ? { subagents } : {}),
+      ...(sessionProjections ? { sessionProjections } : {}),
+      ...(sessions ? { sessions } : {}),
     }, ['agents', 'logger', 'on', 'effect']),
   }
 }
 
 /** 起一个被测插件实例，返回访问它所需的一切。 */
-async function bootPlugin({ agents = {}, config = {}, attachments = null, sessionQuery = null, commands = null, stored = null, sessionController = null } = {}) {
+async function bootPlugin({ agents = {}, config = {}, attachments = null, sessionQuery = null, commands = null, stored = null, sessionController = null, subagents = null, sessionProjections = null, sessions = null } = {}) {
   const home = mkdtempSync(join(tmpdir(), 'dsh-mini-home-'))
   process.env.DSH_HOME = home
 
@@ -129,7 +135,7 @@ async function bootPlugin({ agents = {}, config = {}, attachments = null, sessio
   }
 
   const port = await freePort()
-  const mock = mockCtx({ attachments, sessionQuery, commands, sessionController })
+  const mock = mockCtx({ attachments, sessionQuery, commands, sessionController, subagents, sessionProjections, sessions })
   const { ctx, handlers, handlerOptions, agents: agentMap } = mock
   for (const [id, agent] of Object.entries(agents)) agentMap.set(id, agent)
 
@@ -2530,4 +2536,411 @@ test('飞书配置：关着的时候不建连接，面板上也看得见「没�
   assert.equal(feishu.error, null)
   assert.equal(feishu.openIds, '', '名单空着——默认谁都不认')
   assert.equal(feishu.chatIds, '')
+})
+
+// ---------------------------------------------------------------------------
+// 子智能体（2026-10-03）
+//
+// smoke.test.mjs 那一层把 nav 换成了桩，只验接口契约。这一层**把插件真跑起来**，
+// 直接打它自己的端口，覆盖 lib/index.js 里那一段：数字从哪来、什么该拦在门外、
+// 什么必须如实说读不到。两个层次各管一段，缺一边就有盲区。
+// ---------------------------------------------------------------------------
+
+/** 打插件自己的端口，带上 token。返回 [状态码, 解析后的 body]。 */
+async function apiCall(p, path, { method = 'GET', body = null } = {}) {
+  // path 里可能已经带了查询串（`/mini/api/subagent?id=…`），那就用 & 接。
+  // 再写一个 ? 的话，token 会被当成前一个参数值的一部分，请求就成了 401。
+  const sep = path.includes('?') ? '&' : '?'
+  const res = await fetch(`${p.base}${path}${sep}token=${p.token}`, {
+    method,
+    ...(body ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {}),
+  })
+  return [res.status, await res.json()]
+}
+
+test('子智能体：数读不到就留空，不写成 0——「没跑过」和「读不到」是两句话', async (t) => {
+  // 真机上老早跑完、进程里已经不在的子智能体就是拿不到会话对象。那时候两个数
+  // 都该是 null，页面上写「—」。写成 0 会被读成「一次都没跑过」。
+  const p = await bootPlugin({
+    agents: { s1: {} },
+    // sessions / sessionProjections 都**不给**——走的正是「读不到」那条路。
+    subagents: {
+      listDescendants: async () => [
+        { id: 'session-a', parentId: 's1', depth: 1, mode: 'continuable', label: '查重复依赖', activity: 'running' },
+        { id: 'session-b', parentId: 's1', depth: 1, mode: 'one-shot', label: '', activity: 'idle' },
+      ],
+    },
+  })
+  t.after(p.stop)
+  await bindSession(p, 's1')
+
+  const [status, body] = await apiCall(p, '/mini/api/subagents')
+  assert.equal(status, 200)
+  assert.equal(body.ok, true)
+  assert.deepEqual(body.subagents.map((s) => s.tokens), [null, null], '读不到就是 null，不是 0')
+  assert.deepEqual(body.subagents.map((s) => s.durationMs), [null, null])
+  assert.deepEqual(body.subagents.map((s) => s.running), [true, false])
+  assert.deepEqual(body.subagents.map((s) => s.mode), ['continuable', 'one-shot'])
+  assert.equal(body.subagents[0].label, '查重复依赖')
+  assert.equal(body.boundSessionId, 's1')
+})
+
+test('子智能体：会话在、投影也在，但那个数没算出来时，照样留空', async (t) => {
+  // 「投影在」不等于「这两个数就有」。一个刚起来、还没跑完第一轮的子智能体就是
+  // 这样：拿得到会话对象，投影里却还是空的。这时候写 0 就是凭空编一个数。
+  const p = await bootPlugin({
+    agents: { s1: {} },
+    subagents: {
+      listDescendants: async () => [
+        { id: 'session-a', parentId: 's1', depth: 1, mode: 'continuable', activity: 'running' },
+      ],
+    },
+    sessions: { get: (id) => ({ id }) },
+    sessionProjections: { snapshot: () => ({ values: {} }) },
+  })
+  t.after(p.stop)
+  await bindSession(p, 's1')
+
+  const [, body] = await apiCall(p, '/mini/api/subagents')
+  assert.equal(body.subagents[0].tokens, null, '投影里没有这一项，就是「还不知道」，不是 0')
+  assert.equal(body.subagents[0].durationMs, null, '耗时同理：没掷过就是没掷过')
+  assert.equal(body.subagents[0].lastTurnCompleted, null, '不知道最后跑成没成，不该猜成成功')
+})
+
+test('子智能体：耗时和用量从投影里取，四个桶互不重叠地相加', async (t) => {
+  const asked = []
+  const p = await bootPlugin({
+    agents: { s1: {} },
+    subagents: {
+      listDescendants: async () => [
+        { id: 'session-a', parentId: 's1', depth: 1, mode: 'continuable', label: '查依赖', activity: 'running' },
+      ],
+    },
+    sessions: { get: (id) => (id === 'session-a' ? { id } : undefined) },
+    sessionProjections: {
+      snapshot: (session, keys) => {
+        asked.push([session.id, keys])
+        return {
+          values: {
+            // 跑完的两轮 5000 + 还开着那一轮（4000 − 1000）= 8000
+            subagentTiming: { settledMs: 5000, active: { since: 1000, through: 4000 }, lastTurnCompleted: true },
+            tokenUsage: {
+              uncachedInputTokens: 100, outputTokens: 20, cacheReadTokens: 300, cacheWriteTokens: 7,
+            },
+          },
+        }
+      },
+    },
+  })
+  t.after(p.stop)
+  await bindSession(p, 's1')
+
+  const [, body] = await apiCall(p, '/mini/api/subagents')
+  assert.equal(body.subagents[0].tokens, 427, '四个桶互不重叠，直接相加')
+  assert.equal(body.subagents[0].durationMs, 8000, '跑完那段 + 还开着那一轮')
+  assert.equal(body.subagents[0].lastTurnCompleted, true, '绿点和灰点靠它分')
+  // 只要这两个投影——多要一个就是白算一遍。
+  assert.deepEqual(asked, [['session-a', ['subagentTiming', 'tokenUsage']]])
+})
+
+test('子智能体：读投影时抛错也只当「读不到」，不把整份清单搭进去', async (t) => {
+  const p = await bootPlugin({
+    agents: { s1: {} },
+    subagents: {
+      listDescendants: async () => [
+        { id: 'session-a', parentId: 's1', depth: 1, mode: 'one-shot', activity: 'idle' },
+      ],
+    },
+    sessions: { get: (id) => ({ id }) },
+    sessionProjections: { snapshot: () => { throw new Error('投影坏了') } },
+  })
+  t.after(p.stop)
+  await bindSession(p, 's1')
+
+  const [, body] = await apiCall(p, '/mini/api/subagents')
+  assert.equal(body.ok, true, '一个数读不出来，不该把整份清单搭进去')
+  assert.equal(body.subagents.length, 1)
+  assert.equal(body.subagents[0].tokens, null)
+})
+
+test('子智能体：有一支目录读不动时如实转达，不当作没有', async (t) => {
+  // 吞掉的表现是「明明有子代理，却一个都不显示」，用户完全不知道发生了什么。
+  const p = await bootPlugin({
+    agents: { s1: {} },
+    subagents: {
+      listDescendants: async () => [
+        { kind: 'diagnostic', id: 'session-bad', reason: 'corrupt' },
+        { id: 'session-a', parentId: 's1', depth: 1, mode: 'one-shot', activity: 'idle' },
+      ],
+    },
+  })
+  t.after(p.stop)
+  await bindSession(p, 's1')
+
+  const [, body] = await apiCall(p, '/mini/api/subagents')
+  assert.equal(body.subagents.length, 2, '诊断那一行也要占一个位置')
+  assert.deepEqual(body.subagents[0], { id: 'session-bad', diagnostic: 'corrupt' })
+  assert.equal(body.subagents[1].mode, 'one-shot')
+})
+
+test('子智能体：没绑会话时如实说，不去 DSH 那儿空问一趟', async (t) => {
+  let asked = 0
+  const p = await bootPlugin({
+    agents: { s1: {} },
+    subagents: { listDescendants: async () => { asked += 1; return [] } },
+  })
+  t.after(p.stop)
+
+  const [, body] = await apiCall(p, '/mini/api/subagents')
+  assert.equal(body.ok, false)
+  assert.match(body.error, /还没有绑定会话/)
+  assert.equal(asked, 0, '没绑会话就没有「谁的子智能体」可问')
+})
+
+test('子智能体：一次性的没有可停的轮次——这句人话由插件说，且不往 DSH 递', async (t) => {
+  const calls = []
+  const p = await bootPlugin({
+    agents: { s1: {} },
+    subagents: {
+      listDescendants: async () => [
+        { id: 'session-b', parentId: 's1', depth: 1, mode: 'one-shot', activity: 'idle' },
+      ],
+      interruptByParent: async (...args) => { calls.push(args) },
+    },
+  })
+  t.after(p.stop)
+  await bindSession(p, 's1')
+
+  const [status, body] = await apiCall(p, '/mini/api/subagent/stop', {
+    method: 'POST', body: { id: 'session-b', mode: 'one-shot' },
+  })
+  assert.equal(status, 409)
+  assert.equal(body.error, '这是一次性子智能体，跑完就结束，没有可停的轮次。')
+  assert.deepEqual(calls, [], '一次性的根本不该递下去')
+})
+
+test('子智能体：停可续接的那一道，三个凭据原样递给 DSH', async (t) => {
+  const calls = []
+  const p = await bootPlugin({
+    agents: { s1: {} },
+    subagents: {
+      listDescendants: async () => [
+        { id: 'session-a', parentId: 's1', depth: 1, mode: 'continuable', activity: 'running' },
+      ],
+      interruptByParent: async (...args) => { calls.push(args) },
+    },
+  })
+  t.after(p.stop)
+  await bindSession(p, 's1')
+
+  const [status, body] = await apiCall(p, '/mini/api/subagent/stop', {
+    method: 'POST', body: { id: 'session-a', mode: 'continuable' },
+  })
+  assert.equal(status, 200)
+  assert.equal(body.ok, true)
+  assert.deepEqual(calls, [['session-a', 's1', 'continuable']])
+  // 递进去不等于停稳——「等它的状态翻过来」由页面负责，插件不假装已经完成。
+  assert.equal(body.stopped, undefined)
+})
+
+test('子智能体：读记录先确认它挂在当前会话名下——地址不能当权限', async (t) => {
+  const q = fakeQuery({ 'session-a': [] })
+  const p = await bootPlugin({
+    agents: { s1: {} },
+    subagents: {
+      listDescendants: async () => [
+        { id: 'session-a', parentId: 's1', depth: 1, mode: 'continuable', activity: 'running' },
+      ],
+    },
+    sessionQuery: q,
+  })
+  t.after(p.stop)
+  await bindSession(p, 's1')
+
+  const [, body] = await apiCall(p, '/mini/api/subagent?id=session-别人的')
+  assert.equal(body.ok, false)
+  assert.match(body.error, /不在当前会话名下/)
+  // 绑会话本身会读一次 `s1`（那是它该读的），但那个**别人的 id** 一个字节都不该被读。
+  assert.ok(!q.calls.includes('session-别人的'), '没通过这一关，不该去读它')
+})
+
+test('子智能体：它自己的记录走的是和主会话同一个重放器', async (t) => {
+  const logs = {
+    'session-a': [
+      { type: 'turn/start', seq: 0, time: 1, data: { turn: 1 } },
+      {
+        type: 'user/message', seq: 1, time: 2,
+        data: { id: 'm1', source: { kind: 'user' }, content: [{ type: 'text', text: '看看有没有重复依赖' }] },
+      },
+      {
+        type: 'assistant/message', seq: 2, time: 3,
+        data: { message: { content: [{ type: 'text', text: '有两条重复，已经删掉一条。' }] } },
+      },
+      { type: 'turn/end', seq: 3, time: 4, data: { turn: 1, reason: { kind: 'completed' } } },
+    ],
+  }
+  const p = await bootPlugin({
+    agents: { s1: {} },
+    subagents: {
+      listDescendants: async () => [
+        { id: 'session-a', parentId: 's1', depth: 1, mode: 'continuable', activity: 'idle' },
+      ],
+    },
+    sessionQuery: fakeQuery(logs),
+  })
+  t.after(p.stop)
+  await bindSession(p, 's1')
+
+  const [, body] = await apiCall(p, '/mini/api/subagent?id=session-a')
+  assert.equal(body.ok, true)
+  assert.deepEqual(body.entries.map((e) => [e.role, e.text]),
+    [['user', '看看有没有重复依赖'], ['assistant', '有两条重复，已经删掉一条。']])
+  assert.equal(body.mode, 'continuable')
+  assert.equal(body.running, false)
+  assert.equal(body.reclaimed, false)
+})
+
+test('子智能体：记录已被回收时如实说「没有记录」，不冒充「它没干过活」', async (t) => {
+  const p = await bootPlugin({
+    agents: { s1: {} },
+    subagents: {
+      listDescendants: async () => [
+        { id: 'session-a', parentId: 's1', depth: 1, mode: 'one-shot', activity: 'idle' },
+      ],
+    },
+    sessionQuery: fakeQuery({ 'session-a': [] }),
+  })
+  t.after(p.stop)
+  await bindSession(p, 's1')
+
+  const [, body] = await apiCall(p, '/mini/api/subagent?id=session-a')
+  assert.equal(body.ok, true, '这是「读到了：没有」，不是「读不到」')
+  assert.equal(body.reclaimed, true)
+  assert.deepEqual(body.entries, [])
+})
+
+test('子智能体：继续说一句，请求原样递给 DSH', async (t) => {
+  const seen = []
+  const p = await bootPlugin({
+    agents: { s1: {} },
+    subagents: {
+      listDescendants: async () => [
+        { id: 'session-a', parentId: 's1', depth: 1, mode: 'continuable', activity: 'idle' },
+      ],
+      prompt: async (request) => { seen.push(request); return { messageId: 'm-9' } },
+    },
+  })
+  t.after(p.stop)
+  await bindSession(p, 's1')
+
+  const [status, body] = await apiCall(p, '/mini/api/subagent/ask', {
+    method: 'POST', body: { id: 'session-a', mode: 'continuable', text: '顺手把测试也补上' },
+  })
+  assert.equal(status, 200)
+  assert.equal(body.messageId, 'm-9')
+  assert.equal(seen.length, 1)
+  assert.equal(seen[0].parentSessionId, 's1')
+  assert.equal(seen[0].childSessionId, 'session-a')
+  assert.equal(seen[0].mode, 'continuable')
+  // 排队而不是插队：和手机对主会话的做法一致——正在跑的时候不打断。
+  assert.equal(seen[0].delivery, 'queue')
+  assert.deepEqual(seen[0].content, [{ type: 'text', text: '顺手把测试也补上' }])
+  // requestId 是这条消息的身份，**每次都得是新铸的**：复用会被判成重复投递。
+  assert.ok(typeof seen[0].requestId === 'string' && seen[0].requestId.length > 0)
+})
+
+test('子智能体：一次性的接不了话，人话由插件说', async (t) => {
+  const p = await bootPlugin({
+    agents: { s1: {} },
+    subagents: {
+      listDescendants: async () => [
+        { id: 'session-b', parentId: 's1', depth: 1, mode: 'one-shot', activity: 'idle' },
+      ],
+      prompt: async () => { throw new Error('不该走到这儿') },
+    },
+  })
+  t.after(p.stop)
+  await bindSession(p, 's1')
+
+  const [status, body] = await apiCall(p, '/mini/api/subagent/ask', {
+    method: 'POST', body: { id: 'session-b', mode: 'one-shot', text: '还在吗' },
+  })
+  assert.equal(status, 409)
+  assert.equal(body.error, '这是一次性子智能体，跑完就结束了，接不了话。')
+})
+
+test('子智能体：父会话不在线时，DSH 的代号翻成一句人话', async (t) => {
+  // 用户看到的不该是 PARENT_UNAVAILABLE 这种代号，也不该是一串英文堆栈。
+  const p = await bootPlugin({
+    agents: { s1: {} },
+    subagents: {
+      listDescendants: async () => [
+        { id: 'session-a', parentId: 's1', depth: 1, mode: 'continuable', activity: 'idle' },
+      ],
+      prompt: async () => {
+        const err = new Error('parent agent is gone')
+        err.code = 'PARENT_UNAVAILABLE'
+        throw err
+      },
+    },
+  })
+  t.after(p.stop)
+  await bindSession(p, 's1')
+
+  const [status, body] = await apiCall(p, '/mini/api/subagent/ask', {
+    method: 'POST', body: { id: 'session-a', mode: 'continuable', text: '在吗' },
+  })
+  assert.equal(status, 409)
+  assert.equal(body.error, '它在的那个会话不在线了，这条发不过去。')
+})
+
+test('子智能体：并发满了、认不出的代号，也都要说得出人话', async (t) => {
+  const mk = async (code) => {
+    const p = await bootPlugin({
+      agents: { s1: {} },
+      subagents: {
+        listDescendants: async () => [
+          { id: 'session-a', parentId: 's1', depth: 1, mode: 'continuable', activity: 'idle' },
+        ],
+        prompt: async () => {
+          const err = new Error(`boom ${code}`)
+          err.code = code
+          throw err
+        },
+      },
+    })
+    await bindSession(p, 's1')
+    const out = await apiCall(p, '/mini/api/subagent/ask', {
+      method: 'POST', body: { id: 'session-a', mode: 'continuable', text: '在吗' },
+    })
+    p.stop()
+    return out
+  }
+
+  assert.deepEqual(await mk('ACTIVATION_LIMIT_REACHED'),
+    [409, { ok: false, error: '同时能跑的子智能体已经到上限了，等一个跑完再试。' }])
+  assert.deepEqual(await mk('NOT_RESUMABLE'),
+    [409, { ok: false, error: '这道子智能体没有对话可以接，只能看它跑过什么。' }])
+  // 认不出的代号**不吞也不编**：把人话和原始信息一起带出去。
+  const [, unknown] = await mk('SOMETHING_NEW')
+  assert.equal(unknown.ok, false)
+  assert.match(unknown.error, /这句话没送出去/)
+  assert.match(unknown.error, /SOMETHING_NEW/)
+})
+
+test('子智能体：这台电脑没有这个能力时，如实说没有，不是给空清单', async (t) => {
+  // 「没有能力」和「这个会话真的没派过子智能体」是两句不同的话。
+  const p = await bootPlugin({ agents: { s1: {} } })
+  t.after(p.stop)
+  await bindSession(p, 's1')
+
+  const [, list] = await apiCall(p, '/mini/api/subagents')
+  assert.equal(list.ok, false)
+  assert.match(list.error, /没提供子智能体/)
+
+  const [stopStatus, stop] = await apiCall(p, '/mini/api/subagent/stop', {
+    method: 'POST', body: { id: 'session-a', mode: 'continuable' },
+  })
+  assert.equal(stopStatus, 409, '能力缺位也是「做不了」，不是 500')
+  assert.match(stop.error, /没提供/)
 })
