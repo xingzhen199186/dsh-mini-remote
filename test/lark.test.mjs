@@ -17,6 +17,10 @@ import {
   createFeishuChannel, admitSource, listOf, parseMessageText,
   splitText, segmentsFor, FEISHU_TEXT_LIMIT,
   sessionTagLine, SESSION_TAG_FALLBACK,
+  feishuQuestionText, approvalText, parseAnswer, parseDecision,
+  parseFeishuCommand, sessionPickText, sessionSwitchedText,
+  UNKNOWN_COMMAND_TEXT, NO_SESSIONS_TEXT, LIST_FAILED_TEXT, BIND_FAILED_TEXT,
+  ASK_EXPIRED_TEXT, ASK_CANCELLED_TEXT, ASK_DELIVERED_TEXT,
 } from '../lib/lark.js'
 
 /** 必须是这个形状：lib/lark.js 自己会照 SDK 那条正则查一遍（见下面那条用例）。 */
@@ -109,11 +113,15 @@ function inbound({ event_id = 'ev_1', openId = 'ou_me', message = {}, ...rest } 
   }
 }
 
-async function makeChannel({ config = {}, result = { ok: true }, reply } = {}) {
+async function makeChannel({
+  config = {}, result = { ok: true }, reply, onAnswer, listSessions, bindSession,
+} = {}) {
   const { calls, mod } = fakeSdk({ reply })
   const { live, timers } = fakeTimers()
   const logs = []
   const injected = []
+  /** 飞书那边交回电脑的每一笔拍板结果（形状见 lib/lark.js 的 handleAnswer）。 */
+  const handed = []
   const channel = await createFeishuChannel({
     config: { enabled: true, appId: APP_ID, appSecret: 'app-secret', openIds: 'ou_me', chatIds: '', ...config },
     log: { info: (m) => logs.push(`info:${m}`), warn: (m) => logs.push(`warn:${m}`) },
@@ -121,12 +129,20 @@ async function makeChannel({ config = {}, result = { ok: true }, reply } = {}) {
       injected.push({ text, uploadIds })
       return typeof result === 'function' ? result(text) : result
     },
+    onAnswer: async (reply2) => {
+      handed.push(reply2)
+      return typeof onAnswer === 'function' ? onAnswer(reply2) : { ok: true }
+    },
+    listSessions,
+    bindSession,
     sdk: mod,
     timers,
   })
   return {
-    channel, calls, live, logs, injected,
+    channel, calls, live, logs, injected, handed,
     warns: () => logs.filter((line) => line.startsWith('warn:')),
+    /** 飞书里最后发出去的那几句话（纯文本，解出 content 里的 text）。 */
+    sent: () => calls.replies.map((one) => JSON.parse(one.data.content).text),
   }
 }
 
@@ -618,3 +634,345 @@ test('凭据不全：appSecret 空着也要当面拒绝', async () => {
     /appSecret/,
   )
 })
+
+// ---------------------------------------------------------------------------
+// 会话中途等用户拍板（第一层）：文案、解析、入站优先级、过期
+//
+// 这一层要的是「会用普通文字问出来、用户回一句话就算答复」——不做卡片、不加飞书权限。
+// 所以下面钉两件事：
+//   ① 印出去的每一句文案（用户看到的就是这些字，一个字都不能飘）；
+//   ② 三种入站（命令 / 答复 / 指令）各走哪条路，尤其是**谁也抢不过谁**的那两处。
+// ---------------------------------------------------------------------------
+
+const ONE_CHOICE = [{ id: 'q1', question: '选哪个方案？', options: [{ label: '甲' }, { label: '乙' }] }]
+const TWO_CHOICES = [
+  { id: 'q1', question: '选哪个方案？', options: [{ label: '甲' }, { label: '乙' }] },
+  { id: 'q2', question: '要不要继续？', options: [{ label: '要' }, { label: '不要' }] },
+]
+
+test('问句文案：问题一行、选项按「1. …」列、末尾一句「回数字就行」', () => {
+  assert.equal(feishuQuestionText(ONE_CHOICE), [
+    '选哪个方案？',
+    '1. 甲',
+    '2. 乙',
+    '回数字就行。不想答就回「取消」。',
+  ].join('\n'))
+})
+
+test('问句文案：多选说清「多个用逗号隔开」；没有选项的题说清「直接回一句话」', () => {
+  assert.equal(feishuQuestionText([{ ...ONE_CHOICE[0], multiSelect: true }]).split('\n').pop(),
+    '回数字就行，多个用逗号隔开。不想答就回「取消」。')
+  assert.equal(feishuQuestionText([{ id: 'q1', question: '今天想做什么？' }]), [
+    '今天想做什么？',
+    '直接回一句话就行，不想答就回「取消」。',
+  ].join('\n'))
+})
+
+test('问句文案：多道题一屏列完，选项跟在同一行上，回复按顺序给数字', () => {
+  assert.equal(feishuQuestionText(TWO_CHOICES), [
+    '电脑问你 2 件事，按顺序回数字：',
+    '1. 选哪个方案？ 1) 甲  2) 乙',
+    '2. 要不要继续？ 1) 要  2) 不要',
+    '按顺序回数字就行（像「1 2」）。不想答就回「取消」。',
+  ].join('\n'))
+})
+
+test('问句文案：多道题里混着一道没有选项的题 → 空串，飞书不接（写不成数字协议）', () => {
+  // 那道题的答案只能是一整句话，夹在「1 2」中间没法跟别的题分开。与其编一套没人记得住的
+  // 写法，不如不接——让手机或电脑去问。空串就是「别接」的信号。
+  assert.equal(feishuQuestionText([TWO_CHOICES[0], { id: 'q3', question: '还有什么要说的？' }]), '')
+  assert.equal(feishuQuestionText([]), '')
+})
+
+test('问句文案：选项没有 label 就不印一个空点，正文空了也如实写一句', () => {
+  assert.equal(feishuQuestionText([{ id: 'q1', question: '', options: [{}, { label: '乙' }] }]), [
+    '（这道题没有正文）',
+    '1. 选项 1',
+    '2. 乙',
+    '回数字就行。不想答就回「取消」。',
+  ].join('\n'))
+})
+
+test('审批文案：写清要批准什么（工具、命令、理由），末尾两步都有', () => {
+  assert.equal(approvalText({ toolName: 'shell', command: 'rm -rf build', reason: '要清构建产物' }), [
+    '电脑要动手，等你拍板：',
+    '工具：shell',
+    '命令：rm -rf build',
+    '说明：要清构建产物',
+    '回「同意」或「拒绝」，不想拍板就回「取消」。',
+  ].join('\n'))
+})
+
+test('审批文案：命令取不到就明说没取到；多行的命令压成一行；超长时如实说还有多少字', () => {
+  const noCmd = approvalText({ toolName: 'shell' })
+  assert.match(noCmd, /命令：（这条没取到命令原文）/, '藏起来等于骗他——手机那张卡上也是这么写的')
+  const multiline = approvalText({ toolName: 'shell', command: 'git add .\ngit commit -m x' })
+  assert.match(multiline, /命令：git add \. git commit -m x/)
+  const long = approvalText({ toolName: 'shell', command: 'x'.repeat(420) })
+  assert.match(long, /…（后面还有 120 字）/, '不装作这就是全部')
+  assert.ok(long.length < 420)
+})
+
+test('解析：单选题回数字，回别的、越界的、单选却回了两个都不认', () => {
+  assert.deepEqual(parseAnswer('2', ONE_CHOICE), { ok: true, answers: [{ id: 'q1', selected: ['乙'] }] })
+  assert.deepEqual(parseAnswer(' 1 ', ONE_CHOICE), { ok: true, answers: [{ id: 'q1', selected: ['甲'] }] })
+  for (const bad of ['0', '3', '甲', '1 2', '', '选乙']) {
+    assert.equal(parseAnswer(bad, ONE_CHOICE).ok, false, `「${bad}」不该被当成答案`)
+  }
+})
+
+test('解析：多选题认逗号也认空格；没有选项的题整句话就是答案（手机页那个「我自己说」）', () => {
+  const multi = [{ ...ONE_CHOICE[0], multiSelect: true }]
+  assert.deepEqual(parseAnswer('1,2', multi).answers, [{ id: 'q1', selected: ['甲', '乙'] }])
+  assert.deepEqual(parseAnswer('2 1', multi).answers, [{ id: 'q1', selected: ['乙', '甲'] }])
+  assert.deepEqual(parseAnswer('1,1', multi).answers, [{ id: 'q1', selected: ['甲'] }], '同一个选项重复点只算一次')
+  const open = [{ id: 'q9', question: '随便说点什么' }]
+  assert.deepEqual(parseAnswer('  今天先不做  ', open).answers,
+    [{ id: 'q9', selected: [], custom: '今天先不做' }])
+})
+
+test('解析：多道题按顺序给数字，个数不对就不认（不能猜）', () => {
+  assert.deepEqual(parseAnswer('2 1', TWO_CHOICES).answers, [
+    { id: 'q1', selected: ['乙'] },
+    { id: 'q2', selected: ['要'] },
+  ])
+  for (const bad of ['1', '1 2 3', '1 甲']) {
+    assert.equal(parseAnswer(bad, TWO_CHOICES).ok, false, `「${bad}」不该被当成答案`)
+  }
+})
+
+test('解析：审批只认「同意」「拒绝」那几个词，别的都不算', () => {
+  for (const yes of ['同意', '批准', '好的', 'OK', 'yes']) {
+    assert.deepEqual(parseDecision(yes), { ok: true, decision: 'allowed-once' }, yes)
+  }
+  for (const no of ['拒绝', '不同意', '不行', 'no', 'N']) {
+    assert.deepEqual(parseDecision(no), { ok: true, decision: 'rejected' }, no)
+  }
+  for (const bad of ['', '随便', '同意一下']) assert.equal(parseDecision(bad).ok, false, bad)
+})
+
+/** 先把一条指令交给会话（于是「有一轮从飞书发起的指令还没落定」成立），再开始等拍板。 */
+async function awaitOn(p, payload = { kind: 'question', payload: ONE_CHOICE }) {
+  await p.channel.handleInbound(inbound())
+  p.calls.replies.length = 0
+  assert.equal(p.channel.serving(), true, '刚发过指令，飞书这条路才该接题')
+  assert.equal(p.channel.openAsk({ id: 'q1', kind: 'question', ...payload }), true)
+  await flush()
+  p.calls.replies.length = 0
+}
+
+test('入站：正等着拍板时，他发来的文字当答复解释，不进会话', async () => {
+  const p = await makeChannel()
+  await awaitOn(p)
+  await p.channel.handleInbound(inbound({ event_id: 'ev_2', message: { message_id: 'om_2', content: JSON.stringify({ text: '2' }) } }))
+  assert.deepEqual(p.handed, [{ kind: 'question', id: 'q1', answers: [{ id: 'q1', selected: ['乙'] }] }])
+  assert.deepEqual(p.injected.map((one) => one.text), ['你好'], '答复不许再被当成一条新指令')
+  assert.deepEqual(p.sent(), [ASK_DELIVERED_TEXT], '交回去了要说一声，不然他不知道算不算数')
+})
+
+test('入站：回「取消」＝不答，走现成的那条「把题还给电脑」的路', async () => {
+  const p = await makeChannel()
+  await awaitOn(p)
+  await p.channel.handleInbound(inbound({ event_id: 'ev_2', message: { message_id: 'om_2', content: JSON.stringify({ text: '取消' }) } }))
+  assert.deepEqual(p.handed, [{ kind: 'question', id: 'q1', cancel: true }])
+  assert.deepEqual(p.injected.map((one) => one.text), ['你好'])
+  assert.deepEqual(p.sent(), [ASK_CANCELLED_TEXT])
+})
+
+test('入站：答复看不懂时不吃掉这条消息，回一句怎么答，还在等', async () => {
+  const p = await makeChannel()
+  await awaitOn(p)
+  await p.channel.handleInbound(inbound({ event_id: 'ev_2', message: { message_id: 'om_2', content: JSON.stringify({ text: 'emmm' }) } }))
+  assert.deepEqual(p.handed, [], '看不懂就不该交回去')
+  assert.deepEqual(p.injected.map((one) => one.text), ['你好'], '也不能硬塞进会话')
+  assert.deepEqual(p.sent(), ['没看懂。回数字就行（回「取消」放回电脑）。'])
+  assert.equal(p.channel.isWaiting('q1'), true, '还在等——接着回一句数字就该能答上')
+  await p.channel.handleInbound(inbound({ event_id: 'ev_3', message: { message_id: 'om_3', content: JSON.stringify({ text: '1' }) } }))
+  assert.equal(p.handed.length, 1)
+  assert.deepEqual(p.handed[0].answers, [{ id: 'q1', selected: ['甲'] }])
+})
+
+test('入站：手机先拍了板（交回去被回 expired），如实说「这次提问已经过期了」', async () => {
+  const p = await makeChannel({ onAnswer: () => ({ ok: false, error: 'expired' }) })
+  await awaitOn(p)
+  await p.channel.handleInbound(inbound({ event_id: 'ev_2', message: { message_id: 'om_2', content: JSON.stringify({ text: '1' }) } }))
+  assert.deepEqual(p.sent(), [ASK_EXPIRED_TEXT])
+  assert.deepEqual(p.injected.map((one) => one.text), ['你好'], '过期了也不许把他那句话当新指令发出去')
+})
+
+test('入站：过期之后只有「像答复的」那句被拦下，别的话照旧是新指令', async () => {
+  const p = await makeChannel()
+  await awaitOn(p)
+  // 题被手机答掉了（电脑那边收尾），飞书这一格只留着说一句「过期了」。
+  p.channel.expireAsk('q1')
+  assert.equal(p.channel.isWaiting('q1'), false, 'expired 的不算还在等——电脑那边据此决定要不要还给电脑')
+  // 晚一步的那句答复：讲清楚，别当成指令。
+  await p.channel.handleInbound(inbound({ event_id: 'ev_2', message: { message_id: 'om_2', content: JSON.stringify({ text: '2' }) } }))
+  assert.deepEqual(p.sent(), [ASK_EXPIRED_TEXT])
+  assert.equal(p.injected.length, 1)
+  // 紧接着一句真正的新指令：不能被那句「已经过期了」吃掉。
+  await p.channel.handleInbound(inbound({ event_id: 'ev_3', message: { message_id: 'om_3', content: JSON.stringify({ text: '帮我看下日志' }) } }))
+  assert.deepEqual(p.injected.map((one) => one.text), ['你好', '帮我看下日志'])
+})
+
+test('入站优先级：`/` 开头的命令永远当命令，哪怕此刻正等着拍板', async () => {
+  const p = await makeChannel()
+  await awaitOn(p)
+  await p.channel.handleInbound(inbound({ event_id: 'ev_2', message: { message_id: 'om_2', content: JSON.stringify({ text: '/会话' }) } }))
+  await flush()
+  assert.deepEqual(p.handed, [], '命令不许被当成答复')
+  assert.deepEqual(p.sent(), [LIST_FAILED_TEXT], '没接 listSessions 就如实说没取到')
+  assert.equal(p.channel.isWaiting('q1'), true, '问句还挂着——看一眼列表不该把题作废')
+})
+
+test('问句：挂回**发起这一轮的那条消息**下面，发的是纯文本、内容就是那段话', async () => {
+  const p = await makeChannel()
+  await p.channel.handleInbound(inbound())
+  assert.equal(p.channel.serving(), true)
+  p.calls.replies.length = 0
+  p.channel.openAsk({ id: 'q1', kind: 'question', payload: ONE_CHOICE })
+  await flush()
+  assert.equal(p.calls.replies.length, 1)
+  assert.equal(p.calls.replies[0].path.message_id, 'om_1', '挂在原消息下，飞书里才看得出这是哪一轮在问')
+  assert.equal(p.calls.replies[0].data.msg_type, 'text', '这一层只做普通文字，不做卡片')
+  assert.equal(p.sent()[0], feishuQuestionText(ONE_CHOICE))
+  assert.equal(p.channel.isWaiting('q1'), true)
+})
+
+test('问句：没人发起过轮次（手机发起的）就不接——不许抢掉电脑上的弹窗', async () => {
+  const p = await makeChannel()
+  assert.equal(p.channel.serving(), false)
+  assert.equal(p.channel.openAsk({ id: 'q1', kind: 'question', payload: ONE_CHOICE }), false)
+  await flush()
+  assert.equal(p.calls.replies.length, 0)
+  assert.equal(p.channel.isWaiting('q1'), false)
+})
+
+test('问句：发不出去就当场撤回「在等」，好让电脑那边照旧把题收回去', async () => {
+  const p = await makeChannel({ reply: () => { throw new Error('没权限：99991672') } })
+  await p.channel.handleInbound(inbound())
+  p.channel.openAsk({ id: 'q1', kind: 'question', payload: ONE_CHOICE })
+  assert.equal(p.channel.isWaiting('q1'), true, '先挂上再发——往返那一下不能算「没人等」')
+  await flush()
+  assert.equal(p.channel.isWaiting('q1'), false, '没发出去就是没人等：电脑那边 2 秒后把题收回去')
+})
+
+// ---------------------------------------------------------------------------
+// /会话：列会话、切会话
+// ---------------------------------------------------------------------------
+
+test('/会话 命令的解析：只认这一条，多敲几个斜杠也算手滑', () => {
+  assert.deepEqual(parseFeishuCommand('/会话'), { kind: 'list' })
+  assert.deepEqual(parseFeishuCommand('  /会话  '), { kind: 'list' })
+  assert.deepEqual(parseFeishuCommand('//会话'), { kind: 'list' })
+  assert.deepEqual(parseFeishuCommand('/会话 3'), { kind: 'switch', index: 3 })
+  assert.deepEqual(parseFeishuCommand('/会话3'), { kind: 'switch', index: 3 })
+  for (const bad of ['/帮助', '/session', '会话', '/会话 x', '/会话 -1', '/']) {
+    assert.deepEqual(parseFeishuCommand(bad), { kind: 'unknown' }, bad)
+  }
+})
+
+test('/会话 列表文案：编号 + 标题，标出当前那个，取不到标题就写「未命名会话」', () => {
+  assert.equal(sessionPickText({
+    rows: [{ id: 's1', title: '改登录按钮' }, { id: 's2', title: '' }],
+    total: 2,
+    bound: 's2',
+  }), [
+    '现在能切的会话：',
+    '1. 改登录按钮',
+    `2. ${SESSION_TAG_FALLBACK}（当前）`,
+    '回「/会话 2」就切到第 2 个。',
+  ].join('\n'))
+  assert.equal(sessionPickText({ rows: [], total: 0 }), NO_SESSIONS_TEXT)
+})
+
+test('/会话 列表文案：条数截过就如实说还剩多少', () => {
+  const text = sessionPickText({ rows: [{ id: 's1', title: '甲' }], total: 12 })
+  assert.match(text, /（只列了最近 1 条，一共 12 条）/)
+})
+
+test('切会话的确认：写清新会话的标题，并说清手机页跟着一起变', () => {
+  assert.equal(sessionSwitchedText('部署脚本'),
+    '切到「部署脚本」了。手机页那边跟着一起变——两边用的是同一个会话。')
+  assert.equal(sessionSwitchedText(''), `切到「${SESSION_TAG_FALLBACK}」了。手机页那边跟着一起变——两边用的是同一个会话。`)
+})
+
+test('/会话：列出来的是插件给的那份（标题来自手机页同一份缓存），当命令走、不进会话', async () => {
+  const p = await makeChannel({
+    listSessions: async () => ({ rows: [{ id: 's1', title: '甲' }, { id: 's2', title: '乙' }], total: 2, bound: 's1' }),
+  })
+  await p.channel.handleInbound(inbound({ message: { content: JSON.stringify({ text: '/会话' }) } }))
+  await flush()
+  assert.deepEqual(p.injected, [], '命令不是指令，一个字都不该进会话')
+  assert.deepEqual(p.sent(), [[
+    '现在能切的会话：',
+    '1. 甲（当前）',
+    '2. 乙',
+    '回「/会话 2」就切到第 2 个。',
+  ].join('\n')])
+})
+
+test('/会话 2：切的是插件那个全局绑定，回一句带标题的确认', async () => {
+  const bound = []
+  const p = await makeChannel({
+    listSessions: async () => ({ rows: [{ id: 's1', title: '甲' }, { id: 's2', title: '乙' }], total: 2, bound: 's1' }),
+    bindSession: async (id) => { bound.push(id); return '乙' },
+  })
+  await p.channel.handleInbound(inbound({ message: { content: JSON.stringify({ text: '/会话 2' }) } }))
+  await flush()
+  assert.deepEqual(bound, ['s2'], '传下去的是会话 id，不是那行界面上的编号')
+  assert.deepEqual(p.sent(), [sessionSwitchedText('乙')])
+  assert.deepEqual(p.injected, [])
+})
+
+test('/会话 编号越界：如实说没有第几个，不去猜他想切哪个', async () => {
+  const p = await makeChannel({
+    listSessions: async () => ({ rows: [{ id: 's1', title: '甲' }], total: 1, bound: 's1' }),
+    bindSession: async () => { throw new Error('不该切') },
+  })
+  await p.channel.handleInbound(inbound({ message: { content: JSON.stringify({ text: '/会话 9' }) } }))
+  await flush()
+  assert.deepEqual(p.sent(), ['没有第 9 个。先发「/会话」看一眼有哪些。'])
+})
+
+test('/会话：列表没取到就说没取到，不装作「这台电脑上没有会话」', async () => {
+  const p = await makeChannel({ listSessions: async () => { throw new Error('DSH 不在') } })
+  await p.channel.handleInbound(inbound({ message: { content: JSON.stringify({ text: '/会话' }) } }))
+  await flush()
+  assert.deepEqual(p.sent(), [LIST_FAILED_TEXT])
+})
+
+test('/会话：切的时候出错就说切不过去，不装作切好了', async () => {
+  const p = await makeChannel({
+    listSessions: async () => ({ rows: [{ id: 's1', title: '甲' }], total: 1, bound: 's2' }),
+    bindSession: async () => { throw new Error('写不进去') },
+  })
+  await p.channel.handleInbound(inbound({ message: { content: JSON.stringify({ text: '/会话 1' }) } }))
+  await flush()
+  assert.deepEqual(p.sent(), [BIND_FAILED_TEXT])
+})
+
+test('不认识的命令：回一句最简提示，只提那一条真有的', async () => {
+  const p = await makeChannel()
+  await p.channel.handleInbound(inbound({ message: { content: JSON.stringify({ text: '/帮助' }) } }))
+  await flush()
+  assert.deepEqual(p.sent(), [UNKNOWN_COMMAND_TEXT])
+  assert.match(UNKNOWN_COMMAND_TEXT, /\/会话/)
+  assert.equal(UNKNOWN_COMMAND_TEXT.split('\n').length, 1, '一屏能看完，不列一长串')
+  assert.deepEqual(p.injected, [])
+})
+
+test('命令也只在白名单内的单聊生效：群聊、未授权来源照旧', async () => {
+  const p = await makeChannel({ config: { openIds: 'ou_me' } })
+  // 群聊
+  await p.channel.handleInbound(inbound({ message: { chat_type: 'group', content: JSON.stringify({ text: '/会话' }) } }))
+  // 未授权来源：被挡下时照旧回那句带编号的提示，而不是去列会话
+  const stranger = await makeChannel({ config: { openIds: '' } })
+  await stranger.channel.handleInbound(inbound({ openId: 'ou_x', message: { content: JSON.stringify({ text: '/会话' }) } }))
+  await flush()
+  assert.deepEqual(p.sent(), [], '群里一句话都不回')
+  assert.match(stranger.sent()[0], /open_id=ou_x/, '未授权来源照旧收到那句带编号的提示')
+  assert.ok(!stranger.sent()[0].includes('现在能切的会话'), '不许把列表发给他')
+  assert.deepEqual(stranger.injected, [])
+})
+

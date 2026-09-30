@@ -1529,9 +1529,12 @@ async function bootQuestionHook({ phone = true, answer = null, rejects = false }
 
   const saved = { hasPhone: miniControl.hasPhone, askPhone: miniControl.askPhone }
   let asked = 0
+  /** 交到那条接缝上的原样参数（第 3 个是 onPending / keepAlive 那一格）。 */
+  const calls = []
   miniControl.hasPhone = () => phone
-  miniControl.askPhone = () => {
+  miniControl.askPhone = (...args) => {
     asked += 1
+    calls.push(args)
     // 接管的失败是**异步**的：真实的 askPhone 一上来就同步返回一个 Promise，
     // 等待过程中手机全断了才会出结果。所以这里用 reject 来走那条 catch。
     if (rejects) return Promise.reject(new Error('模拟：接管出错了'))
@@ -1541,6 +1544,7 @@ async function bootQuestionHook({ phone = true, answer = null, rejects = false }
   return {
     p,
     sessionId,
+    calls,
     askedCount: () => asked,
     hook: p.handlers.get('user-questions/request'),
     restore: () => {
@@ -1642,6 +1646,120 @@ test('提问钩子：手机上答不出来（返回空），把问题还给电�
   const got = await h.hook(askRequest(h.sessionId), next)
   assert.equal(got, '电脑来答', '手机中途没了要还给电脑，不能两头都答不上')
   assert.equal(handed, 1)
+})
+
+// ---------------------------------------------------------------------------
+// 会话中途等用户拍板（第一层）：插件主体交到那条接缝上的东西
+//
+// 真正的清单、settle、「谁先答谁生效」都在 lib/server.js（那边另有一组用例钉着）。
+// 这里只钉插件主体这半边：交出去的那份参数里有 onPending 和 keepAlive，
+// 而且**飞书没开的时候 keepAlive 一律是 false**——也就是老行为一个字不变。
+// ---------------------------------------------------------------------------
+
+test('提问钩子：把 onPending / keepAlive 一并交给那条接缝；飞书没开时 keepAlive 恒假', async (t) => {
+  const h = await bootQuestionHook({ answer: { answers: [] } })
+  t.after(h.restore)
+
+  await h.hook(askRequest(h.sessionId), () => { throw new Error('不该让路') })
+  assert.equal(h.calls.length, 1)
+  const opts = h.calls[0][2]
+  assert.equal(typeof opts?.onPending, 'function', '飞书那边靠它拿到题号，才能对号入座')
+  assert.equal(typeof opts?.keepAlive, 'function', '手机全断了要不要收摊，多了这一个判据')
+  assert.equal(opts.keepAlive(), false, '飞书没开：和以前一样，手机不在就把题还给电脑')
+
+  // onPending 交出来的题号要原样转给飞书那边（这里飞书没开，只是不能抛）。
+  opts.onPending('q7')
+  assert.equal(opts.keepAlive(), false)
+})
+
+// ---------------------------------------------------------------------------
+// 命令确认（审批）也推到手机上
+// ---------------------------------------------------------------------------
+
+/** 起一个插件、绑好会话，把审批钩子连着两个能力一起交给用例。 */
+async function bootApprovalHook({ phone = true, outcome = null, rejects = false } = {}) {
+  const p = await bootPlugin()
+  const sessionId = 'sess-approval'
+  await fetch(`${p.base}/mini/api/bind?token=${p.token}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sessionId }),
+  })
+
+  const saved = { hasPhone: miniControl.hasPhone, askApproval: miniControl.askApproval }
+  const calls = []
+  miniControl.hasPhone = () => phone
+  miniControl.askApproval = (...args) => {
+    calls.push(args)
+    if (rejects) return Promise.reject(new Error('模拟：接管审批出错了'))
+    return Promise.resolve(outcome)
+  }
+
+  return {
+    p,
+    sessionId,
+    calls,
+    hook: p.handlers.get('approval/request'),
+    restore: () => {
+      miniControl.hasPhone = saved.hasPhone
+      miniControl.askApproval = saved.askApproval
+      p.stop()
+    },
+  }
+}
+
+test('审批钩子：插到队首、普通函数，手机在就把结论原样交回电脑', async (t) => {
+  const h = await bootApprovalHook({ outcome: 'allowed-once' })
+  t.after(h.restore)
+
+  assert.ok(h.hook, '必须挂上这个钩子，否则手机永远收不到审批')
+  assert.equal(h.p.handlerOptions.get('approval/request')?.prepend, true, '不插队就永远轮不到')
+  assert.notEqual(h.hook.constructor.name, 'AsyncFunction', 'async 函数里「让路」交不回派发链条')
+
+  const got = await h.hook({ agent: { id: h.sessionId }, toolName: 'shell', callId: 'c1' }, () => {
+    throw new Error('手机在的时候不该让给电脑')
+  })
+  assert.equal(got, 'allowed-once')
+  assert.equal(h.calls.length, 1)
+  assert.equal(h.calls[0][2], '', '取不到命令原文时就交空串，手机那张卡上会明说没取到')
+  assert.equal(typeof h.calls[0][3]?.onPending, 'function')
+  assert.equal(h.calls[0][3].keepAlive(), false, '飞书没开：和以前一样')
+})
+
+test('审批钩子：手机不在、飞书也没开，原样让给电脑', async (t) => {
+  const h = await bootApprovalHook({ phone: false, outcome: 'allowed-once' })
+  t.after(h.restore)
+
+  let handed = 0
+  const got = await h.hook({ agent: { id: h.sessionId }, toolName: 'shell' }, () => { handed += 1; return '电脑来批' })
+  assert.equal(got, '电脑来批')
+  assert.equal(handed, 1)
+  assert.equal(h.calls.length, 0, '两边都不在时不该把审批推出去')
+})
+
+test('审批钩子：问的不是手机上绑的那个会话，让路（连推都不推）', async (t) => {
+  const h = await bootApprovalHook({ outcome: 'allowed-once' })
+  t.after(h.restore)
+
+  let handed = 0
+  const got = await h.hook({ agent: { id: 'sess-别的' }, toolName: 'shell' }, () => { handed += 1; return '电脑来批' })
+  assert.equal(got, '电脑来批')
+  assert.equal(handed, 1)
+  assert.equal(h.calls.length, 0)
+})
+
+test('审批钩子：接管出错了、或者手机上没拍成，都要还给电脑（不能吞掉）', async (t) => {
+  const broken = await bootApprovalHook({ rejects: true })
+  const empty = await bootApprovalHook({ outcome: null })
+  t.after(broken.restore)
+  t.after(empty.restore)
+
+  for (const h of [broken, empty]) {
+    let handed = 0
+    const got = await h.hook({ agent: { id: h.sessionId }, toolName: 'shell' }, () => { handed += 1; return '电脑来批' })
+    assert.equal(got, '电脑来批', '出了错也不能把审批吞掉，否则电脑上什么都不弹')
+    assert.equal(handed, 1)
+  }
 })
 
 // ---------------------------------------------------------------------------

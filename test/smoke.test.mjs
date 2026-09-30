@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url'
 
 import { createTurnTracker, stepSelfTalk } from '../lib/events.js'
 import { createStore } from '../lib/store.js'
-import { createMiniServer } from '../lib/server.js'
+import { createMiniServer, miniControl } from '../lib/server.js'
 import { renderPage, readArt, readImage } from '../lib/page.js'
 import { buildId } from '../lib/build.js'
 
@@ -1455,6 +1455,137 @@ test('绑定会话后状态里能读到', async (t) => {
   assert.equal(res.status, 200)
   const state = await (await fetch(`${base}/mini/api/state?token=${token}`)).json()
   assert.equal(state.boundSessionId, 'session-abc')
+})
+
+// ---------------------------------------------------------------------------
+// 「交回答案」这条接缝：手机页走 HTTP，飞书走 miniControl 上那两个函数
+//
+// 两条路**共用同一份清单、同一个 settle**，所以「谁先答谁生效、另一个自动失效」
+// 不是另写的一套规矩。这里钉的就是这件事——一边答了，另一边必须拿到 expired。
+// ---------------------------------------------------------------------------
+
+test('答题接缝：飞书那两个函数和手机页那两条路由进的是同一份清单', async (t) => {
+  const { server } = await startTestServer()
+  t.after(() => server.close())
+
+  const taken = []
+  const pending = server.askPhone([{ id: 'q1', question: '选哪个方案？' }], 's1', {
+    onPending: (id) => taken.push(id),
+  })
+  assert.equal(taken.length, 1, '题一挂上就要把编号交出去——飞书那条路靠它对号入座')
+
+  // 手机页那条路先到（同一个 settle）：飞书随后交回来就该拿到 expired（对应 409），
+  // 而不是把这道题答第二遍。
+  assert.deepEqual(miniControl.answerQuestion(taken[0], { answers: [] }), { ok: true })
+  assert.deepEqual(await pending, { answers: [] })
+  assert.deepEqual(miniControl.answerQuestion(taken[0], { answers: [] }), { ok: false, error: 'expired' },
+    '已经答过的题，第二个来的人拿到 expired——这正是「另一个自动失效」')
+})
+
+test('答题接缝：格式不对说 bad（对应 400），过期的题优先说 expired（对应 409）', async (t) => {
+  const { server } = await startTestServer()
+  t.after(() => server.close())
+
+  const pending = server.askPhone([{ id: 'q1', question: '选哪个方案？' }], 's1')
+  pending.catch(() => {})
+  assert.deepEqual(miniControl.answerQuestion('q1', { answers: '不是数组' }), { ok: false, error: 'bad' })
+  assert.deepEqual(miniControl.answerQuestion('q-没有这个', { answers: [] }), { ok: false, error: 'expired' })
+  miniControl.answerQuestion('q1', { answers: [] })
+  await pending
+})
+
+test('答题接缝：回「取消」= 不答，题原样还给电脑（和手机锁屏时同一条路）', async (t) => {
+  const { server } = await startTestServer()
+  t.after(() => server.close())
+
+  const pending = server.askPhone([{ id: 'q1', question: '选哪个方案？' }], 's1')
+  assert.deepEqual(miniControl.answerQuestion('q1', { cancel: true }), { ok: true })
+  assert.equal(await pending, null, 'null 就是「没人答」，调用方据此 next() 还给电脑')
+})
+
+test('审批接缝：同一个 settle，取消也是还给电脑', async (t) => {
+  const { server } = await startTestServer()
+  t.after(() => server.close())
+
+  const allow = miniControl.askApproval({ toolName: 'shell' }, 's1', 'rm -rf build')
+  assert.deepEqual(miniControl.decideApproval('a1', { decision: 'allowed-once' }), { ok: true })
+  assert.equal(await allow, 'allowed-once')
+  assert.deepEqual(miniControl.decideApproval('a1', { decision: 'rejected' }), { ok: false, error: 'expired' })
+  assert.deepEqual(miniControl.decideApproval('a1', { decision: '随便' }), { ok: false, error: 'expired' })
+
+  const deny = miniControl.askApproval({ toolName: 'shell' }, 's1', 'rm -rf build')
+  assert.deepEqual(miniControl.decideApproval('a2', { decision: '随便' }), { ok: false, error: 'bad' })
+  assert.deepEqual(miniControl.decideApproval('a2', { cancel: true }), { ok: true })
+  assert.equal(await deny, null)
+})
+
+test('超时判据：手机全断了，但飞书那边还挂着这道题，就不能收摊还给电脑', async (t) => {
+  const { server } = await startTestServer()
+  t.after(() => server.close())
+
+  // 手机不在（测试里是空壳 hasPhone）——原来这里 2 秒后就会 settle(null) 还给电脑。
+  // 现在多问一句「还有别人在等吗」：飞书说还在等，题就不许被收走。
+  let waiting = true
+  const pending = server.askPhone([{ id: 'q1', question: '选哪个方案？' }], 's1', {
+    keepAlive: () => waiting,
+  })
+  const early = await Promise.race([
+    pending,
+    new Promise((resolve) => setTimeout(() => resolve('还在等'), 2300)),
+  ])
+  assert.equal(early, '还在等', '飞书还挂着题，就不该按「手机没了」那条判据收摊')
+
+  // 飞书那边也接不上了（发不出去、或者被关掉）：立刻按老规矩还给电脑。
+  waiting = false
+  const late = await Promise.race([
+    pending,
+    new Promise((resolve) => setTimeout(() => resolve('还在等'), 3000)),
+  ])
+  assert.equal(late, null, '两边都没人等了，必须还给电脑——不能把提问卡死在这里')
+})
+
+test('超时判据：keepAlive 抛错一律当「没人在等」，不能把提问卡死', async (t) => {
+  const { server } = await startTestServer()
+  t.after(() => server.close())
+
+  const pending = server.askPhone([{ id: 'q1', question: '选哪个方案？' }], 's1', {
+    keepAlive: () => { throw new Error('飞书那边炸了') },
+  })
+  const verdict = await Promise.race([
+    pending,
+    new Promise((resolve) => setTimeout(() => resolve('还在等'), 3000)),
+  ])
+  assert.equal(verdict, null, '宁可还给电脑，也不能让一道题卡死在这儿')
+})
+
+test('答题接缝：手机页收到的那条 question 帧一个字都没变', async (t) => {
+  const { server, base, token } = await startTestServer()
+  t.after(() => server.close())
+
+  const questions = [{ id: 'q1', question: '选哪个方案？', options: [{ label: 'A' }, { label: 'B' }] }]
+  const pending = server.askPhone(questions, 'sess-1', { onPending: () => {} })
+  pending.catch(() => {})
+
+  const res = await fetch(`${base}/mini/api/stream?token=${token}`)
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  const deadline = Date.now() + 5000
+  while (!buffer.includes('event: question') && Date.now() < deadline) {
+    const chunk = await Promise.race([
+      reader.read(),
+      new Promise((resolve) => setTimeout(() => resolve('timeout'), 500)),
+    ])
+    if (chunk === 'timeout') continue
+    if (chunk.done) break
+    buffer += decoder.decode(chunk.value, { stream: true })
+  }
+  const frame = buffer.split('\n').find((line) => line.startsWith('data: ') && line.includes('选哪个方案'))
+  assert.ok(frame, '还要有这条数据行')
+  assert.deepEqual(JSON.parse(frame.slice('data: '.length)), { id: 'q1', agentId: 'sess-1', questions },
+    '飞书那条路接上之后，手机页收到的这一帧必须逐字不变')
+  await reader.cancel()
+  miniControl.answerQuestion('q1', { answers: [] })
 })
 
 test('未带 token 打开页面时给的是填 token 的入口页，而不是内容页', async (t) => {
