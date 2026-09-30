@@ -859,17 +859,52 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
     const text = feishuSel().text;
     assert.match(text, /事件与回调/, '第二步要说清在哪儿设成长连接');
     assert.match(text, /添加应用能力/, '建应用那一步要写清去哪里加机器人能力，漏了这步飞书里搜不到机器人');
-    assert.match(text, /重新发布一次版本才生效/, '加了机器人能力之后还要再发一次版本，这句不能省');
+    assert.match(text, /漏了这步，飞书里搜不到它/, '漏加的后果要写在动作旁边，不能只说「要加」');
     assert.match(text, /im\.message\.receive_v1/, '订阅哪个事件是最容易漏的一步');
     assert.match(text, /im:message:receive_as_bot/);
     assert.match(text, /仅我可见/);
-    assert.match(text, /来源不在白名单：open_id=ou_xxxxx/, '第 8 步要和插件真报的那句话对得上');
     assert.match(text, /不要把机器人拉进群/, '注意事项也在这一份里');
     assert.ok(closeBtn(), '点开之后按钮要变成「收起」');
+
+    // 下面这几组钉的是 2026-10 实机跑通之后补进去的坑：每一条都对应一个具体动作或一个判断标志，
+    // 改文案时不许把它们悄悄丢掉。判断标志（0→3、那条通知、那句灰字）是最省字也最经用的一类
+    // 句子，删了用户就不知道自己到底做对了没有。
+    assert.match(text, /搜索框只填 im\.message 这半段/, '权限页只搜半个 scope 名，是这个功能卡人最久的一步');
+    assert.match(text, /带上后面的 :receive_as_bot 会搜出 0 条/, '要写清带上哪一段会搜不到，否则用户还是会连后半段一起搜');
+    assert.match(text, /「应用身份权限」（另一个标签「用户身份权限」不用管）/, '说清三项在哪一档，顺带把另一个标签排掉');
+    assert.match(text, /从 0 变成 3，就是勾对了/, '判断标志：勾全了才从 0 变 3');
+    assert.match(text, /im\.message\.receive_v1 是事件，在第 4 步那个列表里配，权限页搜不到它/,
+      '事件和权限是两个页面，这个混法最耽误时间');
+
+    assert.match(text, /都要重新发布一次才生效，不发布一切不生效/, '改了不重新发布等于白改');
+    assert.match(text, /「开发者小助手」会推给你一条通知（应用审批通过／已发布成功）/, '发布生效的可见信号，得说清去哪儿看');
+    assert.match(text, /收到就是生效了/, '判断标志之二');
+    assert.match(text, /企业里配了审批就得等管理员通过/, '有审批的企业里这一步会卡住，要提前说');
+
+    // 第 5 步整段的行为在 2026-10 变了：不再让用户回电脑上抄 id，插件直接在飞书里回他一句。
+    assert.match(text, /第一次一定被挡下（两份名单都留空时谁都不认）/, '第一次被挡是设计的一部分，不说清用户会以为配错了');
+    assert.match(text, /插件会直接在飞书里回你一句/, '新路子：编号在飞书里当场给，不用回电脑上翻');
+    assert.match(text, /你的编号告诉你/);
+    assert.match(text, /open_id=ou_xxxxx/, '第 8 步要和插件在飞书里真回的那句话对得上');
+    assert.match(text, /可能还带个 chat_id=oc_xxxxx/, 'chat_id 是「可能有」，不能写成一定有');
+    assert.match(text, /照着它回的那句填就行，不用再回电脑上看/);
+    assert.match(text, /填进「允许的 open_id」那一格（chat_id 可以留空）/);
+    assert.match(text, /App Secret 那一格保存后会自动清空/, '密钥不回显，不说清用户会以为自己把它删掉了');
+    assert.match(text, /留空就不改动它/, '判断标志之三：那句灰字是「存上了」的唯一凭据');
+    assert.match(text, /留空保存 = 不动原来那份/);
+
+    assert.match(text, /回答是整段一次回来的/, '整段回 = 要等一会儿，不预告用户会以为卡死了');
+    assert.match(text, /回答落进手机页当前绑定的那个会话/, '回答落到哪个会话，是用户必然会问的第一个问题');
+    assert.match(text, /这块还没做/, '看不到「在跟哪个会话说话」是已知缺口，不要含糊过去');
+    assert.match(text, /机器人同时只处理一轮/);
+
+    assert.match(text, /群里被挡时不会回那句话（只对单聊回）/,
+      '那句提示只发给单聊，群里的人等不到——不写清楚会以为插件坏了');
 
     closeBtn().props.onClick();
     await tick();
     assert.doesNotMatch(feishuSel().text, /仅我可见/, '再点一次就该收回去');
+    assert.doesNotMatch(feishuSel().text, /搜索框只填 im\.message/, '收起来之后新补的这些也不该留在页面上');
   });
 
   await check('保存失败时留一行，写清是哪一环', async () => {
