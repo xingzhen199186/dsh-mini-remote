@@ -895,7 +895,9 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
 
     assert.match(text, /回答是整段一次回来的/, '整段回 = 要等一会儿，不预告用户会以为卡死了');
     assert.match(text, /回答落进手机页当前绑定的那个会话/, '回答落到哪个会话，是用户必然会问的第一个问题');
-    assert.match(text, /这块还没做/, '看不到「在跟哪个会话说话」是已知缺口，不要含糊过去');
+    assert.match(text, /回答末尾另起一行「会话：<标题>」/, '回答出自哪个会话，现在靠这行标记，指引得说清它在哪儿');
+    assert.match(text, /取不到名字时写「未命名会话」/, '兜底文案要对得上 lib/lark.js 的 SESSION_TAG_FALLBACK');
+    assert.doesNotMatch(text, /这块还没做/, '这功能已经做了，别留旧说法');
     assert.match(text, /机器人同时只处理一轮/);
 
     assert.match(text, /群里被挡时不会回那句话（只对单聊回）/,
