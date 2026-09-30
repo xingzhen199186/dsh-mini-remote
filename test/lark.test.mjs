@@ -16,6 +16,7 @@ import assert from 'node:assert/strict'
 import {
   createFeishuChannel, admitSource, listOf, parseMessageText,
   splitText, segmentsFor, FEISHU_TEXT_LIMIT,
+  sessionTagLine, SESSION_TAG_FALLBACK,
 } from '../lib/lark.js'
 
 /** 必须是这个形状：lib/lark.js 自己会照 SDK 那条正则查一遍（见下面那条用例）。 */
@@ -446,6 +447,97 @@ test('出站：超长回答分多条发出，顺序对、每段不超上限', as
     assert.equal(payload.data.msg_type, 'text')
   }
   assert.match(sent[0], /^（1\/\d+）\n开头/)
+})
+
+// ---------------------------------------------------------------------------
+// 末尾那行「会话：…」：只走飞书这一条路、只加在最后一段、取不到标题也不裸奔 id
+// ---------------------------------------------------------------------------
+
+test('标记那行：接在「会话：」后面的是标题本身，空标题写兜底文案', () => {
+  assert.equal(sessionTagLine('改登录按钮'), '会话：改登录按钮')
+  assert.equal(sessionTagLine(''), `会话：${SESSION_TAG_FALLBACK}`)
+  assert.equal(sessionTagLine('   '), `会话：${SESSION_TAG_FALLBACK}`)
+  assert.equal(sessionTagLine(undefined), `会话：${SESSION_TAG_FALLBACK}`)
+  // 「一行」是这行的格式要求：标题里的换行、连续空格都压成一个空格
+  assert.equal(sessionTagLine('甲\n  乙'), '会话：甲 乙')
+  assert.ok(!sessionTagLine('甲\n乙').includes('\n'))
+  // 不加装饰：前缀后面就是标题本身，前后没有记号（飞书那边发的是纯文本，记号不渲染）
+  assert.equal(sessionTagLine('甲'), '会话：甲')
+})
+
+test('出站：传了会话标题，回答末尾就多一行「会话：…」（正文原样）', async () => {
+  const p = await makeChannel()
+  await p.channel.handleInbound(inbound())
+  const r = await p.channel.reply('改好了。', { userText: '你好', sessionTitle: '改登录按钮' })
+  assert.equal(r.ok, true)
+  assert.equal(r.segments, 1)
+  const sent = JSON.parse(p.calls.replies[0].data.content).text
+  assert.equal(sent, '改好了。\n\n会话：改登录按钮')
+})
+
+test('出站：没给标题字段就一个字都不加；给了空串则写「未命名会话」', async () => {
+  const p = await makeChannel()
+  await p.channel.handleInbound(inbound({ message: { content: JSON.stringify({ text: '第一条' }) } }))
+  await p.channel.handleInbound(inbound({ event_id: 'ev_2', message: { message_id: 'om_2', content: JSON.stringify({ text: '第二条' }) } }))
+  // 不给 sessionTitle 这个字段 = 不加标记（测试和别的调用方走的老路子）
+  await p.channel.reply('回答一', { userText: '第一条' })
+  const plain = JSON.parse(p.calls.replies[0].data.content).text
+  assert.equal(plain, '回答一', '没这个字段就不加，别人不会被这个功能顺手改掉')
+  // 给了但是空串 = 这条会话没有名字，照写标记，写兜底文案
+  await p.channel.reply('回答二', { userText: '第二条', sessionTitle: '' })
+  const tagged = JSON.parse(p.calls.replies[1].data.content).text
+  assert.equal(tagged, `回答二\n\n会话：${SESSION_TAG_FALLBACK}`)
+  assert.ok(!tagged.includes('sess-'), '兜底文案里不许出现任何会话 id')
+})
+
+test('出站：分段发送时，标记只加在最后一段末尾', async () => {
+  const p = await makeChannel()
+  await p.channel.handleInbound(inbound())
+  const r = await p.channel.reply(`开头\n${'y'.repeat(8000)}`, { userText: '你好', sessionTitle: '长回答' })
+  assert.ok(r.segments >= 3)
+  const sent = p.calls.replies.map((one) => JSON.parse(one.data.content).text)
+  assert.equal(sent.length, r.segments)
+  assert.ok(sent[sent.length - 1].endsWith('\n\n会话：长回答'), '最后一段末尾要带上')
+  for (let i = 0; i < sent.length - 1; i += 1) {
+    assert.ok(!sent[i].includes('会话：'), `第 ${i + 1} 段不该带标记——同一行字重复三遍就是噪音`)
+  }
+  for (const one of sent) assert.ok(one.length <= FEISHU_TEXT_LIMIT)
+})
+
+test('出站：回答正好顶到上限时，加上标记也不越过上限', async () => {
+  // 3484 字是一段的满格量（3500 减去分段标头那点预算）。标记的位置不预留下来的话，
+  // 最后一段就成了 3484 + 空行 + 标记那一行，顶上 3500 那条硬线，飞书直接拒收。
+  // 标题特意取长的：短标题下 3476 + 十几字也还在 3500 以内，这条用例就白写了。
+  const p = await makeChannel()
+  await p.channel.handleInbound(inbound())
+  const title = '一条名字特别长的会话标题用来验证越界保护'
+  assert.ok(title.length > 11, '标题得长到 3484 + 标记 > 3500，这条用例才有意义')
+  const r = await p.channel.reply('z'.repeat(3484), { userText: '你好', sessionTitle: title })
+  assert.equal(r.ok, true)
+  const sent = p.calls.replies.map((one) => JSON.parse(one.data.content).text)
+  for (const one of sent) {
+    assert.ok(one.length <= FEISHU_TEXT_LIMIT, `一段 ${one.length} 字，越过了 ${FEISHU_TEXT_LIMIT} 的上限`)
+  }
+  assert.ok(sent[sent.length - 1].endsWith(`会话：${title}`), '标记本身要完整，不许为了凑上限被截掉')
+})
+
+test('出站：回答是空的或只有空白，标记照样发得出去（不崩）', async () => {
+  const p = await makeChannel()
+  await p.channel.handleInbound(inbound())
+  const r = await p.channel.reply('  \n ', { userText: '你好', sessionTitle: '空回答' })
+  assert.equal(r.ok, true, '正文是空的不是错，标记该发就发')
+  assert.equal(r.segments, 1)
+  const sent = JSON.parse(p.calls.replies[0].data.content).text
+  assert.equal(sent, '会话：空回答', '只有标记那一条，前面不许多出空行')
+  assert.equal(p.calls.replies[0].path.message_id, 'om_1', '照旧挂回原消息')
+})
+
+test('出站：正文空、又没标记可写，还是不发（老行为）', async () => {
+  const p = await makeChannel()
+  await p.channel.handleInbound(inbound())
+  const r = await p.channel.reply('   ', { userText: '你好' })
+  assert.equal(r.ok, false)
+  assert.equal(p.calls.replies.length, 0)
 })
 
 test('出站：飞书接口返回非 0 的 code 时，记一行原因而不是当成功', async () => {

@@ -209,6 +209,43 @@ test('一轮任务跑完，最终回复出现在 /mini/api/latest', async (t) =>
 })
 
 /**
+ * 飞书那行「会话：…」标记（lib/lark.js 的 sessionTagLine）**只能**加在飞书那条路上。
+ * 这一条就是那句话的证据：名字先让它进缓存（标记本来取得到），再跑完一轮，
+ * 手机页拿到的文本必须和加这个功能之前**一字不差**。
+ */
+test('给飞书加「会话：」标记之后，手机页拿到的回答一个字都没变', async (t) => {
+  const p = await bootPlugin()
+  t.after(p.stop)
+
+  const feed = p.handlers.get('session/event')
+  const session = { id: 'sess-tag', header: { id: 'sess-tag' } }
+  const answer = 'README 的安装部分已更新为 Node 22+。'
+
+  // 前提：这条会话确实有名字，而且名字进了标题缓存——**飞书那行标记取的就是这一份**
+  // （见 lib/index.js 的 titleOfSession）。落盘是合并写的（500 毫秒一次），等它一下再读。
+  feed(session, ev('session/title', { title: '改登录按钮' }))
+  await new Promise((resolve) => setTimeout(resolve, 600))
+  const cache = JSON.parse(readFileSync(join(p.home, 'dsh-mini-remote', 'titles.json'), 'utf8'))
+  assert.equal(cache['sess-tag']?.title, '改登录按钮',
+    '前提没立住：这条会话的名字没进标题缓存，下面那两条断言就证明不了什么')
+  const named = await snapOf(p)
+  assert.ok(named.sessions.some((s) => s.id === 'sess-tag' && s.title === '改登录按钮'),
+    '手机上显示的名字也该是它')
+
+  feed(session, ev('user/message', { source: { kind: 'user' }, content: text('帮我看下 README') }))
+  feed(session, ev('turn/start', { turn: 1 }))
+  feed(session, ev('assistant/message', { turn: 1, step: 1, message: { content: text(answer) } }))
+  feed(session, ev('turn/end', { turn: 1, reason: { kind: 'completed' } }))
+
+  const state = await snapOf(p)
+  assert.equal(state.latest.text, answer, '手机页单帧那份文本一个字符都不许变')
+  assert.ok(!state.latest.text.includes('会话：'), '标记只走飞书那条路，不许溢到手机页')
+  assert.ok(!state.latest.text.includes('改登录按钮'), '会话名字也不许混进回答正文')
+  const assistant = (state.history ?? []).filter((m) => m.role === 'assistant')
+  assert.equal(assistant[assistant.length - 1]?.text, answer, '聊天记录那份也一样')
+})
+
+/**
  * 自言自语（2026-09-26）：只走鲸鱼娘的气泡，不碰回答区、不进历史。
  */
 test('中间步骤的自言自语会进快照，但回答区一个字都不变', async (t) => {
