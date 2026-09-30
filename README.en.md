@@ -12,7 +12,7 @@
 
 Tool calls, file reads and writes, sub-agent dispatch, and the body of the reasoning trace never reach the phone. This plugin exists for one situation: you're out, and all you want to do is send an instruction and read the result — a phone, one input box, the latest reply.
 
-[What it is](#what-it-is) ・ [When you'd use it](#when-youd-use-it) ・ [Install](#install) ・ [Connecting your phone](#connecting-your-phone-three-routes-pick-one) ・ [What the phone can do](#what-the-phone-can-do) ・ [FAQ](#faq) ・ [Security](#security) ・ [Why I built this](#why-i-built-this-plugin)
+[What it is](#what-it-is) ・ [When you'd use it](#when-youd-use-it) ・ [Install](#install) ・ [Connecting your phone](#connecting-your-phone-three-routes-pick-one) ・ [What the phone can do](#what-the-phone-can-do) ・ [Remote control from Feishu](#remote-control-from-feishu) ・ [FAQ](#faq) ・ [Security](#security) ・ [Why I built this](#why-i-built-this-plugin)
 
 ---
 
@@ -84,6 +84,8 @@ All three connection methods **exist at the same time**. Pick one, or leave seve
 | **Tailscale** | You need it outside, and you want the address to stay fixed | Tailscale on the computer and on the phone | An app on both sides |
 | **Public tunnel** | Nothing installed, reachable on any network | Nothing at all | The address changes on every restart; the first run downloads a ~50 MB component |
 
+There is one more route, and it isn't the phone: **Feishu** (see [Remote control from Feishu](#remote-control-from-feishu)). It never touches the browser, and none of the three routes above need to be on.
+
 Open DSH settings (bottom of the sidebar) → "Phone Remote" in the left column. Every route on that page has a QR code and a link, and the small text under each QR code says **when to use that route**. That's all you need to read.
 
 The plugin's own settings (default mode, external notifications, port, password and so on) also have a standard declaration, so writing them in DSH's standard configuration works too. If the same item is set in both places, **the standard configuration wins**. One difference worth knowing: **"default mode" and "external notifications" apply immediately, with no plugin restart**; port, bind address, tunnel, password and history length make the plugin restart and the phone reconnect once — those genuinely need to re-bind or rebuild, and the plugin says so instead of pretending they can be changed live.
@@ -150,6 +152,36 @@ Both are phone photographs (the browser's own chrome is in frame, so they sit sl
 **Three things you can change in passing.** Tap the line at the top to switch the current session's model and reasoning effort; switch the permission preset (View Only / Workspace Write / Full Access); browse the computer's folders to register a new workspace and start a session in it.
 
 **You're reading conclusions, not the process.** There's no tool-call chain and no file diff on the page. The one exception is the line the whale girl says out loud — it goes into her bubble, never into the answer area (see above). **System-level confirmation dialogs cannot be answered from the phone** (approving a dangerous command, for instance) — those still need the computer. What the phone can answer is the multiple-choice question the AI puts to you; the two are not the same thing. It's a remote control: the TV still has to be on for the remote to be any use.
+
+---
+
+## Remote control from Feishu
+
+**Talk to the session on your computer from inside Feishu.** You send a line, the session runs a round, and the answer comes back under your message — with one more line underneath saying which session it came from (`会话：deploy script`, and `未命名会话` when the session has no name yet). Those two labels are Chinese and stay as they are.
+
+It runs over Feishu's **long connection**: the plugin dials out to Feishu and keeps the line open, so there is no public address and no domain to arrange. It shares one session binding with the phone page.
+
+### Setup
+
+Create an app in the [Feishu open platform](https://open.feishu.cn/) — the "custom app" type, which is also what you would use for yourself alone. Copy the App ID and App Secret from Credentials & Basic Info. **Then add a Bot capability and publish a version** — skip that step and the bot will not show up in Feishu search. Set the event subscription mode to "receive events over a long connection", and add the event `im.message.receive_v1`. Under permissions, search for just `im.message` (typing the rest of the name returns nothing) and tick three: receive messages, send messages as the app, get and send single-chat and group messages — **the count going from 0 to 3 is your proof you got it**. Any change to the capability, the permissions or the events needs another published version. Then back in DSH settings, fill the App ID and App Secret into "Phone Remote" → "Feishu" and turn the switch on.
+
+Every menu and the sign of a successful publish are in the "配置指引（飞书后台六步）" guide inside that settings block. It is **collapsed by default**. The paragraph above only tells you how many things there are to do; it does not repeat the guide.
+
+### The first message is refused, and that's expected
+
+Both allow-lists start empty, and **with both empty nobody is recognised**. So your first message to the bot does nothing. The plugin **answers you inside Feishu** instead: it hands you your own id (`open_id`, the internal number Feishu knows you by) and tells you which field it goes in. Paste it into "允许的 open_id", save, and send again — that one works.
+
+Only **direct messages** are handled (you and the bot, one to one). Group messages are not read in this version.
+
+### What you can do from Feishu
+
+**Plain text is you talking to the current session** — the same as sending it from the phone.
+
+**When the session stops to ask you something, an ordinary text message arrives in Feishu.** A multiple-choice question lists its options as `1.` `2.`; an approval spells out which tool and which command it wants to run. Reply with a number, or with 「同意」 (agree) or 「拒绝」 (refuse) — `y`, `yes` and `ok` count as agree, `n` and `no` as refuse. Reply 「取消」 to decline to decide: the question goes back to the computer. That word has to be 「取消」; the English "cancel" is not read.
+
+**`/会话` lists the sessions you can switch to**, marking the current one 「（当前）」. **`/会话 3`** switches to the third, and the phone page follows — the two sides share one binding. Anything starting with `/` is treated as a command and never as an answer to a pending question. It is the only command here, and it is Chinese; send those characters as they are.
+
+**Not there yet.** Cards with buttons; images and files; group chats; streaming — the answer arrives in one piece, after a wait; one round at a time.
 
 ---
 
