@@ -800,6 +800,23 @@ test('入站：手机先拍了板（交回去被回 expired），如实说「这
   assert.deepEqual(p.injected.map((one) => one.text), ['你好'], '过期了也不许把他那句话当新指令发出去')
 })
 
+test('小票不进会话：只说一句，不替他发第二条指令', async () => {
+  // 用户问过「这句会不会又变成会话里的一条消息」。答案是不会，凭据在这里：
+  // 小票（收到/取消/过期/没看懂）走的是**这一层自己的一句普通回复**，从不经过
+  // onInstruction 那条注入路。所以哪怕他刚回的就是答案本身，会话里也只有原话那一条。
+  for (const [answer, 说, sent] of [
+    [null, '收到', ASK_DELIVERED_TEXT],
+    [{ ok: false, error: 'expired' }, '过期', ASK_EXPIRED_TEXT],
+  ]) {
+    const p = await makeChannel(answer ? { onAnswer: () => answer } : {})
+    await awaitOn(p)
+    await p.channel.handleInbound(inbound({ event_id: 'ev_2', message: { message_id: 'om_2', content: JSON.stringify({ text: '1' }) } }))
+    assert.deepEqual(p.sent(), [sent], `${说}：小票就这一句`)
+    assert.deepEqual(p.injected.map((one) => one.text), ['你好'],
+      `${说}：小票一个字都不许进会话——会话里只该有他原来那条指令`)
+  }
+})
+
 test('入站：过期之后只有「像答复的」那句被拦下，别的话照旧是新指令', async () => {
   const p = await makeChannel()
   await awaitOn(p)
@@ -855,6 +872,58 @@ test('问句：发不出去就当场撤回「在等」，好让电脑那边照�
   assert.equal(p.channel.isWaiting('q1'), true, '先挂上再发——往返那一下不能算「没人等」')
   await flush()
   assert.equal(p.channel.isWaiting('q1'), false, '没发出去就是没人等：电脑那边 2 秒后把题收回去')
+})
+
+// ---------------------------------------------------------------------------
+// 一轮回答的**归属**：这一轮从哪条飞书消息起跑，回答就回到那条消息下面
+//
+// 原来只认「指令原文」。那条凭据会被同一轮里后来的一句人话顶掉（累计器记的是
+// 「这一轮最后那句人话」），于是发起它的那条消息永远等不到回答——用户看到的正是
+// 「答完了，飞书里再没动静」。下面两条把这个缺口钉死。
+// ---------------------------------------------------------------------------
+
+/** 一轮归属的用例：让交回电脑的结果带上会话号，好把这一轮认成「从飞书起的跑」。 */
+async function makeRoundChannel(opts = {}) {
+  return makeChannel({ result: { ok: true, sessionId: 'sess-1' }, ...opts })
+}
+
+test('出站：这一轮从飞书起跑，后来原话被顶掉了也照样回到**发起它的那条消息**', async () => {
+  const p = await makeRoundChannel()
+  await p.channel.handleInbound(inbound())
+  p.calls.replies.length = 0
+  // 这一轮跑完时，累计器手里那句「这一轮的原话」已经不是发起它的那句了
+  // （同一轮里用户又在别处跟了一句人话，或者别的注入改了它）。
+  const out = await p.channel.reply('甲方案更合适，我按这个做了。', { userText: '等等，先别动', sessionId: 'sess-1' })
+  assert.equal(out.ok, true, '归属是记下来的，不该因为对不上原文就静默不发')
+  assert.equal(out.messageId, 'om_1', '要回到发起这一轮的那条消息下面')
+  assert.equal(p.calls.replies.length, 1)
+  assert.equal(p.calls.replies[0].path.message_id, 'om_1')
+  assert.equal(p.sent()[0], '甲方案更合适，我按这个做了。')
+})
+
+test('出站：手机的轮次不许抢走飞书那条还没人认领的指令', async () => {
+  const p = await makeRoundChannel()
+  await p.channel.handleInbound(inbound()) // 飞书那条：起了跑，等着被回答
+  const out = await p.channel.reply('手机那边跑完的一轮', { userText: '手机上发的那句', sessionId: 'sess-other' })
+  assert.deepEqual(out, { ok: false, error: 'no-target' }, '会话对不上就不发，绝不把手机上的回答倒进飞书')
+  assert.equal(p.calls.replies.length, 0)
+  assert.equal(p.channel.serving(), true, '飞书那条还在等，没被抢掉')
+})
+
+test('出站：这一轮还没起跑（只是排着队）时，回答不认它', async () => {
+  // 交回 ok:false = 这条指令压根没交给会话，它不该留在名单里，更不该被当成起跑过。
+  const q = await makeChannel({ result: { ok: false, error: '电脑上还没有可遥控的会话。' } })
+  await q.channel.handleInbound(inbound())
+  assert.equal(q.channel.serving(), false, '没交出去的那条要从名单里撤掉')
+  const out = await q.channel.reply('不该发出去的回答', { userText: '你好', sessionId: 'sess-1' })
+  assert.deepEqual(out, { ok: false, error: 'no-target' })
+  assert.equal(q.calls.replies.length, 0)
+
+  // 交出去了的那条才认得出——同一个形状，差的就是「起跑标记」那一下。
+  const p = await makeRoundChannel()
+  await p.channel.handleInbound(inbound())
+  const ok = await p.channel.reply('这一轮的回答', { userText: '你好', sessionId: 'sess-1' })
+  assert.equal(ok.messageId, 'om_1')
 })
 
 // ---------------------------------------------------------------------------

@@ -50,6 +50,41 @@ test('只把「人发的」当用户消息，插件注入的合成上下文要�
   assert.deepEqual(human, { kind: 'user', text: '帮我把 README 更新一下', id: 'm-1' })
 })
 
+test('一轮回答要带出「这一轮是哪条消息起跑的」——那是归属，不是原文', () => {
+  // 为什么不能只带原文：同一轮里用户后面再跟一句人话，累计器里那句「这一轮的原话」
+  // 就被顶成新那句了。飞书那条路原来是按原文认领发起它的消息的，于是一旦被顶掉，
+  // 这一轮的回答就认不到任何消息、静默发不出去（用户看到的正是「答完了，飞书里再没动静」）。
+  // 号不会变，所以把它一并交出去。
+  const tracker = createTurnTracker()
+  tracker.feed('s1', ev('turn/start', { turn: 1 }))
+  tracker.feed('s1', ev('user/message', {
+    id: 'm-1', source: { kind: 'user' }, content: text('帮我看看'),
+  }))
+  // 同一轮里又来了一句人话（用户在别处跟了一句）：原话被顶掉，但号还在。
+  tracker.feed('s1', ev('user/message', {
+    id: 'm-2', source: { kind: 'user' }, content: text('等等，先别动'),
+  }))
+  tracker.feed('s1', ev('assistant/message', {
+    turn: 1, step: 2, message: { content: text('看好了。') },
+  }))
+
+  const reply = tracker.feed('s1', ev('turn/end', { turn: 1, reason: { kind: 'completed' } }))
+  assert.equal(reply.userText, '等等，先别动', '原文确实是最后那句人话（这一条没变）')
+  assert.equal(reply.userMessageId, 'm-2', '号跟着原文一起走——两者说的是同一条消息')
+
+  // 另一条：不是人发的消息不参与，原话和号都留着（插件注入的合成上下文铺天盖地）。
+  const t2 = createTurnTracker()
+  t2.feed('s2', ev('turn/start', { turn: 1 }))
+  t2.feed('s2', ev('user/message', { id: 'm-9', source: { kind: 'user' }, content: text('帮我看看') }))
+  t2.feed('s2', ev('user/message', {
+    id: 'm-10', source: { kind: 'runtime-context' }, content: text('（插件注入的上下文）'),
+  }))
+  t2.feed('s2', ev('assistant/message', { turn: 1, step: 2, message: { content: text('好了。') } }))
+  const r2 = t2.feed('s2', ev('turn/end', { turn: 1, reason: { kind: 'completed' } }))
+  assert.equal(r2.userText, '帮我看看', '注入的消息不许顶掉这一轮的原话')
+  assert.equal(r2.userMessageId, 'm-9')
+})
+
 test('中间步骤的旁白不能当成回答（用户实机报的「显示的是思考过程」）', () => {
   // 这条用例原来断言的是反的：它要求「最后一条没文本时回退到上一条有文本的」。
   // 而那个回退正是病根——模型每次调工具前都会先说一句「我先看下文件」，
@@ -1586,6 +1621,109 @@ test('答题接缝：手机页收到的那条 question 帧一个字都没变', a
     '飞书那条路接上之后，手机页收到的这一帧必须逐字不变')
   await reader.cancel()
   miniControl.answerQuestion('q1', { answers: [] })
+})
+
+// ---------------------------------------------------------------------------
+// 别处答掉了：手机页那张卡片要**自己收起来**，不能干挂着
+//
+// 现象（2026-10-02 真机）：飞书和手机页同时看着同一道题，他在飞书里回了序号，
+// 手机上那张选择卡片留在原地一动不动——他不知道这道题已经有人答了。
+// 语义一个没动（谁先答谁生效、后到的拿 expired），这里只是**把结果说出去**。
+// ---------------------------------------------------------------------------
+
+/**
+ * 挂一个 SSE 监听。
+ *
+ * **`read(needle)` 等的是整帧出现**（needle 要自己带上收尾的空行），而且
+ * `openStream` 会先等 `: connected` 那一声——它是「手机已经挂上来了」的确认。
+ * 不等就往下走，下面那条动作可能在「还没有任何连接」的时候广播，帧没人收到，用例会假红。
+ */
+async function openStream(base, token) {
+  const res = await fetch(`${base}/mini/api/stream?token=${token}`)
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  const read = async (needle, ms = 5000) => {
+    const deadline = Date.now() + ms
+    while (!buffer.includes(needle) && Date.now() < deadline) {
+      const chunk = await Promise.race([
+        reader.read(),
+        new Promise((resolve) => setTimeout(() => resolve('timeout'), 300)),
+      ])
+      if (chunk === 'timeout') continue
+      if (chunk.done) break
+      buffer += decoder.decode(chunk.value, { stream: true })
+    }
+    return buffer
+  }
+  // 初始那一帧是 `: connected\n\n`（注释帧），**带上收尾的空行再等**——只等
+  // ": connected" 会在一分片就命中，后面什么都没读到就往下走了。
+  await read(': connected\n\n')
+  return { read, close: () => reader.cancel(), raw: () => buffer }
+}
+
+/** 从一段 SSE 原文里挑出指定事件的那条 data 行并解出来。 */
+function frameOf(buffer, event) {
+  const line = buffer.split('\n\n')
+    .find((block) => block.includes(`event: ${event}\n`))
+  if (!line) return null
+  const data = line.split('\n').find((one) => one.startsWith('data: '))
+  return data ? JSON.parse(data.slice('data: '.length)) : null
+}
+
+test('别处答掉了：手机页会收到一条 question-done，并知道是飞书答的', async (t) => {
+  const { server, base, token } = await startTestServer()
+  t.after(() => server.close())
+
+  const pending = server.askPhone([{ id: 'q1', question: '选哪个方案？' }], 'sess-1', { onPending: () => {} })
+  // 先把监听挂稳（openStream 会等它确认连上），再让飞书那边交回来。
+  const stream = await openStream(base, token)
+  // 飞书那边交回来的（第三个参数就是「谁答的」，见 answerQuestion）。
+  assert.deepEqual(miniControl.answerQuestion('q1', { answers: [] }, 'feishu'), { ok: true })
+  await pending
+
+  const buffer = await stream.read('event: question-done')
+  assert.ok(buffer.includes('event: question-done'), '要有这条状态帧，手机页才知道该把卡片收起来')
+  assert.deepEqual(frameOf(buffer, 'question-done'), { id: 'q1', source: 'feishu' },
+    '谁答的由插件如实说——手机页靠它写「已在飞书答过」，猜不得')
+  await stream.close()
+})
+
+test('别处答掉了：审批也一样，而且同一道题只通知一次', async (t) => {
+  const { server, base, token } = await startTestServer()
+  t.after(() => server.close())
+
+  const allow = miniControl.askApproval({ toolName: 'shell' }, 'sess-1', 'rm -rf build')
+  const stream = await openStream(base, token)
+  assert.deepEqual(miniControl.decideApproval('a1', { decision: 'allowed-once' }, 'feishu'), { ok: true })
+  assert.equal(await allow, 'allowed-once')
+  // 第二个来的人拿到 expired——老语义一个字没动，**而且不该再推一条状态**（不许重复打扰）。
+  assert.deepEqual(miniControl.decideApproval('a1', { decision: 'rejected' }, 'feishu'), { ok: false, error: 'expired' })
+
+  const buffer = await stream.read('event: approval-done')
+  const times = buffer.split('event: approval-done').length - 1
+  assert.equal(times, 1, '同一道题对同一侧只提示一次')
+  assert.deepEqual(frameOf(buffer, 'approval-done'), { id: 'a1', source: 'feishu' })
+  await stream.close()
+})
+
+test('手机自己答的：帧里说的是 phone，不是 feishu', async (t) => {
+  const { server, base, token } = await startTestServer()
+  t.after(() => server.close())
+
+  const pending = server.askPhone([{ id: 'q1', question: '选哪个方案？' }], 'sess-1', { onPending: () => {} })
+  const stream = await openStream(base, token)
+  const res = await fetch(`${base}/mini/api/answer?token=${token}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id: 'q1', answers: [] }),
+  })
+  assert.equal(res.status, 200)
+  await pending
+  const buffer = await stream.read('event: question-done')
+  assert.deepEqual(frameOf(buffer, 'question-done'), { id: 'q1', source: 'phone' },
+    '手机自己答的要说 phone——不然手机页会对自己说「已在飞书答过」')
+  await stream.close()
 })
 
 test('未带 token 打开页面时给的是填 token 的入口页，而不是内容页', async (t) => {

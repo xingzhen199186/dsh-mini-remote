@@ -3145,6 +3145,31 @@
       ask = { id: payload.id, questions: payload.questions, i: 0, picked: {}, custom: false }
       askRender()
     });
+    // 这道题在**别处**被答掉了（飞书那边回的），插件主动推一条状态过来。
+    //
+    // 没有这一条，卡片就干巴巴挂在屏幕上：用户在飞书里答完了，切回手机还看得见这道题，
+    // 只能以为没生效、再答一次——那时候拿到的是「已经过期了」。所以这里就地收起来，
+    // 并说一句它是怎么没的。**只在自己正显示着同一道题时动手**，别的题（编号对不上）
+    // 一个字都不碰。
+    es.addEventListener('question-done', function (e) {
+      let payload = null
+      try { payload = JSON.parse(e.data) } catch (err) { return }
+      if (!payload || !payload.id) return
+      if (!ask || ask.id !== payload.id) return
+      ask = null
+      $('askCard').classList.remove('on')
+      // 谁答的由插件如实说（'feishu'）——猜不得，也不把「超时/断线」说成「已在别处答过」。
+      if (payload.source === 'feishu') toast('这道题已经在飞书里答过了')
+    });
+    es.addEventListener('approval-done', function (e) {
+      let payload = null
+      try { payload = JSON.parse(e.data) } catch (err) { return }
+      if (!payload || !payload.id) return
+      if (!approve || approve.id !== payload.id) return
+      approve = null
+      $('approveCard').classList.remove('on')
+      if (payload.source === 'feishu') toast('这条已经在飞书里处理过了')
+    });
     es.addEventListener('status', function (e) {
       try { setRunning(JSON.parse(e.data).running); } catch (err) {}
     });

@@ -133,3 +133,46 @@ test('工序刻度尺只表达队列，不假装知道 Agent 跑到哪一步', (
   // 最要紧的一条：界面上不许出现编出来的工序进度。
   assert.ok(!/width:\s*\d+(\.\d+)?%/.test(block), '刻度不该按百分比假装进度')
 })
+
+// ---------------------------------------------------------------------------
+// 别处答掉了：手机页只许**换状态**，位置一个像素都不许动
+//
+// 用户 2026-10-02 的硬规矩：飞书那边答了，手机页这张卡片要自己收起来，但
+// 「位置不许变」。所以那两条监听只准把状态清掉、把 `on` 拿掉——**不许碰任何
+// 位置/尺寸**。卡片本身还是老样子：整屏一层，由 `on` 决定显不显示。
+// 这里把这两件事都钉住，以后谁想「顺手调整一下」就得先过这一关。
+// ---------------------------------------------------------------------------
+
+test('答题卡/审批卡还是整屏一层，显不显示只由 on 决定（位置没动）', () => {
+  assert.match(css, /#askCard\s*\{[^}]*position:\s*fixed;[^}]*inset:\s*0/, '答题卡还是整屏一层')
+  assert.match(css, /#askCard\.on\s*\{\s*display:\s*flex;?\s*\}/, '显不显示只由 on 决定')
+  assert.match(css, /#approveCard\s*\{[^}]*position:\s*fixed;[^}]*inset:\s*0/, '审批卡还是整屏一层')
+  assert.match(css, /#approveCard\.on\s*\{\s*display:\s*flex;?\s*\}/, '显不显示只由 on 决定')
+})
+
+test('别处答掉了：手机页那两条监听只换状态，不碰位置', () => {
+  // 只读源码做静态检查：页面那一大段脚本里，这两条监听各自只干三件事——
+  // 比对编号、清掉状态、拿掉 `on`。出现位置/尺寸相关的写法就是越界了。
+  for (const [event, label] of [['question-done', '答题卡'], ['approval-done', '审批卡']]) {
+    const from = html.indexOf(`es.addEventListener('${event}'`)
+    assert.ok(from > 0, `页面里找不到 ${event} 这条监听——别处答掉了，${label}就只能干挂着`)
+    const body = html.slice(from, html.indexOf('});', from))
+    assert.match(body, /classList\.remove\('on'\)/, `${label}要收起来就得拿掉 on`)
+    assert.ok(!/\.style\b/.test(body), `${label}不许就地改样式（位置一个像素都不能动）`)
+    assert.ok(!/(top|left|right|bottom|width|height|margin|padding|transform|zoom)\s*:/.test(body),
+      `${label}不许碰任何位置/尺寸`)
+  }
+})
+
+test('别处答掉了：只有飞书答的才说「已在飞书答过」，超时/断线不冒充', () => {
+  // 来源由插件如实说（notifySettled 只带 'phone' / 'feishu'，超时是空串）。
+  // 页面据此挑话——猜不得，更不能把「没人答、收摊了」说成「已在飞书答过」。
+  const from = html.indexOf("es.addEventListener('question-done'")
+  const body = html.slice(from, html.indexOf('});', from))
+  assert.match(body, /payload\.source === 'feishu'/, '要按来源分话')
+  assert.match(body, /已经在飞书里答过了/)
+  const aFrom = html.indexOf("es.addEventListener('approval-done'")
+  const aBody = html.slice(aFrom, html.indexOf('});', aFrom))
+  assert.match(aBody, /payload\.source === 'feishu'/)
+  assert.match(aBody, /已经在飞书里处理过了/)
+})
