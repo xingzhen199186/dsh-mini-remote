@@ -50,3 +50,19 @@ Thumbs.db
 
 # 交付给用户看的成图（仓库里公开用的图在 docs/）
 screenshots/
+
+# 内部资料与会话转储，不进仓库（和上面「内部文档」同一条裁决）
+#
+# 这六类文件目前本机没有、也从未提交过，所以今天没有泄露；但这是**公开仓库**，
+# 一旦哪次误 `git add -A`，本机路径和会话内容就会上 GitHub。
+#   AGENTS.md、subagents/       —— 代理指令与子代理资料，属内部工作文件
+#   DELIVERY-EVIDENCE.md        —— 交付证据
+#   session.v4.jsonl            —— DSH 会话转储
+#   dsh-session-*.zip           —— 会话导出包
+#   *.tgz.bak-*                 —— 打包备份
+AGENTS.md
+subagents/
+DELIVERY-EVIDENCE.md
+session.v4.jsonl
+dsh-session-*.zip
+*.tgz.bak-*
