@@ -176,3 +176,55 @@ test('别处答掉了：只有飞书答的才说「已在飞书答过」，超�
   assert.match(aBody, /payload\.source === 'feishu'/)
   assert.match(aBody, /已经在飞书里处理过了/)
 })
+
+// ---------------------------------------------------------------------------
+// 统一操作面板：窄屏与深浅色
+//
+// 用户 2026-10-02 验收里的两条是「深浅色主题和窄屏都不溢出」。这一屏的做法是
+// **一个令牌都不造**（深浅色自动成对）、**一个圆角档位都不加**、长文字一律省略；
+// 抽屉本身那三样（限高、自己滚、让开底部安全区）由既有的 .sheet 提供。
+// ---------------------------------------------------------------------------
+
+test('统一操作面板：不新造令牌、不放强调色、长文字省略（窄屏与深浅色一起管住）', () => {
+  const from = css.indexOf('/* ---------- 统一操作面板')
+  const to = css.indexOf('/* ---------- token 输入')
+  assert.ok(from > 0 && to > from, '找不到统一面板那段样式，锚点变了先修测试')
+  const block = css.slice(from, to)
+
+  // 深浅色：新造的颜色令牌要在 [data-theme="light"] 里再写一份，漏一边就有元素在
+  // 那个主题下隐身。这一块的做法是**一个都不造**，全用主屏已有的那几个。
+  const declared = [...block.matchAll(/(--[a-z0-9-]+)\s*:/g)].map((m) => m[1])
+  assert.deepEqual(declared, [], `统一面板不该声明新令牌：${JSON.stringify(declared)}`)
+  // 强调色是一屏最多两处的稀缺资源（见上面那张白名单），这一屏没有它。
+  assert.ok(!block.includes('var(--act)'), '统一面板不放主按钮')
+  assert.ok(!block.includes('var(--gold)'), '统一面板没有暖金字的位置')
+  // 圆角只能用现成那一档（全页那条断言也管着，这里再钉最容易被写歪的一处）。
+  for (const m of block.matchAll(/border-radius:\s*([^;]+);/g)) {
+    assert.equal(m[1].trim(), 'var(--r)', `统一面板只许用 var(--r)：${m[1].trim()}`)
+  }
+
+  // 窄屏：列表自己滚，别把抽屉撑出屏幕。
+  assert.match(block, /max-height:\s*40vh/)
+  assert.match(block, /overflow-y:\s*auto/)
+  // 抽屉那三样照旧归 .sheet 管：限高、自己滚、让开底部安全区。
+  const sheet = css.slice(css.indexOf('.sheet {'), css.indexOf('.sheet h2'))
+  assert.match(sheet, /max-height:\s*86vh/, '抽屉要限高，否则窄屏上顶出去')
+  assert.match(sheet, /overflow-y:\s*auto/, '装不下要能滚')
+  assert.match(sheet, /env\(safe-area-inset-bottom\)/, '要按机型让开底部那一条')
+})
+
+test('统一操作面板：指令行沿用菜单那一套，名字说明不溢出，小旗不折行', () => {
+  // 面板里的行和打 / 弹出的菜单是同一份规则（不另写一套），所以这两条要一起看。
+  const from = css.indexOf('.cmd-menu .cmd-row')
+  const to = css.indexOf('/* ---------- 左侧导航栏 ---------- */')
+  assert.ok(from > 0 && to > from, '找不到指令行那段样式，锚点变了先修测试')
+  const rows = css.slice(from, to)
+  assert.match(rows, /\.ops-cmds \.cmd-row/, '面板里的行要共用菜单那一套样式')
+  assert.match(rows, /\.ops-cmds \.cmd-desc[^{]*\{[^}]*text-overflow:\s*ellipsis/,
+    '一长串说明不许把行顶出屏幕')
+  assert.match(rows, /\.ops-cmds \.cmd-desc[^{]*\{[^}]*white-space:\s*nowrap/)
+  assert.match(rows, /\.ops-cmds \.cmd-flag[^{]*\{[^}]*white-space:\s*nowrap/,
+    '「手机暂时带不了附件」那面小旗不折行，也别被挤没')
+  assert.match(rows, /\.ops-cmds \.cmd-flag[^{]*\{[^}]*flex:\s*none/,
+    '小旗固定宽度，让说明去省略')
+})

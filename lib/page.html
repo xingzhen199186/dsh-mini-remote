@@ -682,24 +682,35 @@
     backdrop-filter: blur(14px) saturate(1.1);
   }
   .cmd-menu[hidden] { display: none; }
-  .cmd-menu .cmd-row {
+  /* 面板里的指令列表（#opsCmds）和这只菜单**长得一样、也共用这份规则**：
+     同一份数据、同一种行，没有第二套样式。 */
+  .cmd-menu .cmd-row,
+  .ops-cmds .cmd-row {
     display: flex; align-items: baseline; gap: 10px; width: 100%;
     padding: 9px 8px; border: none; border-radius: var(--r); background: none;
     color: var(--fg); font: inherit; font-size: 14.5px; text-align: left; cursor: pointer;
   }
-  .cmd-menu .cmd-row:active { background: var(--panel-2); }
-  .cmd-menu .cmd-name {
+  .cmd-menu .cmd-row:active,
+  .ops-cmds .cmd-row:active { background: var(--panel-2); }
+  .cmd-menu .cmd-name,
+  .ops-cmds .cmd-name {
     flex: 0 0 auto; color: var(--ice);
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   }
   /* 说明收成一行：这一屏是「扫一眼挑一个」，不是读文档的地方。 */
-  .cmd-menu .cmd-desc {
+  .cmd-menu .cmd-desc,
+  .ops-cmds .cmd-desc {
     flex: 1 1 auto; min-width: 0; color: var(--muted); font-size: 12.5px;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   /* 取不到指令时说清原因，**不显示空列表**：空列表看着就像「这个会话没有指令」，
      而真实原因多半是「这个会话现在没在跑」——两件事，用户能做的事也不一样。 */
-  .cmd-menu .cmd-note { padding: 10px 8px; color: var(--muted); font-size: 13px; }
+  .cmd-menu .cmd-note,
+  .ops-cmds .cmd-note { padding: 10px 8px; color: var(--muted); font-size: 13px; }
+  /* 面板那一行多两样：一层包住名字和说明（好让右边那面小旗挨着它排），以及那面小旗本身
+     （声明了收附件的指令，手机这一版带不了）。名字和说明的省略规则照旧用上面那一套。 */
+  .ops-cmds .cmd-top { display: flex; align-items: baseline; gap: 10px; flex: 1 1 auto; min-width: 0; }
+  .ops-cmds .cmd-flag { flex: none; color: var(--muted); font-size: 12px; white-space: nowrap; }
 
   /* ---------- 左侧导航栏 ---------- */
   #nav {
@@ -883,6 +894,31 @@
   .sheet .foot { margin-top: 18px; display: flex; gap: 10px; }
   .sheet .foot .btn { flex: 1 1 0; text-align: center; }
 
+  /* ---------- 统一操作面板（输入框旁边那一个入口点开的东西） ----------
+     骨架和设置抽屉**是同一套**：同一个 `#xxx.open` 即时显隐、同一个贴底的 `.sheet`
+     （它自带 max-height / overflow-y / safe-area 那三样，窄屏顶不出去），不新建样式体系。
+     这里独有的只有上面两段小节头和那个筛选框；指令行沿用 .cmd-menu 那一套。 */
+  #ops {
+    position: fixed; inset: 0; background: var(--scrim);
+    display: none; align-items: flex-end; z-index: 50;
+  }
+  #ops.open { display: flex; }
+  .ops-head { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+  .ops-head h2 { flex: 1 1 auto; margin: 0; }
+  /* 两个动作平分一行。都是既有 .btn（细边框 + --r 圆角 + --panel-2 底），
+     没有主按钮——这一屏不放强调色（#settings 那一屏已经有一处「完成」）。 */
+  .ops-acts { display: flex; gap: 10px; }
+  .ops-acts .btn { flex: 1 1 0; text-align: center; }
+  .ops-files { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+  .ops-files[hidden] { display: none; }
+  .ops-sub { margin: 20px 0 10px; font-size: 16px; }
+  .ops-filter {
+    width: 100%; padding: 9px 12px; border-radius: var(--r); border: 1px solid var(--line);
+    background: var(--panel-2); color: var(--fg); font: inherit; font-size: 16px;
+  }
+  /* 列表自己滚，别把整张抽屉撑出屏幕。 */
+  .ops-cmds { margin-top: 8px; max-height: 40vh; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+
   /* ---------- token 输入 ---------- */
   #gate { position: fixed; inset: 0; background: var(--bg); z-index: 100;
           display: none; flex-direction: column; justify-content: center;
@@ -1063,8 +1099,10 @@
 <div class="cmd-menu" id="cmdMenu" hidden></div>
 
 <footer>
-  <!-- 回形针。input 藏起来，按钮点它——iOS 上直接放一个 file input 样式很难统一。 -->
-  <button class="attach" id="btnAttach" type="button" aria-label="上传文件" title="上传文件">
+  <!-- 统一入口。位置和尺寸一个像素都没动（还是原来回形针那个 42×42），改的只是点了之后
+       干什么：原来直接开文件选择器，现在开下面那张统一操作面板（文件 + 指令都在里面）。
+       input 藏起来，按钮点它——iOS 上直接放一个 file input 样式很难统一。 -->
+  <button class="attach" id="btnAttach" type="button" aria-label="添加文件或调用指令" title="添加文件或调用指令">
     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
   </button>
   <input type="file" id="filePick" hidden>
@@ -1194,6 +1232,36 @@
   </div>
 </div>
 
+<!-- 统一操作面板：输入框旁边那一个入口点开的就是它，上面「添加文件」、下面「调用指令」。
+     原来这两件事各有各的门（回形针直接开文件选择器、打 `/` 才弹指令菜单），手机上没人
+     知道打一个斜杠还能调指令。
+
+     外壳是设置抽屉那一套**一模一样**的写法（`#xxx.open` 即时显隐 + `.sheet` 贴底），
+     不新建样式体系；令牌、圆角、细边框也全是现成的。
+
+     它盖住整屏、贴着底边（和设置抽屉同一层），所以不和底栏抢位置；打开时先把键盘收起来，
+     不然手机键盘会把这张抽屉顶到看不见的地方。 -->
+<div id="ops">
+  <div class="sheet">
+    <div class="ops-head">
+      <h2>添加文件</h2>
+      <button class="btn" id="opsClose">关闭</button>
+    </div>
+    <div class="ops-acts">
+      <button class="btn" id="opsPick" type="button">选文件</button>
+      <button class="btn" id="opsShot" type="button">拍照</button>
+    </div>
+    <!-- 已选文件的去处和附件小条**是同一份数据**（state.uploads，同一个 renderAttach）。
+         这里画一遍是为了让用户在面板里就看得到自己带了什么，不必先关掉面板。 -->
+    <div class="ops-files" id="opsFiles" hidden></div>
+
+    <h2 class="ops-sub">调用指令</h2>
+    <input class="ops-filter" id="opsFilter" type="text" placeholder="筛选指令…"
+           autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
+    <div class="ops-cmds" id="opsCmds"></div>
+  </div>
+</div>
+
 <!-- 子智能体（2026-10-03 用户要求：把电脑端「子智能体」搬到手机）。
 
      入口在顶栏，紧挨着设置齿轮的左边。面板外壳和设置抽屉**是同一套**（#subagents
@@ -1286,7 +1354,15 @@
     commands: null,        // null = 还没取到
     commandsError: '',     // 取不到时服务端给的那句话，原样显示给用户
     commandsFor: null,     // 上面这份数据是哪个会话的
-    commandsLoading: false // 正在取（挡住重复请求，见 loadCommands）
+    commandsLoading: false, // 正在取（挡住重复请求，见 loadCommands）
+    /**
+     * 「输入框里这一行曾经是一条指令」——点过面板/菜单里某一条之后，这里记着它的名字。
+     *
+     * 用来堵一个真缺口：点了一条要参数的指令，用户把 `/名字 ` 里的名字删掉、只留参数，
+     * 那一行就不再以 `/` 开头，会被当成普通提问发给模型，白花一次额度。
+     * 有这枚标记时，send() 会把这一行拦下来，让他补回名字或**清空输入框**（= 明确取消）。
+     */
+    pendingCommand: null
   };
   if (params.get('token')) {
     localStorage.setItem('dshMiniToken', params.get('token'));
@@ -3513,15 +3589,27 @@
         // **不能显示成空列表**：那等于说「这个会话没有指令」，是另一回事。
         state.commandsError = (res && res.error) || '读不到指令列表';
       }
-      paintCmdMenu();
+      paintCommandViews();
     }).catch(function (err) {
       state.commandsLoading = false;
       if (forSession !== state.boundSessionId) return;
       state.commandsFor = forSession;
       state.commands = null;
       state.commandsError = err.message || '读不到指令列表';
-      paintCmdMenu();
+      paintCommandViews();
     });
+  }
+
+  /**
+   * 指令表换了一份之后，**所有正在看着它的地方**都要重画。
+   *
+   * 现在有两处：打 / 弹出来的菜单，和统一操作面板里的那个列表。回调那一个由面板
+   * 那一段自己挂上——因为它在这一段下面，而这一段会被测试单独抠出来跑（那时面板还不存在）。
+   */
+  var onCommandsReady = null;
+  function paintCommandViews() {
+    paintCmdMenu();
+    if (onCommandsReady) onCommandsReady();
   }
 
   /**
@@ -3534,6 +3622,9 @@
   function paintCmdMenu() {
     var el = $('cmdMenu');
     if (!el) return;
+    // 输入框被清空了 = 用户把刚才那条指令整个删了，这是「明确取消」那一步。
+    // 放在这儿而不是 send() 里：清空之后他往往还要改写成普通提问，那次 send 不该再被拦。
+    if (!inputEl.value.trim()) state.pendingCommand = null;
     var prefix = slashQuery();
     if (prefix === null) { hideCmdMenu(); return; }
     var wasOpen = !el.hidden;
@@ -3566,16 +3657,22 @@
   }
 
   /**
-   * 菜单里点了一条。
+   * 菜单/面板里点了一条。
    *
-   * 分两路，判据是服务端给的 hint（这条指令要不要参数）：
+   * 分两路，判据是服务端给的 hint（这条指令要不要参数）。两路都**不执行**，
+   * 除非是打了 / 之后从菜单里点了一条不要参数的（那种当场跑，见 deferRun 的说明）：
    *   · 不要参数 —— 直接执行。让用户再按一次发送是白白多一步。
    *   · 要参数   —— 把 `/名字 ` 填进输入框，末尾留一个空格、光标停在后面，并把
    *     hint 那句话挂到输入框的 placeholder 上。
    *     **不自己编一句「请输入参数」**：只有服务端知道这条指令要什么，
    *     编一句就等于让用户照着一个错的提示去填。
+   *
+   * @param {string} name
+   * @param {boolean} [deferRun] 面板那条路传 true：**一次点击不执行**，只把这一行放进
+   *   输入框，由「发送」那一下确认（没有参数提示的指令也照此办理，宁可多问一句）。
+   *   打 / 弹出来的那个菜单不传——它本来就是「扫一眼挑一个」，多一步反而碍事。
    */
-  function pickCommand(name) {
+  function pickCommand(name, deferRun) {
     var list = state.commands || [];
     var cmd = null;
     for (var i = 0; i < list.length; i++) { if (list[i].name === name) cmd = list[i]; }
@@ -3587,12 +3684,25 @@
     if (cmd.hint) {
       inputEl.value = '/' + cmd.name + ' ';
       inputEl.placeholder = cmd.hint;
+      // 这一行「曾经是一条指令」：名字要是被删掉，send 不许拿它当普通提问发出去。
+      state.pendingCommand = cmd.name;
       inputEl.focus();
       // 光标停在最后：停在名字中间的话，用户接着打的字会插进名字里去。
       inputEl.setSelectionRange(inputEl.value.length, inputEl.value.length);
       autoGrow();
       return;
     }
+    if (deferRun) {
+      // 面板那条路：只填不跑。等用户按「发送」——那就是明确的确认执行动作。
+      inputEl.value = '/' + cmd.name;
+      state.pendingCommand = cmd.name;
+      inputEl.focus();
+      inputEl.setSelectionRange(inputEl.value.length, inputEl.value.length);
+      autoGrow();
+      return;
+    }
+    // 当场执行：框里不留东西，也就不存在「曾是指令」这回事。
+    state.pendingCommand = null;
     inputEl.value = '';
     autoGrow();
     runCommand('/' + cmd.name);
@@ -3670,17 +3780,38 @@
       .then(function () { setAttachBusy(false); });
   }
 
-  /** 附件小条。有东西才出现，没有就整块收起来——不占地方。 */
+  /**
+   * 附件小条。有东西才出现，没有就整块收起来——不占地方。
+   *
+   * 统一操作面板里那几行「已选文件」是**同一份数据、同一份 HTML**：都由这里画，
+   * 都读 state.uploads。别在面板里另存一个附件数组——那样两处迟早对不上
+   * （面板里删了一条，小条还挂着，用户就不知道该信哪个）。
+   */
   function renderAttach() {
     var bar = $('attachBar');
     if (!bar) return;
     var list = state.uploads || [];
-    bar.hidden = !list.length;
-    bar.innerHTML = list.map(function (f, i) {
+    var chips = list.map(function (f, i) {
       return '<span class="chip"><span class="nm">' + escapeHtml(f.name) + '</span>'
         + '<span class="sz">' + humanSize(f.bytes) + '</span>'
         + '<button class="x" type="button" data-drop="' + i + '" aria-label="去掉">×</button></span>';
     }).join('');
+    bar.hidden = !list.length;
+    bar.innerHTML = chips;
+    var box = $('opsFiles');
+    if (box) { box.hidden = !list.length; box.innerHTML = chips; }
+  }
+
+  /**
+   * 去掉一条已选文件。小条和面板共用这一处，别写两份。
+   *
+   * 编号必须从**被点的按钮**上读（`closest('[data-drop]')`），不能读 e.target：
+   * ✕ 是按钮里那个图形，手指落上去 e.target 就是图形本身，读它只能拿到 null，
+   * 于是静默什么都不做（2026-09-28 实机报过的那个 bug）。
+   */
+  function dropUpload(btn) {
+    state.uploads.splice(Number(btn.getAttribute('data-drop')), 1);
+    renderAttach();
   }
 
   function send() {
@@ -3693,6 +3824,21 @@
     // 只带文件、一个字不写也是合法的：「这份文件你看一下」本来就是常见用法。
     // 两样都没有才算空。
     if (!text && !files.length) return;
+
+    // **点过指令、又把名字删掉的那一行，不许当普通提问发出去。**
+    //
+    // 从面板/菜单点了一条「要参数」的指令之后，输入框里躺着 `/名字 参数`。用户要是把
+    // 名字删了、只留参数，这一行就不再以 / 开头，原来会被当成一次普通提问发给模型——
+    // 白花一次额度，而且他还以为自己跑的是那条指令。
+    //
+    // 拦在**清空输入框之前**：那一行字要留着，补回名字就能接着发。出路有两条，
+    // 都在提示里说清楚了：补回开头的指令名，或者清空输入框（清空 = 明确取消这条指令，
+    // 由 paintCmdMenu 在每次输入时把那枚标记撤掉）。
+    if (text.charAt(0) !== '/' && state.pendingCommand) {
+      toast('这是 /' + state.pendingCommand + ' 的参数，指令名被删掉了。'
+        + '把 /' + state.pendingCommand + ' 补回开头，或者清空输入框改问别的。');
+      return;
+    }
     unlockAudio();
     // **发指令这个动作，无条件拉回底部。**
     //
@@ -3727,6 +3873,8 @@
       // 这里**不动 state.uploads**——清掉就等于把用户刚传上来的文件悄悄扔了，
       // 而他还以为跟着发出去了。留在小条上看得见，想发就配一句话再发一次。
       if (files.length) toast('指令带不了附件，附件还留在下面');
+      // 跑出去了，那枚「曾是指令」的标记就该撤掉：留着会拦住下一条普通提问。
+      state.pendingCommand = null;
       runCommand(text);
       return;
     }
@@ -3785,7 +3933,127 @@
       });
   }
 
-  $('btnAttach').addEventListener('click', function () { $('filePick').click(); });
+  // ---------------- 统一操作面板（输入框旁边那一个入口） ----------------
+  //
+  // 形态是用户 2026-10-02 定的：输入框旁边**一个**入口，点开是一张底部抽屉，
+  // 上面「添加文件」、下面「调用指令」。原来这两件事各有各的门——回形针直接开文件
+  // 选择器、打 `/` 才弹指令菜单——手机上没人知道打一个斜杠还能调指令。
+  //
+  // 四条复用纪律（都不许另起一套）：
+  //   · 外壳 = 设置抽屉那一套（#settings.open + .sheet），不新建样式体系；
+  //   · 指令数据 = state.commands 那份按会话缓存，与打 / 弹出来的菜单**同一份**，
+  //     判据也共用 needCommands()，不写「面板专用」的第二套；
+  //   · 指令行 = 现成的 pickCommand(name, true)，一次点击**不执行**；
+  //   · 附件 = state.uploads + renderAttach()，面板里那几行就是小条那几行。
+  //
+  // 「指令带附件一起发」这一轮**不做**（手机的上传小票 DSH 的指令接口不认，见 onCommand
+  // 那段说明）——所以对声明了要附件的指令，面板上如实标一句「手机暂时带不了附件」，
+  // 不假装支持。
+  var ops = $('ops');
+  // 面板是不是开着。指令表换一份时要按它决定要不要重画列表（见 paintCommandViews）。
+  var opsOpen = false;
+
+  function openOps() {
+    opsOpen = true;
+    // 先把键盘收起来：这张抽屉贴着底边，键盘不收，它就被顶到看不见的地方。
+    if (inputEl.blur) inputEl.blur();
+    ops.classList.add('open');
+    // 与打 / 时同一个判据：换了会话要重取，上次没取到过就再试一次。
+    if (needCommands() || state.commandsError) loadCommands();
+    paintOps();
+  }
+
+  function closeOps() {
+    opsOpen = false;
+    ops.classList.remove('open');
+  }
+
+  /**
+   * 画面板里的指令列表。
+   *
+   * 和打 / 那个菜单同源（state.commands），但这里是「搜」不是「按前缀」：面板上那个框是
+   * 一句话搜索框，名字和说明都匹配（桌面端也是名字和标题一起匹配）。顺手带个 `/c` 也算，
+   * 那是用户平时打指令的手势。
+   *
+   * **取不到就说原因**，不显示成「一条都没有」——两件事，用户能做的也不同。
+   */
+  function paintOps() {
+    var listEl = $('opsCmds');
+    if (!listEl) return;
+    if (state.commandsError) {
+      listEl.innerHTML = '<div class="cmd-note">' + escapeHtml(state.commandsError) + '</div>';
+      return;
+    }
+    if (!state.commands) {
+      // 取回来之前先占个位——不然打开面板是一片空白，看着像坏了。
+      listEl.innerHTML = '<div class="cmd-note">正在读取可用的指令…</div>';
+      return;
+    }
+    var filterEl = $('opsFilter');
+    var q = String((filterEl && filterEl.value) || '').trim().toLowerCase();
+    if (q.charAt(0) === '/') q = q.slice(1);
+    var rows = state.commands.filter(function (c) {
+      if (!q) return true;
+      return (String(c.name) + ' ' + String(c.description || '')).toLowerCase().indexOf(q) >= 0;
+    });
+    if (!rows.length) {
+      listEl.innerHTML = '<div class="cmd-note">没有对得上的指令。</div>';
+      return;
+    }
+    listEl.innerHTML = rows.map(function (c) {
+      return '<button class="cmd-row" type="button" data-cmd="' + escapeHtml(c.name) + '">'
+        + '<span class="cmd-top">'
+        + '<span class="cmd-name">/' + escapeHtml(c.name) + '</span>'
+        + '<span class="cmd-desc">' + escapeHtml(c.description || '') + '</span>'
+        + '</span>'
+        + (c.attachments ? '<span class="cmd-flag">手机暂时带不了附件</span>' : '')
+        + '</button>';
+    }).join('');
+  }
+
+  // 面板里点一行：**一次点击不执行**（deferRun）。要参数的把 hint 挂成占位提示、把
+  // `/名字 ` 填进输入框；不要参数的也只填进去，等「发送」那一下——宁可多问一句，
+  // 也不能点错一下就真跑掉。
+  $('opsCmds').addEventListener('click', function (e) {
+    var btn = e.target && e.target.closest ? e.target.closest('[data-cmd]') : null;
+    if (!btn) return;
+    closeOps();
+    pickCommand(btn.getAttribute('data-cmd'), true);
+  });
+
+  $('opsFilter').addEventListener('input', paintOps);
+  $('opsClose').addEventListener('click', closeOps);
+  // 点抽屉外面那一层 = 关掉（和设置抽屉同一条规矩）。
+  ops.addEventListener('click', function (e) { if (e.target === ops) closeOps(); });
+
+  // 「添加文件」两件事：选文件、拍照。都走原来那个藏起来的 #filePick——手机上这两件事
+  // 本来就是同一个系统选择器，区别只在「要不要限定图片、要不要调后置摄像头」。
+  function openFilePicker(camera) {
+    var pick = $('filePick');
+    if (!pick) return;
+    if (camera) {
+      pick.setAttribute('accept', 'image/*');
+      pick.setAttribute('capture', 'environment');
+    } else {
+      pick.removeAttribute('accept');
+      pick.removeAttribute('capture');
+    }
+    pick.click();
+  }
+  $('opsPick').addEventListener('click', function () { openFilePicker(false); });
+  $('opsShot').addEventListener('click', function () { openFilePicker(true); });
+
+  // 面板里那行已选文件上的 ✕。走的是和小条同一个 dropUpload()。
+  $('opsFiles').addEventListener('click', function (e) {
+    var btn = e.target && e.target.closest ? e.target.closest('[data-drop]') : null;
+    if (!btn) return;
+    dropUpload(btn);
+  });
+
+  // 指令表换了一份（换会话、第一次取到）时，面板开着就跟着重画。
+  onCommandsReady = function () { if (opsOpen) paintOps(); };
+
+  $('btnAttach').addEventListener('click', function () { openOps(); });
   $('filePick').addEventListener('change', function (e) {
     var f = e.target.files && e.target.files[0];
     // 清掉 value：不清的话，连着选同一个文件第二次不会触发 change，
@@ -3796,8 +4064,7 @@
   $('attachBar').addEventListener('click', function (e) {
     var btn = e.target.closest ? e.target.closest('[data-drop]') : null;
     if (!btn) return;
-    state.uploads.splice(Number(btn.getAttribute('data-drop')), 1);
-    renderAttach();
+    dropUpload(btn);
   });
 
   $('btnSend').addEventListener('click', send);

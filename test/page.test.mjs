@@ -3145,6 +3145,49 @@ test('发送：不是 / 开头的照旧走 send', async () => {
   assert.equal(b.calls[0].path, '/mini/api/send', '普通消息一个字都不该变')
 })
 
+test('发送：点过指令之后又把名字删掉，只留参数——这行不许当普通提问发出去', async () => {
+  // 从面板/菜单点一条「要参数」的指令，输入框里是 `/config `。用户把名字删掉、只留参数，
+  // 按发送——原来只认「首字符是不是 /」，这一行会被当成普通提问发给模型，真花一次额度。
+  const b = buildSend()
+  b.state.pendingCommand = 'config'
+  b.input.value = '要改暗色'
+  b.send()
+  await Promise.resolve()
+  await Promise.resolve()
+
+  assert.equal(b.calls.length, 0,
+    '既不许走 /mini/api/command，也不许走 /mini/api/send——这一行是那条指令的参数')
+  assert.equal(b.input.value, '要改暗色', '输入框里那行要留着，用户补回名字就能接着发')
+  assert.equal(b.toasts.length, 1, '得告诉他出了什么事、怎么办')
+  assert.match(b.toasts[0], /config/)
+})
+
+test('发送：名字补回去了，照旧走指令那条路，并且把那枚标记清掉', async () => {
+  const b = buildSend()
+  b.state.pendingCommand = 'config'
+  b.input.value = '/config 暗色'
+  b.send()
+  await Promise.resolve()
+  await Promise.resolve()
+
+  assert.equal(b.calls.length, 1)
+  assert.equal(b.calls[0].path, '/mini/api/command')
+  assert.equal(b.state.pendingCommand, null,
+    '跑过之后必须清掉：不清的话，用户下一条普通提问会被这条残留的标记拦住')
+})
+
+test('发送：没点过指令时，普通提问一个字都不许被拦', async () => {
+  const b = buildSend()
+  b.state.pendingCommand = null
+  b.input.value = '把这一段改成两列'
+  b.send()
+  await Promise.resolve()
+  await Promise.resolve()
+  assert.equal(b.calls.length, 1)
+  assert.equal(b.calls[0].path, '/mini/api/send')
+  assert.equal(b.toasts.length, 0, '没点过指令就不该冒出任何提示')
+})
+
 test('发送：指令被拒时说清原因，而且**不会**再当普通消息发一次', async () => {
   // 契约里那条拒绝形状。用户拍板过：打了一条不存在的指令要跟电脑端一样拒绝并说明，
   // 不能悄悄当普通消息发给模型。
@@ -3161,6 +3204,32 @@ test('发送：指令被拒时说清原因，而且**不会**再当普通消息�
   assert.equal(b.toasts[0], '没有 /xyz 这条指令')
   assert.equal(b.state.history.length, 0,
     '也不许在聊天记录里留一条「已发出」的气泡——那等于骗人说发出去了')
+})
+
+test('斜杠菜单：点过的指令要记下来，名字删掉之后不许回退成普通消息', async () => {
+  const m = buildMenu({ value: '/con' })
+  m.paintCmdMenu()
+  await m.settle()
+  m.pickCommand('config')
+  await m.settle()
+  assert.equal(m.state.pendingCommand, 'config',
+    '点过之后这一行就「曾经是一条指令」，send 里要认这个标记')
+
+  // 清空输入框 = 明确取消。之后写普通提问不该再被拦（不然用户没法恢复成随便聊天）。
+  m.input.value = ''
+  m.paintCmdMenu()
+  assert.equal(m.state.pendingCommand, null, '清空输入框就是取消这条指令')
+})
+
+test('斜杠菜单：点没参数的指令不落这枚标记（它当场就跑完了，没留参数在框里）', async () => {
+  const m = buildMenu({ value: '/co' })
+  m.paintCmdMenu()
+  await m.settle()
+  m.pickCommand('compact')
+  await m.settle()
+  assert.equal(m.input.value, '', '当场执行的那条，输入框已经清空')
+  assert.equal(m.calls.length, 2, '取列表 + 执行，两趟')
+  assert.equal(m.state.pendingCommand, null)
 })
 
 test('历史里的指令行：running / success / error 三种长得不一样', () => {
@@ -3484,4 +3553,228 @@ test('完工卡片和列表行只用了既有令牌，一个新颜色都没造',
   // 强调色是**一屏最多两处**的稀缺资源，这一屏没有它。
   assert.ok(!sa.includes('var(--act)'), '子智能体这屏没有主按钮色的位置')
   assert.ok(!sa.includes('var(--gold)'), '子智能体这屏没有暖金字的位置')
+})
+
+// ---------------------------------------------------------------------------
+// 统一操作面板（输入框旁边那一个入口点开的东西）
+//
+// 它把「添加文件」和「调用指令」合进一个入口：外壳复用设置抽屉那一套，指令数据复用
+// state.commands 那份按会话缓存，附件复用 state.uploads + renderAttach()。这一组钉的
+// 是「复用」和「一次点击不许直接执行」这两件事——它们最容易在后续改动里悄悄退化。
+// ---------------------------------------------------------------------------
+
+const OP_S = '// ---------------- 统一操作面板'
+const OP_E = "$('btnAttach').addEventListener('click'"
+const opS = html.indexOf(OP_S)
+const opE = html.indexOf(OP_E)
+assert.ok(opS > 0, `在 page.html 里找不到锚点「${OP_S}」`)
+assert.ok(opE > opS, `在 page.html 里找不到锚点「${OP_E}」`)
+
+/**
+ * 把面板那一段抠出来跑。
+ *
+ * 面板自己不认识指令数据、也不认得上传通道——它全靠外面那几样（那条按会话缓存的
+ * 指令表、pickCommand、renderAttach、dropUpload）。这里按名字把它们换成熟手替身，
+ * 好断言「面板真的走了现成那条路」，而不是自己另写一份。
+ */
+function buildOps({
+  commands = COMMANDS, commandsError = '', commandsFor = 's1', sessionId = 's1',
+  filter = '', need = true,
+} = {}) {
+  const els = {}
+  const listeners = {}
+  const calls = []
+  const drops = []
+  const state = {
+    commands, commandsError, commandsFor, commandsLoading: false,
+    boundSessionId: sessionId, uploads: [], pendingCommand: null,
+  }
+  const input = {
+    value: '', placeholder: '说点什么…', style: {}, scrollHeight: 40, blurred: 0,
+    blur() { this.blurred += 1 }, focus() {}, setSelectionRange() {},
+  }
+  const el = (id) => (els[id] || (els[id] = {
+    id, hidden: false, innerHTML: '', value: id === 'opsFilter' ? filter : '',
+    attrs: {}, clicked: false,
+    classList: {
+      set: new Set(),
+      add(c) { this.set.add(c) },
+      remove(c) { this.set.delete(c) },
+      contains(c) { return this.set.has(c) },
+    },
+    setAttribute(k, v) { this.attrs[k] = v },
+    removeAttribute(k) { delete this.attrs[k] },
+    click() { this.clicked = true },
+    addEventListener(type, fn) { (listeners[id] = listeners[id] || {})[type] = fn },
+  }))
+  const sandbox = {
+    state, inputEl: input, $: el,
+    escapeHtml: md.escapeHtml,
+    toast: () => {},
+    needCommands: () => need,
+    loadCommands: () => { calls.push({ path: '/mini/api/commands' }) },
+    pickCommand: (name, defer) => { calls.push({ path: 'pick', name, defer }) },
+    dropUpload: (btn) => { drops.push(btn.getAttribute('data-drop')) },
+    renderAttach: () => {},
+  }
+  // eslint-disable-next-line no-new-func
+  const build = new Function(...Object.keys(sandbox),
+    `${html.slice(opS, opE)}\nreturn { openOps, closeOps, paintOps, openFilePicker };`)
+  const fns = build(...Object.values(sandbox))
+  return {
+    ...fns, els, state, input, listeners, calls, drops,
+    el, cmds: () => els.opsCmds, files: () => els.opsFiles,
+  }
+}
+
+test('统一入口：回形针那个位置改成开面板，三个 id 一个都没动', () => {
+  // 位置和尺寸是硬规矩（见 test/ui.test.mjs 那两条），所以入口**还是那一个按钮**，
+  // 改的只是点了之后干什么。
+  assert.match(html, /id="btnAttach"/, '要有那个入口按钮')
+  assert.match(html, /id="filePick"[^>]*hidden/, '文件选择器仍旧藏着')
+  assert.match(html, /id="attachBar"/, '附件小条也在')
+  const at = html.indexOf("$('btnAttach').addEventListener('click'")
+  assert.ok(at > 0, '找不到入口按钮的点击接线')
+  const body = html.slice(at, html.indexOf('});', at))
+  assert.match(body, /openOps\(\)/, '点了要开统一面板')
+  assert.ok(!/filePick'\)\.click\(\)/.test(body),
+    '不许再直接开文件选择器——那正是「两个入口」的老样子')
+})
+
+test('统一面板：外壳复用设置抽屉那一套，上「添加文件」下「调用指令」', () => {
+  const from = html.indexOf('<div id="ops">')
+  assert.ok(from > 0, '页面里没有统一操作面板')
+  const block = html.slice(from, html.indexOf('<div id="subagents">'))
+  assert.match(block, /<div class="sheet">/, '面板外壳要用设置那一套 .sheet，不另起一套样式')
+  for (const id of ['opsClose', 'opsPick', 'opsShot', 'opsFiles', 'opsFilter', 'opsCmds']) {
+    assert.ok(block.includes(`id="${id}"`), `面板里少了 id="${id}"`)
+  }
+  assert.ok(block.indexOf('添加文件') > 0 && block.indexOf('调用指令') > 0)
+  assert.ok(block.indexOf('添加文件') < block.indexOf('调用指令'), '上是添加文件、下是调用指令')
+})
+
+test('统一面板：打开就先收键盘、贴上抽屉，并按当前会话对齐指令表', () => {
+  // 手上还没有这个会话的指令表（第一次打开就是这样）：要取，并且先占个位。
+  const o = buildOps({ commands: null, commandsFor: null })
+  o.openOps()
+  // 抽屉贴着底边，键盘不收，它就被顶到看不见的地方。
+  assert.equal(o.input.blurred, 1, '打开时要把键盘收起来')
+  assert.ok(o.el('ops').classList.contains('open'), '抽屉要露出来')
+  // 判据和打 / 时同一份（needCommands），不是面板专用的一套。
+  assert.equal(o.calls.length, 1, `该取就取一次，实际 ${o.calls.length} 次`)
+  assert.equal(o.calls[0].path, '/mini/api/commands')
+  assert.match(o.cmds().innerHTML, /正在读取可用的指令…/, '取回来之前先占位，不留一片空白')
+})
+
+test('统一面板：这个会话的指令表已经取到了，就不再白取一次', () => {
+  const o = buildOps({ need: false })
+  o.openOps()
+  assert.equal(o.calls.length, 0)
+  assert.match(o.cmds().innerHTML, /data-cmd="compact"/, '直接画手上那份')
+})
+
+test('统一面板：列出这个会话的指令，名字和说明都在', () => {
+  const o = buildOps()
+  o.openOps()
+  const out = o.cmds().innerHTML
+  assert.match(out, /data-cmd="compact"/)
+  assert.match(out, /压缩这个会话的上下文/, '说明要在，不能只有名字')
+  assert.match(out, /data-cmd="cost"/, '别的指令不许漏')
+})
+
+test('统一面板：筛选框同时匹配名字和说明，顺手带个斜杠也算', () => {
+  // 用户平时打指令就是 `/名字`，在搜索框里多半也会这么打。
+  const byName = buildOps({ filter: '/c' })
+  byName.paintOps()
+  for (const name of ['compact', 'config', 'cost']) {
+    assert.match(byName.cmds().innerHTML, new RegExp(`data-cmd="${name}"`), `/c 该筛出 ${name}`)
+  }
+
+  const byDesc = buildOps({ filter: '花掉' })
+  byDesc.paintOps()
+  assert.match(byDesc.cmds().innerHTML, /data-cmd="cost"/, '说明里的话也要搜得到')
+  assert.ok(!byDesc.cmds().innerHTML.includes('data-cmd="compact"'), '对不上的不该留在列表里')
+})
+
+test('统一面板：搜不到也要说一句，不留白（空白看着像坏了）', () => {
+  const o = buildOps({ filter: 'zzz没有这条' })
+  o.paintOps()
+  assert.match(o.cmds().innerHTML, /没有对得上的指令/)
+})
+
+test('统一面板：取不到指令时原样说原因，不显示成空列表', () => {
+  const o = buildOps({
+    commands: null,
+    commandsError: '这个会话现在没在跑，指令要先让它跑起来（发一句话）。',
+  })
+  o.paintOps()
+  const out = o.cmds().innerHTML
+  assert.match(out, /这个会话现在没在跑/, '服务端那句话要原样显示')
+  assert.ok(!out.includes('cmd-row'), '空列表看着就像「这个会话没有指令」，是另一回事')
+})
+
+test('统一面板：声明要附件的指令如实标一句，不假装支持', () => {
+  const o = buildOps({
+    commands: [
+      { name: 'goal', description: '设一个目标', hint: '要做什么？', attachments: true },
+      { name: 'compact', description: '压缩上下文', hint: null, attachments: false },
+    ],
+  })
+  o.paintOps()
+  const rows = o.cmds().innerHTML.split('<button')
+  const goal = rows.find((r) => r.includes('data-cmd="goal"'))
+  const compact = rows.find((r) => r.includes('data-cmd="compact"'))
+  assert.match(goal, /手机暂时带不了附件/, '这一轮带不了，就得写出来')
+  assert.ok(!/手机暂时带不了附件/.test(compact), '没声明要附件的指令不该被盖上这面旗')
+})
+
+test('统一面板：点一行**不执行**，交给 pickCommand(名字, true) 填进输入框', () => {
+  const o = buildOps()
+  o.openOps()
+  o.listeners.opsCmds.click({
+    target: { closest: (sel) => (sel === '[data-cmd]' ? { getAttribute: () => 'config' } : null) },
+  })
+  assert.deepEqual(o.calls.filter((c) => c.path === 'pick'),
+    [{ path: 'pick', name: 'config', defer: true }], '要走现成那条路，并且明确「先别跑」')
+  assert.equal(o.calls.filter((c) => c.path === '/mini/api/command').length, 0,
+    '一次点击不许直接执行——「要参数的指令不会误执行」是验收里的一条')
+  assert.ok(!o.el('ops').classList.contains('open'), '挑完就收起来，别再挡着')
+  // 面板里点那一行也不许自己执行：源码里连 runCommand 都不该出现。
+  const body = html.slice(html.indexOf("$('opsCmds').addEventListener"), opE)
+  assert.ok(!/runCommand\(/.test(body), '面板这一段不许直接执行指令')
+  assert.match(body, /closest\('\[data-cmd\]'\)/, '要从被点的元素往上找那一行')
+})
+
+test('统一面板：已选文件那条 ✕ 走同一个 dropUpload，不直接读 e.target', () => {
+  const o = buildOps()
+  o.listeners.opsFiles.click({
+    target: { closest: (sel) => (sel === '[data-drop]' ? { getAttribute: () => '1' } : null) },
+  })
+  assert.deepEqual(o.drops, ['1'], '面板和小条共用同一个去掉逻辑')
+  const body = html.slice(html.indexOf("$('opsFiles').addEventListener"), opE)
+  assert.match(body, /closest\('\[data-drop\]'\)/, '手指落在 ✕ 的图形上时，e.target 是那根线，不是按钮')
+  assert.ok(!/e\.target\.getAttribute/.test(body))
+})
+
+test('统一面板：已选文件和附件小条是同一份数据、同一个渲染函数', () => {
+  // 面板里再存一个附件数组的话，两处迟早对不上：面板里删了一条，小条还挂着，
+  // 用户不知道该信哪个。
+  const from = html.indexOf('function renderAttach')
+  const to = html.indexOf('function dropUpload')
+  assert.ok(from > 0 && to > from, '找不到 renderAttach / dropUpload')
+  const body = html.slice(from, to)
+  assert.match(body, /\$\('attachBar'\)/, '小条还是它画')
+  assert.match(body, /\$\('opsFiles'\)/, '面板里那几行也得由它画，不许另写一个')
+  assert.ok(!/state\.uploads\s*=\s*\[/.test(body), '不许在这里换掉那个数组')
+})
+
+test('统一面板：选文件和拍照都走原来那个藏起来的 file input', () => {
+  const o = buildOps()
+  o.openFilePicker(false)
+  assert.equal(o.el('filePick').clicked, true, '选文件就是点那个 input')
+  assert.equal(o.el('filePick').attrs.accept, undefined, '不挑类型的文件照旧不设 accept')
+  o.openFilePicker(true)
+  assert.equal(o.el('filePick').attrs.accept, 'image/*', '拍照只收图片')
+  assert.equal(o.el('filePick').attrs.capture, 'environment', '后置摄像头')
+  assert.ok(!/\/mini\/api\/upload/.test(html.slice(opS, opE)), '面板不许另造一条上传通道')
 })

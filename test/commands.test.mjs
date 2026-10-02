@@ -75,6 +75,27 @@ test('指令名单：脏数据不许把整份列表带崩', () => {
   assert.deepEqual(describeCommands('不是数组'), [])
 })
 
+test('指令名单：身份标识原样带过来，界面不许出现空名字', () => {
+  // 桌面端靠 `definitionId` 选本地化标题、图标和内置别名（见 lib/commands.js 里那段说明）。
+  // 手机上还拿不到那份本地化文案，但标识这一格**不能再丢**：丢了就永远接不上那一层。
+  const rows = describeCommands([
+    {
+      definitionId: '@deepseek-ai/dsh-command-compact',
+      name: 'compact',
+      description: 'Compact older conversation history',
+    },
+    { name: 'mine', description: '自家插件的指令' },
+  ])
+  assert.equal(rows[0].definitionId, '@deepseek-ai/dsh-command-compact',
+    '身份标识要原样带到手机上')
+  assert.equal(rows[1].definitionId, null, '没有身份标识就是 null，不许编一个')
+  // 脏数据：给个非字符串，当没有处理。
+  assert.equal(describeCommands([{ name: 'x', definitionId: 42 }])[0].definitionId, null)
+  assert.equal(describeCommands([{ name: 'x', definitionId: '' }])[0].definitionId, null)
+  // 名字是界面上唯一必需的东西：每一行都得有个非空的名字可用。
+  assert.ok(rows.every((r) => typeof r.name === 'string' && r.name.length > 0))
+})
+
 test('指令行：开始那条用事件自己的时间，缺字段的不硬造', () => {
   const row = commandRow({
     type: 'command/run', time: 1_700_000_000_123,
