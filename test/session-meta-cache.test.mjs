@@ -29,3 +29,15 @@ test('过期元数据不会恢复', async () => {
   const expired = createSessionMetaCache({ file, now: () => 2000, ttl: 10 })
   assert.deepEqual(expired.all(), [])
 })
+
+test('upsert 更新单个会话而不重写其它元数据', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-meta-'))
+  const file = join(dir, 'session-meta.json')
+  const cache = createSessionMetaCache({ file, debounceMs: 1 })
+  cache.replace([record('s1', 10), record('s2', 20)])
+  cache.upsert({ ...record('s1', 30), live: true, persisted: false })
+  await new Promise((resolve) => setTimeout(resolve, 10))
+  const rows = cache.all()
+  assert.equal(rows.find((row) => row.header.id === 's1').header.createdAt, 30)
+  assert.equal(rows.find((row) => row.header.id === 's2').header.createdAt, 20)
+})

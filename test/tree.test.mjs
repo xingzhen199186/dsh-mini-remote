@@ -118,6 +118,26 @@ test('工作区列表先用元数据缓存，不等待完整会话扫描', async
   await new Promise((resolve) => setTimeout(resolve, 0))
 })
 
+test('并发读取元数据缓存只启动一趟后台校正', async () => {
+  const registry = registryOf(ws('w1', 'I:\\a', '甲', ['s1']))
+  let release
+  const gate = new Promise((resolve) => { release = resolve })
+  let scans = 0
+  const query = {
+    listSessions: async () => { scans += 1; await gate; return [rec('s1', 1)] },
+  }
+  const meta = { all: () => [rec('s1', 1)], replace() {} }
+  const [first, second] = await Promise.all([
+    listWorkspaces({ registry, query, meta, includeEmpty: true }),
+    listWorkspaces({ registry, query, meta, includeEmpty: true }),
+  ])
+  assert.equal(first[0].count, 1)
+  assert.equal(second[0].count, 1)
+  assert.equal(scans, 1)
+  release()
+  await new Promise((resolve) => setTimeout(resolve, 0))
+})
+
 test('runningIds 用来数「有几个在跑」', async () => {
   const registry = registryOf(ws('w1', 'I:\\a', '甲', ['s1', 's2', 's3']))
   const query = queryOf([rec('s1', 1), rec('s2', 2), rec('s3', 3)])
