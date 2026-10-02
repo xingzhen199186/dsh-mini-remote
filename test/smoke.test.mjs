@@ -749,6 +749,23 @@ test('工作区列表命中缓存，刷新请求才重新整理', async (t) => {
   assert.equal(calls, 2)
 })
 
+test('导航缓存可由会话生命周期主动失效', async (t) => {
+  let calls = 0
+  const tree = {
+    ...fakeNav(),
+    listWorkspaces: async () => {
+      calls += 1
+      return [{ id: 'w1', title: '生命周期', count: 1, running: 0 }]
+    },
+  }
+  const { server, base, token } = await startTestServer({ tree })
+  t.after(() => server.close())
+  await fetch(`${base}/mini/api/workspaces?token=${token}`)
+  server.invalidateNavigation()
+  await fetch(`${base}/mini/api/workspaces?token=${token}`)
+  assert.equal(calls, 2)
+})
+
 test('展开工作区能拿到它的会话', async (t) => {
   const { server, base, token } = await startTestServer({ tree: fakeNav() })
   t.after(() => server.close())

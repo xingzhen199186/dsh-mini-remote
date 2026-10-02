@@ -3177,6 +3177,12 @@
       }
       if (navExpanded[payload.workspaceId] && navView === 'tree') renderNav();
     });
+    es.addEventListener('navigation-refresh', function () {
+      navList = null;
+      navSessions = {};
+      if ($('nav').classList.contains('open')) loadWorkspaces(false);
+      else prefetchWorkspaces();
+    });
     es.addEventListener('reply', function (e) {
       var payload = JSON.parse(e.data);
       // interrupted 必须带上：这条是「实时推过来的那一条」，走的是和刷新时
