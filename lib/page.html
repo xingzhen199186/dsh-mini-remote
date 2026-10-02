@@ -2665,6 +2665,17 @@
 
   function loadWorkspaces(force) {
     if (navList && !force) { renderNav(); return; }
+    if (!force && navPrefetchPromise) {
+      $('navBody').innerHTML = '<div class="placeholder">正在读取…</div>';
+      navPrefetchPromise.then(function () {
+        if ($('nav').classList.contains('open')) renderNav();
+      }).catch(function (err) {
+        navList = null;
+        $('navBody').innerHTML = '<div class="placeholder">读不到会话列表：'
+          + escapeHtml(err.message) + '</div>';
+      });
+      return;
+    }
     $('navBody').innerHTML = '<div class="placeholder">正在读取…</div>';
     // 带 refresh=1 是给 ⟳ 用的：绕过服务端的短时缓存，真去读一遍。
     // 不带的话服务端会把最近一次的结果直接给你，导航栏就不再「每次都要重新读取」。
@@ -2681,19 +2692,17 @@
 
   // 导航栏不是首屏内容，但用户通常会在连上手机后很快点左上角。
   // 趁页面空闲先取一次；真正打开菜单时若已完成就直接画，不再把等待放在点击之后。
-  var navPrefetchPending = false;
+  var navPrefetchPromise = null;
   function prefetchWorkspaces() {
-    if (navList || navPrefetchPending || navView !== 'tree' || !state.token) return;
-    navPrefetchPending = true;
+    if (navList || navPrefetchPromise || navView !== 'tree' || !state.token) return;
     var run = function () {
-      api('/mini/api/workspaces').then(function (body) {
+      navPrefetchPromise = api('/mini/api/workspaces').then(function (body) {
         navList = body.workspaces || [];
         navSessions = {};
         if ($('nav').classList.contains('open')) renderNav();
-      }).catch(function () {
+      }).finally(function () { navPrefetchPromise = null; });
+      navPrefetchPromise.catch(function () {
         // 预取失败不改变导航栏原来的行为，用户打开时仍会再试一次。
-      }).then(function () {
-        navPrefetchPending = false;
       });
     };
     if (typeof window.requestIdleCallback === 'function') {
