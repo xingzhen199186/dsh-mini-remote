@@ -2635,12 +2635,30 @@ test('子智能体：耗时和用量从投影里取，四个桶互不重叠地�
   t.after(p.stop)
   await bindSession(p, 's1')
 
+  const stream = await fetch(`${p.base}/mini/api/stream?token=${p.token}`)
+  const reader = stream.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  async function readUntil(name) {
+    while (!buffer.includes('event: ' + name)) {
+      const { value, done } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+    }
+    const match = new RegExp('event: ' + name + '\\ndata: ([^\\n]+)').exec(buffer)
+    return match ? JSON.parse(match[1]) : null
+  }
+  await readUntil('state')
   const [, body] = await apiCall(p, '/mini/api/subagents')
-  assert.equal(body.subagents[0].tokens, 427, '四个桶互不重叠，直接相加')
-  assert.equal(body.subagents[0].durationMs, 8000, '跑完那段 + 还开着那一轮')
-  assert.equal(body.subagents[0].lastTurnCompleted, true, '绿点和灰点靠它分')
+  assert.equal(body.subagents[0].tokens, null, '首屏先返回清单，指标不应阻塞')
+  const metrics = await readUntil('subagent-metrics')
+  assert.equal(metrics.childId, 'session-a', '指标事件要对应子智能体')
+  assert.equal(metrics.tokens, 427, '四个桶互不重叠，直接相加')
+  assert.equal(metrics.durationMs, 8000, '跑完那段 + 还开着那一轮')
+  assert.equal(metrics.lastTurnCompleted, true, '绿点和灰点靠它分')
   // 只要这两个投影——多要一个就是白算一遍。
   assert.deepEqual(asked, [['session-a', ['subagentTiming', 'tokenUsage']]])
+  await reader.cancel()
 })
 
 test('子智能体：读投影时抛错也只当「读不到」，不把整份清单搭进去', async (t) => {

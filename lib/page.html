@@ -3194,6 +3194,28 @@
       }
       if (navExpanded[payload.workspaceId] && navView === 'tree') renderNav();
     });
+    es.addEventListener('subagent-metrics', function (e) {
+      var payload;
+      try { payload = JSON.parse(e.data); } catch (err) { return; }
+      if (!payload || payload.parentSessionId !== state.boundSessionId) return;
+      var row = null;
+      for (var i = 0; i < saRows.length; i++) {
+        if (saRows[i].id === payload.childId) { row = saRows[i]; break; }
+      }
+      if (!row) return;
+      row.tokens = payload.tokens;
+      row.durationMs = payload.durationMs;
+      row.lastTurnCompleted = payload.lastTurnCompleted;
+      if (saCache && saCacheSession === state.boundSessionId) {
+        for (var k = 0; k < (saCache.subagents || []).length; k++) {
+          if (saCache.subagents[k].id === payload.childId) {
+            Object.assign(saCache.subagents[k], payload);
+            break;
+          }
+        }
+      }
+      if (saPanel.classList.contains('open') && !saCurrent) saRenderList(saCache || { ok: true, subagents: saRows });
+    });
     es.addEventListener('navigation-refresh', function () {
       navList = null;
       navSessions = {};
