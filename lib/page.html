@@ -2654,6 +2654,7 @@
   // 本机实测 35 个工作区、最多的一个有 452 个会话，一次全拉会卡住手机。
   var navList = null;      // 工作区列表，开一次取一次
   var navSessions = {};    // workspaceId -> { sessions, total, truncated }
+  var navFollowTimers = {}; // workspaceId -> 当前标题补齐轮询定时器
   var navExpanded = {};    // workspaceId -> 是否展开
 
   function openNav() {
@@ -2676,6 +2677,30 @@
       $('navBody').innerHTML = '<div class="placeholder">读不到会话列表：'
         + escapeHtml(err.message) + '</div>';
     });
+  }
+
+  // 导航栏不是首屏内容，但用户通常会在连上手机后很快点左上角。
+  // 趁页面空闲先取一次；真正打开菜单时若已完成就直接画，不再把等待放在点击之后。
+  var navPrefetchPending = false;
+  function prefetchWorkspaces() {
+    if (navList || navPrefetchPending || navView !== 'tree' || !state.token) return;
+    navPrefetchPending = true;
+    var run = function () {
+      api('/mini/api/workspaces').then(function (body) {
+        navList = body.workspaces || [];
+        navSessions = {};
+        if ($('nav').classList.contains('open')) renderNav();
+      }).catch(function () {
+        // 预取失败不改变导航栏原来的行为，用户打开时仍会再试一次。
+      }).then(function () {
+        navPrefetchPending = false;
+      });
+    };
+    if (typeof window.requestIdleCallback === 'function') {
+      window.requestIdleCallback(run, { timeout: 1200 });
+    } else {
+      setTimeout(run, 0);
+    }
   }
 
   function dayLabel(ts) {
@@ -2973,7 +2998,8 @@
      */
     function followTitles(cur, deadline) {
       if (!(pendingCount(cur) > 0) || Date.now() >= deadline) return;
-      setTimeout(function () {
+      navFollowTimers[wsId] = setTimeout(function () {
+        delete navFollowTimers[wsId];
         // 用户收起了、或者这份数据已经被刷新换掉，就放手：别跟人抢。
         if (navSessions[wsId] !== cur || !navExpanded[wsId]) return;
         api('/mini/api/workspaces/' + encodeURIComponent(wsId) + '/sessions')
@@ -3118,11 +3144,29 @@
       state.connected = true;
       updateStatusUI();
       $('connHint').textContent = '已连接';
+      prefetchWorkspaces();
     });
     es.addEventListener('state', function (e) {
       state.connected = true;
       updateStatusUI();
       try { applySnapshot(JSON.parse(e.data)); } catch (err) {}
+      prefetchWorkspaces();
+    });
+    es.addEventListener('navigation-title', function (e) {
+      var payload;
+      try { payload = JSON.parse(e.data); } catch (err) { return; }
+      if (!payload || typeof payload.workspaceId !== 'string' || typeof payload.sessionId !== 'string') return;
+      var got = navSessions[payload.workspaceId];
+      if (!got || !Array.isArray(got.sessions)) return;
+      var row = got.sessions.find(function (item) { return item.id === payload.sessionId; });
+      if (!row) return;
+      row.title = typeof payload.title === 'string' ? payload.title : '';
+      if (typeof got.pending === 'number' && got.pending > 0) got.pending -= 1;
+      if (got.pending <= 0 && navFollowTimers[payload.workspaceId]) {
+        clearTimeout(navFollowTimers[payload.workspaceId]);
+        delete navFollowTimers[payload.workspaceId];
+      }
+      if (navExpanded[payload.workspaceId] && navView === 'tree') renderNav();
     });
     es.addEventListener('reply', function (e) {
       var payload = JSON.parse(e.data);

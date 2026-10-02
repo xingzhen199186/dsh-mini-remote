@@ -480,6 +480,47 @@ test('标题还没读出来时，列表也要立刻返回（不阻塞）', async
   await new Promise((r) => setTimeout(r, 0))
 })
 
+test('标题后台读到后通过回调通知工作区和会话', async () => {
+  const registry = registryOf(ws('w1', 'I:\\a', '甲', ['s1']))
+  const query = queryOf([rec('s1', 1)], { s1: '后台标题' })
+  const updates = []
+  const out = await listSessionsOf({
+    registry, query, workspaceId: 'w1',
+    onTitle: (update) => updates.push(update),
+  })
+  assert.equal(out.sessions[0].title, '后台标题')
+  await new Promise((r) => setTimeout(r, 0))
+  assert.deepEqual(updates, [{ workspaceId: 'w1', sessionId: 's1', title: '后台标题' }])
+})
+
+test('旧 import 会话不走 DSH 标题迁移，直接结束为无标题', async () => {
+  const id = 'import-does-not-exist-for-title-test'
+  const registry = registryOf(ws('w1', 'I:\\a', '甲', [id]))
+  let called = false
+  const query = {
+    listSessions: async () => [rec(id, 1)],
+    readTitleSnapshots: async () => { called = true; throw new Error('不该走迁移') },
+  }
+  const out = await listSessionsOf({ registry, query, workspaceId: 'w1' })
+  assert.equal(out.sessions[0].title, '')
+  assert.equal(out.pending, 0)
+  assert.equal(called, false)
+})
+
+test('标题批次里的失败项不会永久占着 pending', async () => {
+  const registry = registryOf(ws('w1', 'I:\\a', '甲', ['s1']))
+  const query = {
+    listSessions: async () => [rec('s1', 1)],
+    readTitleSnapshots: async () => [{ sessionId: 's1', status: 'rejected', reason: new Error('坏日志') }],
+  }
+  const out = await listSessionsOf({ registry, query, workspaceId: 'w1' })
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  const again = await listSessionsOf({ registry, query, workspaceId: 'w1' })
+  assert.equal(out.pending, 0)
+  assert.equal(again.pending, 0)
+  assert.equal(again.sessions[0].title, '')
+})
+
 // ---------------------------------------------------------------------------
 // 标题落盘：读一次就该长期记住，跨 DSH 重启不必重读
 // ---------------------------------------------------------------------------
@@ -637,7 +678,7 @@ test('读过了、确实没有标题的那条不再算 pending（不能让它一
   assert.equal(out.pending, 0, '读完了就是读完了：空标题再问一万次也不会有')
 })
 
-test('读失败的那条仍然算 pending（下次还能重试）', async () => {
+test('读失败的那条暂时结束 pending，过一段时间再允许重试', async () => {
   const registry = registryOf(ws('w1', 'I:\\a', '甲', ['s1', 's2']))
   const query = {
     listSessions: async () => [rec('s1', 1), rec('s2', 2)],
@@ -647,7 +688,7 @@ test('读失败的那条仍然算 pending（下次还能重试）', async () => 
     ],
   }
   const out = await listSessionsOf({ registry, query, workspaceId: 'w1' })
-  assert.equal(out.pending, 1, '读失败的不算"读过"，留着下次再试')
+  assert.equal(out.pending, 0, '读失败不能永久卡住 pending')
 })
 
 test('没有读日志这个能力时 pending 是 0（不去读，就不能让手机一直问）', async () => {

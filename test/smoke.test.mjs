@@ -727,6 +727,28 @@ test('工作区列表带 token 能读到', async (t) => {
   assert.equal(body.workspaces[0].title, '极简遥控器')
 })
 
+test('工作区列表命中缓存，刷新请求才重新整理', async (t) => {
+  let calls = 0
+  const tree = {
+    ...fakeNav(),
+    listWorkspaces: async () => {
+      calls += 1
+      await new Promise((resolve) => setTimeout(resolve, 10))
+      return [{ id: 'w1', title: '缓存测试', count: 1, running: 0 }]
+    },
+  }
+  const { server, base, token } = await startTestServer({ tree })
+  t.after(() => server.close())
+
+  const first = await (await fetch(`${base}/mini/api/workspaces?token=${token}`)).json()
+  const second = await (await fetch(`${base}/mini/api/workspaces?token=${token}`)).json()
+  const refreshed = await (await fetch(`${base}/mini/api/workspaces?token=${token}&refresh=1`)).json()
+  assert.equal(first.workspaces[0].title, '缓存测试')
+  assert.equal(second.workspaces[0].title, '缓存测试')
+  assert.equal(refreshed.workspaces[0].title, '缓存测试')
+  assert.equal(calls, 2)
+})
+
 test('展开工作区能拿到它的会话', async (t) => {
   const { server, base, token } = await startTestServer({ tree: fakeNav() })
   t.after(() => server.close())
@@ -1417,6 +1439,41 @@ test('SSE 流：连上先收到 state，之后能收到广播的 reply', async (
   assert.ok(buffer.includes('event: reply'))
   assert.ok(buffer.includes('全部通过'), '回复正文要原样送到手机')
 
+  await reader.cancel()
+})
+
+test('展开工作区时，标题补齐通过 SSE 单独推送', async (t) => {
+  const tree = {
+    ...fakeNav(),
+    listSessionsOf: async (workspaceId, limit, force, onTitle) => {
+      onTitle?.({ workspaceId, sessionId: 's1', title: '刚读到的标题' })
+      return { workspaceId, total: 1, truncated: false, pending: 0, sessions: [
+        { id: 's1', title: '刚读到的标题', createdAt: 1, running: false, live: false },
+      ] }
+    },
+  }
+  const { server, base, token } = await startTestServer({ tree })
+  t.after(() => server.close())
+
+  const res = await fetch(`${base}/mini/api/stream?token=${token}`)
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  async function readUntil(needle) {
+    while (!buffer.includes(needle)) {
+      const { value, done } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+    }
+  }
+  await readUntil('event: state')
+  buffer = ''
+  const sessions = await fetch(`${base}/mini/api/workspaces/w1/sessions?token=${token}`)
+  assert.equal(sessions.status, 200)
+  await readUntil('event: navigation-title')
+  assert.match(buffer, /"workspaceId":"w1"/)
+  assert.match(buffer, /"sessionId":"s1"/)
+  assert.match(buffer, /刚读到的标题/)
   await reader.cancel()
 })
 
