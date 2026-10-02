@@ -10,6 +10,7 @@
  *   node tools/live-check.mjs            # 打一次
  *   node tools/live-check.mjs --wait 60  # 最多等 60 秒，等**新代码**上线（重启后用）
  *   node tools/live-check.mjs --port 3090
+ *   node tools/live-check.mjs --nav-wait 5 # 额外等待标题 pending 收敛
  *   node tools/live-check.mjs --build <指纹>   # 手动指定要等的指纹
  */
 import { readFileSync, readdirSync } from 'node:fs'
@@ -73,9 +74,10 @@ if (!token) {
 }
 
 async function get(path) {
+  const started = performance.now()
   const res = await fetch(`${base}${path}${path.includes('?') ? '&' : '?'}token=${token}`)
   const body = await res.json().catch(() => ({}))
-  return { status: res.status, body }
+  return { status: res.status, body, ms: Math.round(performance.now() - started) }
 }
 
 async function post(path, payload) {
@@ -89,6 +91,7 @@ async function post(path, payload) {
 }
 
 const wait = Number(arg('--wait', 0))
+const navWait = Number(arg('--nav-wait', 0))
 if (wait > 0) {
   // 等「服务应答」是不够的——重启期间旧进程还在应答；等「某个接口返回 200」也不够，
   // 那个接口很可能上一轮就已经部署了。这两条我都踩过。所以改成等**构建指纹**：
@@ -155,6 +158,7 @@ const ws = await get('/mini/api/workspaces')
 check('工作区接口可用', ws.status === 200, `HTTP ${ws.status}`)
 const list = ws.body?.workspaces ?? []
 check('读到工作区', list.length > 0, `${list.length} 个`)
+if (ws.status === 200) console.log(`      工作区列表耗时：${ws.ms}ms`)
 if (list.length) {
   // 挑一个**非空**的来展开。
   //
@@ -176,6 +180,31 @@ if (list.length) {
   const sess = await get(`/mini/api/workspaces/${encodeURIComponent(first.id)}/sessions`)
   check('展开工作区能取到会话', sess.status === 200 && (sess.body?.sessions?.length ?? 0) > 0,
     `${sess.body?.sessions?.length ?? 0} 条 / 共 ${sess.body?.total ?? '?'} 条`)
+  if (sess.status === 200) {
+    console.log(`      首次展开耗时：${sess.ms}ms，标题 pending=${sess.body?.pending ?? 0}`)
+    if (navWait > 0 && Number(sess.body?.pending) > 0) {
+      const deadline = Date.now() + navWait * 1000
+      const titleStarted = Date.now()
+      let latest = sess
+      while (Date.now() < deadline && Number(latest.body?.pending) > 0) {
+        await new Promise((resolve) => setTimeout(resolve, 1000))
+        latest = await get(`/mini/api/workspaces/${encodeURIComponent(first.id)}/sessions`)
+      }
+      check('标题 pending 在限定时间内归零', Number(latest.body?.pending) === 0,
+        `${latest.body?.pending ?? '?'} 条仍未完成（等待 ${navWait}s）`)
+      console.log(`      标题收敛耗时：约 ${((Date.now() - titleStarted) / 1000).toFixed(1)}s`)
+    }
+  }
+
+  const largest = list.filter((w) => !w.empty).sort((a, b) => (b.count || 0) - (a.count || 0))[0]
+  if (largest && largest.id !== first.id) {
+    const largestSess = await get(`/mini/api/workspaces/${encodeURIComponent(largest.id)}/sessions`)
+    check('最大工作区能取到会话', largestSess.status === 200,
+      `${largest.title}：${largestSess.body?.sessions?.length ?? 0} 条 / 共 ${largestSess.body?.total ?? '?'} 条`)
+    if (largestSess.status === 200) {
+      console.log(`      最大工作区展开耗时：${largestSess.ms}ms，标题 pending=${largestSess.body?.pending ?? 0}`)
+    }
+  }
 
   // 空工作区展开要**干净地返回 0 条**：不报错、不 404。手机上点开一个刚建好的
   // 工作区走的正是这条路径，它得好看。
