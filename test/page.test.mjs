@@ -2894,6 +2894,131 @@ test('权限档位的点击真的接上了 tapPerm（不是画出来就算）', 
   assert.match(html, /renderPerms[\s\S]*?seg\.innerHTML/, 'renderPerms 应当是整块重画')
 })
 
+/**
+ * 权限档位那块**不能只在启动时读一次**。
+ *
+ * 真机现象：抽屉里根本没有「权限档位」这一块，别的行都正常。查下来，这块整块不显示
+ * 只有一条路——`loadPermissions()` 读不回来（`renderPerms()` 是先去掉 hidden 再画，
+ * 逻辑本身没问题）。而它原来只被调用一次，就在启动那一刻：宿主刚重启、绑定的会话
+ * 还没装进 `ctx.agents` 的那几秒里，服务端如实回 `no-session`，那一次正好撞上，
+ * 这一块就再也不出现，只有整页刷新能救回来。
+ *
+ * 两条牙：①一次读失败不许把已经画出来的那一盘擦掉；②打开设置抽屉要重读一次
+ *（顺带让「现在是哪一档」不至于停在开机那一刻的旧值）。
+ */
+const PERM_S = 'var permOptions = null;'
+const PERM_E = 'function renderPerms() {'
+const PERM_END = html.indexOf('function tapPerm')
+const permS = html.indexOf(PERM_S)
+const permE = html.indexOf(PERM_E)
+assert.ok(permS > 0, `在 page.html 里找不到锚点「${PERM_S}」`)
+assert.ok(permE > permS, `在 page.html 里找不到锚点「${PERM_E}」`)
+assert.ok(PERM_END > permE, '在 page.html 里找不到锚点「function tapPerm」')
+
+/**
+ * 把「读一次档位盘 + 画出来」那一段抠出来真跑。
+ *
+ * 切片要连 `renderPerms` 一起带上：**露出这一块的动作在它里面**（先去掉 hidden 再画）。
+ * 只抠 `loadPermissions` 就会把「露出来」那一步换成桩，测的就不是页面上真跑的那条链了。
+ */
+function permReader() {
+  const els = {
+    permBlock: { hidden: true },
+    segPerm: { innerHTML: '' },
+    permHint: { textContent: '' },
+  }
+  const queue = []
+  const box = new Function('$', 'api', 'escapeHtml',
+    `${html.slice(permS, PERM_END)}\n`
+    + 'return { load: loadPermissions, current: function () { return permOptions; },'
+    + ' feed: function (b) { permOptions = b; renderPerms(); } };')(
+    (id) => els[id], () => queue.shift()(), md.escapeHtml,
+  )
+  return { els, queue, box }
+}
+
+const PERM_LIVE = {
+  ok: true,
+  options: [
+    { value: 'read-only', name: '仅可查看', description: '', dangerous: false },
+    { value: 'workspace-write', name: '工作区内修改', description: '', dangerous: false },
+    { value: 'danger-full-access', name: '完全权限', description: '', dangerous: true },
+    { value: 'auto', name: '自动审查', description: '', dangerous: true },
+  ],
+  currentValue: 'auto',
+}
+
+test('权限档位：一次读失败不许把已经画出来的那一盘擦掉', async () => {
+  const r = permReader()
+  r.queue.push(() => Promise.resolve(PERM_LIVE))
+  r.box.load()
+  await flushMicro()
+  assert.equal(r.els.permBlock.hidden, false, '读到了就要露出来')
+  assert.match(r.els.segPerm.innerHTML, /data-perm="auto"/, '读到了就要把那几档画出来')
+
+  // 真机上就是这一下：读回来一个 ok:false（宿主刚重启、会话还没加载完）或者干脆断线。
+  r.queue.push(() => Promise.reject(new Error('断线')))
+  r.box.load()
+  await flushMicro()
+  assert.equal(r.els.permBlock.hidden, false, '已经显示出来的档位，不许因为一次读失败当场消失')
+  assert.ok(r.box.current(), '读失败也不该把上一次读到的档位丢掉（丢了连点击都点不动）')
+  assert.match(r.els.segPerm.innerHTML, /data-perm="auto"/, '读失败后原来画的那一盘要原样留着')
+})
+
+test('权限档位：一个档位都没读到过时，读不回来仍然整块不显示（不摆一个空壳）', async () => {
+  const r = permReader()
+  r.queue.push(() => Promise.resolve({ ok: false, reason: 'no-session' }))
+  r.box.load()
+  await flushMicro()
+  assert.equal(r.els.permBlock.hidden, true, '一个档位都没读到，空壳不该露出来')
+
+  // 那一段过去之后要能自己长回来——不能「一次没读成，这块就永远算了」。
+  r.queue.push(() => Promise.resolve(PERM_LIVE))
+  r.box.load()
+  await flushMicro()
+  assert.equal(r.els.permBlock.hidden, false, '后来读到了就要露出来')
+})
+
+test('打开设置抽屉会重读一次权限档位（不是只在启动时读一次）', () => {
+  const A = "$('btnSettings').addEventListener('click'"
+  const B = "$('btnClose').addEventListener('click'"
+  const a = html.indexOf(A)
+  const b = html.indexOf(B)
+  assert.ok(a > 0, `在 page.html 里找不到锚点「${A}」`)
+  assert.ok(b > a, `在 page.html 里找不到锚点「${B}」`)
+
+  const bound = []
+  const el = {
+    classList: { add() {}, remove() {} },
+    addEventListener(type, fn) { bound.push([type, fn]) },
+    textContent: '',
+  }
+  let loads = 0
+  new Function('$', 'sheet', 'state', 'loadPermissions', html.slice(a, b))(
+    () => el, el, { connected: true }, () => { loads += 1 },
+  )
+
+  assert.equal(bound.length, 1, '这个按钮上正好绑一个监听')
+  bound[0][1]()
+  assert.equal(loads, 1, '打开设置时必须重读一次档位盘，否则开机那一次没读成就永远缺这一块')
+})
+
+test('四档（含宿主保留档 auto）都要画出来，当前那一档要标出来', () => {
+  // 这份数据是 3090 上 /mini/api/permissions 真实回的形状：桌面端加载了
+  // experimental-auto-review 之后多出第四档，它的 name 由 lib/permissions.js 的
+  // PRESET_LABELS 补成中文。这一侧**一个标识符都不许写死**——多几档就画几档。
+  const r = permReader()
+  r.box.feed(PERM_LIVE)
+
+  const buttons = r.els.segPerm.innerHTML.match(/data-perm="/g) || []
+  assert.equal(buttons.length, 4, `四档要画四个按钮，实际 ${buttons.length} 个`)
+  assert.match(r.els.segPerm.innerHTML, />自动审查</, '第四档要显示中文名，不能显示标识符 auto')
+  assert.match(r.els.segPerm.innerHTML, /data-perm="auto" class="active">自动审查</,
+    '当前这一档（auto）要带 active，界面要能标出「现在是哪一档」')
+  assert.equal(r.els.permHint.textContent, '当前：自动审查', '说明那一行要说出现在是哪一档')
+  assert.equal(r.els.permBlock.hidden, false, '画出来了就要露出来')
+})
+
 // ---------------------------------------------------------------------------
 // 斜杠指令：手机上打 / 弹菜单、点一条执行、以及它在历史里怎么画
 // ---------------------------------------------------------------------------

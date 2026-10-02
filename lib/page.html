@@ -4098,6 +4098,9 @@
   $('btnSettings').addEventListener('click', function () {
     sheet.classList.add('open');
     $('connHint').textContent = state.connected ? '已连接' : '未连接';
+    // 权限档位那块也在这儿重读一次：它显示的是「现在在哪一档」的实时状态（电脑端
+    // 随时能改），而且启动时那一次要是没读成，不重读就整块再也不出现。
+    loadPermissions();
   });
   $('btnClose').addEventListener('click', function () { sheet.classList.remove('open'); });
   sheet.addEventListener('click', function (e) { if (e.target === sheet) sheet.classList.remove('open'); });
@@ -4388,15 +4391,30 @@
   var permOptions = null;   // null = 还没读到（或这台电脑没这个能力）
   var permArmed = '';       // 哪一档正在等「再点一次」
 
+  /**
+   * 读一次档位盘。
+   *
+   * **这是个要反复读的动作，不是启动时读一次就够。** 两个理由：
+   *   · 答案会变——电脑端随时能改档位，而这一块的作用就是「标出现在是哪一档」；
+   *   · 一次读不到就会永远缺这一块——宿主刚重启、绑定会话还没装进 `ctx.agents`
+   *     那段时间里，服务端如实回 `no-session`（见 lib/permissions.js 的 listPresets）。
+   *     启动时那一次正好撞上，不重读就再也回不来，只有整页刷新能让它出现。
+   *     所以设置抽屉每次打开都重读（见上面「设置」那一段）。
+   *
+   * 读不到时**只在这块本来就空着的情况下才藏起来**：已经画出来的档位不许因为一次
+   * 读失败当场消失——那是把「此刻读不到」错当成「这台电脑没有这个能力」。
+   */
   function loadPermissions() {
     api('/mini/api/permissions').then(function (body) {
-      if (!body || !body.ok) { $('permBlock').hidden = true; return; }
+      if (!body || !body.ok) {
+        if (!permOptions) $('permBlock').hidden = true;
+        return;
+      }
       permOptions = body;
       renderPerms();
     }).catch(function () {
-      // 读不到就整块不显示。附加能力缺了，不该影响发指令。
-      permOptions = null;
-      $('permBlock').hidden = true;
+      // 附加能力缺了不该影响发指令：一个档位都没读到过时，整块不显示。
+      if (!permOptions) $('permBlock').hidden = true;
     });
   }
 
