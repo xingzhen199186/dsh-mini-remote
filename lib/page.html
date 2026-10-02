@@ -3171,12 +3171,14 @@
       updateStatusUI();
       $('connHint').textContent = '已连接';
       prefetchWorkspaces();
+      prefetchSubagents();
     });
     es.addEventListener('state', function (e) {
       state.connected = true;
       updateStatusUI();
       try { applySnapshot(JSON.parse(e.data)); } catch (err) {}
       prefetchWorkspaces();
+      prefetchSubagents();
     });
     es.addEventListener('navigation-title', function (e) {
       var payload;
@@ -3949,6 +3951,26 @@
     }).catch(function (err) {
       $('subagentsList').innerHTML = '<div class="sa-none">'
         + escapeHtml(err && err.message || '没读出来。') + '</div>';
+    }).finally(function () {
+      if (saInflight && saInflight.request === request) saInflight = null;
+    });
+  }
+
+  // 连接后趁页面空闲预取当前会话的子代理清单。首次读取可能很慢，不能把这段等待
+  // 放到用户点入口之后；入口点击时会复用 saInflight，和导航工作区同一套策略。
+  function prefetchSubagents() {
+    var sessionId = state.boundSessionId || '';
+    if (!sessionId || saCacheSession === sessionId || saInflight) return;
+    var request = api('/mini/api/subagents');
+    saInflight = { sessionId: sessionId, request: request };
+    request.then(function (body) {
+      if (state.boundSessionId !== sessionId || !body || !body.ok) return;
+      saCache = body;
+      saCacheSession = sessionId;
+      saCacheAt = Date.now();
+      if (saPanel.classList.contains('open') && !saCurrent) saRenderList(body);
+    }).catch(function () {
+      // 预取失败不影响入口；用户点开时仍会重试。
     }).finally(function () {
       if (saInflight && saInflight.request === request) saInflight = null;
     });
