@@ -188,9 +188,22 @@ test('服务没给说明时 description 是空串，不是 undefined 也不是�
   }
 })
 
-test('映射表本身只认这三个稳定的标识符', () => {
+test('映射表本身只认这四个稳定的标识符', () => {
   assert.deepEqual(Object.keys(PRESET_LABELS).sort(),
-    ['danger-full-access', 'read-only', 'workspace-write'])
+    ['auto', 'danger-full-access', 'read-only', 'workspace-write'])
+})
+
+test('auto 这一档在手机上是中文，不是英文字面 auto', () => {
+  // 宿主多加载一个插件后多出来的保留档：无沙箱，但每次原生工具调用前由同一模型
+  // 做一次实验性审查。名字必须是人话，否则手机上就是一串英文键名。
+  const service = serviceOf({
+    names: ['read-only', 'workspace-write', 'danger-full-access', 'auto'],
+    current: 'auto',
+  })
+  const out = listPresets({ service, session: SESSION })
+  const auto = out.options.find((o) => o.value === 'auto')
+  assert.equal(auto.name, '自动审查')
+  assert.notEqual(auto.name, 'auto')
 })
 
 // ---------------------------------------------------------------------------
