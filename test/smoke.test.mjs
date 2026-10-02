@@ -2309,6 +2309,18 @@ test('子智能体清单取的是「手机绑着的那个会话」名下的，�
   assert.equal(body.subagents[1].durationMs, null)
 })
 
+test('子智能体清单在短时间内命中缓存，不重复读取 DSH', async (t) => {
+  const store = tempStore()
+  store.bind('session-parent')
+  const { nav, calls } = fakeSubagentNav()
+  const { server, base, token } = await startTestServer({ store, tree: nav })
+  t.after(() => server.close())
+
+  await fetch(`${base}/mini/api/subagents?token=${token}`)
+  await fetch(`${base}/mini/api/subagents?token=${token}`)
+  assert.deepEqual(calls, [['list', 'session-parent']], '短时间重复打开不应再次读取子智能体清单')
+})
+
 test('运行记录：也要按服务端绑定的会话去要，不能拿手机传的当凭据', async (t) => {
   const store = tempStore()
   store.bind('session-parent')

@@ -43,8 +43,8 @@ test('动效只剩这五种关键帧：光标、立绘翻帧（两套）、上�
   // 第五个（poseFlip6，2026-09-29）**不是新动效**：冲刺那张立绘从 2 帧变 6 帧，
   // 翻帧这同一件事要多一套关键帧（2 帧那套仍然是其余七个姿势在用的）。运动种类还是四种。
   const names = [...css.matchAll(/@keyframes\s+([A-Za-z0-9_-]+)/g)].map((m) => m[1]).sort()
-  assert.deepEqual(names, ['barStep', 'caret', 'poseFlip', 'poseFlip6', 'spin'],
-    '只允许这几个：其余都是"界面在表演"，规格里明令砍掉')
+  assert.deepEqual(names, ['barStep', 'caret', 'poseFlip', 'poseFlip6', 'spin', 'subagent-spin'],
+    '只允许这些：子智能体运行状态需要一个明确的入口动效，其余都是"界面在表演"')
 })
 
 test('状态点不再闪动，只留 160ms 的颜色过渡', () => {

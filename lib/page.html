@@ -124,6 +124,12 @@
     font-size: 16px; display: grid; place-items: center; cursor: pointer;
   }
   .icon-btn:active { transform: scale(.94); }
+  #btnSubagents.subagent-running svg { animation: subagent-spin 1.6s linear infinite; }
+  #btnSubagents.subagent-running { border-color: var(--run); color: var(--run); }
+  @keyframes subagent-spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) {
+    #btnSubagents.subagent-running svg { animation: none; }
+  }
 
   /* ---------- 子智能体（2026-10-03） ----------
      整块**只新增两条外观**：列表里的一行、聊天记录里那张完工卡片。其余全部复用：
@@ -1247,6 +1253,7 @@
     // 不能替他决定。明文连接下这一项永远是空转的，见下面「锁屏也能提醒」那一段。
     notify: localStorage.getItem('dshMiniNotify') === 'on',
     running: false,
+    subagentsRunning: false,
     sessions: [],
     // 排队中的指令（[{ id, text, placement }]）。跑着任务时接着发的那几条排在这儿，
     // 由服务端每次取快照时从 agent 的收件箱现读，手机不自己记。
@@ -2637,6 +2644,11 @@
     if ('boundSessionId' in snap) {
       var wasBound = state.boundSessionId;
       state.boundSessionId = snap.boundSessionId;
+      if (state.boundSessionId !== wasBound) {
+        saCache = null;
+        saCacheSession = null;
+        saCacheAt = 0;
+      }
       // 换了会话，指令菜单那份缓存就作废了（指令表是每个会话一份的，这个会话没在跑
       // 时一条都读不到，见「斜杠指令」那一段）。重画一次，它自己会发现数据不属于
       // 这个会话、去重取——否则用户点到的是上一个会话的指令，点下去必然被拒。
@@ -2645,6 +2657,11 @@
     // running 也在快照里，而且算的是**当前绑定的那个会话**。不接的话，
     // 在导航栏切到别的会话时，那个会话会继承上一个会话的「正在执行」。
     if ('running' in snap) setRunning(snap.running);
+    if ('subagentsRunning' in snap) {
+      state.subagentsRunning = snap.subagentsRunning === true;
+      $('btnSubagents').classList.toggle('subagent-running', state.subagentsRunning);
+      $('btnSubagents').setAttribute('aria-label', state.subagentsRunning ? '子智能体（运行中）' : '子智能体');
+    }
     paintNavCurrent();
     render();
   }
@@ -3180,6 +3197,9 @@
     es.addEventListener('navigation-refresh', function () {
       navList = null;
       navSessions = {};
+      saCache = null;
+      saCacheSession = null;
+      saCacheAt = 0;
       if ($('nav').classList.contains('open')) loadWorkspaces(false);
       else prefetchWorkspaces();
     });
@@ -3802,6 +3822,11 @@
   var saPanel = $('subagents');
   var saRows = [];        // 最近一次读到的清单，点行时按 id 找回来
   var saCurrent = null;   // 正在看运行记录的那一道；null = 现在在看清单
+  var saCache = null;
+  var saCacheSession = null;
+  var saCacheAt = 0;
+  var saInflight = null;
+  var SA_CACHE_TTL = 5000;
 
   function saToList() {
     saCurrent = null;
@@ -3882,11 +3907,28 @@
     }
   }
 
-  function saLoad() {
+  function saLoad(force) {
+    var sessionId = state.boundSessionId || '';
+    if (!force && saCache && saCacheSession === sessionId && Date.now() - saCacheAt < SA_CACHE_TTL) {
+      saRenderList(saCache);
+      return;
+    }
+    if (!force && saInflight && saInflight.sessionId === sessionId) return;
     $('subagentsList').innerHTML = '<div class="sa-none sa-none-indent">正在读取…</div>';
-    api('/mini/api/subagents').then(saRenderList).catch(function (err) {
+    var request = api('/mini/api/subagents');
+    saInflight = { sessionId: sessionId, request: request };
+    request.then(function (body) {
+      if (state.boundSessionId === sessionId && body && body.ok) {
+        saCache = body;
+        saCacheSession = sessionId;
+        saCacheAt = Date.now();
+      }
+      saRenderList(body);
+    }).catch(function (err) {
       $('subagentsList').innerHTML = '<div class="sa-none">'
         + escapeHtml(err && err.message || '没读出来。') + '</div>';
+    }).finally(function () {
+      if (saInflight && saInflight.request === request) saInflight = null;
     });
   }
 
