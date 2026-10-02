@@ -10,6 +10,7 @@
  *   node tools/live-check.mjs            # 打一次
  *   node tools/live-check.mjs --wait 60  # 最多等 60 秒，等**新代码**上线（重启后用）
  *   node tools/live-check.mjs --port 3090
+ *   node tools/live-check.mjs --admin-port 19387  # 跳过探测，直接指定 DSH 自己那个端口
  *   node tools/live-check.mjs --nav-wait 5 # 额外等待标题 pending 收敛
  *   node tools/live-check.mjs --build <指纹>   # 手动指定要等的指纹
  */
@@ -18,6 +19,7 @@ import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { buildId } from '../lib/build.js'
+import { describeAdminPort, pickAdminPort, splitPresets } from './live-check-rules.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 
@@ -62,7 +64,28 @@ const port = Number(arg('--port', readPort()))
 // 用 base 去打它们会拿到 404——2026-09-25 就是这么白跑了一轮，而且更糟：
 // 404 的正文里没有 `serve` 字段，于是「serve 没开时不出现 https 那条」**假绿**了。
 // 判据错的时候，绿比红危险。
-const adminPort = Number(arg('--admin-port', 3080))
+//
+// 那个端口**不写死**：它跟着宿主形态走——`dsh web` 默认 3080，桌面端应用默认 19387。
+// 换成桌面端之后 3080 上没人应答，`/mini-remote/pairing` 直接 fetch failed，下面那两条
+// 也跟着一起判空：两项红，全是这一个数造成的。所以：先试 3080，不行再试 19387，
+// 都不行就如实说没探到（不装作「配对信息里没那条」）。探测过程打到输出里，
+// 让人一眼看出这次连的是哪个端口。想跳过探测，用 `--admin-port <端口>` 显式指定。
+const explicitAdminPort = arg('--admin-port')
+let adminPort = 0
+let adminHow = ''
+if (explicitAdminPort !== undefined) {
+  adminPort = Number(explicitAdminPort)
+  if (!Number.isInteger(adminPort) || adminPort <= 0) {
+    console.error(`--admin-port 要给一个端口号，收到的是 ${JSON.stringify(explicitAdminPort)}。`)
+    process.exitCode = 1
+    throw new Error('bad admin port')
+  }
+  adminHow = `admin 端口 ${adminPort}（命令里显式指定，不探测）`
+} else {
+  const picked = await pickAdminPort()
+  adminPort = picked.port
+  adminHow = describeAdminPort(picked)
+}
 const adminBase = `http://127.0.0.1:${adminPort}`
 const token = readToken()
 const base = `http://127.0.0.1:${port}`
@@ -121,6 +144,10 @@ function check(label, ok, detail) {
   console.log(`${ok ? 'OK  ' : 'FAIL'}  ${label}${detail ? '  ' + detail : ''}`)
   if (!ok) problems.push(label)
 }
+
+// 先把「这次连的是哪台、说话的是哪个口」打出来。端口不对的话，下面每一条结论都不算数，
+// 而「服务应答」那几条的名字看不出这一点——所以它得是独立的、在最前面的一行。
+console.log(`      宿主形态：${adminHow}；插件自己的服务在 ${port}`)
 
 // 1. 服务活着
 const state = await get('/mini/api/state')
@@ -437,6 +464,12 @@ check('版本接口带新建会话的能力位', typeof ver.body?.canCreateSessi
 // 权限档位：手机界面直接照这两个字段画——名字是给人看的，dangerous 决定点它要不要
 // 二次确认。所以两件都不能错：名字不能拿英文键名充数；危险标记必须**恰好一个**，
 // 而且必须落在完全权限那一档上。标错就等于点一下直接提权、中间那道确认没了。
+//
+// 「恰好一个」只数**配置里的档位**：桌面端加载了 experimental-auto-review 之后，
+// 档位从三个变四个，多出的那一档是宿主自己的保留档 `auto`（Auto review），它的沙箱
+// 按协议就是完全放开，于是危险的天然是两个。那不是我这边标错了，是宿主形态变了。
+// 但放宽不等于不看了：配置档位的那一条判据原样保留（把「完全权限」的危险标记去掉，
+// 这条照样要红），保留档自己那一条也照看（见 live-check-rules.mjs 的 splitPresets）。
 const perm = await get('/mini/api/permissions')
 check('权限档位接口可用', perm.status === 200, `HTTP ${perm.status}`)
 if (perm.status === 200 && perm.body?.ok) {
@@ -446,12 +479,18 @@ if (perm.status === 200 && perm.body?.ok) {
   const noName = opts.filter((o) => !o.name || o.name === o.value)
   check('每一档都有给人看的名字（不是拿英文键名充数）', noName.length === 0,
     noName.length ? `没名字的是 ${noName.map((o) => o.value).join(', ')}` : '')
-  const danger = opts.filter((o) => o.dangerous)
-  check('危险的档位恰好标了一个（多标少标都等于确认那一步失效）', danger.length === 1,
-    danger.length ? `标在 ${danger[0].value}` : '一个都没标')
+  const presets = splitPresets(opts)
+  const danger = presets.danger
+  check('配置档位里恰好一个危险（宿主保留档 auto 不算配置档位）', danger.length === 1,
+    danger.length
+      ? `标在 ${danger.map((o) => o.value).join('、')}`
+      : `一个都没标（配置档位：${presets.configured.map((o) => o.value).join('、')}）`)
   check('标危险的那一档就是完全权限',
     danger.length === 1 && danger[0].value === 'danger-full-access',
     danger.length ? danger[0].value : '')
+  check('宿主保留档若在，也带着危险标记（它同样要点两次）',
+    presets.reservedMissed.length === 0,
+    presets.reservedMissed.length ? `${presets.reservedMissed.map((o) => o.value).join('、')} 没标` : '')
   check('当前档位在列表里（界面要能标出「现在是哪一档」）',
     opts.some((o) => o.value === perm.body.currentValue),
     `currentValue = ${perm.body.currentValue}`)
