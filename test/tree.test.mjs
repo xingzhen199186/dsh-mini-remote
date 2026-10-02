@@ -99,6 +99,25 @@ test('工作区标题为空时退到目录名，而不是显示 UUID', async () 
   assert.equal(out[0].title, '极简遥控器')
 })
 
+test('工作区列表先用元数据缓存，不等待完整会话扫描', async () => {
+  const registry = registryOf(ws('w1', 'I:\\a', '甲', ['s1']))
+  let release
+  const gate = new Promise((resolve) => { release = resolve })
+  let scans = 0
+  const query = {
+    listSessions: async () => { scans += 1; await gate; return [rec('s1', 1)] },
+  }
+  const meta = {
+    all: () => [rec('s1', 1)],
+    replace() {},
+  }
+  const out = await listWorkspaces({ registry, query, meta, includeEmpty: true })
+  assert.equal(out[0].count, 1)
+  assert.equal(scans, 1, '后台应只启动一趟完整扫描')
+  release()
+  await new Promise((resolve) => setTimeout(resolve, 0))
+})
+
 test('runningIds 用来数「有几个在跑」', async () => {
   const registry = registryOf(ws('w1', 'I:\\a', '甲', ['s1', 's2', 's3']))
   const query = queryOf([rec('s1', 1), rec('s2', 2), rec('s3', 3)])
