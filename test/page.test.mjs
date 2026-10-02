@@ -3019,6 +3019,96 @@ test('四档（含宿主保留档 auto）都要画出来，当前那一档要标
   assert.equal(r.els.permBlock.hidden, false, '画出来了就要露出来')
 })
 
+/**
+ * 权限档位是**每个会话各一份**的。
+ *
+ * 宿主的 `permission/preset` 记在会话自己的日志里，`service.current(session)` 读的是
+ * 这个会话那份投影（见 lib/permissions.js 的 listPresets 与 lib/index.js 的 sessionFor）。
+ * 这一侧原来只在开机和打开抽屉时读，于是切了会话之后抽屉里还是上一个会话那一档——
+ * 用户复制过来的原话就是「切到会话二是工作区内修改，它显示的是自动审查」。
+ *
+ * 两条牙：①换会话当场撤掉那一份高亮（列表留着，不许整盘消失）；②上一个会话那一份
+ * 晚到的应答不许顶掉这个会话的。
+ */
+test('权限档位：换了会话，上一个会话那一档的高亮当场撤掉（列表留着）', async () => {
+  const r = permReader()
+  r.queue.push(() => Promise.resolve({ ...PERM_LIVE }))   // 会话一：当前是「自动审查」
+  r.box.load('s1')
+  await flushMicro()
+  assert.match(r.els.segPerm.innerHTML, /data-perm="auto" class="active"/, '会话一那一档先标出来')
+
+  // 会话二那一份还在路上（网络慢或宿主还没登记这个会话）。
+  r.queue.push(() => new Promise(() => {}))
+  r.box.load('s2')
+  assert.ok(!/class="active"/.test(r.els.segPerm.innerHTML),
+    '还没读到会话二的档位，就不许拿会话一那一档冒充——宁可一个都不标')
+  assert.match(r.els.segPerm.innerHTML, /data-perm="auto"/, '但列表要留着，不能整盘消失')
+  assert.equal(r.els.permHint.textContent, '作用在当前会话上', '说不清是哪一档时，不编一个名字')
+})
+
+test('权限档位：上一个会话那一份晚到的应答不许覆盖这个会话', async () => {
+  const r = permReader()
+  let release1
+  r.queue.push(() => new Promise((resolve) => { release1 = resolve }))
+  r.box.load('s1')                                        // 会话一那一发还飞在路上
+  r.queue.push(() => Promise.resolve({ ...PERM_LIVE, currentValue: 'workspace-write' }))
+  r.box.load('s2')                                        // 用户已经切到会话二
+  await flushMicro()
+  assert.match(r.els.segPerm.innerHTML, /data-perm="workspace-write" class="active"/,
+    '会话二自己那一档要标出来')
+
+  release1({ ...PERM_LIVE, currentValue: 'auto' })        // 会话一那一发这才回来
+  await flushMicro()
+  assert.match(r.els.segPerm.innerHTML, /data-perm="workspace-write" class="active"/,
+    '会话一的答案属于会话一，不许把会话二的高亮顶掉')
+  assert.ok(!/data-perm="auto" class="active"/.test(r.els.segPerm.innerHTML), '会话一那一档不许冒头')
+})
+
+/**
+ * 换会话那一瞬间要发生什么——把**真的** applySnapshot 抠出来跑。
+ *
+ * 这一段以前只有 `'running' in snap` 那种静态正则，所以「换了会话之后哪些东西要
+ * 重取」全靠肉眼。权限档位就是这么漏掉的。
+ */
+function snapshotHarness() {
+  const A = 'function applySnapshot(snap) {'
+  const B = '// ---------------- 左侧导航栏'
+  const a = html.indexOf(A)
+  const b = html.indexOf(B)
+  assert.ok(a > 0, `在 page.html 里找不到锚点「${A}」`)
+  assert.ok(b > a, `在 page.html 里找不到锚点「${B}」`)
+
+  const state = { boundSessionId: null }
+  const permCalls = []
+  // eslint-disable-next-line no-new-func
+  const apply = new Function(
+    'state', '$', 'setRunning', 'paintCmdMenu', 'paintNavCurrent', 'render',
+    'loadPermissions', 'saCache', 'saCacheSession', 'saCacheAt',
+    `${html.slice(a, b)}\nreturn applySnapshot;`,
+  )(
+    state,
+    () => ({ classList: { toggle() {}, add() {}, remove() {} }, setAttribute() {} }),
+    () => {}, () => {}, () => {}, () => {},
+    (id) => permCalls.push(id),
+    null, null, 0,
+  )
+  return { apply, state, permCalls }
+}
+
+test('换会话要重读权限档位（它是每个会话各一份的）', () => {
+  const h = snapshotHarness()
+  h.apply({ boundSessionId: 's1' })
+  assert.deepEqual(h.permCalls, ['s1'], '第一次拿到绑定会话就该读一次')
+
+  h.permCalls.length = 0
+  h.apply({ boundSessionId: 's1' })   // 同一个会话的快照（每秒都来一份）
+  assert.deepEqual(h.permCalls, [], '没换会话，不该无谓地重读')
+
+  h.apply({ boundSessionId: 's2' })   // 用户在导航栏切到了会话二
+  assert.deepEqual(h.permCalls, ['s2'],
+    '换了会话必须重读——不读显示的就是会话一那一档（用户的真机反馈）')
+})
+
 // ---------------------------------------------------------------------------
 // 斜杠指令：手机上打 / 弹菜单、点一条执行、以及它在历史里怎么画
 // ---------------------------------------------------------------------------
