@@ -4634,3 +4634,79 @@ test('三档切换接线：minimal↔chat↔full 来回切，提示语跟着换�
   assert.deepEqual(calls, { render: 6, syncTraj: 6, syncSeg: 6 },
     '每切一次都要重画、重同步按钮和轨迹订阅（缺一样就是真机上的死档位）')
 })
+
+// ---------------------------------------------------------------------------
+// 轨迹区里的会话内搜索：只搜已加载的轨迹，命中只标不藏
+// ---------------------------------------------------------------------------
+//
+// 数据只有 state.trajectory（服务端最多留 120 条），所以搜索激活时那句范围说明
+// 必须逐字在场；搜空只说「已加载的轨迹里没有命中」，任何时候都不许说「不存在」。
+// 空查询要把搜索造成的强制展开清掉，回到「组默认收/摊、条目默认收」的口径。
+
+function trajSearchBox(value) {
+  return {
+    value,
+    getAttribute(name) { return name === 'data-traj-search' ? '' : null },
+  }
+}
+
+test('轨迹搜索·搜到：命中的字标出来，范围说明逐字在场，没命中的行一块不藏', () => {
+  const h = trajHarness()
+  h.state.trajectory = [
+    { turn: 1, state: 'ok', reason: null, entries: [
+      trajTool('k1'),
+      trajTool('k2', { step: 2, name: '写文件', summary: 'b.txt', output: '写完了乙' }),
+    ] },
+    { turn: 2, state: 'ok', reason: null, entries: [trajTool('m1', { turn: 2 })] },
+  ]
+  h.render()
+  const idle = h.replyEl.innerHTML
+  assert.ok(idle.includes('data-traj-search'), '完整模式、有轨迹：搜索框跟着轨迹区')
+  assert.ok(!idle.includes('搜的是已加载的轨迹'), '没输入时范围说明不占地方')
+  h.state.mode = 'chat'
+  h.render()
+  assert.ok(!h.replyEl.innerHTML.includes('data-traj-search'), '搜索框只在「完整」模式出现')
+  h.state.mode = 'full'
+  h.render()
+
+  h.replyEl.listeners.input({ target: trajSearchBox('乙') })
+  const hit = h.replyEl.innerHTML
+  assert.ok(hit.includes('<mark class="traj-hit">乙</mark>'), '命中的字用 mark 标出来')
+  assert.equal((hit.match(/class="traj-hit"/g) || []).length, 1, '只标命中的那一处，别处不多标')
+  assert.ok(hit.includes('搜的是已加载的轨迹（最多 120 条），更早的需先翻页加载'),
+    '搜索激活：范围说明逐字在场')
+  assert.ok(hit.includes('data-traj-entry="k1"'), '没命中的行照旧在原处（只标不藏）')
+  assert.ok(hit.includes('data-traj-entry="m1"'), '别的组的行也不藏、不重排')
+})
+
+test('轨迹搜索·搜空：只说「已加载的轨迹里没有命中」，不说不存在', () => {
+  const h = trajHarness()
+  h.state.trajectory = [{ turn: 1, state: 'ok', reason: null,
+    entries: [trajTool('k1'), trajTool('k2', { step: 2 })] }]
+  h.render()
+  h.replyEl.listeners.input({ target: trajSearchBox('查无此词') })
+  const miss = h.replyEl.innerHTML
+  assert.ok(miss.includes('已加载的轨迹里没有命中'), '搜空如实说，范围限定在「已加载的」')
+  assert.ok(miss.includes('搜的是已加载的轨迹（最多 120 条），更早的需先翻页加载'),
+    '搜空时范围边界那句照旧在场')
+  assert.ok(!/不存在|查不到|没有这条/.test(miss), '任何时候都不许把搜不到说成不存在')
+  assert.ok(miss.includes('data-traj-group="1"'), '没命中也不藏组头')
+})
+
+test('轨迹搜索·空查询：恢复默认折叠——搜索摊开的收回去，说明与高亮一起撤', () => {
+  const h = trajHarness()
+  h.state.trajectory = [{ turn: 1, state: 'ok', reason: null,
+    entries: [trajTool('k1'), trajTool('k2', { step: 2 })] }]
+  h.render()
+  h.replyEl.listeners.input({ target: trajSearchBox('甲') })
+  const opened = h.replyEl.innerHTML
+  assert.ok(opened.includes('data-traj-entry=') && opened.includes('traj-hit'),
+    '搜索时命中的组与条目摊开，命中的字才有处显示')
+  h.replyEl.listeners.input({ target: trajSearchBox('') })
+  const back = h.replyEl.innerHTML
+  assert.ok(back.includes('data-traj-group="1"'), '组头照画')
+  assert.ok(!back.includes('data-traj-entry='), '已结束的多条组回到默认收')
+  assert.ok(!back.includes('traj-hit') && !back.includes('搜的是已加载的轨迹'),
+    '高亮与范围说明都随查询一起撤')
+  assert.match(back, /data-traj-search[^>]*value=""/, '输入框也清空了')
+})

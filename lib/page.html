@@ -886,6 +886,18 @@
     background: var(--panel-2); border: 1px solid var(--line); border-radius: var(--r);
     color: var(--muted); font-size: 12.5px; line-height: 1.6;
   }
+  /* 轨迹内搜索（完整模式，会话内）：框跟着轨迹区，命中的字包一层 mark 标出来——
+     只标不藏、不动折叠结构。颜色只取现成令牌（--line 打底、--ice 当字，深浅两套
+     自动成对），圆角走 --r，零动效。字号 16px 是防 iOS 聚焦输入框时整页放大。 */
+  .traj-search { margin: 0 0 10px; }
+  .traj-search input {
+    display: block; width: 100%; padding: 7px 10px;
+    font: inherit; font-size: 16px; line-height: 1.5;
+    color: var(--fg); background: var(--panel-2);
+    border: 1px solid var(--line); border-radius: var(--r);
+  }
+  .traj-search input::placeholder { color: var(--muted); }
+  mark.traj-hit { background: var(--line); color: var(--ice); border-radius: var(--r); }
 
   /* ---------- 设置抽屉 ---------- */
   #settings {
@@ -2990,27 +3002,38 @@
    * 长得一样，是预期）。
    */
   function renderFull() {
+    // 输入框每次重画都是全新元素，焦点会跟着丢——先记下「正有人在输」，画完接回去。
+    var typing = trajSearchFocusIn();
     renderChat();
     if (state.trajectoryLoading) {
       replyEl.innerHTML = '<div class="history-note">正在读取这个会话的过程…</div>' + replyEl.innerHTML;
     }
     // 换了会话，用户手动拨过的折叠开关就作废——和聊天窗 chatWindowFor 同一个道理：
-    // 两场会话的轮号会撞在一起，留在手里的开关会去拨新会话的组。
+    // 两场会话的轮号会撞在一起，留在手里的开关会去拨新会话的组。搜索词也一样作废。
     if (trajFor !== state.boundSessionId) {
       trajFor = state.boundSessionId;
       trajGroupOpen = {};
       trajEntryOpen = {};
+      trajQuery = '';
     }
     var traj = trajectoryHtml();
     var notice = trajNoticeHtml();
     // 说明（「这份轨迹不是全部」/读取失败的原因）和组一起包进 .traj：排在聊天之后、
-    // 轨迹组之前；两头都没有就整个不包——空态观感和聊天保持一致。
+    // 轨迹组之前；两头都没有就整个不包——空态观感和聊天保持一致。搜索框跟着轨迹区走，
+    // 只在真的画出轨迹时画（没轨迹时一个字都不多占，这条口径不变）。
     if (traj || notice) {
-      replyEl.innerHTML = replyEl.innerHTML + '<div class="traj">' + notice + traj + '</div>';
+      replyEl.innerHTML = replyEl.innerHTML + '<div class="traj">' + notice
+        + (traj ? trajSearchHtml() : '') + traj + '</div>';
     }
+    trajSearchFocusOut(typing);
     // 点击走容器委托（和复制按钮同一根线）：轨迹区每次重绘都是全新 HTML，
-    // 逐个绑必漏；绑一次就够——回调认的是 data 属性，不是元素本身。
-    if (!trajBound) { trajBound = true; replyEl.addEventListener('click', onTrajectoryClick); }
+    // 逐个绑必漏；绑一次就够——回调认的是 data 属性，不是元素本身。搜索框的
+    // 输入走同一根线（input 事件冒泡到容器上），也是绑这一次。
+    if (!trajBound) {
+      trajBound = true;
+      replyEl.addEventListener('click', onTrajectoryClick);
+      replyEl.addEventListener('input', onTrajectoryInput);
+    }
   }
 
   // ---------------- 轨迹的三层折叠（完整模式） ----------------
@@ -3026,21 +3049,27 @@
   var trajGroupOpen = {};    // 组级手动覆写：{ 轮号字符串: true|false }
   var trajEntryOpen = {};    // 条目级手动覆写：{ 条目 id: true|false }
   var trajBound = false;     // replyEl 上的委托绑过没有
+  var trajQuery = '';        // 轨迹内搜索词（会话内；换会话时在 renderFull 里清掉）
 
   /**
    * 组默认摊不摊。收的条件是**三条一起成立**：条目够多（≥2）、已经跑完
    * （running 还在长，收了就看不见新条目）、结局不是 error（出错的组自己摊到
-   * 条目级给人看，不用点）。用户手动拨过的开关优先于默认值。
+   * 条目级给人看，不用点）。用户手动拨过的开关优先于默认值；再往后才是搜索的
+   * 强制摊开——搜索只把命中的组摊出来（命中的字得有地方显示），清空查询时它
+   * 自己就没了，而且它排在用户开关之后，搜索期间点组头也照样收得回去。
    */
   function trajGroupIsOpen(g) {
     var key = String(g.turn);
     if (Object.prototype.hasOwnProperty.call(trajGroupOpen, key)) return trajGroupOpen[key];
+    if (trajQuery && trajGroupHit(g)) return true;
     if (!g.entries || g.entries.length < 2) return true;
     if (g.state === 'running' || g.state === 'error') return true;
     return false;
   }
-  function trajEntryIsOpen(id) {
-    return trajEntryOpen[id] === true;
+  /** 一条摊不摊：用户开关优先；没有开关时，搜索命中的条目强制摊开，其余默认收。 */
+  function trajEntryIsOpen(e) {
+    if (Object.prototype.hasOwnProperty.call(trajEntryOpen, e.id)) return trajEntryOpen[e.id];
+    return trajQuery !== '' && trajEntryHit(e);
   }
   function trajStateLabel(s) {
     return s === 'ok' ? '已完成' : s === 'error' ? '出错了'
@@ -3061,8 +3090,18 @@
     }
     render();
   }
+  // 点的当下算开还是收，要按「含搜索强制摊开」的实况来（不然搜索摊开的条目点了
+  // 收不回去）：先按 id 找到那条再取反；找不到时按手里原有的开关算，和原来一致。
   function toggleTrajEntry(id) {
-    trajEntryOpen[id] = !trajEntryIsOpen(id);
+    var open = trajEntryOpen[id] === true;
+    var groups = state.trajectory || [];
+    for (var i = 0; i < groups.length; i++) {
+      var es = groups[i].entries || [];
+      for (var j = 0; j < es.length; j++) {
+        if (String(es[j].id) === String(id)) open = trajEntryIsOpen(es[j]);
+      }
+    }
+    trajEntryOpen[id] = !open;
     render();
   }
 
@@ -3106,28 +3145,30 @@
   function trajEntryBody(e) {
     var tr = e.truncated || {};
     var parts = [];
+    // 每段先经 trajHi 转义（搜索激活时顺带把命中的字标出来），所以下面**不再**整体
+    // 转义一次——再转一次会把 <mark> 变成字面量，高亮就成了一堆尖括号字符。
     if (e.kind === 'think') {
-      if (e.output) parts.push(e.output + trajTruncNote(tr.think, e.output));
+      if (e.output) parts.push(trajHi(e.output) + trajTruncNote(tr.think, e.output));
     } else {
-      if (e.args) parts.push('参数：\n' + e.args + trajTruncNote(tr.args, e.args));
-      if (e.output) parts.push('结果：\n' + e.output + trajTruncNote(tr.output, e.output));
+      if (e.args) parts.push('参数：\n' + trajHi(e.args) + trajTruncNote(tr.args, e.args));
+      if (e.output) parts.push('结果：\n' + trajHi(e.output) + trajTruncNote(tr.output, e.output));
     }
     if (!parts.length) return '';
-    return '<div class="traj-body">' + escapeHtml(parts.join('\n\n')) + '</div>';
+    return '<div class="traj-body">' + parts.join('\n\n') + '</div>';
   }
 
   /** 每步一行：思考与工具都要有（用户看的就是「跑到哪一步了」）。 */
   function trajEntryHtml(e) {
     var step = typeof e.step === 'number' ? '第 ' + e.step + ' 步 · ' : '';
-    var label = e.kind === 'think' ? '思考' : '工具 ' + escapeHtml(e.name || '（没写名字）');
+    var label = e.kind === 'think' ? '思考' : '工具 ' + trajHi(e.name || '（没写名字）');
     // 失败与进行中都顶在这一行上（折叠处一眼可见）：失败给错误首行，跑着给明确字样。
-    var tail = e.summary ? ' · ' + escapeHtml(e.summary) : '';
+    var tail = e.summary ? ' · ' + trajHi(e.summary) : '';
     if (e.error) tail += ' · <span class="traj-err">' + escapeHtml(trajErrLine(e)) + '</span>';
     else if (e.state === 'running') tail += ' · <span class="traj-run">进行中</span>';
     var row = '<button type="button" class="traj-row" data-traj-entry="'
       + escapeHtml(e.id) + '">' + step + label + tail + '</button>';
     return '<div class="traj-entry">' + row
-      + (trajEntryIsOpen(e.id) ? trajEntryBody(e) : '') + '</div>';
+      + (trajEntryIsOpen(e) ? trajEntryBody(e) : '') + '</div>';
   }
 
   /** 一个轮次组：头一行（收起时就是它自己），摊开时下面挂条目。 */
@@ -3175,6 +3216,83 @@
     }
     if (state.trajectoryTruncated) return '<div class="traj-note">这份轨迹不是全部。</div>';
     return '';
+  }
+
+  // ---------------- 轨迹内搜索（完整模式、会话内） ----------------
+  // 只搜 state.trajectory 里存着的文本：name/args/summary/output 的已截断前段
+  // （服务端最多留 120 条，从尾部留；被截掉的后半不还原、也不搜）。
+  function trajEntryHit(e) {
+    if (!trajQuery) return false;
+    var q = trajQuery.toLowerCase();
+    var fields = [e.name, e.args, e.summary, e.output];
+    for (var i = 0; i < fields.length; i++) {
+      if (fields[i] && String(fields[i]).toLowerCase().indexOf(q) >= 0) return true;
+    }
+    return false;
+  }
+  /** 组里有一条命中就算命中：组只因搜索摊开，不重排、不藏别的组。 */
+  function trajGroupHit(g) {
+    if (!trajQuery) return false;
+    var es = g.entries || [];
+    for (var i = 0; i < es.length; i++) if (trajEntryHit(es[i])) return true;
+    return false;
+  }
+  /**
+   * 命中的字标出来（只标不藏）：按位置切段、逐段转义，命中那段包一层 mark——中间段
+   * 一个字都不丢。按小写比对（大小写不拘）但按原文位置切；没查询时就是一句纯转义。
+   */
+  function trajHi(text) {
+    var s = String(text == null ? '' : text);
+    if (!trajQuery) return escapeHtml(s);
+    var q = trajQuery.toLowerCase();
+    var low = s.toLowerCase();
+    var out = '';
+    var from = 0;
+    for (var at = low.indexOf(q, from); at >= 0; at = low.indexOf(q, from)) {
+      out += escapeHtml(s.slice(from, at))
+        + '<mark class="traj-hit">' + escapeHtml(s.slice(at, at + q.length)) + '</mark>';
+      from = at + q.length;
+    }
+    return out + escapeHtml(s.slice(from));
+  }
+  /**
+   * 搜索框 + 说明（排在轨迹组之前）。查询非空即搜索激活：范围说明那句逐字在场；
+   * 一条没命中再补一句实话——只说「已加载的里没有」，不把「搜不到」说成「不存在」。
+   */
+  function trajSearchHtml() {
+    var html = '<div class="traj-search"><input type="text" data-traj-search=""'
+      + ' placeholder="在已加载的轨迹里搜" value="' + escapeHtml(trajQuery)
+      + '" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"></div>';
+    if (!trajQuery) return html;
+    html += '<div class="traj-note">搜的是已加载的轨迹（最多 120 条），更早的需先翻页加载</div>';
+    var groups = state.trajectory || [];
+    for (var i = 0; i < groups.length; i++) {
+      if (trajGroupHit(groups[i])) return html;
+    }
+    return html + '<div class="traj-note">已加载的轨迹里没有命中</div>';
+  }
+  // 输入走容器委托（和点击同一根线）：搜索框每次重绘都是全新的。重画交给 render()，
+  // 焦点的接回在 renderFull 里做（只有它知道框画出来没有）。
+  function onTrajectoryInput(e) {
+    var t = e.target;
+    if (!t || !t.getAttribute || t.getAttribute('data-traj-search') === null) return;
+    trajQuery = String(t.value || '');
+    render();
+  }
+  /** 重画前记下「有人正在搜索框里打字」这件事（重画把整个框换掉，焦点必丢）。 */
+  function trajSearchFocusIn() {
+    if (typeof document === 'undefined') return null;
+    var el = document.activeElement;
+    if (!el || !el.getAttribute || el.getAttribute('data-traj-search') === null) return null;
+    return { pos: typeof el.selectionStart === 'number' ? el.selectionStart : null };
+  }
+  /** 画完把焦点接回去：丢一次焦点，人就只能打一个字，等于没法搜。 */
+  function trajSearchFocusOut(f) {
+    if (!f || !replyEl.querySelector) return;
+    var box = replyEl.querySelector('[data-traj-search]');
+    if (!box) return;
+    box.focus();
+    if (f.pos !== null && box.setSelectionRange) box.setSelectionRange(f.pos, f.pos);
   }
 
   // 轨迹区的点击全走这一根委托。先认条目再认组头——行和头各带各的 data 属性，
