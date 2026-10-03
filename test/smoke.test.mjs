@@ -303,6 +303,13 @@ test('构建指纹里的可疑字符会被洗掉，不能往 HTML 里注入', ()
     `应该只剩字母数字，实际是 ${html.match(/var BUILD = '[^']*'/)}`)
 })
 
+test('默认模式白名单认「完整」，非法值仍回落单帧', () => {
+  assert.ok(renderPage({ defaultMode: 'full' }).includes("var DEFAULT_MODE = 'full';"),
+    '「完整」存成默认模式后刷新，不能被降回单帧')
+  assert.ok(renderPage({ defaultMode: 'xxx' }).includes("var DEFAULT_MODE = 'minimal';"),
+    '非法值必须回落到单帧')
+})
+
 // ---------------------------------------------------------------------------
 // 鲸鱼娘立绘（lib/art/）
 // ---------------------------------------------------------------------------
