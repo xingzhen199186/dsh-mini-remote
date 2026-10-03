@@ -3368,7 +3368,7 @@
       + escapeHtml(String(g.turn)) + '"><span class="traj-ico">' + trajIco(t.kind) + '</span>'
       + '<span class="traj-chev">' + (open ? '▾' : '▸') + '</span>'
       + title + chip + err + '</button>';
-    var entries = open
+    var entries = open && g.entries.length
       ? '<div class="traj-entries">' + g.entries.map(trajEntryHtml).join('') + '</div>'
       : '';
     return '<div class="traj-group">' + head + entries + '</div>';
@@ -3386,7 +3386,11 @@
    */
   function trajInterleave(rows, list, all) {
     var groups = (state.trajectory || []).filter(function (g) {
-      return g && Array.isArray(g.entries) && g.entries.length > 0;
+      // 空组也可能是「正在想」的那一轮：turn/start 刚到、条目要等这一步说完才落
+      // （DSH 的事件就是这么给的）。它就是进展本身，不许因为还没条目就整组不画——
+      // 真机上那正是「跑的时候一片安静、跑完一次性全冒出来」的观感
+      // （2026-10-04 用户报的）。跑完还是空的才不画：那一组确实没有过程。
+      return g && Array.isArray(g.entries) && (g.entries.length > 0 || g.state === 'running');
     });
     // 服务端那句「这不是全部」跟着轨迹内容走（11.1-C）：排在第一个过程组前面；
     // 一个过程组都没有（含轨迹读不到那条路）就兜底页尾——话必须说，位置不抢戏。

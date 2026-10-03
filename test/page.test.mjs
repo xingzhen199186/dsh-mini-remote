@@ -4161,6 +4161,26 @@ test('完整模式：running 的组不收，条目一直看得见', () => {
   assert.ok(out.includes('data-traj-entry="r1"'), '还在跑的组随时要看新条目，不许收')
 })
 
+test('完整模式：跑着但还没条目的组也要露头——「正在分析请求」就是进展本身', () => {
+  // turn/start 到了、模型还在想：条目要等这一步说完才落（事件就是这么给的）。
+  // 这期间「没有条目」不等于「没有动静」——整组不画的话，用户看到的就是
+  // 「跑完之后所有步骤一次性全冒出来」（2026-10-04 真机报告的正是这个）。
+  const h = trajHarness()
+  h.state.trajectory = [{ turn: 6, state: 'running', reason: null, entries: [] }]
+  h.render()
+  const out = h.replyEl.innerHTML
+  assert.ok(out.includes('data-traj-group="6"'), '组头在，哪怕它还一条条目都没有')
+  assert.ok(out.includes('正在分析请求'), '活动词照 PC 的兜底词：正在分析请求')
+})
+
+test('完整模式：跑完仍然一条条目都没有的组不画（没过程就是没过程）', () => {
+  const h = trajHarness()
+  h.state.trajectory = [{ turn: 6, state: 'done', reason: 'completed', entries: [] }]
+  h.render()
+  assert.ok(!h.replyEl.innerHTML.includes('data-traj-group'),
+    '收官还是空的组不冒头——露头的只有「正在跑」的那种')
+})
+
 test('完整模式：单条组不收组级，那一步直接看得见', () => {
   const h = trajHarness()
   h.state.trajectory = [{
