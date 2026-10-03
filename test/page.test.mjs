@@ -2452,6 +2452,30 @@ test('导航栏：服务端没给 pending 时退回数空标题（新页面配�
   assert.equal(sessionAsks(haz), 2, '没有 pending 字段时，退回「还有空标题就接着问」')
 })
 
+test('导航栏：会话数据被清空后，展开着的工作区要自己重新拉（不干等点击）', async () => {
+  // 真机报的（2026-10-03）：从会话打开导航栏，展开的工作区停在「正在读取…」
+  // 不动，收起再展开却又很快。根因是 navigation-refresh（会话开跑/收工都会广播）
+  // 清空了 navSessions 却留着 navExpanded——重画时只画出占位符，而取列表的请求
+  // 只在点击里发，没人发就永远停着。所以重画要自己把缺的那份补拉回来。
+  const haz = navHarness({
+    apiImpl: () => Promise.resolve({ pending: 0, sessions: [{ id: 's1', title: '甲', createdAt: 1 }] }),
+  })
+
+  haz.scope.toggleWorkspace('w1')            // 第一次展开：照常拉一次
+  await flushMicro()
+  assert.equal(sessionAsks(haz), 1, '展开要发一次请求')
+
+  haz.scope.setSessions({})                  // 模拟 navigation-refresh 清空（展开态不动）
+  haz.scope.renderNav()
+  haz.scope.renderNav()                      // 连画两次也不许发两趟（在途要拦）
+  await flushMicro()
+  assert.equal(sessionAsks(haz), 2, '清空后重画必须自己补发请求，且只补一次')
+  assert.equal(
+    haz.scope.getSessions().w1.sessions[0].title, '甲',
+    '补拉回来的数据要落进状态（渲染画的就是它）',
+  )
+})
+
 // ---------------------------------------------------------------------------
 // 单帧模式：回答出现时跳到顶部
 // ---------------------------------------------------------------------------

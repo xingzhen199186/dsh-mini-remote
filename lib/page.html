@@ -3022,6 +3022,7 @@
   var navSessions = {};    // workspaceId -> { sessions, total, truncated }
   var navFollowTimers = {}; // workspaceId -> 当前标题补齐轮询定时器
   var navExpanded = {};    // workspaceId -> 是否展开
+  var navWsFetching = {};  // workspaceId -> 会话列表请求在途（同一工作区只发一趟）
 
   function openNav() {
     $('nav').classList.add('open');
@@ -3090,6 +3091,11 @@
   function renderNav() {
     // 目录浏览那一屏接管整个面板。它自己画返回按钮，所以不走下面这套。
     if (navView === 'browse') { renderBrowse(); return; }
+    // 自愈：navigation-refresh（会话开跑/收工都会广播）清得掉数据、清不掉展开态，
+    // 重画出来的就是永远停着的「正在读取…」——取列表的请求原来只在点击时发，
+    // 没人补发就一直停着（真机报过：收起再展开才好，2026-10-03）。缺数据的补拉一次，
+    // loadWsSessions 自带在途闩，重复调用不会发第二趟。
+    Object.keys(navExpanded).forEach(function (id) { loadWsSessions(id); });
     var list = navList || [];
     // 「新建工作区」常驻在最上面：它是这一屏的入口，不该等有了会话才出现——
     // 一个工作区都还没有的人，恰恰最需要它。
@@ -3361,7 +3367,17 @@
     }
     navExpanded[wsId] = true;
     renderNav();
-    if (navSessions[wsId]) return;
+    loadWsSessions(wsId);
+  }
+
+  // 取一个工作区的会话列表。点击和 renderNav 的自愈（见 renderNav 顶部）都走这里：
+  // navWsFetching 这道闩让同一工作区同时只有一趟在飞，别重复付读日志折标题的钱。
+  // 15 秒兜底解锁是给「请求永远不回来」留的——闩本身不能变成新的卡死点，
+  // 超过 15 秒就放行，让下一次渲染或点击还能再试（服务端有缓存，重发很便宜）。
+  function loadWsSessions(wsId) {
+    if (navSessions[wsId] || navWsFetching[wsId]) return;
+    navWsFetching[wsId] = true;
+    var bail = setTimeout(function () { delete navWsFetching[wsId]; }, 15000);
     /**
      * 接着问，直到服务端说「一条都不剩」。
      *
@@ -3391,11 +3407,15 @@
     }
     api('/mini/api/workspaces/' + encodeURIComponent(wsId) + '/sessions')
       .then(function (body) {
+        clearTimeout(bail);
         navSessions[wsId] = body;
+        delete navWsFetching[wsId];
         renderNav();
         followTitles(body, Date.now() + TITLE_FOLLOW_LIMIT_MS);
       })
       .catch(function (err) {
+        clearTimeout(bail);
+        delete navWsFetching[wsId];
         navSessions[wsId] = { sessions: [], total: 0 };
         renderNav();
         toast(err.message);
