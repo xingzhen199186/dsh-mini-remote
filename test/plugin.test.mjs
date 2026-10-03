@@ -2962,3 +2962,302 @@ test('子智能体：这台电脑没有这个能力时，如实说没有，不�
   assert.equal(stopStatus, 409, '能力缺位也是「做不了」，不是 500')
   assert.match(stop.error, /没提供/)
 })
+
+// ---------------------------------------------------------------------------
+// 执行轨迹（「完整」模式）：把过程搬到手机
+//
+// 判据和上面一样，是「从 HTTP 那一头看出去的事实」：真插件、真服务、真 SSE。四件事：
+//   ① 声明了完整模式的那条连接收得到**增量**（新加的那几条 + 改了的那几笔），
+//      别的连接一个字节都不收；
+//   ② 过程**不进回答区、不进聊天记录、不进快照**——这一条是这次改动最要紧的边界；
+//   ③ 只推手机正在遥控的那个会话；别的会话的过程照样攒着，切过去用接口拉；
+//   ④ 关掉一个睡着的会话，日志里的过程要能重放出来。
+// ---------------------------------------------------------------------------
+
+/** 连一条能带查询串的 SSE 流，攒下每一帧的**名字和解析后的 data**。 */
+async function openTraceStream(url) {
+  const res = await fetch(url)
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  const stream = { status: res.status, frames: [], reader }
+  let buffer = ''
+  ;(async () => {
+    for (;;) {
+      const { value, done } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      let i
+      while ((i = buffer.indexOf('\n\n')) >= 0) {
+        const raw = buffer.slice(0, i + 2)
+        buffer = buffer.slice(i + 2)
+        const m = /^event: ([^\n]+)\ndata: ([^\n]*)/.exec(raw)
+        if (m) stream.frames.push({ name: m[1], data: JSON.parse(m[2]) })
+      }
+    }
+  })().catch(() => {})
+  return stream
+}
+
+/** 等到攒够 n 条某名字的帧（或超时）。 */
+async function waitFrames(stream, name, n, timeoutMs = 3000) {
+  const deadline = Date.now() + timeoutMs
+  while (stream.frames.filter((f) => f.name === name).length < n) {
+    if (Date.now() > deadline) break
+    await new Promise((resolve) => setTimeout(resolve, 10))
+  }
+  return stream.frames.filter((f) => f.name === name).map((f) => f.data)
+}
+
+test('执行轨迹：「完整」模式收到的是增量，聊天模式一个字节都不收', async (t) => {
+  const p = await bootPlugin()
+  t.after(p.stop)
+  await bindSession(p, 'sess-1')
+  const feed = p.handlers.get('session/event')
+  const session = { id: 'sess-1', header: { id: 'sess-1' } }
+
+  const chat = await openTraceStream(`${p.base}/mini/api/stream?token=${p.token}&clientId=chat`)
+  const full = await openTraceStream(`${p.base}/mini/api/stream?token=${p.token}&full=1&clientId=phone`)
+  await waitFrames(chat, 'state', 1)
+  await waitFrames(full, 'state', 1)
+
+  feed(session, ev('turn/start', { turn: 1 }))
+  feed(session, ev('assistant/message', {
+    turn: 1,
+    step: 1,
+    message: {
+      content: [
+        { type: 'reasoning', text: '先看看现在是什么版本' },
+        { type: 'tool-call', id: 'c1', name: 'read', arguments: '{"path":"README.md"}' },
+      ],
+    },
+  }))
+  feed(session, ev('tool/call', { turn: 1, step: 1, callId: 'c1', name: 'read', arguments: '{"path":"README.md"}' }))
+  feed(session, ev('tool/result', {
+    turn: 1, step: 1, message: { role: 'tool', toolCallId: 'c1', content: text('版本是 22') },
+  }))
+  feed(session, ev('turn/end', { turn: 1, reason: { kind: 'completed' } }))
+
+  const frames = await waitFrames(full, 'trajectory', 5)
+  assert.equal(frames.length, 5, '一轮下来五帧：起轮、思考、工具步、结果、收尾')
+  assert.deepEqual(frames.map((f) => [f.state, f.add.length, f.update.length]), [
+    ['running', 0, 0],   // turn/start：手机上那一组先立起来
+    [null, 1, 0],        // 思考（正文只在「完整」模式里出现）
+    [null, 1, 0],        // 工具步，正在跑
+    [null, 0, 1],        // 结果回来，**只补那一笔**（不是重发整轮）
+    ['done', 0, 0],      // 收尾
+  ])
+  assert.deepEqual(frames.map((f) => f.seq), [1, 2, 3, 4, 5], '帧序号一格一格走，客户端靠它认出漏帧')
+  assert.equal(frames[1].add[0].kind, 'think')
+  assert.equal(frames[1].add[0].output, '先看看现在是什么版本')
+  assert.equal(frames[2].add[0].name, 'read')
+  assert.equal(frames[2].add[0].summary, 'README.md', '折叠行给的是参数摘要，原始参数在 args 里')
+  assert.equal(frames[2].add[0].args, '{"path":"README.md"}')
+  assert.equal(frames[3].update[0].id, frames[2].add[0].id, '结果补的是那一次调用')
+  assert.equal(frames[3].update[0].state, 'ok')
+  assert.equal(frames[3].update[0].output, '版本是 22')
+  assert.equal(frames[0].sessionId, 'sess-1')
+  assert.equal(frames[0].turn, 1)
+  assert.equal(frames[0].epoch, frames[4].epoch, '同一代服务的编号一样')
+  assert.ok(frames[0].epoch.length > 0, '帧里要带这一代服务的编号——重连后靠它认出服务重启过')
+
+  await new Promise((resolve) => setTimeout(resolve, 200))
+  assert.equal(chat.frames.filter((f) => f.name === 'trajectory').length, 0,
+    '没声明完整模式的那条，轨迹一个字节都不收')
+  await chat.reader.cancel()
+  await full.reader.cancel()
+})
+
+test('执行轨迹：过程一个字都不进回答区、不进聊天记录、不进快照', async (t) => {
+  const p = await bootPlugin()
+  t.after(p.stop)
+  await bindSession(p, 'sess-1')
+  const feed = p.handlers.get('session/event')
+  const session = { id: 'sess-1', header: { id: 'sess-1' } }
+  const answer = 'README 的安装部分已更新为 Node 22+。'
+
+  feed(session, ev('user/message', { source: { kind: 'user' }, content: text('帮我看下 README') }))
+  feed(session, ev('turn/start', { turn: 1 }))
+  feed(session, ev('assistant/message', {
+    turn: 1,
+    step: 1,
+    message: {
+      content: [
+        { type: 'reasoning', text: '先看看现在是什么版本' },
+        { type: 'tool-call', id: 'c1', name: 'read', arguments: '{"path":"README.md"}' },
+      ],
+    },
+  }))
+  feed(session, ev('tool/call', { turn: 1, step: 1, callId: 'c1', name: 'read', arguments: '{"path":"README.md"}' }))
+  feed(session, ev('tool/result', {
+    turn: 1, step: 1, message: { role: 'tool', toolCallId: 'c1', content: text('版本是 22') },
+  }))
+  feed(session, ev('assistant/message', { turn: 1, step: 2, message: { content: text(answer) } }))
+  feed(session, ev('turn/end', { turn: 1, reason: { kind: 'completed' } }))
+
+  const snap = await snapOf(p)
+  assert.equal(snap.latest.text, answer, '回答区还是那一句回答，一个字都没变')
+  assert.equal(snap.history.filter((m) => m.role === 'assistant').length, 1)
+  const dump = JSON.stringify(snap)
+  assert.ok(!dump.includes('先看看现在是什么版本'), '思考不许进回答区、不许进聊天记录')
+  assert.ok(!dump.includes('版本是 22'), '工具的结果也一样')
+  assert.ok(!dump.includes('tool-call'), '过程留下的任何痕迹都不许进快照')
+  assert.equal(snap.trajectory, undefined, '快照里连这个字段都不该有')
+
+  // 没丢：它走了另一条路（GET 是重连/切模式时的补齐口）
+  const [code, body] = await apiCall(p, '/mini/api/trajectory?sessionId=sess-1')
+  assert.equal(code, 200)
+  assert.deepEqual(body.turns[0].entries.map((e) => [e.kind, e.name]), [
+    ['think', null], ['tool', 'read'],
+  ], '过程在这里，一条不少')
+})
+
+test('执行轨迹：只推手机正在遥控的那个会话，别的会话切过去再拉', async (t) => {
+  const p = await bootPlugin()
+  t.after(p.stop)
+  await bindSession(p, 'sess-1')
+  const feed = p.handlers.get('session/event')
+  const phone = { id: 'sess-1', header: { id: 'sess-1' } }
+  const desk = { id: 'sess-2', header: { id: 'sess-2' } }
+
+  const full = await openTraceStream(`${p.base}/mini/api/stream?token=${p.token}&full=1&clientId=phone`)
+  await waitFrames(full, 'state', 1)
+
+  feed(phone, ev('turn/start', { turn: 1 }))
+  feed(phone, ev('assistant/message', {
+    turn: 1, step: 1, message: { content: [{ type: 'reasoning', text: '手机上这个会话在想' }] },
+  }))
+  // 电脑上另开的那个会话：过程不该震手机（和 reply 那条同一个口径）
+  feed(desk, ev('turn/start', { turn: 1 }))
+  feed(desk, ev('assistant/message', {
+    turn: 1, step: 1, message: { content: [{ type: 'reasoning', text: '电脑上那个会话在想' }] },
+  }))
+
+  const frames = await waitFrames(full, 'trajectory', 2)
+  await new Promise((resolve) => setTimeout(resolve, 150))
+  assert.ok(frames.every((f) => f.sessionId === 'sess-1'), '推的全是手机正在看的那个会话')
+  assert.equal(full.frames.filter((f) => f.name === 'trajectory' && f.data.sessionId === 'sess-2').length, 0,
+    '别的会话的过程不该推')
+  await full.reader.cancel()
+
+  // 但它没丢：切过去（或者事后点开）用接口拉得到
+  const [, other] = await apiCall(p, '/mini/api/trajectory?sessionId=sess-2')
+  assert.deepEqual(other.turns.map((g) => [g.turn, g.entries.map((e) => e.output)]), [
+    [1, ['电脑上那个会话在想']],
+  ])
+})
+
+test('执行轨迹：子智能体的会话一条都不进轨迹', async (t) => {
+  // 和「子 agent 的回答不进手机」同一条纪律：用户遥控的是自己的主会话，不是它派出去的小弟。
+  const p = await bootPlugin({ agents: { s1: {} } })
+  t.after(p.stop)
+  await bindSession(p, 's1')
+  const feed = p.handlers.get('session/event')
+  const child = { id: 'child-1', header: { id: 'child-1', origin: 'subagent', parentSession: 's1' } }
+
+  feed(child, ev('turn/start', { turn: 1 }))
+  feed(child, ev('assistant/message', {
+    turn: 1, step: 1, message: { content: [{ type: 'reasoning', text: '子 agent 的想法' }] },
+  }))
+
+  const [, body] = await apiCall(p, '/mini/api/trajectory?sessionId=child-1')
+  assert.deepEqual(body.turns, [], '子 agent 的过程不该进手机')
+})
+
+test('执行轨迹：关掉一个睡着的会话，日志里的过程要能重放出来', async (t) => {
+  const p = await bootPlugin({ sessionQuery: fakeQuery({}) })
+  t.after(p.stop)
+
+  let clock = 1_700_000_000_000
+  const at = () => (clock += 1000)
+  writeSessionLog(p.home, 'sess-trace', [
+    { ...ev('turn/start', { turn: 1 }), time: at() },
+    { ...ev('assistant/message', {
+      turn: 1, step: 1,
+      message: {
+        content: [
+          { type: 'reasoning', text: '读一下那个文件' },
+          { type: 'tool-call', id: 'c1', name: 'read', arguments: '{"path":"a.txt"}' },
+        ],
+      },
+    }), time: at() },
+    { ...ev('tool/call', { turn: 1, step: 1, callId: 'c1', name: 'read', arguments: '{"path":"a.txt"}' }), time: at() },
+    { ...ev('tool/result', {
+      turn: 1, step: 1, message: { role: 'tool', toolCallId: 'c1', content: text('文件内容') },
+    }), time: at() },
+    { ...ev('assistant/message', { turn: 1, step: 2, message: { content: text('看完了。') } }), time: at() },
+    { ...ev('turn/end', { turn: 1, reason: { kind: 'completed' } }), time: at() },
+  ])
+  // 绑定的同时就会读这个会话的记录（readTailHistory 那条日常路）
+  await bindSession(p, 'sess-trace')
+
+  const [code, body] = await apiCall(p, '/mini/api/trajectory?sessionId=sess-trace')
+  assert.equal(code, 200)
+  assert.equal(body.turns.length, 1)
+  assert.equal(body.turns[0].turn, 1)
+  assert.equal(body.turns[0].state, 'done', 'completed = 完成')
+  assert.deepEqual(body.turns[0].entries.map((e) => [e.kind, e.name, e.state, e.output]), [
+    ['think', null, 'ok', '读一下那个文件'],
+    ['tool', 'read', 'ok', '文件内容'],
+  ], '日志里的过程重放出来：思考 + 工具步，结果已经配上了')
+
+  // 按轮取：只给那一轮；取不存在的轮给空的，不是错
+  const [, only] = await apiCall(p, '/mini/api/trajectory?sessionId=sess-trace&turn=1')
+  assert.deepEqual(only.turns.map((g) => g.turn), [1])
+  const [, none] = await apiCall(p, '/mini/api/trajectory?sessionId=sess-trace&turn=99')
+  assert.deepEqual(none.turns, [])
+  // 手机重新连上来第一件事就是拉这个接口；不能让它把「正在读」当「没有过程」
+  assert.equal(body.loading, false, '读完了就不许再说「正在读」')
+  assert.equal(body.epoch.length > 0, true, '接口和帧共用同一代服务编号')
+})
+
+test('执行轨迹：切回聊天模式就停推，重连带上 full=1 自己就重新订上', async (t) => {
+  const p = await bootPlugin()
+  t.after(p.stop)
+  await bindSession(p, 'sess-1')
+  const feed = p.handlers.get('session/event')
+  const session = { id: 'sess-1', header: { id: 'sess-1' } }
+  const talk = (turn, text0) => {
+    feed(session, ev('turn/start', { turn }))
+    feed(session, ev('assistant/message', {
+      turn, step: 1, message: { content: [{ type: 'reasoning', text: text0 }] },
+    }))
+  }
+
+  const first = await openTraceStream(`${p.base}/mini/api/stream?token=${p.token}&full=1&clientId=phone-1`)
+  await waitFrames(first, 'state', 1)
+  talk(1, '第一轮的思考')
+  assert.equal((await waitFrames(first, 'trajectory', 2)).length, 2)
+
+  // 切回聊天模式：这条连接不再收
+  const [code, off] = await apiCall(p, '/mini/api/trajectory/subscribe', {
+    method: 'POST', body: { clientId: 'phone-1', on: false },
+  })
+  assert.equal(code, 200)
+  assert.equal(off.subscribed, false)
+  assert.equal(off.connections, 1)
+  talk(2, '第二轮的思考')
+  await new Promise((resolve) => setTimeout(resolve, 200))
+  assert.equal(first.frames.filter((f) => f.name === 'trajectory').length, 2, '关掉之后不再推')
+  await first.reader.cancel()
+
+  // 断线重连：带 full=1 上来就自动订上（不用先握手一次），并靠 epoch + 拉一次接口对齐
+  const again = await openTraceStream(`${p.base}/mini/api/stream?token=${p.token}&full=1&clientId=phone-1`)
+  await waitFrames(again, 'state', 1)
+  await new Promise((resolve) => setTimeout(resolve, 50))
+  assert.equal(again.frames.filter((f) => f.name === 'trajectory').length, 0,
+    '刚连上不该补推旧帧——对齐靠那一次接口，不靠重放')
+  talk(3, '第三轮的思考')
+  const frames = await waitFrames(again, 'trajectory', 2)
+  assert.equal(frames.length, 2, '重连之后自动又收得到')
+  assert.deepEqual(frames.map((f) => f.turn), [3, 3])
+  assert.equal(frames[1].add[0].output, '第三轮的思考')
+  await again.reader.cancel()
+
+  // 对齐用的那一次接口：把没亲眼看见的那两轮（手机上那些）也一并给出来
+  const [, view] = await apiCall(p, '/mini/api/trajectory?sessionId=sess-1')
+  assert.deepEqual(view.turns.map((g) => [g.turn, g.entries.map((e) => e.output)]), [
+    [1, ['第一轮的思考']],
+    [2, ['第二轮的思考']],
+    [3, ['第三轮的思考']],
+  ], '三轮都在，重连之后拉一次就能补全')
+})

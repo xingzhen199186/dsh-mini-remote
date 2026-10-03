@@ -1459,6 +1459,202 @@ test('SSE 流：连上先收到 state，之后能收到广播的 reply', async (
   await reader.cancel()
 })
 
+// ---------------------------------------------------------------------------
+// 「完整」模式的执行轨迹
+//
+// 传输这一层要钉住三件事：
+//   ① 轨迹**不塞进快照**（`/mini/api/state`）——它只走 `event: trajectory` 这条新帧，
+//      而且只发给声明了「完整」模式的那几条连接。实测轨迹正文是回答正文的 90.7 倍
+//      （单轮最高约 946KB），而快照是**每条广播都发整份**的：塞进去等于每一次工具调用
+//      都推几百 KB，公网隧道下尤其不可接受。
+//   ② 切回聊天模式就要停推——订阅按**连接**记，开/关都得点到具体那一条，
+//      认不出那条连接时**如实说没订上**，不许静默成功（那是最难查的一种失败）。
+//   ③ GET /mini/api/trajectory 是重连、切模式、换会话时的补齐口。
+// ---------------------------------------------------------------------------
+
+/**
+ * 和上面那个 openStream 同一套，只是能带查询串（`clientId` / `full=1`）。
+ *
+ * **自己起一个一直跑着的收帧循环**，不按需去读：按需读那种写法每等一次超时都会把一个
+ * `reader.read()` 悬在半空（`Promise.race` 里输掉的那个），它随后收到的那一片数据会被
+ * 悄悄丢掉——「这一帧到没到」这种判据就会假红假绿。一个循环独占 reader，谁都不跟它抢。
+ */
+async function openStreamWith(base, token, query) {
+  const res = await fetch(`${base}/mini/api/stream?token=${token}${query}`)
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  const stream = { status: res.status, buffer: '', reader }
+  ;(async () => {
+    for (;;) {
+      const { value, done } = await reader.read()
+      if (done) break
+      stream.buffer += decoder.decode(value, { stream: true })
+    }
+  })().catch(() => {})
+  stream.raw = () => stream.buffer
+  stream.read = async (needle, ms = 5000) => {
+    const deadline = Date.now() + ms
+    while (!stream.buffer.includes(needle) && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    }
+    return stream.buffer
+  }
+  stream.close = () => reader.cancel()
+  await stream.read(': connected\n\n')
+  return stream
+}
+
+/** 数一数某条帧收了几回（「一条都没收到」这种判据靠它）。 */
+function countFrames(buffer, event) {
+  return buffer.split(`event: ${event}\n`).length - 1
+}
+
+/**
+ * 读一小会儿把这段时间里到达的帧都吸进来，再判「收没收到」。
+ *
+ * 等一个**永远不会出现**的标记，是为了等满这段时间；只看「我还没读」等于什么都没证明
+ * ——帧就躺在 socket 里，缓冲区里当然没有。
+ */
+async function drain(stream, ms = 300) {
+  await stream.read('这个标记永远不会出现', ms)
+  return stream.raw()
+}
+
+function trajectoryEntry(id, output, turn = 1) {
+  return {
+    id, turn, step: 1, kind: 'think', name: null, args: null, summary: null,
+    output, state: 'ok', error: null, truncated: null, timestamp: 1,
+  }
+}
+
+test('轨迹只推给声明了「完整」模式的那条连接，切回聊天模式就停', async (t) => {
+  const { server, base, token, store } = await startTestServer()
+  t.after(() => server.close())
+  store.bind('s1')
+
+  // 两条连接都用上面那个一直收帧的写法：要证明「这条一条都没收到」，就得真的在读。
+  const chat = await openStreamWith(base, token, '')
+  const full = await openStreamWith(base, token, '&full=1&clientId=phone-1')
+  await chat.read('event: state')
+  await full.read('event: state')
+
+  server.broadcastTrajectory({
+    sessionId: 's1', seq: 1, turn: 1, state: 'running', reason: null,
+    add: [trajectoryEntry('a', '先看看现在是什么版本')], update: [],
+  })
+  const got = await full.read('event: trajectory')
+  assert.ok(got.includes('event: trajectory'), '声明了完整模式的那条要收得到')
+  const frame = frameOf(got, 'trajectory')
+  assert.equal(frame.add[0].output, '先看看现在是什么版本')
+  assert.equal(frame.seq, 1, '帧里带着序号，客户端靠它认出漏帧')
+  assert.ok(frame.epoch, '帧里带着这一代服务的编号——重连后靠它认出服务重启过')
+  assert.equal(frame.sessionId, 's1')
+
+  // 给两条流一点时间：要证明的是「这条收到了、那条没收到」，不能靠「还没读到」就算数。
+  assert.equal(countFrames(await drain(chat), 'trajectory'), 0, '聊天模式一个字节都不该为轨迹付钱')
+
+  // 切回聊天模式：订阅关掉，这条连接不再收（**别人不受影响**）
+  const off = await fetch(`${base}/mini/api/trajectory/subscribe?token=${token}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ clientId: 'phone-1', on: false }),
+  })
+  assert.equal(off.status, 200)
+  const offBody = await off.json()
+  assert.equal(offBody.ok, true)
+  assert.equal(offBody.subscribed, false)
+  assert.equal(offBody.connections, 1, '点到的就是这一条连接')
+
+  server.broadcastTrajectory({
+    sessionId: 's1', seq: 2, turn: 1, state: 'running', reason: null,
+    add: [trajectoryEntry('b', '关掉之后这条不该到')], update: [],
+  })
+  assert.equal(countFrames(await drain(full), 'trajectory'), 1, '关掉之后不再推')
+
+  // 再打开：又能收
+  const on = await fetch(`${base}/mini/api/trajectory/subscribe?token=${token}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ clientId: 'phone-1', on: true }),
+  })
+  assert.equal((await on.json()).subscribed, true)
+  server.broadcastTrajectory({
+    sessionId: 's1', seq: 3, turn: 1, state: 'running', reason: null,
+    add: [trajectoryEntry('c', '打开之后又收得到')], update: [],
+  })
+  // 等**新那一条**到，不能只等帧名——缓冲里本来就有上一帧，那等于没等。
+  await full.read('打开之后又收得到')
+  assert.equal(countFrames(full.raw(), 'trajectory'), 2, '打开之后又收得到')
+
+  // 认不出的请求：不当成功
+  const empty = await fetch(`${base}/mini/api/trajectory/subscribe?token=${token}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ on: true }),
+  })
+  assert.equal(empty.status, 400, 'clientId 不能空——订阅是按连接记的')
+  const ghost = await fetch(`${base}/mini/api/trajectory/subscribe?token=${token}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ clientId: '没人认领', on: true }),
+  })
+  assert.equal(ghost.status, 404, '认不出这条连接就如实说没订上，让手机重连一次')
+
+  await chat.close()
+  await full.close()
+})
+
+test('轨迹接口：一组一组地给，能按轮取，没有会话时不是错', async (t) => {
+  const { server, base, token, store } = await startTestServer()
+  t.after(() => server.close())
+  store.bind('s1')
+  store.applyTrajectory('s1', { turn: 1, entries: [trajectoryEntry('a', '想了')], updates: [], state: 'running' })
+  store.applyTrajectory('s1', { turn: 1, entries: [trajectoryEntry('b', '又想了')], updates: [], state: 'done' })
+  store.applyTrajectory('s1', { turn: 2, entries: [trajectoryEntry('c', '新一轮', 2)], updates: [], state: 'running' })
+
+  const body = await (await fetch(`${base}/mini/api/trajectory?token=${token}`)).json()
+  assert.equal(body.ok, true)
+  assert.equal(body.sessionId, 's1')
+  assert.equal(body.seq, 3, '和增量帧共用同一个序号计数器')
+  assert.ok(body.epoch)
+  assert.equal(body.loading, false, '手里有亲眼看见的那份，就不说「正在读」')
+  assert.equal(body.truncated, false)
+  assert.equal(body.note, null)
+  assert.deepEqual(body.turns.map((g) => [g.turn, g.state, g.entries.length]),
+    [[1, 'done', 2], [2, 'running', 1]], '一组一轮，轮状态和条目都对着')
+
+  const only = await (await fetch(`${base}/mini/api/trajectory?token=${token}&sessionId=s1&turn=2`)).json()
+  assert.deepEqual(only.turns.map((g) => g.turn), [2], '按轮取只给那一轮')
+  assert.equal(only.turn, 2)
+
+  const bad = await fetch(`${base}/mini/api/trajectory?token=${token}&sessionId=s1&turn=abc`)
+  assert.equal(bad.status, 400, 'turn 不是数字是请求本身坏了')
+
+  // 谁都没绑过：给一组空的，不是 400——「还没有会话」不是错。
+  const fresh = await startTestServer()
+  t.after(() => fresh.server.close())
+  const none = await (await fetch(`${fresh.base}/mini/api/trajectory?token=${fresh.token}`)).json()
+  assert.equal(none.sessionId, null)
+  assert.deepEqual(none.turns, [])
+})
+
+test('轨迹不在快照里——一次都别想混进 /mini/api/state', async (t) => {
+  const { server, base, token, store } = await startTestServer()
+  t.after(() => server.close())
+  store.bind('s1')
+  store.applyTrajectory('s1', {
+    turn: 1, entries: [trajectoryEntry('a', '轨迹里那句话')], updates: [], state: 'running',
+  })
+
+  const snap = await (await fetch(`${base}/mini/api/state?token=${token}`)).json()
+  assert.ok(!JSON.stringify(snap).includes('轨迹里那句话'), '快照里一个字都不许有轨迹')
+  assert.equal(snap.trajectory, undefined)
+
+  // 没丢：它只是走了另一条路（真机上由 event: trajectory 那条帧增量推）
+  const traj = await (await fetch(`${base}/mini/api/trajectory?token=${token}`)).json()
+  assert.equal(traj.turns[0].entries[0].output, '轨迹里那句话')
+})
+
 test('展开工作区时，标题补齐通过 SSE 单独推送', async (t) => {
   const tree = {
     ...fakeNav(),
