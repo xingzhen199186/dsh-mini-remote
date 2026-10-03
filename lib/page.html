@@ -1133,6 +1133,7 @@
       <div class="seg" id="segMode">
         <button data-mode="minimal">单帧</button>
         <button data-mode="chat">聊天</button>
+        <button data-mode="full">完整</button>
       </div>
     </div>
 
@@ -1347,6 +1348,23 @@
     // 「这份历史只到最近一段」（服务端读历史有上限时会给这一句）。
     historyTruncated: false,
     historyNote: '',
+    /**
+     * 执行轨迹（「完整」模式里的过程）：一组一轮，形状与服务端
+     * `GET /mini/api/trajectory` 的 `turns` 一字不差
+     * （`[{ turn, state, reason, entries:[…] }]`）。
+     *
+     * **它和 latest / history 是两回事**：思考正文只活在 `entries[].output` 里，
+     * 回答气泡那两条路（`state.latest` / `state.history`）一个字都不碰它——
+     * 这是 2026-09-27 用户定的边界（思维链一个字都不上气泡）。
+     *
+     * 只在「完整」模式订阅、只在那里画；切回单帧/聊天就退订，不再收也不再画。
+     */
+    trajectory: [],
+    trajectoryNote: '',        // 「这份轨迹不是全部」时服务端给的那句话（展示下一棒接手）
+    trajectoryTruncated: false,
+    trajectoryLoading: false,  // 服务端还在读会话记录（**不等于「没有过程」**）
+    trajectoryEpoch: '',       // 服务换了一代（重启）就不能再往旧的那份上面接
+    trajectorySeq: 0,          // 收到第几帧，用来认出「我漏了几帧」（只进不退）
     // 斜杠指令的列表（在输入框里打 / 时弹出来的那个菜单）。
     // **按绑定的会话缓存**：指令表是每个会话一份的，而这个会话没在跑时服务端一条都
     // 读不到（回 ok:false + 一句话）。所以换了会话必须重取——否则用户点到的是上一个
@@ -1368,6 +1386,227 @@
     localStorage.setItem('dshMiniToken', params.get('token'));
     // 别把 token 留在地址栏里，避免被截图/分享带出去。
     history.replaceState(null, '', location.pathname);
+  }
+
+  /**
+   * ---------------- 执行轨迹：订阅与收帧（数据层） ----------------
+   *
+   * 轨迹**不走全量快照**：实测它的正文是回答正文的 90.7 倍（单轮最高约 946KB），
+   * 而 `event: state` 是「每条广播都发整份」。所以它走单独的增量帧
+   * （`event: trajectory`，每帧只带新加的几条和改了的几笔），且**只有「完整」模式的
+   * 连接才订**——不看这块的人一个字节都不付。
+   *
+   * 三件事一起看才完整：切到「完整」时订上并 GET 一次当前状态；切回单帧/聊天就退订；
+   * 断线重连把 clientId 和 `?full=1` 带在流地址上（服务端自动重新订上），重连后再
+   * GET 一次对齐——帧里的 epoch 变了就整个重拉。
+   *
+   * 本片到「收进 state.trajectory」为止，画法（三层折叠）是下一棒的活。
+   * clientId / subscribedClientId 两个连接身份变量声明在下面 SSE 一节里——
+   * 那一节被测试整段抠出来跑，身份必须跟流地址待在一起才找得到。
+   */
+
+  /**
+   * 这一帧该不该接、接到哪一组。三道门：
+   * 不是「完整」模式不接（退订之后可能还有在路上的旧帧）；
+   * 不是当前这个会话不接（切会话了，旧会话的过程与新会话无关）。
+   * 没有这一组就立一个（turn 号是帧给的，组里 entries 往后只增不减）。
+   */
+  function trajectoryKeyOf(frame) {
+    if (state.mode !== 'full') return null;
+    if (frame.sessionId && state.boundSessionId && frame.sessionId !== state.boundSessionId) return null;
+    var turn = typeof frame.turn === 'number' ? frame.turn : null;
+    for (var i = 0; i < state.trajectory.length; i++) {
+      if (state.trajectory[i].turn === turn) return state.trajectory[i];
+    }
+    var group = { turn: turn, state: 'running', reason: null, entries: [] };
+    state.trajectory.push(group);
+    return group;
+  }
+
+  /**
+   * 把一条增量补丁贴到已有条目上。**只改补丁里真有的字段**——「停了」那种补丁不该
+   * 顺手把输出清空；截断信息是合并而不是替换（一条工具步可能参数超长、结果也超长）。
+   * 写法和 lib/trajectory.js 的 applyTrajectoryPatch 一致：两端对同一笔补丁的理解
+   * 必须一样，否则手机上会出现「明明有结果却还写着正在跑」。
+   */
+  function patchTrajectoryEntry(entry, patch) {
+    if (!entry || !patch) return;
+    if (typeof patch.state === 'string') entry.state = patch.state;
+    if (Object.prototype.hasOwnProperty.call(patch, 'output')) entry.output = patch.output;
+    if (Object.prototype.hasOwnProperty.call(patch, 'error')) entry.error = patch.error;
+    if (patch.truncated) {
+      entry.truncated = Object.assign({}, entry.truncated || {}, patch.truncated);
+    }
+  }
+
+  /**
+   * 一帧的落法，四步按顺序走：
+   *
+   * 1. **换代认新**：帧里 epoch 和手里记的不一样（服务重启过），旧的那份整份作废，
+   *    用 GET 重拉——旧代的 seq 在新代里毫无意义，硬拼会出现「凭空多出半截过程」。
+   * 2. **缺帧认补**：帧的 seq 比预期大出不止一格，中间丢过帧，GET 重拉；
+   *    seq 只进不退（重连后服务端可能从头再发一轮）。
+   * 3. **add 幂等**：同一条目按 id 认——收过就改成补丁，没收过才追加。
+   *    同一帧送两遍（重连重放）不会长出两份，这是「帧重复」的硬要求。
+   * 4. **组态只进结论**：一组的 running 是过程中的默认值，收下任何结论态就不再
+   *    被后面的 running 盖回去（结论到了之后又来一条旧的 running 帧，不算输）。
+   */
+  function applyTrajectoryFrame(frame) {
+    if (!frame || typeof frame !== 'object') return false;
+    var epoch = typeof frame.epoch === 'string' ? frame.epoch : '';
+    if (state.trajectoryEpoch && epoch && epoch !== state.trajectoryEpoch) {
+      state.trajectoryEpoch = epoch;
+      state.trajectorySeq = 0;
+      state.trajectory = [];
+      if (state.mode === 'full') requestTrajectory();
+      return false;
+    }
+    if (!state.trajectoryEpoch && epoch) state.trajectoryEpoch = epoch;
+    var seq = typeof frame.seq === 'number' ? frame.seq : 0;
+    if (seq > 0 && state.trajectorySeq > 0 && seq > state.trajectorySeq + 1) {
+      state.trajectorySeq = seq;
+      if (state.mode === 'full') requestTrajectory();
+      return false;
+    }
+    if (seq > state.trajectorySeq) state.trajectorySeq = seq;
+
+    var group = trajectoryKeyOf(frame);
+    if (!group) return false;
+
+    var add = Array.isArray(frame.add) ? frame.add : [];
+    for (var i = 0; i < add.length; i++) {
+      var raw = add[i];
+      if (!raw || typeof raw.id !== 'string' || !raw.id) continue;
+      var hit = null;
+      for (var j = 0; j < group.entries.length; j++) {
+        if (group.entries[j].id === raw.id) { hit = group.entries[j]; break; }
+      }
+      if (hit) {
+        patchTrajectoryEntry(hit, raw);
+      } else {
+        group.entries.push({
+          id: raw.id,
+          turn: typeof raw.turn === 'number' ? raw.turn : group.turn,
+          step: raw.step,
+          kind: raw.kind === 'think' ? 'think' : 'tool',
+          name: raw.name,
+          args: raw.args,
+          summary: raw.summary,
+          output: raw.output,
+          state: typeof raw.state === 'string' ? raw.state : 'running',
+          error: raw.error || null,
+          truncated: raw.truncated || null,
+          timestamp: raw.timestamp,
+        });
+      }
+    }
+    var upd = Array.isArray(frame.update) ? frame.update : [];
+    for (var k = 0; k < upd.length; k++) {
+      var patch = upd[k];
+      if (!patch || typeof patch.id !== 'string') continue;
+      for (var m = 0; m < group.entries.length; m++) {
+        if (group.entries[m].id === patch.id) { patchTrajectoryEntry(group.entries[m], patch); break; }
+      }
+    }
+    if (typeof frame.state === 'string' && frame.state !== 'running') {
+      group.state = frame.state;
+      group.reason = frame.reason || null;
+    } else if (group.state === 'running') {
+      if (frame.reason) group.reason = frame.reason;
+    }
+    return true;
+  }
+
+  /** 一帧到了：落进手里那份，只在「完整」模式下重画。 */
+  function receiveTrajectoryFrame(frame) {
+    if (!applyTrajectoryFrame(frame)) return;
+    render();
+  }
+
+  /**
+   * 用一份 GET 结果把手里那份**整个换掉**（不是往里合）：GET 是服务端按当前记录
+   * 重新汇总的全量视图，比任何增量拼接都新，换掉就不会「补丁叠在过期底稿上」。
+   * `loading` 如实收下——它说的是「还在读会话记录」，不是「没有过程」。
+   */
+  function setTrajectoryFromGet(view) {
+    if (!view || view.ok !== true) return;
+    state.trajectoryEpoch = typeof view.epoch === 'string' ? view.epoch : state.trajectoryEpoch;
+    state.trajectorySeq = typeof view.seq === 'number' ? view.seq : 0;
+    state.trajectory = Array.isArray(view.turns) ? view.turns : [];
+    state.trajectoryTruncated = view.truncated === true;
+    state.trajectoryNote = typeof view.note === 'string' && view.note ? view.note : '';
+    state.trajectoryLoading = view.loading === true;
+    render();
+  }
+
+  /**
+   * 拉一次当前过程。只在「完整」模式发；不是完整模式宁可什么都不说——去要一份
+   * 自己没订的数据，等于给服务端添一次白跑。读完只有两种岔路：是完整模式且还是
+   * 同一个会话才收下（发请求后切了会话/切了模式，这份就是旧账，直接丢），
+   * 读不到就把原因写出来，不说「没有过程」。
+   */
+  function requestTrajectory() {
+    if (state.mode !== 'full' || !state.token) return;
+    var sessionId = state.boundSessionId;
+    if (!sessionId) {
+      state.trajectory = [];
+      state.trajectorySeq = 0;
+      state.trajectoryLoading = false;
+      return;
+    }
+    state.trajectoryLoading = true;
+    api('/mini/api/trajectory?sessionId=' + encodeURIComponent(sessionId))
+      .then(function (view) {
+        if (state.mode !== 'full' || state.boundSessionId !== sessionId) return;
+        setTrajectoryFromGet(view);
+      })
+      .catch(function () {
+        if (state.mode !== 'full' || state.boundSessionId !== sessionId) return;
+        state.trajectoryLoading = false;
+        state.trajectoryNote = '读不到这个会话的过程。';
+        render();
+      });
+  }
+
+  /**
+   * 模式开关的订阅侧动作，跟着「显示模式」按钮走：
+   *
+   * - 切到「完整」：连流时没带 `?full=1`（连流那一刻不是完整模式）就得补一次
+   *   POST 订上，然后 GET 一次把手里的换成当前状态；已经订过就只 GET 对齐。
+   * - 切走：POST 退订，同时把身份清掉——服务端那条连接已经不再推了，
+   *   手里这个「已订」的记号必须同步作废，否则下次切回来会误以为还订着。
+   * - POST 回 404：这条流已经不在了（服务重启或断流没重连），立刻重连一次；
+   *   重连的地址自带 `?full=1`（当前就是完整模式），服务端会重新把这条连接订上。
+   *   重连成功与否都不用在这里补救——`open` 里那一套会再走一遍。
+   */
+  function syncTrajectorySubscription() {
+    if (!state.token) return;
+    var want = state.mode === 'full';
+    if (!want) {
+      if (subscribedClientId) {
+        var was = subscribedClientId;
+        subscribedClientId = '';
+        api('/mini/api/trajectory/subscribe', {
+          method: 'POST',
+          body: JSON.stringify({ clientId: was, on: false }),
+        }).catch(function () { /* 断了就断了：服务端本来就会随连接清理 */ });
+      }
+      return;
+    }
+    if (subscribedClientId) {
+      requestTrajectory();
+      return;
+    }
+    api('/mini/api/trajectory/subscribe', {
+      method: 'POST',
+      body: JSON.stringify({ clientId: clientId, on: true }),
+    }).then(function () {
+      if (state.mode !== 'full') return; // 刚要订又切走了，回包当没看见
+      subscribedClientId = clientId;
+      requestTrajectory();
+    }).catch(function (err) {
+      if (err && err.status === 404) connect();
+    });
   }
 
   var $ = function (id) { return document.getElementById(id); };
@@ -2694,9 +2933,33 @@
     if (stick && !liveNow) mainEl.scrollTop = mainEl.scrollHeight;
   }
 
+  /**
+   * 三种模式各自的提示语。「完整」= 聊天那一串 **+ 每一轮的过程组**，所以三句话
+   * 必须跟着模式一起改——收在一处是防两处走样（渲染处和点击处各写一遍的旧写法，
+   * 加第三种模式时漏一处，用户看到的就是「点了完整、说明还写着聊天」）。
+   */
+  function modeHint() {
+    if (state.mode === 'chat') return '聊天：常规问答对话';
+    if (state.mode === 'full') return '完整：附加每一步过程';
+    return '单帧：只留最新一条回复';
+  }
+
+  /**
+   * 「完整」的底座：聊天那一串**全部照画**（分批、往上滑补页、滚动对齐都照旧），
+   * 再如实交代轨迹的状态。轨迹正文的三层折叠渲染下一棒接手——这里一条条目都不画，
+   * 但**「正在读取」和「没有过程」必须分清**：loading=true 是服务端还在读会话记录，
+   * 不是这个会话没有过程。这期间什么都不说，人就会以为没有过程。
+   */
+  function renderFull() {
+    renderChat();
+    if (state.trajectoryLoading) {
+      replyEl.innerHTML = '<div class="history-note">正在读取这个会话的过程…</div>' + replyEl.innerHTML;
+    }
+  }
+
   function render() {
-    $('hintMode').textContent = state.mode === 'chat' ? '聊天：常规问答对话' : '单帧：只留最新一条回复';
-      if (state.mode === 'chat') renderChat(); else renderMinimal();
+    $('hintMode').textContent = modeHint();
+      if (state.mode === 'full') renderFull(); else if (state.mode === 'chat') renderChat(); else renderMinimal();
   }
 
   function applySnapshot(snap) {
@@ -2724,6 +2987,13 @@
         saCache = null;
         saCacheSession = null;
         saCacheAt = 0;
+      }
+      // 手里那份轨迹属于上一个会话——换会话立刻作废：两场会话的轮号会撞在一起，
+      // 不清掉就会把新会话的过程贴到旧会话那一组上。完整模式下再拉一份新的。
+      if (state.boundSessionId !== wasBound) {
+        state.trajectory = [];
+        state.trajectorySeq = 0;
+        if (state.mode === 'full') requestTrajectory();
       }
       // 换了会话，指令菜单那份缓存就作废了（指令表是每个会话一份的，这个会话没在跑
       // 时一条都读不到，见「斜杠指令」那一段）。重画一次，它自己会发现数据不属于
@@ -3238,12 +3508,40 @@
   });
 
   // ---------------- SSE ----------------
+  /**
+   * 这条流是谁——轨迹订阅按连接记，就得先有身份。
+   *
+   * 服务端手上只有一条条 SSE 连接（`res`），一次普通的 POST 认不出「我是哪条流」。
+   * 所以由客户端自己报一个随机串，两处都带上：连流时的 `?clientId=…`，和之后每次
+   * 开关订阅的 POST。不报也能用，只是那种连接订不了轨迹。
+   *
+   * 存 `sessionStorage`（不是 localStorage）：一个标签页一个身份，第二个标签页不会
+   * 跟这一页抢同一条订阅；刷新后还在，免得每刷一次就多出一个「认不出」的连接。
+   * 无痕模式下存取会抛，就地退回「本次运行内固定」——订不上，但不影响别的功能。
+   */
+  var clientId = '';
+  try {
+    clientId = sessionStorage.getItem('dshMiniClient') || '';
+    if (!clientId) {
+      clientId = 'c' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+      sessionStorage.setItem('dshMiniClient', clientId);
+    }
+  } catch (e) {
+    clientId = 'c' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+  }
+  /** 服务端此刻认作「订了轨迹」的那个身份；空串 = 没订（切换模式的开关拿它判断）。 */
+  var subscribedClientId = '';
   var es = null;
   function connect() {
     if (es) { try { es.close(); } catch (e) {} es = null; }
     if (!state.token) { showGate(); return; }
     setStatus('', '连接中…');
-    es = new EventSource('/mini/api/stream?token=' + encodeURIComponent(state.token));
+    // clientId 每条连接都带（订阅的 POST 靠它认出这条流）；full=1 只在「完整」模式带，
+    // 服务端见到就自动把这条连接订上轨迹——断线重连沿用同一个地址，重新订上由服务端
+    // 自己完成，客户端不用再握手一次。
+    es = new EventSource('/mini/api/stream?token=' + encodeURIComponent(state.token)
+      + '&clientId=' + encodeURIComponent(clientId)
+      + (state.mode === 'full' ? '&full=1' : ''));
 
     es.addEventListener('open', function () {
       state.connected = true;
@@ -3251,6 +3549,12 @@
       $('connHint').textContent = '已连接';
       prefetchWorkspaces();
       prefetchSubagents();
+      if (state.mode === 'full') {
+        // 首连与重连同一处：full=1 已让服务端订上这条连接，拿住身份，再对齐一次——
+        // 断线那一段路上可能丢过帧，用这份 GET 把 epoch/seq 校正（换代就整个换新）。
+        subscribedClientId = clientId;
+        requestTrajectory();
+      }
     });
     es.addEventListener('state', function (e) {
       state.connected = true;
@@ -3258,6 +3562,12 @@
       try { applySnapshot(JSON.parse(e.data)); } catch (err) {}
       prefetchWorkspaces();
       prefetchSubagents();
+    });
+    // 轨迹的增量帧。JSON 解析失败就丢——宁可等下一份 GET 对齐，也不拿半帧去拼。
+    es.addEventListener('trajectory', function (e) {
+      var frame;
+      try { frame = JSON.parse(e.data); } catch (err) { return; }
+      receiveTrajectoryFrame(frame);
     });
     es.addEventListener('navigation-title', function (e) {
       var payload;
@@ -4526,10 +4836,12 @@
   Array.prototype.forEach.call($('segMode').children, function (btn) {
     btn.addEventListener('click', function () {
       state.mode = btn.dataset.mode;
-        $('hintMode').textContent = state.mode === 'chat' ? '聊天：常规问答对话' : '单帧：只留最新一条回复';
+      $('hintMode').textContent = modeHint();
       localStorage.setItem('dshMiniMode', state.mode);
       syncSeg();
       render();
+      // 切到「完整」：订上并把已有的过程拉下来；切走：退订、停推。
+      syncTrajectorySubscription();
     });
   });
   Array.prototype.forEach.call($('segSound').children, function (btn) {
