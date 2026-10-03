@@ -2036,6 +2036,23 @@ test('合成：手里那份和记录里那份，用的是同一个钟——差�
     '同一轮只能出现一次——手里那份要是用了比记录晚的时间戳，就会再接一遍')
 })
 
+test('实时：聊天记录每条都带轮号（完整模式要把轨迹穿插进对话，靠它对号）', async (t) => {
+  const events = logOf([['问', '答']])
+  const query = fakeQuery({ 'sess-turn': events })
+  const p = await bootPlugin({ sessionQuery: query })
+  t.after(p.stop)
+
+  const session = { id: 'sess-turn', header: { id: 'sess-turn' } }
+  const handle = p.handlers.get('session/event')
+  for (const e of events) handle(session, e)
+
+  await bindSession(p, 'sess-turn')
+  const snap = await waitSnap(p, (s) => s.history.length >= 2, '读回来')
+
+  assert.deepEqual(snap.history.map((m) => [m.role, m.turn]), [['user', 1], ['assistant', 1]],
+    '用户指令和回答都得知道自己是第几轮的，否则轨迹块插不回原位')
+})
+
 test('没有会话记录服务时（headless 组合）：行为跟以前一样，不出错', async (t) => {
   const p = await bootPlugin() // 不传 sessionQuery
   t.after(p.stop)

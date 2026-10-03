@@ -47,7 +47,8 @@ test('只把「人发的」当用户消息，插件注入的合成上下文要�
   }))
   // id 必须带出来：手机自己发的指令注入后也会以这条事件回来，
   // 调用方要靠它认出「这条我已经记过了」（见下面的去重测试）。
-  assert.deepEqual(human, { kind: 'user', text: '帮我把 README 更新一下', id: 'm-1' })
+  // turn 也随动作带出（穿插渲染对号用）；这里没喂 turn/start，所以是 null。
+  assert.deepEqual(human, { kind: 'user', text: '帮我把 README 更新一下', id: 'm-1', turn: null })
 })
 
 test('一轮回答要带出「这一轮是哪条消息起跑的」——那是归属，不是原文', () => {

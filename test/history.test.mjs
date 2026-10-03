@@ -260,3 +260,30 @@ test('重放：插件注入的合成上下文照旧丢掉，没被这条新规�
   assert.deepEqual(rows.map((r) => r.role), ['user', 'assistant'])
   assert.deepEqual(rows.map((r) => r.text), ['问', '答'])
 })
+
+// ---------------------------------------------------------------------------
+// 消息 ↔ 轮号（2026-10-03 用户裁决「轨迹要跟 DSH 一样穿插在对话里」之后）
+//
+// 穿插渲染要把每一轮的「过程块」插回它那轮对话的原位——指令之后、回答之前。
+// 对号的依据就是这里的 turn 字段：提取器（events.js）早就在记「当前第几轮」，
+// 只是原来没随消息带出来。用户指令、模型回答、子智能体通知三种都要带。
+// ---------------------------------------------------------------------------
+
+test('重放：每条消息带上它所属的轮号（穿插对号的依据）', () => {
+  const rows = replayHistory([
+    ev('turn/start', { turn: 7 }),
+    userMsg('第七问'),
+    ev('assistant/message', { message: { content: text('第七答') } }),
+    ev('turn/end', { turn: 7, reason: { kind: 'completed' } }),
+    ev('turn/start', { turn: 8 }),
+    userMsg('第八问'),
+    settledMsg('Background subagent session-child finished.', '做完了'),
+    ev('assistant/message', { message: { content: text('第八答') } }),
+    ev('turn/end', { turn: 8, reason: { kind: 'completed' } }),
+  ])
+
+  assert.deepEqual(rows.map((m) => [m.role, m.turn]), [
+    ['user', 7], ['assistant', 7],
+    ['user', 8], ['notice', 8], ['assistant', 8],
+  ], '用户指令、回答、通知都得知道自己是第几轮的——过程块插回原位全靠它')
+})
