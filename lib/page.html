@@ -854,9 +854,10 @@
      露和收之间就不会把下面的消息顶来顶去（那会是一次小跳）。 */
   .more-note.hide { visibility: hidden; }
 
-  /* 「完整」模式追加在聊天之后的过程区（三层折叠：组头一行 → 步一行 → 正文一框）。
-     只用现成令牌、不加动效不加新颜色：它是补充信息，不是这一屏的主角。 */
-  .traj { margin-top: 16px; padding-top: 10px; border-top: 1px dashed var(--line); }
+  /* 「完整」模式：过程组穿插在对话原位（三层折叠：组头一行 → 步一行 → 正文一框），
+     只用现成令牌、不加动效不加新颜色：它是补充信息，不是这一屏的主角。
+     输入框上方那根轨迹条（搜索框 + 注记）是唯一剩下的独立容器。 */
+  .traj-bar { padding: 8px 12px 6px; border-top: 1px dashed var(--line); }
   .traj-group { margin-bottom: 8px; }
   .traj-head {
     display: block; width: 100%; text-align: left; cursor: pointer;
@@ -1142,6 +1143,17 @@
 <!-- 在输入框里打 / 时弹出来的指令列表。和附件小条一样排在底栏**上面**：
      盖住输入框的话，用户就看不清自己正在打什么了。 -->
 <div class="cmd-menu" id="cmdMenu" hidden></div>
+
+<!-- 轨迹搜索条（完整模式、有轨迹或有说明时才露脸，见 renderTrajBar）。
+     排在输入框**上方**：过程组穿插进对话后没有整块轨迹区，搜索框跟着对话走会
+     滚出视野，输入框是这一页唯一不动的锚。搜索框是常驻元素、不跟着 #reply
+     重画——每次重画都重建输入框的话，正在打字的人每敲一个字就丢一次焦点。 -->
+<div class="traj-bar" id="trajBar" hidden>
+  <div class="traj-search" id="trajSearchBox">
+    <input type="text" id="trajSearch" placeholder="在已加载的轨迹里搜" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
+  </div>
+  <div id="trajBarNote"></div>
+</div>
 
 <footer>
   <!-- 统一入口。位置和尺寸一个像素都没动（还是原来回形针那个 42×42），改的只是点了之后
@@ -2775,8 +2787,50 @@
     el.classList.toggle('hide', !chatNoteVisible());
   }
 
-  function renderChat() {
-    mainEl.classList.remove('center');
+  /**
+   * 一条消息的 HTML。从 renderChat 的逐条循环里提出来：完整模式要把每轮的过程组
+   * **穿插进这串消息的原位**（renderFull → trajInterleave），聊天模式直接按顺序拼——
+   * 两边画同一条消息必须是同一段代码，两处各写一遍迟早走样。
+   */
+  function chatMsgHtml(m) {
+    // 指令行：这是会话做的一个动作，不是谁说的话，单独一种长相——
+    // 不套气泡、不给复制按钮（见 commandBlock 的说明）。
+    if (m.role === 'command') return commandBlock(m);
+    // 子智能体完工的通知：同一类「会话做的事」，画成一张可展开的卡片
+    // （见 noticeBlock 的说明）。它没有复制按钮，也没有气泡。
+    if (m.role === 'notice') return noticeBlock(m);
+    // 被按停的那一轮：标一句，别让人以为模型答到一半断了。
+    var stopped = m.interrupted ? '<span class="stopped">已停止</span>' : '';
+    // 两种消息都给复制按钮。自己敲的指令也常有「再发一遍」「拿去别处用」的时候，
+    // 原来只给 AI 气泡，用户反馈自己的话复制不了。
+    var copyBtn = '<button class="copy" type="button" aria-label="复制" title="复制"'
+      + ' data-copy="' + escapeHtml(m.text) + '">' + ICON_COPY + '</button>';
+    if (m.role === 'user') {
+      // 自己的指令：仍然是气泡，靠右。自己敲的是纯文本，不走 markdown——
+      // 不然打几个星号就变样了。
+      return '<div class="bubble user">' + linkify(m.text)
+        + '<span class="meta">' + stopped + timeLabel(m.timestamp) + copyBtn + '</span></div>';
+    }
+    // AI 的回答：**不套气泡**（用户要求「参考单帧模式那样」）。
+    // 于是一左一右、一个有框一个没框，正好分得清谁说的。
+    return '<div class="said">'
+      + (stopped ? '<div class="reply-bar">' + stopped + '</div>' : '')
+      + '<div class="md">' + mdToHtml(m.text) + '</div>'
+      + '<div class="reply-foot">' + copyBtn
+      + '<span class="time">' + timeLabel(m.timestamp) + '</span></div></div>';
+  }
+
+  /**
+   * 聊天那一串的「料」：滤掉排队那条、按窗口裁好、逐条变行。
+   *
+   * 返回的是**结构**（行数组 + 对应消息 + 滤后全量），不是拼好的字符串——
+   * renderChat 直接按顺序拼；renderFull 拼之前要把每轮的过程组插进 rows 的
+   * 原位（见 trajInterleave），只有结构在手才插得动。
+   *
+   * searchTurns 是「搜索命中的轮号」（只在完整模式搜索时给）：命中轮的消息
+   * 哪怕在窗口外也要露出来（10.3-3，「命中组在原位强开」的原位得先在场）。
+   */
+  function buildChat(searchTurns) {
     // 换了会话就把窗口收回首屏：上一个会话铺到多少条都不该跟过来——那正是这次要修的慢。
     // 判据用会话 id 而不是 history 的引用：服务端每次推的都是整份新数组，比引用永远「变了」。
     if (chatWindowFor !== state.boundSessionId) {
@@ -2807,61 +2861,47 @@
       // 「正在读」和「确实没有」是两件事，分开说。点开一个插件没看过的会话时，
       // 服务端要去 DSH 的会话记录里读它那一段（最大的那条 20 MB、约半秒），
       // 这期间说「还没有对话记录」会让人以为这个会话本来就是空的。
-      replyEl.innerHTML = state.historyLoading
-        ? '<div class="placeholder">正在读取这个会话的记录…</div>'
-        : '<div class="placeholder">还没有对话记录。</div>';
-      return;
+      return {
+        empty: state.historyLoading
+          ? '<div class="placeholder">正在读取这个会话的记录…</div>'
+          : '<div class="placeholder">还没有对话记录。</div>',
+        moreNote: '', rows: [], list: [], all: [],
+      };
     }
     // **只铺最近那几十条**，剩下的留在手里等用户往上滑（来由见 CHAT_PAGE 那段）。
     // 切在**滤掉排队那条之后**：不然被滤掉的那条会白占一个名额。
     var older = Math.max(0, chatLoaded - chatWindow);
-    if (older) list = list.slice(older);
-    var html = list.map(function (m) {
-      // 指令行：这是会话做的一个动作，不是谁说的话，单独一种长相——
-      // 不套气泡、不给复制按钮（见 commandBlock 的说明）。
-      if (m.role === 'command') return commandBlock(m);
-      // 子智能体完工的通知：同一类「会话做的事」，画成一张可展开的卡片
-      // （见 noticeBlock 的说明）。它没有复制按钮，也没有气泡。
-      if (m.role === 'notice') return noticeBlock(m);
-      // 被按停的那一轮：标一句，别让人以为模型答到一半断了。
-      var stopped = m.interrupted ? '<span class="stopped">已停止</span>' : '';
-      // 两种消息都给复制按钮。自己敲的指令也常有「再发一遍」「拿去别处用」的时候，
-      // 原来只给 AI 气泡，用户反馈自己的话复制不了。
-      var copyBtn = '<button class="copy" type="button" aria-label="复制" title="复制"'
-        + ' data-copy="' + escapeHtml(m.text) + '">' + ICON_COPY + '</button>';
-      if (m.role === 'user') {
-        // 自己的指令：仍然是气泡，靠右。自己敲的是纯文本，不走 markdown——
-        // 不然打几个星号就变样了。
-        return '<div class="bubble user">' + linkify(m.text)
-          + '<span class="meta">' + stopped + timeLabel(m.timestamp) + copyBtn + '</span></div>';
+    // 搜索命中轮把窗口上沿抬到自己（10.3-3）：不然命中的过程组按「组跟消息走」
+    // 的规矩被裁在窗口外，搜得到、看不见。
+    if (searchTurns && searchTurns.length) {
+      for (var t = 0; t < list.length; t++) {
+        if (list[t] && searchTurns.indexOf(String(list[t].turn)) >= 0 && t < older) {
+          older = t;
+          break;
+        }
       }
-      // AI 的回答：**不套气泡**（用户要求「参考单帧模式那样」）。
-      // 于是一左一右、一个有框一个没框，正好分得清谁说的。
-      return '<div class="said">'
-        + (stopped ? '<div class="reply-bar">' + stopped + '</div>' : '')
-        + '<div class="md">' + mdToHtml(m.text) + '</div>'
-        + '<div class="reply-foot">' + copyBtn
-        + '<span class="time">' + timeLabel(m.timestamp) + '</span></div></div>';
-    }).join('');
+    }
+    var all = list;
+    if (older) list = list.slice(older);
     // 「上面还有，往上滑」要贴在**看得到的顶上**，而且**离顶远了就收起来**——
     // 两处讲究见 .more-note 的样式注释。露 / 收在这里先按当前位置定一次，
     // 之后由滚动里的 paintChatNote 接着跟。
     var moreNote = older
       ? '<div class="more-note' + (chatNoteVisible() ? '' : ' hide') + '">往上滑看更早的</div>'
       : '';
-    // 「这不是全部」要说在**内容前面**：用户往上翻到顶时，第一眼看到的就是它，
-    // 免得以为这个会话只有这么点内容。读历史有上限（见服务端 HISTORY_MAX_*）。
-    if (state.historyTruncated) {
-      html = '<div class="history-note">'
-        + escapeHtml(state.historyNote || '这个会话很大，只显示了最近一段。')
-        + '</div>' + html;
+    return { empty: null, moreNote: moreNote, rows: list.map(chatMsgHtml), list: list, all: all };
+  }
+
+  function renderChat() {
+    mainEl.classList.remove('center');
+    var built = buildChat();
+    if (built.empty) {
+      replyEl.innerHTML = built.empty;
+      return;
     }
-    // 「正在执行」不再追加一个气泡——它是常驻的 #work，排在整串消息下面。
-    // 两种模式共用同一块，改的时候两边都走一遍。
-    if (state.live) html += liveBlock(state.live);
     // 先问「在不在底部」，再改内容——顺序反了永远是「在」（见 atBottom 的注释）。
     var stick = atBottom();
-    replyEl.innerHTML = moreNote + html;
+    replyEl.innerHTML = chatFrame(built, built.rows.join(''), state.live ? liveBlock(state.live) : '');
     scrollChat(stick);
   }
 
@@ -2994,20 +3034,15 @@
 
   /**
    * 「完整」的底座：聊天那一串**全部照画**（分批、往上滑补页、滚动对齐都照旧），
-   * 再把服务端推来的执行轨迹**追加在聊天之后**——三层折叠那套就在下面。聊天那半边
-   * （布局/滚动/补页）一个字不碰，轨迹只是排队尾的一块新内容。
+   * 每一轮的过程组**穿插进它那轮对话的原位**——指令之后、回答之前（10.3-1，
+   * 对齐 DSH 聊天视图的 turn-process 位置，2026-10-03 用户裁决「一定要让执行
+   * 轨迹的逻辑符合DSH本身」）。三层折叠那套跟着组走，落点规则见 trajInterleave。
    * 但**「正在读取」和「没有过程」必须分清**：loading=true 是服务端还在读会话记录，
    * 不是这个会话没有过程。这期间什么都不说，人就会以为没有过程——所以那句注记
-   * 照旧垫在最前面。没轨迹且不在 loading 时轨迹区整个不画（这时完整模式和聊天
+   * 照旧垫在最前面。没轨迹且不在 loading 时一个过程组都不画（这时完整模式和聊天
    * 长得一样，是预期）。
    */
   function renderFull() {
-    // 输入框每次重画都是全新元素，焦点会跟着丢——先记下「正有人在输」，画完接回去。
-    var typing = trajSearchFocusIn();
-    renderChat();
-    if (state.trajectoryLoading) {
-      replyEl.innerHTML = '<div class="history-note">正在读取这个会话的过程…</div>' + replyEl.innerHTML;
-    }
     // 换了会话，用户手动拨过的折叠开关就作废——和聊天窗 chatWindowFor 同一个道理：
     // 两场会话的轮号会撞在一起，留在手里的开关会去拨新会话的组。搜索词也一样作废。
     if (trajFor !== state.boundSessionId) {
@@ -3016,24 +3051,71 @@
       trajEntryOpen = {};
       trajQuery = '';
     }
-    var traj = trajectoryHtml();
-    var notice = trajNoticeHtml();
-    // 说明（「这份轨迹不是全部」/读取失败的原因）和组一起包进 .traj：排在聊天之后、
-    // 轨迹组之前；两头都没有就整个不包——空态观感和聊天保持一致。搜索框跟着轨迹区走，
-    // 只在真的画出轨迹时画（没轨迹时一个字都不多占，这条口径不变）。
-    if (traj || notice) {
-      replyEl.innerHTML = replyEl.innerHTML + '<div class="traj">' + notice
-        + (traj ? trajSearchHtml() : '') + traj + '</div>';
+    mainEl.classList.remove('center');
+    // 搜索命中轮（10.3-3）：它们的消息哪怕在窗口外也要露出来——「命中组在原位强开」
+    // 的原位得先在场，否则搜得到、看不见。
+    var hitTurns = [];
+    if (trajQuery) {
+      var gs = state.trajectory || [];
+      for (var i = 0; i < gs.length; i++) {
+        if (trajGroupHit(gs[i])) hitTurns.push(String(gs[i].turn));
+      }
     }
-    trajSearchFocusOut(typing);
-    // 点击走容器委托（和复制按钮同一根线）：轨迹区每次重绘都是全新 HTML，
-    // 逐个绑必漏；绑一次就够——回调认的是 data 属性，不是元素本身。搜索框的
-    // 输入走同一根线（input 事件冒泡到容器上），也是绑这一次。
-    if (!trajBound) {
-      trajBound = true;
-      replyEl.addEventListener('click', onTrajectoryClick);
-      replyEl.addEventListener('input', onTrajectoryInput);
+    var built = buildChat(hitTurns);
+    var html;
+    if (built.empty) {
+      // 一条消息都没有（正在读/确实没有）：手里有过程组就兜底页尾（10.3-1 d）。
+      // 这一路不滚动，和 renderChat 的空态同口径。
+      html = built.empty + trajInterleave([], [], built.all).join('');
+    } else {
+      // 先问「在不在底部」，再改内容——顺序反了永远是「在」（见 atBottom 的注释）。
+      var stick = atBottom();
+      html = chatFrame(built, trajInterleave(built.rows, built.list, built.all).join(''),
+        state.live ? liveBlock(state.live) : '');
+      replyEl.innerHTML = state.trajectoryLoading
+        ? '<div class="history-note">正在读取这个会话的过程…</div>' + html
+        : html;
+      scrollChat(stick);
+      bindTraj();
+      return;
     }
+    if (state.trajectoryLoading) {
+      html = '<div class="history-note">正在读取这个会话的过程…</div>' + html;
+    }
+    replyEl.innerHTML = html;
+    bindTraj();
+  }
+
+  /** 轨迹区的点击走一次容器委托就够（重绘都是全新 HTML，逐个绑必漏）。 */
+  function bindTraj() {
+    if (trajBound) return;
+    trajBound = true;
+    replyEl.addEventListener('click', onTrajectoryClick);
+  }
+
+  /**
+   * 聊天那串的外框：截断说明排内容前面、流式那段接在最后、moreNote 贴顶。
+   * 聊天与完整两个模式共用这一段——两处各写一遍的旧写法走样过（见 modeHint 的说明）。
+   * liveHtml 由调用方给（完整模式的切片里没有 liveBlock，传空串就是「没有流式」）。
+   *
+   * 定义在 renderFull 之后是**测试切片的约束**：trajHarness 切的是
+   * renderFull → applySnapshot，外框函数得在切片里才调得到；页面里函数提升，
+   * 位置不影响 renderChat 调它。
+   */
+  function chatFrame(built, body, liveHtml) {
+    var html = body;
+    // 「这不是全部」要说在**内容前面**：用户往上翻到顶时，第一眼看到的就是它，
+    // 免得以为这个会话只有这么点内容。读历史有上限（见服务端 HISTORY_MAX_*）。
+    if (state.historyTruncated) {
+      html = '<div class="history-note">'
+        + escapeHtml(state.historyNote || '这个会话很大，只显示了最近一段。')
+        + '</div>' + html;
+    }
+    // 「正在执行」不再追加一个气泡——它是常驻的 #work，排在整串消息下面。
+    // 流式那段（live）接在所有行（含穿插的过程组）之后：过程在回答之前，
+    // 正在流的半句就是「回答」那个位置（10.3-1）。
+    if (liveHtml) html += liveHtml;
+    return built.moreNote + html;
   }
 
   // ---------------- 轨迹的三层折叠（完整模式） ----------------
@@ -3195,16 +3277,58 @@
   }
 
   /**
-   * 轨迹区里的组内容（不含最外层 .traj——包不包由 renderFull 看它和说明有没有货
-   * 决定）。没东西就返回空串——「无轨迹且不在 loading」时完整模式的观感和聊天
-   * 一样，这是预期；loading 时那句注记垫在最前面，是另一件事。
+   * 把每轮的过程组插回它那轮对话的原位（10.3-1，对齐 DSH 的 turn-process 位置）。
+   * 落点四条：
+   *   a 该轮**第一个回答之前**——「指令 → 过程 → 回答」；
+   *   b 该轮没有回答（跑着/失败）落该轮**簇尾**（活轮即页尾，新步骤从这里冒出来）；
+   *   c 该轮有消息但都不在窗口里 → **不画**（组跟消息走，翻页上来自然带进来）；
+   *   d 该轮一条消息都没有（排队被滤掉、本地回显没号）→ 兜底**页尾**。
+   * rows[i] 与 list[i] 一一对应（list＝裁好窗的消息，all＝滤掉排队后的全量）。
+   * 返回插好之后的新数组，不动入参。
    */
-  function trajectoryHtml() {
+  function trajInterleave(rows, list, all) {
     var groups = (state.trajectory || []).filter(function (g) {
       return g && Array.isArray(g.entries) && g.entries.length > 0;
     });
-    if (!groups.length) return '';
-    return groups.map(trajGroupHtml).join('');
+    if (!groups.length) return rows.slice();
+    var slots = [];
+    for (var i = 0; i < groups.length; i++) {
+      var g = groups[i];
+      var at = -1;
+      // a：该轮第一个回答之前
+      for (var j = 0; j < list.length && at < 0; j++) {
+        if (list[j] && list[j].role === 'assistant' && sameTurn(list[j].turn, g.turn)) at = j;
+      }
+      // b：没有回答就落簇尾
+      if (at < 0) {
+        for (var k = list.length - 1; k >= 0; k--) {
+          if (list[k] && sameTurn(list[k].turn, g.turn)) { at = k + 1; break; }
+        }
+      }
+      if (at < 0) {
+        // c/d：窗口里没有这一轮的消息——全量里有＝出窗不画；没有＝兜底页尾。
+        var anywhere = false;
+        for (var n = 0; n < (all || []).length; n++) {
+          if (all[n] && sameTurn(all[n].turn, g.turn)) { anywhere = true; break; }
+        }
+        if (anywhere) continue;
+        at = list.length;
+      }
+      slots.push({ at: at, turn: g.turn, html: trajGroupHtml(g) });
+    }
+    // 同一落点上的组按轮号排（兜底页尾时可能好几组），插的时候按落点从前往后放。
+    slots.sort(function (x, y) { return x.at - y.at || x.turn - y.turn; });
+    var out = [];
+    var s = 0;
+    for (var p = 0; p <= rows.length; p++) {
+      while (s < slots.length && slots[s].at === p) out.push(slots[s++].html);
+      if (p < rows.length) out.push(rows[p]);
+    }
+    return out;
+  }
+  /** 轮号对得上吗：两边都要有号，再比字符串（号来自消息字段/组字段，类型不总一致）。 */
+  function sameTurn(a, b) {
+    return a != null && b != null && String(a) === String(b);
   }
 
   /**
@@ -3259,43 +3383,48 @@
     return out + escapeHtml(s.slice(from));
   }
   /**
-   * 搜索框 + 说明（排在轨迹组之前）。查询非空即搜索激活：范围说明那句逐字在场；
-   * 一条没命中再补一句实话——只说「已加载的里没有」，不把「搜不到」说成「不存在」。
+   * 输入框上方那根轨迹条（10.3-3）：搜索框是**常驻元素**（不跟着 #reply 重画，
+   * 打字不丢焦点），这里只管露/藏、注记和值同步。「没轨迹时一个字都不多占」
+   * 这条口径不变：没轨迹也没说明，整根条收起来；只剩说明（读取失败那条路）
+   * 就只出说明、不给框。
    */
-  function trajSearchHtml() {
-    var html = '<div class="traj-search"><input type="text" data-traj-search=""'
-      + ' placeholder="在已加载的轨迹里搜" value="' + escapeHtml(trajQuery)
-      + '" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"></div>';
-    if (!trajQuery) return html;
-    html += '<div class="traj-note">搜的是已加载的轨迹（最多 120 条），更早的需先翻页加载</div>';
-    var groups = state.trajectory || [];
-    for (var i = 0; i < groups.length; i++) {
-      if (trajGroupHit(groups[i])) return html;
+  function renderTrajBar() {
+    var bar = $('trajBar');
+    if (!bar) return;
+    var gs = state.trajectory || [];
+    var hasTraj = false;
+    for (var i = 0; i < gs.length; i++) {
+      if (gs[i] && Array.isArray(gs[i].entries) && gs[i].entries.length > 0) { hasTraj = true; break; }
     }
-    return html + '<div class="traj-note">已加载的轨迹里没有命中</div>';
+    // 注记先算、先写：整根条藏起来时也得把旧注记清掉，不然换个会话还挂着上一句。
+    var noteHtml = trajNoticeHtml();
+    if (trajQuery && hasTraj) {
+      noteHtml += '<div class="traj-note">搜的是已加载的轨迹（最多 120 条），更早的需先翻页加载</div>';
+      var hit = false;
+      for (var j = 0; j < gs.length; j++) if (trajGroupHit(gs[j])) { hit = true; break; }
+      if (!hit) noteHtml += '<div class="traj-note">已加载的轨迹里没有命中</div>';
+    }
+    var note = $('trajBarNote');
+    if (note) note.innerHTML = noteHtml;
+    bar.hidden = !(state.mode === 'full' && (hasTraj || !!noteHtml));
+    if (bar.hidden) return;
+    // 搜索框只在真的有轨迹时给（只剩说明时不给框，见上面的口径）。
+    var box = $('trajSearchBox');
+    if (box) box.hidden = !hasTraj;
+    // 值同步只在对不上时写：打字时两边相等，不写就不会动插入点。
+    var input = $('trajSearch');
+    if (input && typeof input.value === 'string' && input.value !== trajQuery) {
+      input.value = trajQuery;
+    }
   }
-  // 输入走容器委托（和点击同一根线）：搜索框每次重绘都是全新的。重画交给 render()，
-  // 焦点的接回在 renderFull 里做（只有它知道框画出来没有）。
+  /**
+   * 搜索框的输入。框是常驻元素（页面启动时绑一次，见 trajSearch 那行绑定），
+   * 重画只碰 #reply 和注记、不碰框本身，所以打字不丢焦点、插入点不动。
+   */
   function onTrajectoryInput(e) {
-    var t = e.target;
-    if (!t || !t.getAttribute || t.getAttribute('data-traj-search') === null) return;
-    trajQuery = String(t.value || '');
+    var t = e && e.target;
+    trajQuery = String((t && t.value) || '');
     render();
-  }
-  /** 重画前记下「有人正在搜索框里打字」这件事（重画把整个框换掉，焦点必丢）。 */
-  function trajSearchFocusIn() {
-    if (typeof document === 'undefined') return null;
-    var el = document.activeElement;
-    if (!el || !el.getAttribute || el.getAttribute('data-traj-search') === null) return null;
-    return { pos: typeof el.selectionStart === 'number' ? el.selectionStart : null };
-  }
-  /** 画完把焦点接回去：丢一次焦点，人就只能打一个字，等于没法搜。 */
-  function trajSearchFocusOut(f) {
-    if (!f || !replyEl.querySelector) return;
-    var box = replyEl.querySelector('[data-traj-search]');
-    if (!box) return;
-    box.focus();
-    if (f.pos !== null && box.setSelectionRange) box.setSelectionRange(f.pos, f.pos);
   }
 
   // 轨迹区的点击全走这一根委托。先认条目再认组头——行和头各带各的 data 属性，
@@ -3312,6 +3441,9 @@
   function render() {
     $('hintMode').textContent = modeHint();
       if (state.mode === 'full') renderFull(); else if (state.mode === 'chat') renderChat(); else renderMinimal();
+    // 轨迹条的露/收跟模式走（只在「完整」露脸）：切回聊天/单帧也得有人喊它收，
+    // 它是常驻元素，不跟着 #reply 的重画一起消失（见 renderTrajBar）。
+    renderTrajBar();
   }
 
   function applySnapshot(snap) {
@@ -4755,6 +4887,8 @@
   });
 
   $('btnSend').addEventListener('click', send);
+  // 轨迹搜索框是常驻元素，输入绑这一次就够（重画不碰它，打字不丢焦点——见 renderTrajBar）。
+  $('trajSearch').addEventListener('input', onTrajectoryInput);
   inputEl.addEventListener('input', autoGrow);
   // 每敲一个字重算一次菜单。它自己会先看「是不是一个没打完的 / 名字」再决定动不动，
   // 所以这里不用加判据。
