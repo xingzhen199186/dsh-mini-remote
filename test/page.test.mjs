@@ -4017,3 +4017,151 @@ test('统一面板：选文件和拍照都走原来那个藏起来的 file input
   assert.equal(o.el('filePick').attrs.capture, 'environment', '后置摄像头')
   assert.ok(!/\/mini\/api\/upload/.test(html.slice(opS, opE)), '面板不许另造一条上传通道')
 })
+
+// ---------------------------------------------------------------------------
+// 「完整」模式的轨迹区：三层折叠（组 → 步 → 正文）
+// ---------------------------------------------------------------------------
+//
+// 前两棒把服务端推来的执行轨迹收进了 state.trajectory（只存不画），这一棒画它。
+// 切片取 renderFull → applySnapshot：renderFull 与它后面的折叠逻辑、以及 render
+// 按 state.mode 的分派整段都在里面——「思考只进完整模式」这条边界靠的正是那个
+// 分派，切掉 render 就测不到了。锚点对不上会立刻断言失败，不会安静地退化成空测试。
+
+function trajHarness() {
+  const START_AT = 'function renderFull'
+  const END_AT = 'function applySnapshot'
+  const a = html.indexOf(START_AT)
+  const b = html.indexOf(END_AT)
+  assert.ok(a > 0, `在 page.html 里找不到锚点「${START_AT}」`)
+  assert.ok(b > a, `在 page.html 里找不到锚点「${END_AT}」`)
+
+  const state = { mode: 'full', boundSessionId: 's1', trajectory: [], trajectoryLoading: false }
+  const replyEl = {
+    innerHTML: '',
+    listeners: {},
+    // 委托绑在容器上：这整块每次重绘都是全新 HTML，逐个绑必漏（和复制按钮同一根线）。
+    addEventListener(type, fn) { this.listeners[type] = fn },
+  }
+  // renderChat 的桩：聊天先铺上，renderFull 再往后拼——「轨迹排在聊天之后」
+  // 这个位置关系正是要测的东西，桩只负责给出一段可辨认的聊天内容。
+  const chatStub = () => { replyEl.innerHTML = '<div class="chat-rows">聊天内容</div>' }
+
+  // eslint-disable-next-line no-new-func
+  const build = new Function(
+    'state', 'replyEl', 'escapeHtml', 'renderChat', 'renderMinimal', 'modeHint', '$',
+    `${html.slice(a, b)}
+     return { render, renderFull, toggleTrajGroup, toggleTrajEntry, state, replyEl };`,
+  )
+  return build(
+    state, replyEl, md.escapeHtml,
+    chatStub,
+    () => { replyEl.innerHTML = '' },
+    () => '',
+    () => ({ textContent: '' }),
+  )
+}
+
+/** 一条工具步的通用样子；第二个参数按需覆盖（轮号、状态、正文……）。 */
+function trajTool(id, over = {}) {
+  return Object.assign({
+    id, turn: 1, step: 1, kind: 'tool', name: '读文件',
+    args: '{"path":"a.txt"}', summary: 'a.txt', output: '读到了甲',
+    state: 'ok', error: null, truncated: null, timestamp: 1,
+  }, over)
+}
+
+test('完整模式：已结束的两步组默认收成一行，切开才见条目与正文', () => {
+  const h = trajHarness()
+  h.state.trajectory = [{
+    turn: 1, state: 'ok', reason: null,
+    entries: [
+      trajTool('k1'),
+      trajTool('k2', { step: 2, name: '写文件', summary: 'b.txt', output: '写完了乙' }),
+    ],
+  }]
+  h.render()
+  const out = h.replyEl.innerHTML
+  assert.match(out, /class="traj"/, '有轨迹就该画轨迹区')
+  assert.match(out, /data-traj-group="1"/, '组头在')
+  assert.match(out, /2 步 · 已完成/, '收成的那一行要交代步数和结局')
+  assert.ok(!out.includes('data-traj-entry='), '默认收着：条目行不该出现')
+  assert.ok(!out.includes('读文件') && !out.includes('读到了甲'), '条目名与正文都收起来')
+  assert.ok(out.indexOf('chat-rows') < out.indexOf('class="traj"'), '轨迹区排在聊天内容之后')
+
+  h.toggleTrajGroup(1)
+  const open = h.replyEl.innerHTML
+  assert.ok(open.includes('data-traj-entry="k1"'), '切一下组，条目行出现')
+  assert.ok(open.includes('写文件'), '条目行要带工具名')
+  assert.ok(!open.includes('读到了甲'), '正文还收着，那是条目级的事')
+
+  h.toggleTrajEntry('k1')
+  assert.ok(h.replyEl.innerHTML.includes('读到了甲'), '点开条目才见正文（工具给参数+结果）')
+  h.toggleTrajEntry('k1')
+  assert.ok(!h.replyEl.innerHTML.includes('读到了甲'), '再点一下收起')
+
+  assert.equal(typeof h.replyEl.listeners.click, 'function', '点击走容器委托，不逐条绑')
+})
+
+test('完整模式：running 的组不收，条目一直看得见', () => {
+  const h = trajHarness()
+  h.state.trajectory = [{
+    turn: 2, state: 'running', reason: null,
+    entries: [
+      trajTool('r1', { turn: 2, state: 'running', output: null }),
+      trajTool('r2', { turn: 2, step: 2, state: 'running', output: null }),
+    ],
+  }]
+  h.render()
+  const out = h.replyEl.innerHTML
+  assert.match(out, /data-traj-group="2"/, '组头照画')
+  assert.ok(out.includes('data-traj-entry="r1"'), '还在跑的组随时要看新条目，不许收')
+})
+
+test('完整模式：单条组不收组级，那一步直接看得见', () => {
+  const h = trajHarness()
+  h.state.trajectory = [{
+    turn: 3, state: 'ok', reason: null,
+    entries: [trajTool('s1', { turn: 3 })],
+  }]
+  h.render()
+  const out = h.replyEl.innerHTML
+  assert.ok(out.includes('data-traj-group="3"'), '组头在')
+  assert.ok(out.includes('data-traj-entry="s1"'), '单条收起来只剩一行没有信息量，不收')
+  assert.ok(!out.includes('读到了甲'), '但正文仍是条目级的事，默认收着')
+})
+
+test('完整模式：出错的组自动摊到条目级，不用人点', () => {
+  const h = trajHarness()
+  h.state.trajectory = [{
+    turn: 4, state: 'error', reason: 'failed', entries: [trajTool('e1'), trajTool('e2', { step: 2 })],
+  }]
+  h.render()
+  assert.ok(h.replyEl.innerHTML.includes('data-traj-entry="e1"'),
+    '出了错的组要把每一步摊出来给人看')
+})
+
+test('聊天模式：手里有轨迹也一块都不画（思考只进完整模式）', () => {
+  const h = trajHarness()
+  h.state.mode = 'chat'
+  h.state.trajectory = [{
+    turn: 5, state: 'ok', reason: null, entries: [trajTool('c1', { turn: 5 })],
+  }]
+  h.render()
+  const out = h.replyEl.innerHTML
+  assert.match(out, /chat-rows/, '聊天照常画')
+  assert.ok(!out.includes('data-traj-') && !out.includes('class="traj"'),
+    '轨迹区块一个字都不许出现——分派只认 state.mode')
+})
+
+test('完整模式：没轨迹就不画轨迹区；「正在读取」那句照旧垫在最前面', () => {
+  const h = trajHarness()
+  h.render()
+  assert.equal(h.replyEl.innerHTML, '<div class="chat-rows">聊天内容</div>',
+    '无轨迹且不在 loading：完整模式的观感同聊天，是预期')
+  h.state.trajectoryLoading = true
+  h.render()
+  const out = h.replyEl.innerHTML
+  assert.ok(out.startsWith('<div class="history-note">正在读取这个会话的过程…</div>'),
+    'loading 注记保留在最前，这句和它的位置都不能动')
+  assert.ok(!out.includes('class="traj"'), 'loading 不等于有轨迹：轨迹区还是不画')
+})

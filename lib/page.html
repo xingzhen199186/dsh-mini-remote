@@ -854,6 +854,31 @@
      露和收之间就不会把下面的消息顶来顶去（那会是一次小跳）。 */
   .more-note.hide { visibility: hidden; }
 
+  /* 「完整」模式追加在聊天之后的过程区（三层折叠：组头一行 → 步一行 → 正文一框）。
+     只用现成令牌、不加动效不加新颜色：它是补充信息，不是这一屏的主角。 */
+  .traj { margin-top: 16px; padding-top: 10px; border-top: 1px dashed var(--line); }
+  .traj-group { margin-bottom: 8px; }
+  .traj-head {
+    display: block; width: 100%; text-align: left; cursor: pointer;
+    font: inherit; font-size: 12.5px; line-height: 1.6;
+    padding: 6px 8px; color: var(--muted);
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: var(--r);
+  }
+  .traj-entries { margin: 4px 0 0 10px; padding-left: 8px; border-left: 1px solid var(--line); }
+  .traj-row {
+    display: block; width: 100%; text-align: left; cursor: pointer;
+    font: inherit; font-size: 13px; line-height: 1.6;
+    padding: 5px 4px; color: var(--fg);
+    background: none; border: none;
+  }
+  .traj-row:active { background: var(--panel-2); }
+  .traj-body {
+    margin: 2px 0 8px; padding: 8px 10px;
+    white-space: pre-wrap; word-break: break-word;
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: var(--r);
+    color: var(--muted); font-size: 12.5px; line-height: 1.6;
+  }
+
   /* ---------- 设置抽屉 ---------- */
   #settings {
     position: fixed; inset: 0; background: var(--scrim);
@@ -1400,7 +1425,7 @@
    * 断线重连把 clientId 和 `?full=1` 带在流地址上（服务端自动重新订上），重连后再
    * GET 一次对齐——帧里的 epoch 变了就整个重拉。
    *
-   * 本片到「收进 state.trajectory」为止，画法（三层折叠）是下一棒的活。
+   * 本片到「收进 state.trajectory」为止；画法（三层折叠）在 renderFull 后面那一片。
    * clientId / subscribedClientId 两个连接身份变量声明在下面 SSE 一节里——
    * 那一节被测试整段抠出来跑，身份必须跟流地址待在一起才找得到。
    */
@@ -2946,15 +2971,146 @@
 
   /**
    * 「完整」的底座：聊天那一串**全部照画**（分批、往上滑补页、滚动对齐都照旧），
-   * 再如实交代轨迹的状态。轨迹正文的三层折叠渲染下一棒接手——这里一条条目都不画，
+   * 再把服务端推来的执行轨迹**追加在聊天之后**——三层折叠那套就在下面。聊天那半边
+   * （布局/滚动/补页）一个字不碰，轨迹只是排队尾的一块新内容。
    * 但**「正在读取」和「没有过程」必须分清**：loading=true 是服务端还在读会话记录，
-   * 不是这个会话没有过程。这期间什么都不说，人就会以为没有过程。
+   * 不是这个会话没有过程。这期间什么都不说，人就会以为没有过程——所以那句注记
+   * 照旧垫在最前面。没轨迹且不在 loading 时轨迹区整个不画（这时完整模式和聊天
+   * 长得一样，是预期）。
    */
   function renderFull() {
     renderChat();
     if (state.trajectoryLoading) {
       replyEl.innerHTML = '<div class="history-note">正在读取这个会话的过程…</div>' + replyEl.innerHTML;
     }
+    // 换了会话，用户手动拨过的折叠开关就作废——和聊天窗 chatWindowFor 同一个道理：
+    // 两场会话的轮号会撞在一起，留在手里的开关会去拨新会话的组。
+    if (trajFor !== state.boundSessionId) {
+      trajFor = state.boundSessionId;
+      trajGroupOpen = {};
+      trajEntryOpen = {};
+    }
+    var traj = trajectoryHtml();
+    if (traj) replyEl.innerHTML = replyEl.innerHTML + traj;
+    // 点击走容器委托（和复制按钮同一根线）：轨迹区每次重绘都是全新 HTML，
+    // 逐个绑必漏；绑一次就够——回调认的是 data 属性，不是元素本身。
+    if (!trajBound) { trajBound = true; replyEl.addEventListener('click', onTrajectoryClick); }
+  }
+
+  // ---------------- 轨迹的三层折叠（完整模式） ----------------
+  // 数据是上一棒收进 state.trajectory 的轮次组：组 {turn, state, entries[]}，
+  // 条目 {kind:'think'|'tool', name, args, summary, output, state, …}，字段语义
+  // 见 lib/trajectory.js 头上的说明（思考正文和工具结果都放 output）。
+  // 三层怎么收：组级把「已结束的多条组」收成一行（running 还在长、error 要给人看、
+  // 单条收了没信息量，这三种默认摊开）；条目级每步一行，点开看正文，再点收起；
+  // 正文级工具给「参数+结果」、思考给想的内容。
+  // 用户拨过的开关存在下面两个对象里（组按轮号、条目按 id），只在本会话内有效，
+  // 换会话时在 renderFull 里清掉。
+  var trajFor = null;        // 上次渲染时的会话 id（变了就清开关）
+  var trajGroupOpen = {};    // 组级手动覆写：{ 轮号字符串: true|false }
+  var trajEntryOpen = {};    // 条目级手动覆写：{ 条目 id: true|false }
+  var trajBound = false;     // replyEl 上的委托绑过没有
+
+  /**
+   * 组默认摊不摊。收的条件是**三条一起成立**：条目够多（≥2）、已经跑完
+   * （running 还在长，收了就看不见新条目）、结局不是 error（出错的组自己摊到
+   * 条目级给人看，不用点）。用户手动拨过的开关优先于默认值。
+   */
+  function trajGroupIsOpen(g) {
+    var key = String(g.turn);
+    if (Object.prototype.hasOwnProperty.call(trajGroupOpen, key)) return trajGroupOpen[key];
+    if (!g.entries || g.entries.length < 2) return true;
+    if (g.state === 'running' || g.state === 'error') return true;
+    return false;
+  }
+  function trajEntryIsOpen(id) {
+    return trajEntryOpen[id] === true;
+  }
+  function trajStateLabel(s) {
+    return s === 'ok' ? '已完成' : s === 'error' ? '出错了'
+      : s === 'stopped' ? '已停止' : '进行中';
+  }
+
+  /**
+   * 组头的开关。key 是 data 属性上的字符串（getAttribute 回来一定是字符串，
+   * 轮号是数字，两边统一按 String 比——有一边不转换就会拨空）。
+   * 拨完立刻重画：开关唯一可见的效果就是下一次渲染，不重画等于点了没反应。
+   */
+  function toggleTrajGroup(turnKey) {
+    var groups = state.trajectory || [];
+    for (var i = 0; i < groups.length; i++) {
+      if (String(groups[i].turn) !== String(turnKey)) continue;
+      trajGroupOpen[turnKey] = !trajGroupIsOpen(groups[i]);
+      break;
+    }
+    render();
+  }
+  function toggleTrajEntry(id) {
+    trajEntryOpen[id] = !trajEntryIsOpen(id);
+    render();
+  }
+
+  /**
+   * 一条的正文。工具是「参数 + 结果」两段（都可能还没有——running 时结果未回），
+   * 思考只有想的内容本身。两头都没有就不开这一层，免得点出一个空框。
+   */
+  function trajEntryBody(e) {
+    var parts = [];
+    if (e.kind === 'think') {
+      if (e.output) parts.push(e.output);
+    } else {
+      if (e.args) parts.push('参数：\n' + e.args);
+      if (e.output) parts.push('结果：\n' + e.output);
+    }
+    if (!parts.length) return '';
+    return '<div class="traj-body">' + escapeHtml(parts.join('\n\n')) + '</div>';
+  }
+
+  /** 每步一行：思考与工具都要有（用户看的就是「跑到哪一步了」）。 */
+  function trajEntryHtml(e) {
+    var step = typeof e.step === 'number' ? '第 ' + e.step + ' 步 · ' : '';
+    var label = e.kind === 'think' ? '思考' : '工具 ' + escapeHtml(e.name || '（没写名字）');
+    var row = '<button type="button" class="traj-row" data-traj-entry="'
+      + escapeHtml(e.id) + '">' + step + label
+      + (e.summary ? ' · ' + escapeHtml(e.summary) : '') + '</button>';
+    return '<div class="traj-entry">' + row
+      + (trajEntryIsOpen(e.id) ? trajEntryBody(e) : '') + '</div>';
+  }
+
+  /** 一个轮次组：头一行（收起时就是它自己），摊开时下面挂条目。 */
+  function trajGroupHtml(g) {
+    var open = trajGroupIsOpen(g);
+    var turn = typeof g.turn === 'number' ? '第 ' + g.turn + ' 轮' : '本轮';
+    var head = '<button type="button" class="traj-head" data-traj-group="'
+      + escapeHtml(String(g.turn)) + '">' + (open ? '▾' : '▸') + ' '
+      + turn + ' · ' + g.entries.length + ' 步 · ' + trajStateLabel(g.state) + '</button>';
+    var entries = open
+      ? '<div class="traj-entries">' + g.entries.map(trajEntryHtml).join('') + '</div>'
+      : '';
+    return '<div class="traj-group">' + head + entries + '</div>';
+  }
+
+  /**
+   * 整个轨迹区。没东西就返回空串——「无轨迹且不在 loading」时完整模式的观感和
+   * 聊天一样，这是预期；loading 时那句注记垫在最前面，是另一件事。
+   */
+  function trajectoryHtml() {
+    var groups = (state.trajectory || []).filter(function (g) {
+      return g && Array.isArray(g.entries) && g.entries.length > 0;
+    });
+    if (!groups.length) return '';
+    return '<div class="traj">' + groups.map(trajGroupHtml).join('') + '</div>';
+  }
+
+  // 轨迹区的点击全走这一根委托。先认条目再认组头——行和头各带各的 data 属性，
+  // 认错一个就拨错层。
+  function onTrajectoryClick(e) {
+    var t = e.target && e.target.closest ? e.target : null;
+    if (!t) return;
+    var row = t.closest('[data-traj-entry]');
+    if (row) { toggleTrajEntry(row.getAttribute('data-traj-entry')); return; }
+    var head = t.closest('[data-traj-group]');
+    if (head) toggleTrajGroup(head.getAttribute('data-traj-group'));
   }
 
   function render() {
