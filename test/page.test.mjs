@@ -4069,7 +4069,7 @@ function trajHarness(chat) {
     'state', 'replyEl', 'escapeHtml', 'renderChat', 'renderMinimal', 'modeHint', '$',
     'buildChat', 'mainEl', 'atBottom', 'scrollChat',
     `${html.slice(a, b)}
-     return { render, renderFull, toggleTrajGroup, toggleTrajEntry, onTrajectoryInput, state, replyEl, getEl: $ };`,
+     return { render, renderFull, toggleTrajGroup, toggleTrajEntry, state, replyEl, getEl: $ };`,
   )
   return build(
     state, replyEl, md.escapeHtml,
@@ -4096,26 +4096,27 @@ function trajTool(id, over = {}) {
 test('完整模式：已结束的两步组默认收成一行，切开才见条目与正文', () => {
   const h = trajHarness()
   h.state.trajectory = [{
-    turn: 1, state: 'ok', reason: null,
+    turn: 1, state: 'done', reason: 'completed',
     entries: [
-      trajTool('k1'),
-      trajTool('k2', { step: 2, name: '写文件', summary: 'b.txt', output: '写完了乙' }),
+      trajTool('k1', { name: 'read' }),
+      trajTool('k2', { step: 2, name: 'write', summary: 'b.txt', output: '写完了乙' }),
     ],
   }]
   h.render()
   const out = h.replyEl.innerHTML
   assert.match(out, /data-traj-group="1"/, '组头在（过程组直接穿插在对话流里，没有整块轨迹区）')
-  assert.match(out, /2 步 · 已完成/, '收成的那一行要交代步数和结局')
+  assert.match(out, /已读取文件并写入文件/, '收成的那一行是 PC 同款组合标题（前两类「并」起来）')
   assert.ok(!out.includes('data-traj-entry='), '默认收着：条目行不该出现')
-  assert.ok(!out.includes('读文件') && !out.includes('读到了甲'), '条目名与正文都收起来')
+  assert.ok(!out.includes('读到了甲') && !out.includes('写完了乙'), '条目名与正文都收起来')
   assert.ok(out.indexOf('chat-rows') < out.indexOf('data-traj-group="1"'),
     '默认桩的消息没有轮号：过程组按兜底规则落页尾（消息带轮号时落原位，见穿插那组测试）')
 
   h.toggleTrajGroup(1)
   const open = h.replyEl.innerHTML
   assert.ok(open.includes('data-traj-entry="k1"'), '切一下组，条目行出现')
-  assert.ok(open.includes('写文件'), '条目行要带工具名')
-  assert.ok(!open.includes('读到了甲'), '正文还收着，那是条目级的事')
+  assert.ok(open.includes('写入') && open.includes('b.txt'),
+    '条目行 = PC 的工具显示名 · 参数摘要（tool.title.* 的叫法）')
+  assert.ok(!open.includes('写完了乙'), '正文还收着，那是条目级的事')
 
   h.toggleTrajEntry('k1')
   assert.ok(h.replyEl.innerHTML.includes('读到了甲'), '点开条目才见正文（工具给参数+结果）')
@@ -4132,15 +4133,15 @@ test('完整模式：turn/end 收官的组按服务端真实字典（done）叫�
   h.state.trajectory = [{
     turn: 7, state: 'done', reason: 'completed',
     entries: [
-      trajTool('d1', { turn: 7 }),
-      trajTool('d2', { turn: 7, step: 2, name: '写文件', summary: 'b.txt', output: '写完了乙' }),
+      trajTool('d1', { turn: 7, name: 'read' }),
+      trajTool('d2', { turn: 7, step: 2, name: 'write', summary: 'b.txt', output: '写完了乙' }),
     ],
   }]
   h.render()
   const out = h.replyEl.innerHTML
   assert.match(out, /data-traj-group="7"/, '组头在')
-  assert.match(out, /第 7 轮 · 2 步 · 已完成/, 'done 要认成「已完成」')
-  assert.ok(!/· 进行中/.test(out), '跑完的组头不许再说进行中')
+  assert.match(out, /已读取文件并写入文件/, 'done 的组头是 PC 的组合标题，本身就是「已完成」的意思')
+  assert.ok(!/进行中/.test(out), '跑完的组头不许再说进行中')
   assert.ok(!out.includes('data-traj-entry='), '已结束的两步组默认收着（9.3-3 不变）')
 })
 
@@ -4149,25 +4150,27 @@ test('完整模式：running 的组不收，条目一直看得见', () => {
   h.state.trajectory = [{
     turn: 2, state: 'running', reason: null,
     entries: [
-      trajTool('r1', { turn: 2, state: 'running', output: null }),
-      trajTool('r2', { turn: 2, step: 2, state: 'running', output: null }),
+      trajTool('r1', { turn: 2, state: 'running', output: null, name: 'read' }),
+      trajTool('r2', { turn: 2, step: 2, state: 'running', output: null, name: 'read' }),
     ],
   }]
   h.render()
   const out = h.replyEl.innerHTML
   assert.match(out, /data-traj-group="2"/, '组头照画')
+  assert.ok(out.includes('正在读取文件'), '跑着的组头挂 PC 的活动词（正在…）')
   assert.ok(out.includes('data-traj-entry="r1"'), '还在跑的组随时要看新条目，不许收')
 })
 
 test('完整模式：单条组不收组级，那一步直接看得见', () => {
   const h = trajHarness()
   h.state.trajectory = [{
-    turn: 3, state: 'ok', reason: null,
-    entries: [trajTool('s1', { turn: 3 })],
+    turn: 3, state: 'done', reason: null,
+    entries: [trajTool('s1', { turn: 3, name: 'read' })],
   }]
   h.render()
   const out = h.replyEl.innerHTML
   assert.ok(out.includes('data-traj-group="3"'), '组头在')
+  assert.ok(out.includes('已读取文件'), '单条组的标题就是那一类的完成词')
   assert.ok(out.includes('data-traj-entry="s1"'), '单条收起来只剩一行没有信息量，不收')
   assert.ok(!out.includes('读到了甲'), '但正文仍是条目级的事，默认收着')
 })
@@ -4268,7 +4271,7 @@ test('完整模式：进行中有明确标识，轨迹区零动效（有标识�
     '跑完就摘掉标识，不许留着谎报')
 
   // 颜色与「不闪」都在样式里钉：颜色只从现成令牌取，轨迹区一个动效都不加。
-  const trajCss = html.slice(html.indexOf('.traj-bar {'), html.indexOf('/* ---------- 设置抽屉'))
+  const trajCss = html.slice(html.indexOf('.traj-group {'), html.indexOf('/* ---------- 设置抽屉'))
   assert.ok(trajCss.length > 0, '锚点：轨迹样式块要找得到')
   assert.match(trajCss, /\.traj-err\s*\{[^}]*color:\s*var\(--err\)/, '失败首行走 --err')
   assert.match(trajCss, /\.traj-run\s*\{[^}]*color:\s*var\(--run\)/, '进行中行走 --run')
@@ -4300,40 +4303,41 @@ test('完整模式：截断如实标注——truncated 在场就写明原始总�
 })
 
 test('完整模式：服务端「这份轨迹不是全部」的说明按实况展示，没有就不吭声', () => {
-  // 10.3-4：注记挪到**输入框上方**那根搜索条里（轨迹穿插进对话后没有整块轨迹区）。
+  // 11.1-C：搜索框删了，说明挪进轨迹内容里（跟着过程组走；轨迹空了兜底页尾）。
   const h = trajHarness()
   h.state.trajectory = [{
-    turn: 1, state: 'ok', reason: null, entries: [trajTool('n1')],
+    turn: 1, state: 'done', reason: null, entries: [trajTool('n1', { name: 'read' })],
   }]
   h.render()
-  assert.equal(h.getEl('trajBarNote').innerHTML, '',
+  assert.ok(!h.replyEl.innerHTML.includes('traj-note'),
     '没给说明就不显示——空态观感和聊天保持一致')
 
   h.state.trajectoryNote = '轨迹只显示最近一段（读取上限：120 条）'
   h.render()
-  assert.match(h.getEl('trajBarNote').innerHTML,
+  assert.match(h.replyEl.innerHTML,
     /class="traj-note"[^>]*>轨迹只显示最近一段（读取上限：120 条）</,
     '服务端给的原句原样显示')
+  assert.ok(h.replyEl.innerHTML.indexOf('traj-note') < h.replyEl.innerHTML.indexOf('data-traj-group'),
+    '说明跟在轨迹内容里、排在第一个过程组前面')
 
   // 只有截断标志、没有句子（服务端实况里两者同生同灭，这里钉兜底）：也得有话说。
   h.state.trajectoryNote = ''
   h.state.trajectoryTruncated = true
   h.render()
-  assert.match(h.getEl('trajBarNote').innerHTML, /class="traj-note"/, '截断标志在场就要出说明')
+  assert.match(h.replyEl.innerHTML, /class="traj-note"/, '截断标志在场就要出说明')
 
   // 手里空了但服务端留了话（读取失败那条路）：话还得说——「读不到」不等于「没有过程」。
   h.state.trajectory = []
   h.state.trajectoryTruncated = false
   h.state.trajectoryNote = '读不到这个会话的过程。'
   h.render()
-  assert.match(h.getEl('trajBarNote').innerHTML,
+  assert.match(h.replyEl.innerHTML,
     /class="traj-note"[^>]*>读不到这个会话的过程。</,
-    '轨迹空了，说明照说')
+    '轨迹空了，说明照说（兜底页尾）')
 
   h.state.trajectoryNote = ''
   h.render()
-  assert.equal(h.getEl('trajBarNote').innerHTML, '', '说明撤了就彻底不占地方')
-  assert.equal(h.getEl('trajBar').hidden, true, '没轨迹也没说明：整根条收起来，一个字都不多占')
+  assert.ok(!h.replyEl.innerHTML.includes('traj-note'), '说明撤了就彻底不占地方')
 })
 
 // ---------------------------------------------------------------------------
@@ -4678,79 +4682,80 @@ test('三档切换接线：minimal↔chat↔full 来回切，提示语跟着换�
 })
 
 // ---------------------------------------------------------------------------
-// 轨迹区里的会话内搜索：只搜已加载的轨迹，命中只标不藏
+// 轨迹样式对齐 PC（2026-10-03 用户需求，tasks/todo.md 第 11 节）
 // ---------------------------------------------------------------------------
 //
-// 数据只有 state.trajectory（服务端最多留 120 条），所以搜索激活时那句范围说明
-// 必须逐字在场；搜空只说「已加载的轨迹里没有命中」，任何时候都不许说「不存在」。
-// 空查询要把搜索造成的强制展开清掉，回到「组默认收/摊、条目默认收」的口径。
-// 搜索条是**输入框上方的常驻元素**（10.3-3）：不跟着重画，打字不丢焦点。
+// 叫法照抄 DSH 桌面端（dsh-client-ui-chat / dsh-client-ui-tool 0.2.0-rc.1 的
+// message.stepProcess.* 与 tool.title.*），一个字都不自创：组头是「动作分类的
+// 完成词」（两类「并」、三类「，」、多于三类加「等」），条目行是「工具显示名 ·
+// 参数摘要」，思考行是「思考 · 首行」。移动端适配只有点按展开这一件事。
 
-test('轨迹搜索·搜到：命中的字标出来，范围说明逐字在场，没命中的行一块不藏', () => {
+test('完整模式：组头标题照抄 DSH 的拼法（并 / ， / 等）', () => {
   const h = trajHarness()
-  h.state.trajectory = [
-    { turn: 1, state: 'ok', reason: null, entries: [
-      trajTool('k1'),
-      trajTool('k2', { step: 2, name: '写文件', summary: 'b.txt', output: '写完了乙' }),
-    ] },
-    { turn: 2, state: 'ok', reason: null, entries: [trajTool('m1', { turn: 2 })] },
-  ]
+  // 两类：共享前缀「已」按 DSH 的规则去掉第二个，中间用「并」。
+  h.state.trajectory = [{ turn: 1, state: 'done', reason: null, entries: [
+    trajTool('a', { name: 'read' }), trajTool('b', { step: 2, name: 'subagent', summary: 'x' }),
+  ] }]
   h.render()
-  assert.equal(h.getEl('trajBar').hidden, false, '完整模式、有轨迹：搜索条露脸（输入框上方）')
-  assert.ok(!h.getEl('trajBarNote').innerHTML.includes('搜的是已加载的轨迹'),
-    '没输入时范围说明不占地方')
+  assert.match(h.replyEl.innerHTML, /已读取文件并协调子智能体/, '两类：「并」起来')
+  // 三类：按 DSH 用「，」连。
+  h.state.trajectory = [{ turn: 1, state: 'done', reason: null, entries: [
+    trajTool('a', { name: 'read' }), trajTool('b', { step: 2, name: 'write' }),
+    trajTool('c', { step: 3, name: 'edit' }),
+  ] }]
+  h.render()
+  assert.match(h.replyEl.innerHTML, /已读取文件，已写入文件，修改了文件/, '三类：「，」连')
+  // 多于三类：只取前三类，后面加「等」（DSH 的 more）。
+  h.state.trajectory = [{ turn: 1, state: 'done', reason: null, entries: [
+    trajTool('a', { name: 'read' }), trajTool('b', { step: 2, name: 'write' }),
+    trajTool('c', { step: 3, name: 'edit' }), trajTool('d', { step: 4, name: 'pwsh' }),
+  ] }]
+  h.render()
+  assert.match(h.replyEl.innerHTML, /修改了文件等/, '多于三类：前三类 + 「等」')
+  // 只有思考：DSH 的 counts 里没有思考这一类，空了才落「已完成分析」。
+  h.state.trajectory = [{ turn: 1, state: 'done', reason: null, entries: [
+    trajTool('t', { kind: 'think', name: null, args: null, summary: null, output: '先想想' }),
+  ] }]
+  h.render()
+  assert.match(h.replyEl.innerHTML, /已完成分析/, '纯思考组落「已完成分析」（DSH 的兜底词）')
+})
+
+test('完整模式：条目行用 PC 的工具显示名与摘要，思考行是「思考 · 首行」', () => {
+  const h = trajHarness()
+  h.state.trajectory = [{ turn: 1, state: 'running', reason: null, entries: [
+    trajTool('p1', { name: 'pwsh', summary: 'dir', output: '结果甲' }),
+    trajTool('t1', { step: 2, kind: 'think', name: null, args: null, summary: null,
+      output: '先看目录结构\n第二行不进折叠处' }),
+    trajTool('x1', { step: 3, name: 'mystery_tool', summary: 's1' }),
+  ] }]
+  h.render()
+  const out = h.replyEl.innerHTML
+  assert.match(out, /class="traj-name">运行命令<\/span><span class="traj-detail"> · dir/,
+    'pwsh → PC 显示名「运行命令」，后面接参数摘要')
+  assert.match(out, /class="traj-name">思考<\/span><span class="traj-detail"> · 先看目录结构/,
+    '思考行 = 思考 · 首行')
+  assert.ok(!out.includes('第二行不进折叠处'), '只露首行，剩下的在正文里')
+  assert.match(out, /class="traj-name">工具调用<\/span><span class="traj-detail"> · s1/,
+    '认不出的工具落 PC 的「工具调用」，摘要照给')
+  assert.ok(!out.includes('结果甲'), '折叠处不提前甩正文（结果在点开的正文里）')
+})
+
+test('完整模式：鲸鱼娘、气泡、光流条收起来；页面上没有轨迹搜索框', () => {
+  const h = trajHarness()
+  h.render()
+  assert.match(String(h.getEl('work').className), /\bbare\b/,
+    '完整模式给「正在执行」块挂 bare：立绘 / 气泡 / 光流进度条由 CSS 藏掉')
   h.state.mode = 'chat'
   h.render()
-  assert.equal(h.getEl('trajBar').hidden, true, '搜索条只在「完整」模式出现')
-  h.state.mode = 'full'
-  h.render()
-
-  h.onTrajectoryInput({ target: { value: '乙' } })
-  const hit = h.replyEl.innerHTML
-  assert.ok(hit.includes('<mark class="traj-hit">乙</mark>'), '命中的字用 mark 标出来')
-  assert.equal((hit.match(/class="traj-hit"/g) || []).length, 1, '只标命中的那一处，别处不多标')
-  assert.ok(h.getEl('trajBarNote').innerHTML.includes('搜的是已加载的轨迹（最多 120 条），更早的需先翻页加载'),
-    '搜索激活：范围说明逐字在场')
-  assert.ok(hit.includes('data-traj-entry="k1"'), '没命中的行照旧在原处（只标不藏）')
-  assert.ok(hit.includes('data-traj-entry="m1"'), '别的组的行也不藏、不重排')
-})
-
-test('轨迹搜索·搜空：只说「已加载的轨迹里没有命中」，不说不存在', () => {
-  const h = trajHarness()
-  h.state.trajectory = [{ turn: 1, state: 'ok', reason: null,
-    entries: [trajTool('k1'), trajTool('k2', { step: 2 })] }]
-  h.render()
-  h.onTrajectoryInput({ target: { value: '查无此词' } })
-  const note = h.getEl('trajBarNote').innerHTML
-  assert.ok(note.includes('已加载的轨迹里没有命中'), '搜空如实说，范围限定在「已加载的」')
-  assert.ok(note.includes('搜的是已加载的轨迹（最多 120 条），更早的需先翻页加载'),
-    '搜空时范围边界那句照旧在场')
-  assert.ok(!/不存在|查不到|没有这条/.test(note), '任何时候都不许把搜不到说成不存在')
-  assert.ok(h.replyEl.innerHTML.includes('data-traj-group="1"'), '没命中也不藏组头')
-})
-
-test('轨迹搜索·空查询：恢复默认折叠——搜索摊开的收回去，说明与高亮一起撤', () => {
-  const h = trajHarness()
-  h.state.trajectory = [{ turn: 1, state: 'ok', reason: null,
-    entries: [trajTool('k1'), trajTool('k2', { step: 2 })] }]
-  h.render()
-  h.onTrajectoryInput({ target: { value: '甲' } })
-  const opened = h.replyEl.innerHTML
-  assert.ok(opened.includes('data-traj-entry=') && opened.includes('traj-hit'),
-    '搜索时命中的组与条目摊开，命中的字才有处显示')
-  h.onTrajectoryInput({ target: { value: '' } })
-  const back = h.replyEl.innerHTML
-  assert.ok(back.includes('data-traj-group="1"'), '组头照画')
-  assert.ok(!back.includes('data-traj-entry='), '已结束的多条组回到默认收')
-  assert.ok(!back.includes('traj-hit') && !h.getEl('trajBarNote').innerHTML.includes('搜的是已加载的轨迹'),
-    '高亮与范围说明都随查询一起撤')
-
-  // 换会话：搜索词与输入框一起作废（新会话不背旧查询）。
-  h.onTrajectoryInput({ target: { value: '甲' } })
-  assert.equal(h.getEl('trajSearch').value, '甲', '打字时输入框的值在（常驻元素，值不被重画冲掉）')
-  h.state.boundSessionId = 's2'
-  h.render()
-  assert.equal(h.getEl('trajSearch').value, '', '换会话输入框跟着清空')
+  assert.ok(!/\bbare\b/.test(String(h.getEl('work').className)), '别的模式照旧，一个字不动')
+  assert.match(html, /\.work\.bare \.work-top[^}]*display:\s*none/,
+    'CSS 里要真有这条：bare 下 work-top（立绘+气泡）不画')
+  assert.match(html, /\.work\.bare \.work-progress[^}]*display:\s*none/,
+    'CSS 里要真有这条：bare 下光流进度条不画')
+  // 搜索框是整条删掉（连元素带脚本），不是「藏起来」。
+  assert.ok(!html.includes('id="trajSearch"'), '页面上不再有轨迹搜索框')
+  assert.ok(!html.includes('onTrajectoryInput') && !html.includes('traj-hit'),
+    '搜索链整条删干净（输入、高亮、命中强开都没了）')
 })
 
 // ---------------------------------------------------------------------------

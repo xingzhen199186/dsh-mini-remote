@@ -541,6 +541,11 @@
   }
   .stop:disabled { opacity: .5; }
 
+  /* 「完整」模式不放装饰（2026-10-03 用户点名）：立绘、气泡、光流进度条都不出现——
+     那一屏的过程由轨迹自己在逐条冒，再挂一只跑动的鲸鱼娘就是重复。只留
+     「已 N 秒 / 停止」那一行：去掉它就中止不了任务了。 */
+  .work.bare .work-top, .work.bare .work-progress { display: none; }
+
   /* 排队中的指令。跑着任务时接着发的那几条排在这儿，等这一轮跑完再跑。
      单帧模式下你发出去的那句话在别处一个字都看不见（那一模式只显示回复），
      所以这块是唯一的反馈，不能省。 */
@@ -854,25 +859,28 @@
      露和收之间就不会把下面的消息顶来顶去（那会是一次小跳）。 */
   .more-note.hide { visibility: hidden; }
 
-  /* 「完整」模式：过程组穿插在对话原位（三层折叠：组头一行 → 步一行 → 正文一框），
-     只用现成令牌、不加动效不加新颜色：它是补充信息，不是这一屏的主角。
-     输入框上方那根轨迹条（搜索框 + 注记）是唯一剩下的独立容器。 */
-  .traj-bar { padding: 8px 12px 6px; border-top: 1px dashed var(--line); }
-  .traj-group { margin-bottom: 8px; }
+  /* 「完整」模式：过程组穿插在对话原位，长相对齐 PC 的 turn-process（tasks/todo.md 11）：
+     行首一枚细线小图标 + 灰色状态词/标题（叫法照抄 DSH，一个字不自创），点开才见原文。
+     只用现成令牌、不加动效不加新颜色：它是补充信息，不是这一屏的主角。 */
+  .traj-group { margin-bottom: 10px; }
   .traj-head {
-    display: block; width: 100%; text-align: left; cursor: pointer;
+    display: flex; align-items: baseline; gap: 6px; width: 100%; text-align: left; cursor: pointer;
     font: inherit; font-size: 12.5px; line-height: 1.6;
-    padding: 6px 8px; color: var(--muted);
-    background: var(--panel-2); border: 1px solid var(--line); border-radius: var(--r);
+    padding: 6px 4px; color: var(--muted);
+    background: none; border: none; border-top: 1px dashed var(--line);
   }
-  .traj-entries { margin: 4px 0 0 10px; padding-left: 8px; border-left: 1px solid var(--line); }
+  .traj-entries { margin: 2px 0 0 4px; padding-left: 10px; border-left: 1px solid var(--line); }
   .traj-row {
-    display: block; width: 100%; text-align: left; cursor: pointer;
+    display: flex; align-items: baseline; gap: 6px; width: 100%; text-align: left; cursor: pointer;
     font: inherit; font-size: 13px; line-height: 1.6;
     padding: 5px 4px; color: var(--fg);
     background: none; border: none;
   }
   .traj-row:active { background: var(--panel-2); }
+  .traj-ico { flex: none; width: 14px; height: 14px; color: var(--muted); }
+  .traj-ico svg { display: block; width: 14px; height: 14px; }
+  .traj-name { flex: none; color: var(--muted); }
+  .traj-detail { color: var(--fg); word-break: break-all; }
   .traj-body {
     margin: 2px 0 8px; padding: 8px 10px;
     white-space: pre-wrap; word-break: break-word;
@@ -887,18 +895,6 @@
     background: var(--panel-2); border: 1px solid var(--line); border-radius: var(--r);
     color: var(--muted); font-size: 12.5px; line-height: 1.6;
   }
-  /* 轨迹内搜索（完整模式，会话内）：框跟着轨迹区，命中的字包一层 mark 标出来——
-     只标不藏、不动折叠结构。颜色只取现成令牌（--line 打底、--ice 当字，深浅两套
-     自动成对），圆角走 --r，零动效。字号 16px 是防 iOS 聚焦输入框时整页放大。 */
-  .traj-search { margin: 0 0 10px; }
-  .traj-search input {
-    display: block; width: 100%; padding: 7px 10px;
-    font: inherit; font-size: 16px; line-height: 1.5;
-    color: var(--fg); background: var(--panel-2);
-    border: 1px solid var(--line); border-radius: var(--r);
-  }
-  .traj-search input::placeholder { color: var(--muted); }
-  mark.traj-hit { background: var(--line); color: var(--ice); border-radius: var(--r); }
 
   /* ---------- 设置抽屉 ---------- */
   #settings {
@@ -1143,17 +1139,6 @@
 <!-- 在输入框里打 / 时弹出来的指令列表。和附件小条一样排在底栏**上面**：
      盖住输入框的话，用户就看不清自己正在打什么了。 -->
 <div class="cmd-menu" id="cmdMenu" hidden></div>
-
-<!-- 轨迹搜索条（完整模式、有轨迹或有说明时才露脸，见 renderTrajBar）。
-     排在输入框**上方**：过程组穿插进对话后没有整块轨迹区，搜索框跟着对话走会
-     滚出视野，输入框是这一页唯一不动的锚。搜索框是常驻元素、不跟着 #reply
-     重画——每次重画都重建输入框的话，正在打字的人每敲一个字就丢一次焦点。 -->
-<div class="traj-bar" id="trajBar" hidden>
-  <div class="traj-search" id="trajSearchBox">
-    <input type="text" id="trajSearch" placeholder="在已加载的轨迹里搜" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
-  </div>
-  <div id="trajBarNote"></div>
-</div>
 
 <footer>
   <!-- 统一入口。位置和尺寸一个像素都没动（还是原来回形针那个 42×42），改的只是点了之后
@@ -3044,24 +3029,14 @@
    */
   function renderFull() {
     // 换了会话，用户手动拨过的折叠开关就作废——和聊天窗 chatWindowFor 同一个道理：
-    // 两场会话的轮号会撞在一起，留在手里的开关会去拨新会话的组。搜索词也一样作废。
+    // 两场会话的轮号会撞在一起，留在手里的开关会去拨新会话的组。
     if (trajFor !== state.boundSessionId) {
       trajFor = state.boundSessionId;
       trajGroupOpen = {};
       trajEntryOpen = {};
-      trajQuery = '';
     }
     mainEl.classList.remove('center');
-    // 搜索命中轮（10.3-3）：它们的消息哪怕在窗口外也要露出来——「命中组在原位强开」
-    // 的原位得先在场，否则搜得到、看不见。
-    var hitTurns = [];
-    if (trajQuery) {
-      var gs = state.trajectory || [];
-      for (var i = 0; i < gs.length; i++) {
-        if (trajGroupHit(gs[i])) hitTurns.push(String(gs[i].turn));
-      }
-    }
-    var built = buildChat(hitTurns);
+    var built = buildChat();
     var html;
     if (built.empty) {
       // 一条消息都没有（正在读/确实没有）：手里有过程组就兜底页尾（10.3-1 d）。
@@ -3118,47 +3093,39 @@
     return built.moreNote + html;
   }
 
-  // ---------------- 轨迹的三层折叠（完整模式） ----------------
+  // ---------------- 轨迹的折叠与长相（完整模式，对齐 PC） ----------------
   // 数据是上一棒收进 state.trajectory 的轮次组：组 {turn, state, entries[]}，
   // 条目 {kind:'think'|'tool', name, args, summary, output, state, …}，字段语义
   // 见 lib/trajectory.js 头上的说明（思考正文和工具结果都放 output）。
-  // 三层怎么收：组级把「已结束的多条组」收成一行（running 还在长、error 要给人看、
-  // 单条收了没信息量，这三种默认摊开）；条目级每步一行，点开看正文，再点收起；
-  // 正文级工具给「参数+结果」、思考给想的内容。
+  // 长相对齐 DSH 桌面端的 turn-process（tasks/todo.md 11）：组头一行 = 图标 +
+  // 状态词/标题（跑着是「正在…」活动词，收官是「已读取文件并调用工具」这类组合标题），
+  // 条目一行 = 图标 + 「工具显示名 · 参数摘要」（思考行是「思考 · 首行」），
+  // 点开才见正文（工具给「参数+结果」、思考给想的内容）。
+  // 折叠口径不变：组级把「已结束的多条组」收成一行（running 还在长、error 要给人看、
+  // 单条收了没信息量，这三种默认摊开）；条目级默认收。
   // 用户拨过的开关存在下面两个对象里（组按轮号、条目按 id），只在本会话内有效，
   // 换会话时在 renderFull 里清掉。
   var trajFor = null;        // 上次渲染时的会话 id（变了就清开关）
   var trajGroupOpen = {};    // 组级手动覆写：{ 轮号字符串: true|false }
   var trajEntryOpen = {};    // 条目级手动覆写：{ 条目 id: true|false }
   var trajBound = false;     // replyEl 上的委托绑过没有
-  var trajQuery = '';        // 轨迹内搜索词（会话内；换会话时在 renderFull 里清掉）
 
   /**
-   * 组默认摊不摊。收的条件是**三条一起成立**：条目够多（≥2）、已经跑完
-   * （running 还在长，收了就看不见新条目）、结局不是 error（出错的组自己摊到
-   * 条目级给人看，不用点）。用户手动拨过的开关优先于默认值；再往后才是搜索的
-   * 强制摊开——搜索只把命中的组摊出来（命中的字得有地方显示），清空查询时它
-   * 自己就没了，而且它排在用户开关之后，搜索期间点组头也照样收得回去。
+   * 组默认摊不摊。收的条件是**两条一起成立**：条目够多（≥2）、已经跑完
+   * （running 还在长，收了就看不见新条目；error 出错的组自己摊到条目级给人看，
+   * 不用点）。用户手动拨过的开关优先于默认值。
    */
   function trajGroupIsOpen(g) {
     var key = String(g.turn);
     if (Object.prototype.hasOwnProperty.call(trajGroupOpen, key)) return trajGroupOpen[key];
-    if (trajQuery && trajGroupHit(g)) return true;
     if (!g.entries || g.entries.length < 2) return true;
     if (g.state === 'running' || g.state === 'error') return true;
     return false;
   }
-  /** 一条摊不摊：用户开关优先；没有开关时，搜索命中的条目强制摊开，其余默认收。 */
+  /** 一条摊不摊：用户开关优先；没有开关时默认收（点开才见正文）。 */
   function trajEntryIsOpen(e) {
     if (Object.prototype.hasOwnProperty.call(trajEntryOpen, e.id)) return trajEntryOpen[e.id];
-    return trajQuery !== '' && trajEntryHit(e);
-  }
-  function trajStateLabel(s) {
-    // 组状态走的是服务端 turnStateOf 那套字典（收官是 'done'，trajectory.js:140）；
-    // 条目那套的 'ok' 也认——两套都指「跑完了」。认不出的才落「进行中」：
-    // 这个兜底在真机上坑过一次：done 不在表里，跑完的轮全显示「进行中」。
-    return s === 'done' || s === 'ok' ? '已完成' : s === 'error' ? '出错了'
-      : s === 'stopped' ? '已停止' : '进行中';
+    return false;
   }
 
   /**
@@ -3230,46 +3197,177 @@
   function trajEntryBody(e) {
     var tr = e.truncated || {};
     var parts = [];
-    // 每段先经 trajHi 转义（搜索激活时顺带把命中的字标出来），所以下面**不再**整体
-    // 转义一次——再转一次会把 <mark> 变成字面量，高亮就成了一堆尖括号字符。
     if (e.kind === 'think') {
-      if (e.output) parts.push(trajHi(e.output) + trajTruncNote(tr.think, e.output));
+      if (e.output) parts.push(escapeHtml(e.output) + trajTruncNote(tr.think, e.output));
     } else {
-      if (e.args) parts.push('参数：\n' + trajHi(e.args) + trajTruncNote(tr.args, e.args));
-      if (e.output) parts.push('结果：\n' + trajHi(e.output) + trajTruncNote(tr.output, e.output));
+      if (e.args) parts.push('参数：\n' + escapeHtml(e.args) + trajTruncNote(tr.args, e.args));
+      if (e.output) parts.push('结果：\n' + escapeHtml(e.output) + trajTruncNote(tr.output, e.output));
     }
     if (!parts.length) return '';
     return '<div class="traj-body">' + parts.join('\n\n') + '</div>';
   }
 
-  /** 每步一行：思考与工具都要有（用户看的就是「跑到哪一步了」）。 */
+  // —— PC 同款词典（照抄 DSH 桌面端 0.2.0-rc.1，一个字不自创）——
+  // 动作分类：dsh-client-ui-chat 的 activity()（工具名 → 动作）。
+  function trajActivity(name) {
+    var n = String(name || '');
+    if (n === 'read') return 'read';
+    if (n === 'read_image') return 'readImage';
+    if (n === 'grep' || n === 'glob' || /_inspect$/.test(n)) return 'search';
+    if (n === 'write') return 'write';
+    if (n === 'edit' || n === 'apply_patch') return 'edit';
+    if (n === 'bash' || n === 'pwsh' || n === 'exec_command' || n === 'write_stdin'
+      || /^terminal_/.test(n)) return 'commands';
+    if (n === 'run_code') return 'code';
+    if (n === 'web_search') return 'webSearch';
+    if (n === 'web_fetch') return 'webFetch';
+    if (n === 'subagent' || /^subagent_/.test(n)) return 'subagents';
+    if (n === 'todo_write' || n === 'create_goal' || n === 'update_goal' || n === 'get_goal') {
+      return 'plan';
+    }
+    if (n === 'ask_user_question' || n === 'request_user_input') return 'questions';
+    return 'tools';
+  }
+  // 动作 → 完成词 / 活动词（dsh-client-ui-chat 的 message.stepProcess.done.* 与 .* 本体）。
+  var TRAJ_DONE = {
+    thinking: '已完成分析', read: '已读取文件', readImage: '已读取图片', write: '已写入文件',
+    search: '已搜索代码', edit: '修改了文件', commands: '执行了命令', code: '运行了代码',
+    webSearch: '已搜索网页', webFetch: '已访问网页', subagents: '已协调子智能体',
+    plan: '更新了计划', questions: '向用户提出了问题', tools: '已调用工具',
+  };
+  var TRAJ_LIVE = {
+    thinking: '正在分析请求', read: '正在读取文件', readImage: '正在读取图片', write: '正在写入文件',
+    search: '正在搜索代码', edit: '正在编辑文件', commands: '正在运行命令', code: '正在运行代码',
+    webSearch: '正在搜索网页', webFetch: '正在访问网页', subagents: '正在协调子智能体',
+    plan: '正在更新计划', questions: '等待你的操作', tools: '正在调用工具',
+  };
+  // 工具显示名（dsh-client-ui-tool 的 tool.title.*）。认不出名字的走变体标题，
+  // 变体也没有就落「工具调用」——和 PC 的 generic 同一口径。
+  var TRAJ_TOOL_TITLE = {
+    read: '读取', read_image: '读取图片', write: '写入', edit: '编辑', apply_patch: '编辑',
+    bash: '运行命令', pwsh: '运行命令', exec_command: '运行命令', write_stdin: '运行命令',
+    grep: '搜索文件内容', glob: '查找文件', run_code: '运行代码',
+    web_search: '网页搜索', web_fetch: '网页获取',
+    todo_write: '更新任务清单', ask_user_question: '提问', request_user_input: '提问',
+    create_goal: '创建目标', get_goal: '查看目标', update_goal: '更新目标',
+    subagent: '创建子智能体', list_agents: '查看子智能体', send_message: '发送消息',
+    interrupt_agent: '中断智能体', wait_agent: '等待子智能体', spawn_teammate: '创建队友',
+  };
+  var TRAJ_VARIANT_TITLE = {
+    read: '读取', readImage: '读取', webFetch: '读取', search: '搜索',
+    write: '写入', edit: '编辑', commands: '运行命令', code: '代码',
+    thinking: '工具调用', tools: '工具调用',
+  };
+  function trajToolTitle(name) {
+    var n = String(name || '');
+    if (TRAJ_TOOL_TITLE[n]) return TRAJ_TOOL_TITLE[n];
+    return TRAJ_VARIANT_TITLE[trajActivity(n)] || '工具调用';
+  }
+  // 图标：手写细线 SVG（1.5px 描边、currentColor），和全页图标同一种画法；
+  // 画的是 PC 那套图标的角色（思考/读/搜/改/命令/代码/网页/子代理/计划/提问/工具）。
+  var TRAJ_ICO = {
+    thinking: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="9" r="5"/><path d="M9.5 18h5M10.5 21h3"/></svg>',
+    read: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4M9 12h6M9 16h6"/></svg>',
+    search: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="11" cy="11" r="6"/><path d="M15.5 15.5L21 21"/></svg>',
+    edit: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 20l1-4L16 5l3 3L8 19z"/><path d="M14 7l3 3"/></svg>',
+    commands: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M5 7l5 5-5 5"/><path d="M12 17h7"/></svg>',
+    code: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 8l-5 4 5 4"/><path d="M15 8l5 4-5 4"/></svg>',
+    webSearch: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="8"/><path d="M4 12h16"/><path d="M12 4c3 3 3 13 0 16c-3-3-3-13 0-16z"/></svg>',
+    subagents: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="8" r="3"/><path d="M5 20a7 7 0 0 1 14 0"/></svg>',
+    plan: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 7l2 2 3-3M4 17l2 2 3-3"/><path d="M12 8h8M12 18h8"/></svg>',
+    questions: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="8"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.7.4-1 .8-1 1.7"/><path d="M12 16.5h.01"/></svg>',
+    tools: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 4l1.5 4.5L18 10l-4.5 1.5L12 16l-1.5-4.5L6 10l4.5-1.5z"/></svg>',
+  };
+  function trajIco(kind) {
+    return TRAJ_ICO[kind] || TRAJ_ICO.tools;
+  }
+  /** 折叠处给思考行的那一句：正文首行，压成一行、限 160 字（DSH 的行内摘要同款口径）。 */
+  function trajFirstLine(text) {
+    var s = String(text == null ? '' : text).split('\n')[0].replace(/\s+/g, ' ').trim();
+    return s.length > 160 ? s.slice(0, 159) + '…' : s;
+  }
+  /**
+   * 收官标题：照抄 DSH 的 processTitle——工具条目按动作分类计数（多的在前，一样多按
+   * 出现先后），取前三类拼完成词；两类共享「已」字时第二个去「已」用「并」连，
+   * 三类用「，」连，超过三类加「等」；一条工具都没有（纯思考）落「已完成分析」。
+   */
+  function trajTitleOf(g) {
+    var order = [];
+    var count = {};
+    var es = g.entries || [];
+    for (var i = 0; i < es.length; i++) {
+      if (!es[i] || es[i].kind !== 'tool') continue;
+      var k = trajActivity(es[i].name || '');
+      if (count[k] === undefined) { count[k] = 0; order.push(k); }
+      count[k] += 1;
+    }
+    order.sort(function (a, b) { return count[b] - count[a]; });
+    var labels = order.slice(0, 3).map(function (k) { return TRAJ_DONE[k]; });
+    var first = labels[0];
+    if (first === undefined) return { kind: 'thinking', text: TRAJ_DONE.thinking };
+    if (labels[1] === undefined) return { kind: order[0], text: first };
+    if (labels.length === 2) {
+      var second = labels[1];
+      if (first.indexOf('已') === 0 && second.indexOf('已') === 0) second = second.slice(1);
+      return { kind: order[0], text: first + '并' + second };
+    }
+    return {
+      kind: order[0],
+      text: first + '，' + labels.slice(1).join('，') + (order.length > 3 ? '等' : ''),
+    };
+  }
+  /** 组头的图标与标题：跑着是活动词（正在…），收官是组合标题。 */
+  function trajGroupTitle(g) {
+    if (g.state === 'running') {
+      var es = g.entries || [];
+      var last = null;
+      for (var i = es.length - 1; i >= 0; i--) {
+        if (es[i] && es[i].state === 'running') { last = es[i]; break; }
+      }
+      // 还没有工具步在跑（正在想）就落「正在分析请求」——和 PC 的兜底同一个词。
+      var kind = last && last.kind === 'tool' ? trajActivity(last.name || '') : 'thinking';
+      var detail = last
+        ? (last.kind === 'think' ? trajFirstLine(last.output) : (last.summary || ''))
+        : '';
+      return { kind: kind, live: true, text: TRAJ_LIVE[kind] + (detail ? ' · ' + detail : '') };
+    }
+    return trajTitleOf(g);
+  }
+
+  /** 一行一条（PC 的成员行）：图标 +「显示名 · 摘要」，失败/进行中顶在这一行上。 */
   function trajEntryHtml(e) {
-    var step = typeof e.step === 'number' ? '第 ' + e.step + ' 步 · ' : '';
-    var label = e.kind === 'think' ? '思考' : '工具 ' + trajHi(e.name || '（没写名字）');
-    // 失败与进行中都顶在这一行上（折叠处一眼可见）：失败给错误首行，跑着给明确字样。
-    var tail = e.summary ? ' · ' + trajHi(e.summary) : '';
+    var think = e.kind === 'think';
+    var kind = think ? 'thinking' : trajActivity(e.name || '');
+    var label = think ? '思考' : trajToolTitle(e.name || '');
+    var detail = think ? trajFirstLine(e.output) : (e.summary || '');
+    var tail = detail ? ' · ' + escapeHtml(detail) : '';
     if (e.error) tail += ' · <span class="traj-err">' + escapeHtml(trajErrLine(e)) + '</span>';
     else if (e.state === 'running') tail += ' · <span class="traj-run">进行中</span>';
     var row = '<button type="button" class="traj-row" data-traj-entry="'
-      + escapeHtml(e.id) + '">' + step + label + tail + '</button>';
+      + escapeHtml(e.id) + '"><span class="traj-ico">' + trajIco(kind) + '</span>'
+      + '<span class="traj-name">' + escapeHtml(label) + '</span>'
+      + '<span class="traj-detail">' + tail + '</span></button>';
     return '<div class="traj-entry">' + row
       + (trajEntryIsOpen(e) ? trajEntryBody(e) : '') + '</div>';
   }
 
-  /** 一个轮次组：头一行（收起时就是它自己），摊开时下面挂条目。 */
+  /** 一个轮次组：PC 的组头一行（图标 + 状态词/标题），摊开时下面挂条目。 */
   function trajGroupHtml(g) {
     var open = trajGroupIsOpen(g);
-    var turn = typeof g.turn === 'number' ? '第 ' + g.turn + ' 轮' : '本轮';
-    // 状态词：跑着的时候挂 .traj-run 上进行色（静止不闪），其余状态不上色。
-    var state = g.state === 'running'
-      ? '<span class="traj-run">' + trajStateLabel(g.state) + '</span>'
-      : trajStateLabel(g.state);
+    var t = trajGroupTitle(g);
+    var title = t.live
+      ? '<span class="traj-run">' + escapeHtml(t.text) + '</span>'
+      : '<span class="traj-title">' + escapeHtml(t.text) + '</span>';
+    // 收官的三种结局：完成词本身就说了「已…」，不再另挂字样；出错与被停要如实挂出来。
+    var chip = g.state === 'error' ? ' · <span class="traj-err">出错了</span>'
+      : g.state === 'stopped' ? ' · 已停止' : '';
     // 失败首行也顶到组头上：收着的时候，错误原因必须一眼可见。
     var err = trajGroupErrLine(g);
     if (err) err = ' · <span class="traj-err">' + escapeHtml(err) + '</span>';
     var head = '<button type="button" class="traj-head" data-traj-group="'
-      + escapeHtml(String(g.turn)) + '">' + (open ? '▾' : '▸') + ' '
-      + turn + ' · ' + g.entries.length + ' 步 · ' + state + err + '</button>';
+      + escapeHtml(String(g.turn)) + '"><span class="traj-ico">' + trajIco(t.kind) + '</span>'
+      + '<span class="traj-chev">' + (open ? '▾' : '▸') + '</span>'
+      + title + chip + err + '</button>';
     var entries = open
       ? '<div class="traj-entries">' + g.entries.map(trajEntryHtml).join('') + '</div>'
       : '';
@@ -3290,7 +3388,10 @@
     var groups = (state.trajectory || []).filter(function (g) {
       return g && Array.isArray(g.entries) && g.entries.length > 0;
     });
-    if (!groups.length) return rows.slice();
+    // 服务端那句「这不是全部」跟着轨迹内容走（11.1-C）：排在第一个过程组前面；
+    // 一个过程组都没有（含轨迹读不到那条路）就兜底页尾——话必须说，位置不抢戏。
+    var noteHtml = trajNoticeHtml();
+    if (!groups.length) return rows.slice().concat(noteHtml ? [noteHtml] : []);
     var slots = [];
     for (var i = 0; i < groups.length; i++) {
       var g = groups[i];
@@ -3320,10 +3421,15 @@
     slots.sort(function (x, y) { return x.at - y.at || x.turn - y.turn; });
     var out = [];
     var s = 0;
+    var noted = false;
     for (var p = 0; p <= rows.length; p++) {
-      while (s < slots.length && slots[s].at === p) out.push(slots[s++].html);
+      while (s < slots.length && slots[s].at === p) {
+        if (noteHtml && !noted) { out.push(noteHtml); noted = true; }
+        out.push(slots[s++].html);
+      }
       if (p < rows.length) out.push(rows[p]);
     }
+    if (noteHtml && !noted) out.push(noteHtml);
     return out;
   }
   /** 轮号对得上吗：两边都要有号，再比字符串（号来自消息字段/组字段，类型不总一致）。 */
@@ -3345,88 +3451,6 @@
     return '';
   }
 
-  // ---------------- 轨迹内搜索（完整模式、会话内） ----------------
-  // 只搜 state.trajectory 里存着的文本：name/args/summary/output 的已截断前段
-  // （服务端最多留 120 条，从尾部留；被截掉的后半不还原、也不搜）。
-  function trajEntryHit(e) {
-    if (!trajQuery) return false;
-    var q = trajQuery.toLowerCase();
-    var fields = [e.name, e.args, e.summary, e.output];
-    for (var i = 0; i < fields.length; i++) {
-      if (fields[i] && String(fields[i]).toLowerCase().indexOf(q) >= 0) return true;
-    }
-    return false;
-  }
-  /** 组里有一条命中就算命中：组只因搜索摊开，不重排、不藏别的组。 */
-  function trajGroupHit(g) {
-    if (!trajQuery) return false;
-    var es = g.entries || [];
-    for (var i = 0; i < es.length; i++) if (trajEntryHit(es[i])) return true;
-    return false;
-  }
-  /**
-   * 命中的字标出来（只标不藏）：按位置切段、逐段转义，命中那段包一层 mark——中间段
-   * 一个字都不丢。按小写比对（大小写不拘）但按原文位置切；没查询时就是一句纯转义。
-   */
-  function trajHi(text) {
-    var s = String(text == null ? '' : text);
-    if (!trajQuery) return escapeHtml(s);
-    var q = trajQuery.toLowerCase();
-    var low = s.toLowerCase();
-    var out = '';
-    var from = 0;
-    for (var at = low.indexOf(q, from); at >= 0; at = low.indexOf(q, from)) {
-      out += escapeHtml(s.slice(from, at))
-        + '<mark class="traj-hit">' + escapeHtml(s.slice(at, at + q.length)) + '</mark>';
-      from = at + q.length;
-    }
-    return out + escapeHtml(s.slice(from));
-  }
-  /**
-   * 输入框上方那根轨迹条（10.3-3）：搜索框是**常驻元素**（不跟着 #reply 重画，
-   * 打字不丢焦点），这里只管露/藏、注记和值同步。「没轨迹时一个字都不多占」
-   * 这条口径不变：没轨迹也没说明，整根条收起来；只剩说明（读取失败那条路）
-   * 就只出说明、不给框。
-   */
-  function renderTrajBar() {
-    var bar = $('trajBar');
-    if (!bar) return;
-    var gs = state.trajectory || [];
-    var hasTraj = false;
-    for (var i = 0; i < gs.length; i++) {
-      if (gs[i] && Array.isArray(gs[i].entries) && gs[i].entries.length > 0) { hasTraj = true; break; }
-    }
-    // 注记先算、先写：整根条藏起来时也得把旧注记清掉，不然换个会话还挂着上一句。
-    var noteHtml = trajNoticeHtml();
-    if (trajQuery && hasTraj) {
-      noteHtml += '<div class="traj-note">搜的是已加载的轨迹（最多 120 条），更早的需先翻页加载</div>';
-      var hit = false;
-      for (var j = 0; j < gs.length; j++) if (trajGroupHit(gs[j])) { hit = true; break; }
-      if (!hit) noteHtml += '<div class="traj-note">已加载的轨迹里没有命中</div>';
-    }
-    var note = $('trajBarNote');
-    if (note) note.innerHTML = noteHtml;
-    bar.hidden = !(state.mode === 'full' && (hasTraj || !!noteHtml));
-    if (bar.hidden) return;
-    // 搜索框只在真的有轨迹时给（只剩说明时不给框，见上面的口径）。
-    var box = $('trajSearchBox');
-    if (box) box.hidden = !hasTraj;
-    // 值同步只在对不上时写：打字时两边相等，不写就不会动插入点。
-    var input = $('trajSearch');
-    if (input && typeof input.value === 'string' && input.value !== trajQuery) {
-      input.value = trajQuery;
-    }
-  }
-  /**
-   * 搜索框的输入。框是常驻元素（页面启动时绑一次，见 trajSearch 那行绑定），
-   * 重画只碰 #reply 和注记、不碰框本身，所以打字不丢焦点、插入点不动。
-   */
-  function onTrajectoryInput(e) {
-    var t = e && e.target;
-    trajQuery = String((t && t.value) || '');
-    render();
-  }
-
   // 轨迹区的点击全走这一根委托。先认条目再认组头——行和头各带各的 data 属性，
   // 认错一个就拨错层。
   function onTrajectoryClick(e) {
@@ -3441,9 +3465,10 @@
   function render() {
     $('hintMode').textContent = modeHint();
       if (state.mode === 'full') renderFull(); else if (state.mode === 'chat') renderChat(); else renderMinimal();
-    // 轨迹条的露/收跟模式走（只在「完整」露脸）：切回聊天/单帧也得有人喊它收，
-    // 它是常驻元素，不跟着 #reply 的重画一起消失（见 renderTrajBar）。
-    renderTrajBar();
+    // 「完整」模式不放装饰（11.1-B）：给常驻的 #work 挂 bare，立绘、气泡、光流
+    // 进度条由 CSS 藏掉，只留「已 N 秒 / 停止」。#work 不跟着 #reply 重画，
+    // 所以这一下挂在总分发这里，切模式时各归各位。
+    $('work').className = 'work' + (state.mode === 'full' ? ' bare' : '');
   }
 
   function applySnapshot(snap) {
@@ -4887,8 +4912,7 @@
   });
 
   $('btnSend').addEventListener('click', send);
-  // 轨迹搜索框是常驻元素，输入绑这一次就够（重画不碰它，打字不丢焦点——见 renderTrajBar）。
-  $('trajSearch').addEventListener('input', onTrajectoryInput);
+
   inputEl.addEventListener('input', autoGrow);
   // 每敲一个字重算一次菜单。它自己会先看「是不是一个没打完的 / 名字」再决定动不动，
   // 所以这里不用加判据。
