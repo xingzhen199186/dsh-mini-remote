@@ -4487,3 +4487,150 @@ test('轨迹接线：loading 随拉取起落——发出即真，回包/出错�
   assert.equal(w2.state.trajectoryNote, '读不到这个会话的过程。',
     '读不到就说读不到，不冒充「没有过程」')
 })
+
+// ---------------------------------------------------------------------------
+// S5：「完整」模式的日常路径——翻更早记录、窗口口径、切模式
+// ---------------------------------------------------------------------------
+//
+// 完整模式缺「往上滑再放一屏」：maybeGrowChat 第一道闸只认聊天，growChat 放完
+// 又直画 renderChat——在完整模式下会把轨迹区抹掉。切片取 `var scrolledReplyAt`
+// → `function applySnapshot`：renderChat、maybeGrowChat、growChat、renderFull 和
+// 按模式分发的 render 整段都在里面，切掉 render 就测不到「走没走总分发」。
+// 锚点对不上会立刻断言失败，不会安静地退化成空测试。
+
+function fullPager({ history, trajectory = [] } = {}) {
+  // renderFull 要在 replyEl 上绑轨迹委托，替身得具备 addEventListener（同 trajHarness）。
+  const replyEl = {
+    innerHTML: '',
+    addEventListener() {},
+  }
+  const hintEl = { textContent: '' }
+  const $ = (id) => (id === 'hintMode' ? hintEl : { textContent: '' })
+  const mainEl = {
+    classList: { remove() {} },
+    scrollTop: 0,
+    clientHeight: 0,
+    get scrollHeight() {
+      const n = (replyEl.innerHTML.match(/class="(?:said|bubble)/g) || []).length
+      return 40 + 10 * n
+    },
+    getBoundingClientRect: () => ({ top: 0 }),
+  }
+  const state = {
+    mode: 'full', boundSessionId: 's1', history, queued: [], live: '', latest: null,
+    trajectory, trajectoryLoading: false, historyTruncated: false,
+  }
+  const RS = 'var scrolledReplyAt'
+  const RE = 'function applySnapshot'
+  const a = html.indexOf(RS)
+  const b = html.indexOf(RE)
+  assert.ok(a > 0, `在 page.html 里找不到锚点「${RS}」`)
+  assert.ok(b > a, `在 page.html 里找不到锚点「${RE}」`)
+  // eslint-disable-next-line no-new-func
+  const build = new Function(
+    'state', 'replyEl', 'mainEl', 'timeLabel', '$', 'hintEl',
+    `${html.slice(start, end)}\n${html.slice(a, b)}
+     return { render, maybeGrowChat, state, mainEl, replyEl, hintEl };`,
+  )
+  const api = build(state, replyEl, mainEl, () => '12:00', $, hintEl)
+  return Object.assign(api, {
+    count: () => (replyEl.innerHTML.match(/class="(?:said|bubble)/g) || []).length,
+  })
+}
+
+test('完整模式：往上滑也一屏一屏往前放，放完走 render() 总分发（轨迹区不许被画没）', () => {
+  const p = fullPager({
+    history: longHistory(200),
+    trajectory: [{ turn: 1, state: 'ok', entries: [trajTool('k1'), trajTool('k2', { step: 2 })] }],
+  })
+  p.render()
+  assert.equal(p.count(), 40, '首屏口径与聊天一致：只铺最近 40 条')
+  assert.ok(p.replyEl.innerHTML.includes('第 161 条') && !p.replyEl.innerHTML.includes('第 160 条'),
+    '从最新往回数满 40 条，第 41 条留给下一屏（同聊天的裁剪口径）')
+  assert.match(p.replyEl.innerHTML, /class="traj"/, '轨迹区在：完整模式的底座')
+
+  p.mainEl.scrollTop = 30
+  const fromBottom = p.mainEl.scrollHeight - p.mainEl.scrollTop
+  p.hintEl.textContent = ''
+  p.maybeGrowChat()
+  assert.equal(p.count(), 80, '完整模式也要放一屏：40 + 40')
+  assert.equal(p.mainEl.scrollHeight - p.mainEl.scrollTop, fromBottom,
+    '位置补偿照旧：离底部的距离一格不动')
+  assert.match(p.replyEl.innerHTML, /class="traj"/,
+    '放完轨迹区还要在——必须走 render() 总分发，直画 renderChat 会把它抹掉')
+  assert.equal(p.hintEl.textContent, '完整：附加每一步过程',
+    'hintMode 也由 render() 刷新过（renderChat 单画不会碰它）')
+
+  p.mainEl.scrollTop = 400
+  p.maybeGrowChat()
+  assert.equal(p.count(), 80, '没靠近顶部就不该再放')
+
+  p.state.mode = 'chat'
+  p.render()
+  assert.equal(p.count(), 80, '切到聊天：窗口跟着会话走，铺开的量不缩水')
+})
+
+test('SSE 推来的回复在「完整」模式也进聊天记录（单帧仍不进）', () => {
+  // 3877 那个分支原来只认聊天：完整模式画的也是同一串聊天记录，回复落定却不追加，
+  // 等于「跑完了页面上没这句」，要等下一份快照才补上。单帧渲染 latest、不画记录，
+  // 不进才对——这条边界不能跟着一起放宽。
+  const full = feedReply(
+    { text: '跑完了。', sessionId: 's1', timestamp: 11 },
+    { mode: 'full' },
+  )
+  assert.equal(full.state.history.length, 1, '完整模式渲染的就是聊天记录：回复落定必须追加')
+  assert.equal(full.state.history[0].text, '跑完了。', '内容不能丢')
+
+  const min = feedReply(
+    { text: '单帧那条', sessionId: 's1', timestamp: 12 },
+    { mode: 'minimal' },
+  )
+  assert.equal(min.state.history.length, 0, '单帧模式仍不往 history 里塞')
+})
+
+test('三档切换接线：minimal↔chat↔full 来回切，提示语跟着换、重画与轨迹订阅都喊到', () => {
+  // 权限档位真机踩过「画得出、点不动」，档位切换同一条线：逻辑都在，缺的是有人喊。
+  // 这里把切换那段接线连同真的 modeHint 一起切出来跑——三句话收在一处就是为了
+  // 不走样（见 modeHint 注释），测试得钉死它们和 data-mode 一一对应。
+  const A0 = "Array.prototype.forEach.call($('segMode')"
+  const A1 = "Array.prototype.forEach.call($('segSound')"
+  const M0 = 'function modeHint'
+  const M1 = 'function renderFull'
+  const idx = [A0, A1, M0, M1].map((s) => html.indexOf(s))
+  assert.ok(idx.every((i) => i > 0), '四个锚点都要在 page.html 里找得到')
+  assert.ok(idx[1] > idx[0] && idx[3] > idx[2], '锚点顺序不对，先修测试')
+
+  const hintEl = { textContent: '' }
+  const btns = ['minimal', 'chat', 'full'].map((m) => {
+    const b = { dataset: { mode: m } }
+    b.addEventListener = (type, fn) => { b[type] = fn }
+    return b
+  })
+  const $ = (id) => (id === 'segMode' ? { children: btns } : hintEl)
+  const store = {}
+  const localStorage = { setItem(k, v) { store[k] = v }, getItem(k) { return store[k] } }
+  const state = { mode: 'minimal' }
+  const calls = { render: 0, syncTraj: 0, syncSeg: 0 }
+  // eslint-disable-next-line no-new-func
+  new Function('state', '$', 'localStorage', 'syncSeg', 'render', 'syncTrajectorySubscription',
+    `${html.slice(idx[2], idx[3])}\n${html.slice(idx[0], idx[1])}\n`)(
+    state, $, localStorage,
+    () => { calls.syncSeg += 1 },
+    () => { calls.render += 1 },
+    () => { calls.syncTraj += 1 },
+  )
+
+  const click = (m) => btns.find((b) => b.dataset.mode === m).click()
+  click('chat')
+  assert.equal(state.mode, 'chat', '点档位要改 state.mode')
+  assert.equal(hintEl.textContent, '聊天：常规问答对话', '切完提示语立即跟着换')
+  click('full')
+  assert.equal(hintEl.textContent, '完整：附加每一步过程', '切到完整：提示语也换')
+  click('minimal')
+  assert.equal(hintEl.textContent, '单帧：只留最新一条回复', '切回单帧：还是那句')
+  click('full'); click('chat'); click('full')
+  assert.equal(state.mode, 'full', '来回切不卡壳')
+  assert.equal(store.dshMiniMode, 'full', '每次都落盘')
+  assert.deepEqual(calls, { render: 6, syncTraj: 6, syncSeg: 6 },
+    '每切一次都要重画、重同步按钮和轨迹订阅（缺一样就是真机上的死档位）')
+})

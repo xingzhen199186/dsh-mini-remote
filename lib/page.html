@@ -2862,8 +2862,8 @@
    */
   function maybeGrowChat() {
     // 单帧模式那边也在往 main 上滚（回答落定要跳到页面顶端），别把那一下当成「他在往上翻」；
-    // 本地都放完了也没什么可放的。
-    if (state.mode !== 'chat' || chatLoaded <= 0) return;
+    // 本地都放完了也没什么可放的。完整模式画的也是这串聊天记录，翻页照旧要能放。
+    if (state.mode === 'minimal' || chatLoaded <= 0) return;
     if (chatWindow >= chatLoaded) return;
     if (mainEl.scrollTop > chatEdge()) {
       // 滑下来了，这一轮重新装填：**一次靠近只放一屏**。
@@ -2896,7 +2896,10 @@
   function growChat() {
     var fromBottom = mainEl.scrollHeight - mainEl.scrollTop;
     chatWindow += CHAT_PAGE;
-    renderChat();
+    // 完整模式要走 render() 总分发：直画 renderChat 会把后面那块轨迹区抹掉。
+    // （位置补偿和聊天同一套：轨迹区每次重画高度不变，底部那一截没动。）
+    if (state.mode === 'full') render();
+    else renderChat();
     mainEl.scrollTop = mainEl.scrollHeight - fromBottom;
   }
 
@@ -3874,7 +3877,9 @@
         text: payload.text, timestamp: payload.timestamp,
         sessionId: payload.sessionId, interrupted: cut,
       };
-      if (state.mode === 'chat') {
+      // 完整模式画的也是这串聊天记录（renderFull 复用 renderChat），回复落定
+      // 同样要追加进去，否则要等下一份快照才补上；单帧不画记录，照旧不进。
+      if (state.mode !== 'minimal') {
         state.history = (state.history || []).concat([
           {
             role: 'assistant', text: payload.text, timestamp: payload.timestamp,
