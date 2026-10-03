@@ -4165,3 +4165,325 @@ test('完整模式：没轨迹就不画轨迹区；「正在读取」那句照�
     'loading 注记保留在最前，这句和它的位置都不能动')
   assert.ok(!out.includes('class="traj"'), 'loading 不等于有轨迹：轨迹区还是不画')
 })
+
+// ---------------------------------------------------------------------------
+// 「完整」模式的四类状态呈现：失败 / 进行中 / 截断 / 服务端「不是全部」的说明
+// ---------------------------------------------------------------------------
+//
+// 上一棒把三层折叠画出来了，这一棒补状态的呈现细节。口径都钉在「折叠处一眼可见」
+// 上：失败首行收着的时候就得在；进行中要有字样且零动效；截断按 truncated 字段
+// 如实标（N 是原始总字符数，措辞照 lib/trajectory.js 的 clipForTrajectory）；
+// 服务端的说明「存在才显示」，一个字都没有时不许凭空冒出来。
+
+test('完整模式：失败原因首行顶在折叠处（错误色），点开正文仍见参数与结果', () => {
+  const h = trajHarness()
+  h.state.trajectory = [{
+    turn: 4, state: 'error', reason: null,
+    entries: [
+      trajTool('e1', {
+        turn: 4, state: 'error',
+        error: { name: 'Error', code: null, reason: '读不到 a.txt\n第二行是细节' },
+        output: '部分结果',
+      }),
+      trajTool('e2', { turn: 4, step: 2 }),
+    ],
+  }]
+  h.render()
+  const closed = h.replyEl.innerHTML
+  assert.match(closed, /class="traj-err"[^>]*>读不到 a\.txt</,
+    '失败首行要在折叠处可见，且挂 .traj-err 交给 CSS 上错误色')
+  assert.ok(!closed.includes('第二行是细节'), '只露首行：细节留在正文里点开看')
+  assert.ok(!closed.includes('部分结果'), '折叠处不提前甩正文')
+
+  h.toggleTrajEntry('e1')
+  const open = h.replyEl.innerHTML
+  assert.ok(open.includes('参数：'), '点开正文仍见 args')
+  assert.ok(open.includes('部分结果'), '点开正文仍见 output')
+
+  // 组头同一口径：手动把出错的组收起来，失败首行还得挂在组头上。
+  h.toggleTrajGroup(4)
+  const shut = h.replyEl.innerHTML
+  assert.ok(!shut.includes('data-traj-entry='), '组确实收着')
+  assert.match(shut, /class="traj-err"[^>]*>读不到 a\.txt</, '收着的组头也带失败首行')
+})
+
+test('完整模式：进行中有明确标识，轨迹区零动效（有标识但不闪）', () => {
+  const h = trajHarness()
+  h.state.trajectory = [{
+    turn: 2, state: 'running', reason: null,
+    entries: [trajTool('r1', { turn: 2, state: 'running', output: null })],
+  }]
+  h.render()
+  const out = h.replyEl.innerHTML
+  assert.equal((out.match(/class="traj-run"/g) || []).length, 2,
+    '组头和条目行各挂一个「进行中」标识')
+  assert.ok(out.includes('进行中'), '标识要写人话：进行中')
+
+  h.state.trajectory[0].state = 'ok'
+  h.state.trajectory[0].entries[0].state = 'ok'
+  h.render()
+  assert.equal((h.replyEl.innerHTML.match(/class="traj-run"/g) || []).length, 0,
+    '跑完就摘掉标识，不许留着谎报')
+
+  // 颜色与「不闪」都在样式里钉：颜色只从现成令牌取，轨迹区一个动效都不加。
+  const trajCss = html.slice(html.indexOf('.traj {'), html.indexOf('/* ---------- 设置抽屉'))
+  assert.ok(trajCss.length > 0, '锚点：轨迹样式块要找得到')
+  assert.match(trajCss, /\.traj-err\s*\{[^}]*color:\s*var\(--err\)/, '失败首行走 --err')
+  assert.match(trajCss, /\.traj-run\s*\{[^}]*color:\s*var\(--run\)/, '进行中行走 --run')
+  assert.ok(!/@keyframes|animation\s*:/.test(trajCss), '轨迹区零动效：有标识但不闪')
+})
+
+test('完整模式：截断如实标注——truncated 在场就写明原始总字符数，没截的不瞎标', () => {
+  const h = trajHarness()
+  h.state.trajectory = [{
+    turn: 1, state: 'ok', reason: null,
+    entries: [
+      trajTool('t1', {
+        args: '{"path":"big.txt"}', output: '前四千字符的正文',
+        truncated: { args: { chars: 4000, total: 49930 }, output: { chars: 4000, total: 12345 } },
+      }),
+      trajTool('t2', { step: 2, output: '完整正文' }),
+    ],
+  }]
+  h.render()
+  h.toggleTrajGroup(1) // 两条的已完成组默认收着
+  h.toggleTrajEntry('t1')
+  const out = h.replyEl.innerHTML
+  assert.ok(out.includes('已截断，共 49930 字符'),
+    '参数截断：N 是原始总字符数（chars 是留下的那段，不拿它充数），措辞照 lib/trajectory.js')
+  assert.ok(out.includes('已截断，共 12345 字符'), '结果截断同样标出来，绝不静默砍尾')
+  h.toggleTrajEntry('t1')
+  h.toggleTrajEntry('t2')
+  assert.ok(!h.replyEl.innerHTML.includes('已截断'), '没截的条目正文一个字都不标')
+})
+
+test('完整模式：服务端「这份轨迹不是全部」的说明按实况展示，没有就不吭声', () => {
+  const h = trajHarness()
+  h.state.trajectory = [{
+    turn: 1, state: 'ok', reason: null, entries: [trajTool('n1')],
+  }]
+  h.render()
+  assert.ok(!h.replyEl.innerHTML.includes('class="traj-note"'),
+    '没给说明就不显示——空态观感和聊天保持一致')
+
+  h.state.trajectoryNote = '轨迹只显示最近一段（读取上限：120 条）'
+  h.render()
+  const withNote = h.replyEl.innerHTML
+  assert.match(withNote, /class="traj-note"[^>]*>轨迹只显示最近一段（读取上限：120 条）</,
+    '服务端给的原句原样显示')
+  assert.ok(withNote.indexOf('chat-rows') < withNote.indexOf('traj-note"')
+    && withNote.indexOf('traj-note"') < withNote.indexOf('class="traj-group"'),
+    '说明排在聊天之后、轨迹组之前')
+
+  // 只有截断标志、没有句子（服务端实况里两者同生同灭，这里钉兜底）：也得有话说。
+  h.state.trajectoryNote = ''
+  h.state.trajectoryTruncated = true
+  h.render()
+  assert.match(h.replyEl.innerHTML, /class="traj-note"/, '截断标志在场就要出说明')
+
+  // 手里空了但服务端留了话（读取失败那条路）：话还得说——「读不到」不等于「没有过程」。
+  h.state.trajectory = []
+  h.state.trajectoryTruncated = false
+  h.state.trajectoryNote = '读不到这个会话的过程。'
+  h.render()
+  assert.match(h.replyEl.innerHTML, /class="traj-note"[^>]*>读不到这个会话的过程。</,
+    '轨迹空了，说明照说')
+
+  h.state.trajectoryNote = ''
+  h.render()
+  assert.ok(!h.replyEl.innerHTML.includes('class="traj-note"'), '说明撤了就彻底不占地方')
+})
+
+// ---------------------------------------------------------------------------
+// 轨迹的接线四件套：订阅建立 / 收帧 / GET 整份替换 / loading
+// ---------------------------------------------------------------------------
+//
+// 90440b3 落地时零测试，这里补上。切片取 function trajectoryKeyOf → var $ = function：
+// 四件套在这一段里连续排布，$ 起就进 DOM 小工具了。render/api/connect 都给桩——
+// 这里测的是「什么时候发什么、state 怎么变」，画面上的事归上面的折叠测试管。
+// subscribedClientId 是页面的外层变量，切片里只写不声明：桩里补一个同名 var，
+// 才能断言「退订后记号清没清」这种跨调用的状态。
+
+function wiringHarness(apiImpl) {
+  const START_AT = 'function trajectoryKeyOf'
+  const END_AT = 'var $ = function (id)'
+  const a = html.indexOf(START_AT)
+  const b = html.indexOf(END_AT)
+  assert.ok(a > 0, `在 page.html 里找不到锚点「${START_AT}」`)
+  assert.ok(b > a, `在 page.html 里找不到锚点「${END_AT}」`)
+
+  const state = {
+    mode: 'full', token: 'tk', boundSessionId: 's1',
+    trajectory: [], trajectorySeq: 0, trajectoryEpoch: '',
+    trajectoryLoading: false, trajectoryNote: '', trajectoryTruncated: false,
+  }
+  const log = [] // 每次 api() 的 url + opts，先记账再交给桩
+  const api = (url, opts) => {
+    log.push({ url, opts })
+    return apiImpl
+      ? apiImpl(url, opts)
+      : Promise.resolve({ ok: true, turns: [], seq: 0, truncated: false, note: null, loading: false })
+  }
+  let connects = 0
+  // eslint-disable-next-line no-new-func
+  const build = new Function(
+    'state', 'api', 'render', 'connect', 'clientId',
+    `var subscribedClientId = '';
+     ${html.slice(a, b)}
+     return {
+       syncTrajectorySubscription, receiveTrajectoryFrame, setTrajectoryFromGet,
+       requestTrajectory,
+       subscribed() { return subscribedClientId },
+     };`,
+  )
+  const h = build(state, api, () => {}, () => { connects += 1 }, 'c1')
+  return { state, log, h, connects: () => connects }
+}
+
+/** 把挂起的微任务排干净（POST 的 .then、GET 的回包都靠它落地）。 */
+const tick = () => new Promise((r) => setTimeout(r, 0))
+
+test('轨迹接线：订阅跟着「完整」开关走——切进先 POST 订上再 GET 对齐，切走 POST 退订并清记号', async () => {
+  const w = wiringHarness()
+  w.state.mode = 'chat'
+  w.h.syncTrajectorySubscription()
+  assert.equal(w.log.length, 0, '不是完整模式：一个请求都不发')
+
+  w.state.mode = 'full'
+  w.h.syncTrajectorySubscription()
+  assert.equal(w.log.length, 1, '没订过：先 POST 订上这一条')
+  assert.match(w.log[0].url, /\/mini\/api\/trajectory\/subscribe/)
+  const on = JSON.parse(w.log[0].opts.body)
+  assert.equal(on.clientId, 'c1', 'POST 要带自己的 clientId')
+  assert.equal(on.on, true, '这是「订上」')
+  await tick()
+  assert.equal(w.h.subscribed(), 'c1', '订成功才记下「已订」')
+  assert.ok(w.log.some((c) => /\/mini\/api\/trajectory\?sessionId=s1/.test(c.url)),
+    '订上之后 GET 一次，把手里的换成服务端那份')
+
+  w.h.syncTrajectorySubscription()
+  assert.equal(w.log.filter((c) => /subscribe/.test(c.url)).length, 1,
+    '已经订过：再同步只 GET 对齐，不重复 POST')
+  assert.equal(w.log.filter((c) => /\/mini\/api\/trajectory\?/.test(c.url)).length, 2,
+    '已订状态下的同步补一次 GET')
+
+  w.state.mode = 'chat'
+  w.h.syncTrajectorySubscription()
+  assert.equal(w.h.subscribed(), '', '退订要立刻清「已订」记号——不许留着骗下次')
+  const last = w.log[w.log.length - 1]
+  assert.match(last.url, /subscribe/, '切走发的是退订')
+  const off = JSON.parse(last.opts.body)
+  assert.equal(off.on, false, 'on:false 才是退订')
+  assert.equal(off.clientId, 'c1', '退的是当初订的那条连接')
+
+  // POST 回 404：这条流不在了（服务重启/断流没重连），当场 connect() 重连一次。
+  const w2 = wiringHarness((url, opts) => (opts && opts.method === 'POST'
+    ? Promise.reject(Object.assign(new Error('gone'), { status: 404 }))
+    : Promise.resolve({ ok: true, turns: [], seq: 0 })))
+  w2.h.syncTrajectorySubscription()
+  await tick()
+  assert.equal(w2.connects(), 1, '404 = 流没了：立刻重连')
+})
+
+test('轨迹接线：收帧按 id 增补改、seq 只进不退，跳一截不硬拼而是 GET 重拉', () => {
+  const w = wiringHarness(() => new Promise(() => {})) // GET 挂起：别让它把 state 换掉
+  const f1 = {
+    epoch: 'E1', seq: 1, sessionId: 's1', turn: 1,
+    add: [{
+      id: 'k1', turn: 1, step: 1, kind: 'tool', name: '读文件',
+      args: null, summary: null, output: '甲', state: 'ok',
+      error: null, truncated: null, timestamp: 1,
+    }],
+    update: [],
+  }
+  w.h.receiveTrajectoryFrame(f1)
+  assert.equal(w.state.trajectory.length, 1, '没见过的轮次立一组')
+  assert.equal(w.state.trajectory[0].entries.length, 1)
+  assert.equal(w.state.trajectory[0].entries[0].output, '甲')
+  assert.equal(w.state.trajectorySeq, 1, 'seq 收下')
+
+  w.h.receiveTrajectoryFrame(f1)
+  assert.equal(w.state.trajectory[0].entries.length, 1, '同帧重放按 id 认出是同一条，不长第二份')
+
+  w.h.receiveTrajectoryFrame({
+    seq: 2, turn: 1,
+    update: [{ id: 'k1', state: 'error', output: '读失败', error: { name: 'Error', code: null, reason: '撞墙了' } }],
+  })
+  const e = w.state.trajectory[0].entries[0]
+  assert.equal(e.state, 'error', 'update 改状态')
+  assert.equal(e.output, '读失败', 'update 改正文')
+  assert.equal(e.error.reason, '撞墙了', 'update 带上失败身份')
+  assert.equal(w.state.trajectorySeq, 2, 'seq 跟着涨')
+
+  w.h.receiveTrajectoryFrame({ seq: 3, turn: 1, update: [{ id: 'k1', state: 'stopped' }] })
+  assert.equal(w.state.trajectory[0].entries[0].output, '读失败',
+    '补丁里没带 output：不许把已有正文清空')
+
+  w.h.receiveTrajectoryFrame({ seq: 2, turn: 1, update: [{ id: 'k1', state: 'ok' }] })
+  assert.equal(w.state.trajectorySeq, 3, '旧帧（seq 更小）不许把 seq 退回去')
+
+  w.h.receiveTrajectoryFrame({ seq: 9, turn: 1, update: [] })
+  assert.equal(w.state.trajectorySeq, 9, '跳帧时 seq 先记到帧给的位置')
+  assert.ok(w.log.some((c) => /\/mini\/api\/trajectory\?/.test(c.url)),
+    '中间丢过帧：不硬拼增量，GET 重拉整份')
+  assert.equal(w.state.trajectory[0].entries[0].output, '读失败',
+    '重拉回来之前手里那份不许先被清掉')
+
+  w.h.receiveTrajectoryFrame({ epoch: 'E2', seq: 1, turn: 1, add: [] })
+  assert.deepEqual(w.state.trajectory, [], '换代（服务重启过）：旧代那份整份作废')
+  assert.equal(w.state.trajectorySeq, 0, 'seq 跟着换代归零')
+})
+
+test('轨迹接线：GET 是整份替换——旧组清空、seq 对齐，说明与 loading 一起收下', () => {
+  const w = wiringHarness()
+  w.state.trajectory = [{ turn: 9, state: 'ok', reason: null, entries: [trajTool('old')] }]
+  w.state.trajectorySeq = 3
+  w.state.trajectoryLoading = true
+  w.h.setTrajectoryFromGet({
+    ok: true, seq: 12,
+    turns: [{ turn: 2, state: 'running', reason: null, entries: [] }],
+    truncated: true, note: '轨迹只显示最近一段（读取上限：120 条）', loading: false,
+  })
+  assert.equal(w.state.trajectory.length, 1)
+  assert.equal(w.state.trajectory[0].turn, 2, '服务端那份整个换进来——不是往旧的里合')
+  assert.equal(w.state.trajectorySeq, 12, 'seq 跟服务端对齐')
+  assert.equal(w.state.trajectoryTruncated, true, '「不是全部」的标志收下')
+  assert.equal(w.state.trajectoryNote, '轨迹只显示最近一段（读取上限：120 条）', '原句收下')
+  assert.equal(w.state.trajectoryLoading, false, 'loading 如实收下')
+
+  const kept = w.state.trajectory
+  w.h.setTrajectoryFromGet({ ok: false, seq: 99, turns: [{ turn: 7, entries: [] }] })
+  assert.equal(w.state.trajectorySeq, 12, '没读成的 GET 不许动手里那份')
+  assert.strictEqual(w.state.trajectory, kept, 'ok 不为 true：整个当没看见')
+})
+
+test('轨迹接线：loading 随拉取起落——发出即真，回包/出错归假，出错写明原因', async () => {
+  const w = wiringHarness()
+  w.state.mode = 'chat'
+  w.h.requestTrajectory()
+  assert.equal(w.log.length, 0, '不是完整模式不拉')
+  assert.equal(w.state.trajectoryLoading, false)
+
+  w.state.mode = 'full'
+  w.state.boundSessionId = ''
+  w.h.requestTrajectory()
+  assert.equal(w.log.length, 0, '没绑会话不拉——拉一个空 sessionId 只是白跑')
+  assert.deepEqual(w.state.trajectory, [], '没绑会话时手里那份清空')
+  assert.equal(w.state.trajectoryLoading, false, '没在拉就别说在拉')
+
+  w.state.boundSessionId = 's1'
+  w.h.requestTrajectory()
+  assert.equal(w.log.length, 1)
+  assert.match(w.log[0].url, /\/mini\/api\/trajectory\?sessionId=s1/)
+  assert.equal(w.state.trajectoryLoading, true, '请求在途：loading 该是真的')
+  await tick()
+  assert.equal(w.state.trajectoryLoading, false, '回包收下：loading 归假')
+
+  const w2 = wiringHarness(() => Promise.reject(new Error('网络断了')))
+  w2.h.requestTrajectory()
+  assert.equal(w2.state.trajectoryLoading, true, '发出那一刻先置真')
+  await tick()
+  assert.equal(w2.state.trajectoryLoading, false, '读失败也归假——不能一直转')
+  assert.equal(w2.state.trajectoryNote, '读不到这个会话的过程。',
+    '读不到就说读不到，不冒充「没有过程」')
+})

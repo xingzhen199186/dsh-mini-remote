@@ -878,6 +878,14 @@
     background: var(--panel-2); border: 1px solid var(--line); border-radius: var(--r);
     color: var(--muted); font-size: 12.5px; line-height: 1.6;
   }
+  /* 四类状态的字样：只上色、零动效（动效守卫只认那五种关键帧），颜色全取现成令牌。 */
+  .traj-err { color: var(--err); }   /* 失败首行：折叠处一眼可见 */
+  .traj-run { color: var(--run); }   /* 进行中：有标识，但不闪 */
+  .traj-note {
+    margin: 0 0 10px; padding: 6px 8px;
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: var(--r);
+    color: var(--muted); font-size: 12.5px; line-height: 1.6;
+  }
 
   /* ---------- 设置抽屉 ---------- */
   #settings {
@@ -2991,7 +2999,12 @@
       trajEntryOpen = {};
     }
     var traj = trajectoryHtml();
-    if (traj) replyEl.innerHTML = replyEl.innerHTML + traj;
+    var notice = trajNoticeHtml();
+    // 说明（「这份轨迹不是全部」/读取失败的原因）和组一起包进 .traj：排在聊天之后、
+    // 轨迹组之前；两头都没有就整个不包——空态观感和聊天保持一致。
+    if (traj || notice) {
+      replyEl.innerHTML = replyEl.innerHTML + '<div class="traj">' + notice + traj + '</div>';
+    }
     // 点击走容器委托（和复制按钮同一根线）：轨迹区每次重绘都是全新 HTML，
     // 逐个绑必漏；绑一次就够——回调认的是 data 属性，不是元素本身。
     if (!trajBound) { trajBound = true; replyEl.addEventListener('click', onTrajectoryClick); }
@@ -3051,16 +3064,50 @@
   }
 
   /**
+   * 失败首行。reason 的第一行；reason 取不到就用错误名/错误码，都没有就如实说
+   * 「这一步失败了」——**不编原因**（和 lib/trajectory.js readError 同一条口径）。
+   */
+  function trajErrLine(e) {
+    if (!e || !e.error) return '';
+    var r = typeof e.error.reason === 'string' ? e.error.reason : '';
+    if (!r && typeof e.error.name === 'string' && e.error.name) r = e.error.name;
+    if (!r && typeof e.error.code === 'string' && e.error.code) r = e.error.code;
+    if (!r) return '这一步失败了';
+    return r.split('\n')[0];
+  }
+  /** 组头上的失败首行：组里第一条带失败身份的条目的那一行。 */
+  function trajGroupErrLine(g) {
+    if (!g.entries) return '';
+    for (var i = 0; i < g.entries.length; i++) {
+      var line = trajErrLine(g.entries[i]);
+      if (line) return line;
+    }
+    return '';
+  }
+
+  /**
+   * 截断标注。N 是**原始总字符数**（truncated 里的 chars 才是留下的那段），措辞照
+   * lib/trajectory.js clipForTrajectory 的原句。服务端在正文尾部写了同一句就不再
+   * 重复；没写（truncated 字段在、句子不在）就地补上——绝不静默砍尾。
+   */
+  function trajTruncNote(t, text) {
+    if (!t || typeof t.total !== 'number') return '';
+    if (String(text).indexOf('已截断') >= 0) return '';
+    return '\n… 已截断，共 ' + t.total + ' 字符';
+  }
+
+  /**
    * 一条的正文。工具是「参数 + 结果」两段（都可能还没有——running 时结果未回），
    * 思考只有想的内容本身。两头都没有就不开这一层，免得点出一个空框。
    */
   function trajEntryBody(e) {
+    var tr = e.truncated || {};
     var parts = [];
     if (e.kind === 'think') {
-      if (e.output) parts.push(e.output);
+      if (e.output) parts.push(e.output + trajTruncNote(tr.think, e.output));
     } else {
-      if (e.args) parts.push('参数：\n' + e.args);
-      if (e.output) parts.push('结果：\n' + e.output);
+      if (e.args) parts.push('参数：\n' + e.args + trajTruncNote(tr.args, e.args));
+      if (e.output) parts.push('结果：\n' + e.output + trajTruncNote(tr.output, e.output));
     }
     if (!parts.length) return '';
     return '<div class="traj-body">' + escapeHtml(parts.join('\n\n')) + '</div>';
@@ -3070,9 +3117,12 @@
   function trajEntryHtml(e) {
     var step = typeof e.step === 'number' ? '第 ' + e.step + ' 步 · ' : '';
     var label = e.kind === 'think' ? '思考' : '工具 ' + escapeHtml(e.name || '（没写名字）');
+    // 失败与进行中都顶在这一行上（折叠处一眼可见）：失败给错误首行，跑着给明确字样。
+    var tail = e.summary ? ' · ' + escapeHtml(e.summary) : '';
+    if (e.error) tail += ' · <span class="traj-err">' + escapeHtml(trajErrLine(e)) + '</span>';
+    else if (e.state === 'running') tail += ' · <span class="traj-run">进行中</span>';
     var row = '<button type="button" class="traj-row" data-traj-entry="'
-      + escapeHtml(e.id) + '">' + step + label
-      + (e.summary ? ' · ' + escapeHtml(e.summary) : '') + '</button>';
+      + escapeHtml(e.id) + '">' + step + label + tail + '</button>';
     return '<div class="traj-entry">' + row
       + (trajEntryIsOpen(e.id) ? trajEntryBody(e) : '') + '</div>';
   }
@@ -3081,9 +3131,16 @@
   function trajGroupHtml(g) {
     var open = trajGroupIsOpen(g);
     var turn = typeof g.turn === 'number' ? '第 ' + g.turn + ' 轮' : '本轮';
+    // 状态词：跑着的时候挂 .traj-run 上进行色（静止不闪），其余状态不上色。
+    var state = g.state === 'running'
+      ? '<span class="traj-run">' + trajStateLabel(g.state) + '</span>'
+      : trajStateLabel(g.state);
+    // 失败首行也顶到组头上：收着的时候，错误原因必须一眼可见。
+    var err = trajGroupErrLine(g);
+    if (err) err = ' · <span class="traj-err">' + escapeHtml(err) + '</span>';
     var head = '<button type="button" class="traj-head" data-traj-group="'
       + escapeHtml(String(g.turn)) + '">' + (open ? '▾' : '▸') + ' '
-      + turn + ' · ' + g.entries.length + ' 步 · ' + trajStateLabel(g.state) + '</button>';
+      + turn + ' · ' + g.entries.length + ' 步 · ' + state + err + '</button>';
     var entries = open
       ? '<div class="traj-entries">' + g.entries.map(trajEntryHtml).join('') + '</div>'
       : '';
@@ -3091,15 +3148,30 @@
   }
 
   /**
-   * 整个轨迹区。没东西就返回空串——「无轨迹且不在 loading」时完整模式的观感和
-   * 聊天一样，这是预期；loading 时那句注记垫在最前面，是另一件事。
+   * 轨迹区里的组内容（不含最外层 .traj——包不包由 renderFull 看它和说明有没有货
+   * 决定）。没东西就返回空串——「无轨迹且不在 loading」时完整模式的观感和聊天
+   * 一样，这是预期；loading 时那句注记垫在最前面，是另一件事。
    */
   function trajectoryHtml() {
     var groups = (state.trajectory || []).filter(function (g) {
       return g && Array.isArray(g.entries) && g.entries.length > 0;
     });
     if (!groups.length) return '';
-    return '<div class="traj">' + groups.map(trajGroupHtml).join('') + '</div>';
+    return groups.map(trajGroupHtml).join('');
+  }
+
+  /**
+   * 服务端「这份轨迹不是全部」的说明（state.trajectoryNote / trajectoryTruncated）。
+   * 给了原句就原样显示；只有截断标志没给句子时补一句大实话兜底。**存在才显示**——
+   * 一个字都没有时不许占地方，完整模式的观感必须和聊天一致。轨迹空了但服务端留了
+   * 话（读取失败那条路）也要说：「读不到」不等于「没有过程」。
+   */
+  function trajNoticeHtml() {
+    if (state.trajectoryNote) {
+      return '<div class="traj-note">' + escapeHtml(state.trajectoryNote) + '</div>';
+    }
+    if (state.trajectoryTruncated) return '<div class="traj-note">这份轨迹不是全部。</div>';
+    return '';
   }
 
   // 轨迹区的点击全走这一根委托。先认条目再认组头——行和头各带各的 data 属性，
