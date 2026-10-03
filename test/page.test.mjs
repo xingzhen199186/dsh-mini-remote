@@ -4102,6 +4102,25 @@ test('完整模式：已结束的两步组默认收成一行，切开才见条�
   assert.equal(typeof h.replyEl.listeners.click, 'function', '点击走容器委托，不逐条绑')
 })
 
+test('完整模式：turn/end 收官的组按服务端真实字典（done）叫「已完成」，不许误标进行中', () => {
+  // 服务端收官走 turnStateOf：completed → 'done'（lib/trajectory.js:140），组状态字典里
+  // 从来没有 'ok'——真机上组头全是 done，认不出就落到兜底「进行中」，跑完的轮全在转圈。
+  const h = trajHarness()
+  h.state.trajectory = [{
+    turn: 7, state: 'done', reason: 'completed',
+    entries: [
+      trajTool('d1', { turn: 7 }),
+      trajTool('d2', { turn: 7, step: 2, name: '写文件', summary: 'b.txt', output: '写完了乙' }),
+    ],
+  }]
+  h.render()
+  const out = h.replyEl.innerHTML
+  assert.match(out, /data-traj-group="7"/, '组头在')
+  assert.match(out, /第 7 轮 · 2 步 · 已完成/, 'done 要认成「已完成」')
+  assert.ok(!/· 进行中/.test(out), '跑完的组头不许再说进行中')
+  assert.ok(!out.includes('data-traj-entry='), '已结束的两步组默认收着（9.3-3 不变）')
+})
+
 test('完整模式：running 的组不收，条目一直看得见', () => {
   const h = trajHarness()
   h.state.trajectory = [{

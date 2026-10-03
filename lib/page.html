@@ -3072,7 +3072,10 @@
     return trajQuery !== '' && trajEntryHit(e);
   }
   function trajStateLabel(s) {
-    return s === 'ok' ? '已完成' : s === 'error' ? '出错了'
+    // 组状态走的是服务端 turnStateOf 那套字典（收官是 'done'，trajectory.js:140）；
+    // 条目那套的 'ok' 也认——两套都指「跑完了」。认不出的才落「进行中」：
+    // 这个兜底在真机上坑过一次：done 不在表里，跑完的轮全显示「进行中」。
+    return s === 'done' || s === 'ok' ? '已完成' : s === 'error' ? '出错了'
       : s === 'stopped' ? '已停止' : '进行中';
   }
 
