@@ -58,7 +58,7 @@ function makeCtx(services, directNames) {
   })
 }
 
-function mockCtx({ attachments, sessionQuery, commands, sessionController, subagents, sessionProjections, sessions, agentPresets, workspaceRegistry } = {}) {
+function mockCtx({ attachments, sessionQuery, commands, sessionController, subagents, sessionProjections, sessions, agentPresets, workspaceRegistry, pluginManager, loader, pluginPackages } = {}) {
   const handlers = new Map()
   // `ctx.on` 的第三个参数（注册选项）也要留下来：提问钩子靠 `prepend` 才能排到
   // 电脑浏览器前面，而漏掉它**不报错、只是永远轮不到**。这种错只能靠断言钉住。
@@ -124,12 +124,20 @@ function mockCtx({ attachments, sessionQuery, commands, sessionController, subag
       ...(agentPresets ? { agentPresets } : {}),
       // 工作区注册表：建会话要拿它核对「有没有这个工作区」（tree.createSessionIn）。
       ...(workspaceRegistry ? { workspaceRegistry } : {}),
+      // 插件那三件（2026-10-04 手机端「插件」页面）：
+      //   pluginManager  —— npm 包清单（官方可装的 + 第三方）；
+      //   loader         —— Cordis Loader 的实时条目表，**内置插件**的真相在这儿；
+      //   pluginPackages —— 显示用的本地化标题/说明。
+      // 三个都可缺席：缺席时那两块各自如实说读不到，不拿空清单充数。
+      ...(pluginManager ? { pluginManager } : {}),
+      ...(loader ? { loader } : {}),
+      ...(pluginPackages ? { pluginPackages } : {}),
     }, ['agents', 'logger', 'on', 'effect']),
   }
 }
 
 /** 起一个被测插件实例，返回访问它所需的一切。 */
-async function bootPlugin({ agents = {}, config = {}, attachments = null, sessionQuery = null, commands = null, stored = null, sessionController = null, subagents = null, sessionProjections = null, sessions = null, agentPresets = null, workspaceRegistry = null } = {}) {
+async function bootPlugin({ agents = {}, config = {}, attachments = null, sessionQuery = null, commands = null, stored = null, sessionController = null, subagents = null, sessionProjections = null, sessions = null, agentPresets = null, workspaceRegistry = null, pluginManager = null, loader = null, pluginPackages = null } = {}) {
   const home = mkdtempSync(join(tmpdir(), 'dsh-mini-home-'))
   process.env.DSH_HOME = home
 
@@ -140,7 +148,7 @@ async function bootPlugin({ agents = {}, config = {}, attachments = null, sessio
   }
 
   const port = await freePort()
-  const mock = mockCtx({ attachments, sessionQuery, commands, sessionController, subagents, sessionProjections, sessions, agentPresets, workspaceRegistry })
+  const mock = mockCtx({ attachments, sessionQuery, commands, sessionController, subagents, sessionProjections, sessions, agentPresets, workspaceRegistry, pluginManager, loader, pluginPackages })
   const { ctx, handlers, handlerOptions, agents: agentMap } = mock
   for (const [id, agent] of Object.entries(agents)) agentMap.set(id, agent)
 
@@ -3400,3 +3408,96 @@ test('Agent 模式：建会话把选中的模式带给 DSH 的 create', async (t
   assert.equal(out.ok, true, `建失败了：${JSON.stringify(out)}`)
   assert.equal(calls[0].agentPreset, 'write', '手机点了哪个模式，create 就收到哪个')
 })
+
+/**
+ * 手机端「插件」页面（2026-10-04）。
+ *
+ * 要点是**内置插件到底是什么粒度**。DSH 是「一切皆插件、无特权核心」——一整套系统
+ * 由几百个插件模块拼成，所以「内置插件」的真相在 Cordis Loader 的实时条目表里，
+ * 不在 npm 包清单里。2026-10-04 用户真机看到内置插件只有 6 个，而 PC 的「内置插件」
+ * 页写着「全局 241 + 会话 29」，一眼就看出不对：那一版拿 `listBundles()` 充了数。
+ */
+test('插件页面：内置插件是 Loader 的条目表，不是 npm 包清单', async (t) => {
+  const baseUrl = 'I:\\proj'
+  /** 造一条 Loader 条目。分组、disabled、fiber 三个字段是要区分开的三件事。 */
+  const entry = (id, name, extra = {}) => ({
+    id,
+    options: { name, group: extra.group === true },
+    disabled: extra.disabled === true,
+    ...(extra.fiber === undefined ? {} : { fiber: extra.fiber }),
+    parent: { tree: { ctx: { baseUrl } } },
+  })
+
+  const p = await bootPlugin({
+    pluginPackages: {
+      metaOf: (name) => ({
+        '@deepseek-ai/dsh-tool-fs': { title: '文件工具', description: '读写文件' },
+        '@deepseek-ai/dsh-persona': { title: { en: 'Persona', 'zh-CN': '人设' } },
+      })[name],
+    },
+    loader: {
+      entries: function* () {
+        yield entry('g1', './group.ts', { group: true }) // 分组只是容器，不是插件
+        yield entry('e1', '@deepseek-ai/dsh-tool-fs', { fiber: { state: 2 } })
+        yield entry('e2', '@deepseek-ai/dsh-persona', { fiber: { state: 0 } })
+        yield entry('e3', 'dsh-advisor-group', { disabled: true })
+      },
+    },
+    agentPresets: {
+      compositionInventory: async () => [{
+        id: 'standard', name: '标准模式', isDefault: true,
+        rows: [
+          { entryId: 'r1', moduleName: '@deepseek-ai/dsh-tool-bash', enabled: true, fiberState: 2 },
+          { entryId: null, moduleName: '@deepseek-ai/dsh-tool-pwsh', enabled: 'conditional' },
+        ],
+      }],
+    },
+    pluginManager: {
+      listBundles: async () => [
+        {
+          name: '@deepseek-ai/dsh-agent-teams', optional: true, installed: false, enabled: true,
+          meta: { title: { 'zh-CN': '智能体团队' }, description: { 'zh-CN': '团队协作' } },
+        },
+        { name: 'dsh-advisor-group', installed: true, enabled: true, description: '顾问群' },
+        { name: '@deepseek-ai/dsh-base', installed: true, enabled: true },
+      ],
+    },
+  })
+  t.after(p.stop)
+
+  const out = await (await fetch(`${p.base}/mini/api/plugins?token=${p.token}`)).json()
+  assert.equal(out.ok, true)
+
+  // ① 内置＝Loader 条目表（分组跳过），**不是 npm 包的个数**。
+  assert.equal(out.entries.length, 3, '全局插件该是 Loader 的条目，不是包')
+  assert.deepEqual(out.entries.map((e) => e.title), ['文件工具', '人设', 'advisor-group'],
+    '有标题就用标题（本地化对象取中文，字符串原样）；没有才把模块名压成短名：dsh-advisor-group → advisor-group')
+  // ② Fiber 状态码要译成词：2=运行中、0=待定；没有 fiber 就是 null，别编一个。
+  assert.deepEqual(out.entries.map((e) => e.phase), ['active', 'pending', null])
+  assert.deepEqual(out.entries.map((e) => e.enabled), [true, true, false],
+    'disabled 的条目如实标已停用')
+
+  // ③ 会话插件＝预设的组合行。'conditional'（带 !!js 条件、要挂载才定得下来）
+  //    和 false（确实停用）是两件事，不能混成一个。
+  assert.equal(out.presets.length, 1)
+  assert.equal(out.presets[0].name, '标准模式')
+  assert.deepEqual(out.presets[0].rows.map((r) => [r.title, r.enabled, r.conditional]), [
+    ['tool-bash', true, false],
+    ['tool-pwsh', false, true],
+  ])
+})
+
+test('插件页面：三块各带各的错，一块读不到不把另两块弄没', async (t) => {
+  const p = await bootPlugin({
+    pluginManager: { listBundles: async () => { throw new Error('注册表问不到') } },
+    // loader 缺席 = 这台电脑没提供（真机上不会有，但契约里是可选的，得如实说）
+  })
+  t.after(p.stop)
+
+  const out = await (await fetch(`${p.base}/mini/api/plugins?token=${p.token}`)).json()
+  assert.equal(out.bundlesError, '注册表问不到', '包清单读不到要带原话回去')
+  assert.equal(out.builtinError, 'unavailable', 'Loader 不在就如实说没有，不拿空清单充数')
+  assert.deepEqual(out.entries, [])
+  assert.deepEqual(out.bundles, [])
+})
+

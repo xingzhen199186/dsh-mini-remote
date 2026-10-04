@@ -170,6 +170,9 @@
      得自己补回同一个 16px——少这一笔，文字就贴着屏幕边（用户报的「两侧没有留白」）。 */
   .plugin-group-title { font-size: 13px; color: var(--muted); margin: 18px 16px 6px; }
   .plugin-group-title:first-child { margin-top: 0; }
+  /* 内置插件里的二级小标题（全局插件 / 会话插件 / 预设名）与读不到时那一句。 */
+  .plugin-subtitle { font-size: 12px; color: var(--dim); margin: 12px 16px 4px; }
+  .plugin-note { font-size: 12px; color: var(--err); margin: 6px 16px; }
   .plugin-row {
     display: flex; align-items: center; gap: 10px;
     padding: 12px 16px; border-bottom: 1px solid var(--line);
@@ -183,6 +186,7 @@
   .plugin-badge { flex: 0 0 auto; font-size: 10px; padding: 2px 6px; border-radius: var(--r); }
   .plugin-badge.on { color: var(--ok); border: 1px solid var(--ok); }
   .plugin-badge.off { color: var(--dim); border: 1px solid var(--line); }
+  .plugin-badge.err { color: var(--err); border: 1px solid var(--err); }
   /* 行负着左右两边的 16px：让分隔线横贯整个抽屉，而不是在里面缩一截。 */
   .sa-list { margin: 0 -16px; }
   .sa-row {
@@ -5542,58 +5546,122 @@
 
   function loadPlugins() {
     var listEl = $('pluginsList');
-    listEl.innerHTML = '<div class="sa-none sa-none-indent">正在读取插件列表…</div>';
+    listEl.innerHTML = pluginNote('正在读取插件列表…');
     api('/mini/api/plugins').then(function (r) {
-      if (!r || !r.ok) {
-        listEl.innerHTML = '<div class="sa-none sa-none-indent">读不到插件列表：'
-          + escapeHtml((r && r.reason) || '服务未提供') + '</div>';
-        return;
-      }
-      var bundles = r.bundles || [];
-      // 分类和 PC 端插件页同一套口径（dsh-client-ui-plugin-manager）：
-      //   官方 = optional 且还没装；已安装 = 装过、或者本来就不是可选项。
-      var official = bundles.filter(function (b) { return b.optional && !b.installed; });
-      var installed = bundles.filter(function (b) { return b.installed || !b.optional; });
-      // 已安装再拆两堆：内置（DSH 自己的 @deepseek-ai/ 包）和第三方（用户自己装的）。
-      var builtin = installed.filter(function (b) { return b.name.indexOf('@deepseek-ai/') === 0; });
-      var thirdParty = installed.filter(function (b) { return b.name.indexOf('@deepseek-ai/') !== 0; });
-
-      var html = '';
-      html += pluginGroup('官方', official);
-      html += pluginGroup('已安装 · 内置', builtin);
-      html += pluginGroup('已安装 · 第三方', thirdParty);
-      if (!html) html = '<div class="sa-none sa-none-indent">没有插件。</div>';
-      listEl.innerHTML = html;
+      listEl.innerHTML = renderPlugins(r || {});
     }).catch(function (err) {
-      listEl.innerHTML = '<div class="sa-none sa-none-indent">读不到插件列表：'
-        + escapeHtml(err.message || '出错了') + '</div>';
+      listEl.innerHTML = pluginNote('读不到插件列表：' + escapeHtml(err.message || '出错了'), true);
     });
   }
 
+  /**
+   * 三块，和 PC 的「插件」页 + 「内置插件」页对齐：
+   *
+   *   官方          —— 能装还没装的（npm 包那一层）
+   *   已安装 · 内置 —— **Cordis Loader 的实时条目表**，分「全局插件」和「会话插件」。
+   *                    这才是 DSH 的本体粒度：一整套系统是几百个插件模块拼起来的。
+   *                    （2026-10-04 用户指出：内置插件拿 npm 包充数是不对的，那只有几个。）
+   *   已安装 · 第三方 —— 用户自己装的包。DSH 自家的包不在这里列——它们在上面
+   *                    以「模块」的身份出现，那才是「一切皆插件」该有的样子。
+   */
+  function renderPlugins(r) {
+    var bundles = r.bundles || [];
+    var official = bundles.filter(function (b) { return b.optional && !b.installed; });
+    var third = bundles.filter(function (b) {
+      return b.installed && b.name.indexOf('@deepseek-ai/') !== 0;
+    });
+    var entries = r.entries || [];
+    var presets = r.presets || [];
+    var sessionRows = 0;
+    presets.forEach(function (p) { sessionRows += (p.rows || []).length; });
+
+    var html = '';
+    if (r.bundlesError) html += pluginNote('包清单读不到：' + escapeHtml(r.bundlesError), true);
+    html += pluginGroup('官方', official, bundleRow);
+
+    if (r.builtinError) {
+      html += pluginNote('内置插件读不到：' + escapeHtml(r.builtinError), true);
+    } else {
+      html += pluginGroupTitle('已安装 · 内置', entries.length + sessionRows);
+      if (entries.length) {
+        html += pluginSubtitle('全局插件', entries.length);
+        html += entries.map(invRow).join('');
+      }
+      if (sessionRows) {
+        html += pluginSubtitle('会话插件', sessionRows);
+        presets.forEach(function (p) {
+          var rows = p.rows || [];
+          if (!rows.length) return;
+          // 只有一个预设就不必再套一层标题；多预设才把预设名露出来（PC 那边是个下拉）。
+          if (presets.length > 1) html += pluginSubtitle(p.name, rows.length);
+          if (p.broken) html += pluginNote('这个预设的组合读不出来：' + escapeHtml(p.broken), true);
+          html += rows.map(invRow).join('');
+        });
+      }
+      if (!entries.length && !sessionRows) html += pluginNote('这台电脑没报出内置插件。');
+    }
+
+    html += pluginGroup('已安装 · 第三方', third, bundleRow);
+    if (!html) html = pluginNote('没有插件。');
+    return html;
+  }
+
+  function pluginNote(text, isErr) {
+    return '<div class="' + (isErr ? 'plugin-note' : 'sa-none sa-none-indent') + '">' + text + '</div>';
+  }
+
+  function pluginGroupTitle(title, count) {
+    return '<div class="plugin-group-title">' + escapeHtml(title) + ' ' + count + '</div>';
+  }
+
+  function pluginSubtitle(title, count) {
+    return '<div class="plugin-subtitle">' + escapeHtml(title) + ' ' + count + '</div>';
+  }
+
   /** 一堆插件：标题 + 若干行。空的那堆整个不画（不占地方、也不说假话）。 */
-  function pluginGroup(title, rows) {
+  function pluginGroup(title, rows, rowFn) {
     if (!rows.length) return '';
-    return '<div class="plugin-group-title">' + escapeHtml(title) + ' ' + rows.length + '</div>'
-      + rows.map(pluginRow).join('');
+    return pluginGroupTitle(title, rows.length) + rows.map(rowFn).join('');
+  }
+
+  function rowHtml(name, desc, badge, descCls) {
+    return '<div class="plugin-row">'
+      + '<div class="plugin-info">'
+      + '<span class="plugin-name">' + escapeHtml(name) + '</span>'
+      + (desc ? '<span class="plugin-desc' + (descCls || '') + '">' + escapeHtml(desc) + '</span>' : '')
+      + '</div>'
+      + (badge ? '<span class="plugin-badge ' + badge[0] + '">' + escapeHtml(badge[1]) + '</span>' : '')
+      + '</div>';
   }
 
   /**
-   * 一行插件。显示名用服务端给的 `title`（本地化标题），没有就是包名——
-   * 官方插件在 PC 上显示的正是「智能体团队」这类中文名，第三方插件多半只有包名。
-   * 出问题的那一笔（if 有）照实说，不装作没事。
+   * 一行「包」（官方 / 第三方）。显示名用服务端给的 `title`（本地化标题），
+   * 没有就是包名——官方插件在 PC 上显示的正是「智能体团队」这类中文名。
    */
-  function pluginRow(b) {
-    var badge = b.enabled
-      ? '<span class="plugin-badge on">已启用</span>'
-      : '<span class="plugin-badge off">已停用</span>';
+  function bundleRow(b) {
     var desc = b.description || '';
     if (b.problem) desc = desc ? desc + ' · ' + b.problem : b.problem;
-    return '<div class="plugin-row">'
-      + '<div class="plugin-info">'
-      + '<span class="plugin-name">' + escapeHtml(b.title || b.name) + '</span>'
-      + (desc ? '<span class="plugin-desc' + (b.problem ? ' plugin-problem' : '') + '">'
-          + escapeHtml(desc) + '</span>' : '')
-      + '</div>' + badge + '</div>';
+    return rowHtml(b.title || b.name, desc,
+      [b.enabled ? 'on' : 'off', b.enabled ? '已启用' : '已停用'],
+      b.problem ? ' plugin-problem' : '');
+  }
+
+  /**
+   * 一行「内置插件」（Loader 条目 / 预设组合行）。`title` 是服务端压好的短名
+   * （`@deepseek-ai/dsh-tool-fs` → `tool-fs`），照 PC 的内置插件面板。
+   */
+  function invRow(e) {
+    return rowHtml(e.title || e.moduleName, e.description || '', invBadge(e));
+  }
+
+  /** 运行时状态。**问不到就不编**——预设没挂载时那一行本来就没有运行状态。 */
+  function invBadge(e) {
+    if (e.phase === 'failed') return ['err', '失败'];
+    if (e.conditional) return ['off', '按条件'];
+    if (!e.enabled) return ['off', '已停用'];
+    if (e.phase === 'active') return ['on', '运行中'];
+    if (e.phase === 'loading' || e.phase === 'pending') return ['off', '加载中'];
+    return null;
   }
   $('subagentsBack').addEventListener('click', saToList);
   saPanel.addEventListener('click', function (e) {

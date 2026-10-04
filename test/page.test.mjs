@@ -5029,3 +5029,76 @@ test('完整模式·穿插：该轮一条消息都没有（排队被滤掉等）
   assert.ok(out.indexOf('先问') < out.indexOf('data-traj-group="9"'),
     '兜底落页尾，不挤在别人中间')
 })
+
+/**
+ * 插件页面的分组（2026-10-04）。
+ *
+ * 这一块的**分组口径**是要紧的，光看渲染结果不容易发现分错：
+ *   · 官方   = 能装还没装的（optional 且未安装）
+ *   · 第三方 = 用户自己装的（已装，且不是 DSH 自家的 @deepseek-ai/）
+ *   · 内置   = **Loader 的条目表**：全局插件 + 会话插件两块。
+ *             DSH 自家的包不在「第三方」里出现——它们以「模块」的身份在「内置」里，
+ *             那才是「一切皆插件」该有的粒度。
+ *
+ * 纯函数整块抠出来跑（切片里没有 DOM、没有网络），锚点对不上会立刻断言失败。
+ */
+const PS = 'function renderPlugins'
+const PE = "$('subagentsBack')"
+const ps = html.indexOf(PS)
+// 从 ps 之后再找 PE：`$('subagentsBack')` 在切片起点**之前**还有一处用法
+// （切清单视图那两行），从头找会切出一个反着的区间。
+const pe = html.indexOf(PE, ps)
+assert.ok(ps > 0, `在 page.html 里找不到锚点「${PS}」`)
+assert.ok(pe > ps, `在 page.html 里找不到锚点「${PE}」`)
+
+// eslint-disable-next-line no-new-func
+const renderPlugins = new Function('escapeHtml',
+  `${html.slice(ps, pe)}\nreturn renderPlugins;`)(md.escapeHtml)
+
+test('插件页面：官方 / 已安装·内置 / 已安装·第三方 的分组口径', () => {
+  const out = renderPlugins({
+    bundles: [
+      { name: '@deepseek-ai/dsh-agent-teams', title: '智能体团队', optional: true, installed: false, enabled: true },
+      { name: '@deepseek-ai/dsh-base', optional: false, installed: true, enabled: true },
+      { name: 'dsh-advisor-group', installed: true, enabled: true, description: '顾问群' },
+    ],
+    entries: [
+      { title: 'tool-fs', enabled: true, phase: 'active' },
+      { title: 'persona', enabled: false, phase: null },
+    ],
+    presets: [{
+      id: 'standard', name: '标准模式', isDefault: true,
+      rows: [{ title: 'tool-bash', enabled: true, phase: 'active' }],
+    }],
+  })
+
+  // 官方只算「可装未装」；DSH 自家的包（dsh-base）不在任何一组里重复出现。
+  assert.match(out, /官方 1/, '官方＝可装未装的那一个')
+  assert.match(out, /智能体团队/, '官方那一条用的是本地化标题')
+  assert.ok(!out.includes('dsh-base'), 'DSH 自家的包不在这两块里重复列——它在「内置」里以模块身份出现')
+  // 第三方只算「用户装的、非 @deepseek-ai/ 的」。
+  assert.match(out, /已安装 · 第三方 1/, '第三方＝用户自己装的那一个')
+  assert.match(out, /advisor-group/, '第三方显示包名')
+  // 内置＝全局条目 + 会话行，两块分开报数。
+  assert.match(out, /已安装 · 内置 3/, '内置的总数是 Loader 条目（2）加会话行（1）')
+  assert.match(out, /全局插件 2/)
+  assert.match(out, /会话插件 1/)
+  assert.match(out, /tool-fs/, '内置条目按短名显示')
+  assert.match(out, /tool-bash/, '会话行也在内置里')
+  // 状态徽标：运行中 / 已停用；预设行没挂载时 phase 为 null，就不编一个状态。
+  assert.match(out, /plugin-badge on">运行中/)
+  assert.match(out, /plugin-badge off">已停用/)
+})
+
+test('插件页面：空的组整个不画，读不到的那块如实说', () => {
+  const empty = renderPlugins({ bundles: [], entries: [], presets: [] })
+  assert.ok(!empty.includes('官方 0'), '一个都没有时不许画一个「官方 0」的空标题')
+  assert.ok(!empty.includes('已安装 · 第三方 0'))
+  assert.match(empty, /没报出内置插件/, '内置那一块空了要如实说，不是静悄悄留白')
+
+  const broken = renderPlugins({ bundlesError: '注册表问不到', builtinError: 'unavailable' })
+  assert.match(broken, /包清单读不到：注册表问不到/)
+  assert.match(broken, /内置插件读不到：unavailable/)
+  assert.ok(!broken.includes('已安装 · 内置'), '读不到就别画一个内置组的壳')
+})
+
