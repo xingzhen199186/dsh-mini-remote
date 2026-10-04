@@ -5159,6 +5159,30 @@ test('插件页面：官方那一栏是「包 + 设置卡片」两样拼的', ()
   assert.match(out, /限制每条命令最多能跑多久、最多输出多少内容。/, '卡片的说明照实显示')
 })
 
+test('插件页面：分组默认可折叠、且默认是收着的', () => {
+  const out = renderPlugins({
+    // 官方＝1 个可开关的包 + 1 张设置卡片
+    bundles: [{
+      name: '@deepseek-ai/dsh-experimental-x', title: '智能体团队',
+      optional: true, installed: false, enabled: true,
+    }],
+    official: [{ kind: 'card', title: '终端', description: '限制每条命令…' }],
+    entries: [{ title: 'tool-fs', enabled: true, phase: 'active' }],
+    presets: [
+      { id: 'a', name: '标准模式', isDefault: true, rows: [{ moduleName: 's', title: 'persona' }] },
+      { id: 'b', name: 'PTC 模式', rows: [{ moduleName: 't', title: 'tool-pwsh' }] },
+    ],
+  })
+
+  assert.match(out, /<details class="plugin-fold depth-1"><summary>官方 2<\/summary>/, '官方那层可折')
+  assert.match(out, /<details class="plugin-fold depth-1"><summary>已安装 · 内置 3<\/summary>/, '内置那层也可折')
+  assert.match(out, /<details class="plugin-fold depth-2"><summary>全局插件 1<\/summary>/, '里面再套一层')
+  assert.match(out, /<details class="plugin-fold depth-2"><summary>会话插件 2/, '会话插件也是可折的一层')
+  assert.match(out, /标准模式（默认） 1<\/summary>/, '多预设时每个预设各一层')
+  // 「默认折叠」不是靠脚本去关的：HTML 里一个 open 都不写，浏览器自然当它收着。
+  assert.ok(!/<details[^>]*\sopen/.test(out), '一个 open 属性都不许有——默认折叠靠的就是这个')
+})
+
 test('插件页面：会话插件分组时，预设名带「（默认）」标记（照 PC）', () => {
   const out = renderPlugins({
     bundles: [], entries: [],

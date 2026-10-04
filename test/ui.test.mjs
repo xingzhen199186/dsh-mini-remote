@@ -275,7 +275,19 @@ test('插件页面：是盖在设置上面的一层浮层，不是掉到输入�
   // ③ 两侧留白。.sa-list 带着 -16px（让分隔线横贯抽屉），行得自己补回来；
   //    少这一笔，文字就贴到屏幕上（用户报的「两侧没有留白」）。
   assert.match(block, /\.plugin-row\s*\{[^}]*padding:\s*\d+px\s+16px/, '行要有左右 16px 内缩')
-  assert.match(block, /\.plugin-group-title\s*\{[^}]*margin:\s*[^;}]*16px/, '分组标题同样内缩 16px')
+  assert.match(block, /\.plugin-fold\s*>\s*summary\s*\{[^}]*margin:\s*[^;}]*16px/,
+    '分组标题（可折那一层的 summary）同样内缩 16px')
+
+  // ⑤ 分组可折可展（2026-10-05 用户要求，默认折叠）：
+  //    用原生 details，所以要把浏览器自带的三角收掉、换成自己画的（不依赖字体）。
+  assert.match(block, /\.plugin-fold\s*>\s*summary[^{]*\{[^}]*list-style:\s*none/,
+    '原生三角要先收掉')
+  assert.match(block, /\.plugin-fold\s*>\s*summary::-webkit-details-marker\s*\{\s*display:\s*none/,
+    'webkit 那边也要收，不然会冒出两个三角')
+  assert.match(block, /\.plugin-fold\s*>\s*summary::before\s*\{[^}]*border-left:\s*\d+px\s+solid\s+currentColor/,
+    '小三角用 CSS 画（currentColor：深浅两套主题自动都对，不依赖字形）')
+  assert.match(block, /\.plugin-fold\[open\]\s*>\s*summary::before/, '展开时三角要换个朝向')
+  assert.ok(!/@keyframes|animation:/.test(block), '折叠不许带动效（全页那条白名单也管着）')
 
   // ④ 主题与护栏：不造新令牌（造了得在浅色里再写一份，漏一边就有元素在那个主题下隐身）、
   //    不碰那两个强调色、圆角只用现成那一档。

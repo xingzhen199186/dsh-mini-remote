@@ -167,11 +167,41 @@
   }
   #plugins.open { display: flex; }
   /* .sa-list 把两边拽到贴屏边（负 16px，让分隔线横贯），所以这里的左右缩进
-     得自己补回同一个 16px——少这一笔，文字就贴着屏幕边（用户报的「两侧没有留白」）。 */
-  .plugin-group-title { font-size: 13px; color: var(--muted); margin: 18px 16px 6px; }
-  .plugin-group-title:first-child { margin-top: 0; }
-  /* 内置插件里的二级小标题（全局插件 / 会话插件 / 预设名）与读不到时那一句。 */
-  .plugin-subtitle { font-size: 12px; color: var(--dim); margin: 12px 16px 4px; }
+     得自己补回同一个 16px——少这一笔，文字就贴着屏幕边（用户报的「两侧没有留白」）。
+
+     ---------- 分组可折可展（2026-10-05 用户要「分组做成可以折叠展开，默认折叠」）----------
+     用浏览器原生的 <details>/<summary>：不写一行脚本去演它、不加关键帧，键盘和读屏
+     也都认（和子智能体那张完工卡片同一个做法，见 .sa-card）。默认收起：HTML 里
+     不写 open 属性就自然是收着的，所以「默认折叠」不需要额外的代码去保证。
+
+     小三角**用 CSS 画**（两条边框拼一个实心三角），不写字形——字形依赖字体，
+     换个机型就可能变成豆腐块；颜色用 currentColor，深浅两套主题自动都对。 */
+  .plugin-fold { margin: 16px 0 0; }
+  .plugin-fold > summary {
+    display: flex; align-items: center; gap: 8px; list-style: none;
+    margin: 0 16px 6px; padding: 4px 0;
+    font-size: 13px; color: var(--muted); cursor: pointer;
+  }
+  .plugin-fold > summary::-webkit-details-marker { display: none; }
+  /* 收起时朝右，展开时朝下——和 PC 那页的分组箭头一个意思。 */
+  .plugin-fold > summary::before {
+    content: ""; flex: 0 0 auto; width: 0; height: 0;
+    border-left: 5px solid currentColor;
+    border-top: 4px solid transparent;
+    border-bottom: 4px solid transparent;
+  }
+  .plugin-fold[open] > summary::before {
+    border-left: 5px solid transparent;
+    border-top: 5px solid currentColor;
+    border-right: 5px solid transparent;
+  }
+  /* 展开的那一组，标题点亮一点，免得收/开两态看着一样。 */
+  .plugin-fold[open] > summary { color: var(--fg); }
+  /* 一级分组（官方 / 已安装）比二级（全局插件 / 会话插件 / 预设名）重一点。 */
+  .plugin-fold.depth-1 > summary { font-size: 14px; margin-top: 4px; }
+  .plugin-fold.depth-2 { margin-top: 10px; }
+  .plugin-fold.depth-2 > summary { font-size: 12px; color: var(--dim); }
+  .plugin-fold.depth-2[open] > summary { color: var(--muted); }
   .plugin-note { font-size: 12px; color: var(--err); margin: 6px 16px; }
   .plugin-row {
     display: flex; align-items: center; gap: 10px;
@@ -5606,30 +5636,31 @@
     if (r.builtinError) {
       html += pluginNote('内置插件读不到：' + escapeHtml(r.builtinError), true);
     } else {
-      html += pluginGroupTitle('已安装 · 内置', entries.length + sessionRows);
-      if (entries.length) {
-        html += pluginSubtitle('全局插件', entries.length);
-        html += entries.map(invRow).join('');
-      }
+      // 内置这一层自己也是一个可折的分组，里面再套「全局插件」「会话插件」两层。
+      var inner = '';
+      if (entries.length) inner += pluginGroup('全局插件', entries, invRow, 2);
       if (sessionRows) {
         // 同一个插件常常被好几个预设都带上，所以行数会重复计（实测 4 个预设共 95 行、
         // 其实只有 32 个不重复的插件）。**只报行数会让人以为有 95 个插件**，
         // 所以这里把两个数都写出来，并说清为什么对不上。
-        html += pluginSubtitle('会话插件', sessionRows, distinctModules(presets) + ' 个不重复，'
-          + presets.length + ' 个预设各算各的');
+        var sessionInner = '';
         presets.forEach(function (p) {
           var rows = p.rows || [];
           if (!rows.length) return;
-          // 只有一个预设就不必再套一层标题；多预设才把预设名露出来（PC 那边是个下拉）。
+          if (p.broken) sessionInner += pluginNote('这个预设的组合读不出来：' + escapeHtml(p.broken), true);
+          var body = rows.map(invRow).join('');
+          // 只有一个预设就不必再套一层；多预设才把预设名露出来（PC 那边是个下拉）。
           // 「（默认）」照 PC 标上：它说的是「不指定模式时按它来」，用户得有这个参照。
-          if (presets.length > 1) {
-            html += pluginSubtitle(p.name + (p.isDefault ? '（默认）' : ''), rows.length);
-          }
-          if (p.broken) html += pluginNote('这个预设的组合读不出来：' + escapeHtml(p.broken), true);
-          html += rows.map(invRow).join('');
+          sessionInner += presets.length > 1
+            ? pluginFold(p.name + (p.isDefault ? '（默认）' : ''), rows.length, body, 2)
+            : body;
         });
+        inner += pluginFold('会话插件', sessionRows, sessionInner, 2,
+          distinctModules(presets) + ' 个不重复，' + presets.length + ' 个预设各算各的');
       }
-      if (!entries.length && !sessionRows) html += pluginNote('这台电脑没报出内置插件。');
+      html += inner
+        ? pluginFold('已安装 · 内置', entries.length + sessionRows, inner, 1)
+        : pluginNote('这台电脑没报出内置插件。');
     }
 
     html += pluginGroup('已安装 · 第三方', third, bundleRow);
@@ -5650,19 +5681,24 @@
     return '<div class="' + (isErr ? 'plugin-note' : 'sa-none sa-none-indent') + '">' + text + '</div>';
   }
 
-  function pluginGroupTitle(title, count) {
-    return '<div class="plugin-group-title">' + escapeHtml(title) + ' ' + count + '</div>';
+  /**
+   * 一层**可折叠**的分组。默认收起——HTML 里不写 open 属性就自然是收着的，
+   * 「默认折叠」不需要额外的代码去保证。没有正文的空层整个不画（点开是个空壳没意义）。
+   *
+   * `depth` 只影响字号轻重（1 = 官方 / 已安装那一级，2 = 里面那两级）。
+   * `note` 是接在计数后面的小注（比如「32 个不重复，4 个预设各算各的」）。
+   */
+  function pluginFold(title, count, bodyHtml, depth, note) {
+    if (!bodyHtml) return '';
+    return '<details class="plugin-fold depth-' + (depth || 1) + '"><summary>'
+      + escapeHtml(title) + ' ' + count + (note ? '（' + escapeHtml(note) + '）' : '')
+      + '</summary>' + bodyHtml + '</details>';
   }
 
-  function pluginSubtitle(title, count, note) {
-    return '<div class="plugin-subtitle">' + escapeHtml(title) + ' ' + count
-      + (note ? '（' + escapeHtml(note) + '）' : '') + '</div>';
-  }
-
-  /** 一堆插件：标题 + 若干行。空的那堆整个不画（不占地方、也不说假话）。 */
-  function pluginGroup(title, rows, rowFn) {
+  /** 一堆插件：可折的一层。空的那堆整个不画（不占地方、也不说假话）。 */
+  function pluginGroup(title, rows, rowFn, depth) {
     if (!rows.length) return '';
-    return pluginGroupTitle(title, rows.length) + rows.map(rowFn).join('');
+    return pluginFold(title, rows.length, rows.map(rowFn).join(''), depth);
   }
 
   function rowHtml(name, desc, badge, descCls) {
