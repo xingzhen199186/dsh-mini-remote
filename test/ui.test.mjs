@@ -217,6 +217,51 @@ test('统一操作面板：不新造令牌、不放强调色、长文字省略�
   assert.match(sheet, /env\(safe-area-inset-bottom\)/, '要按机型让开底部那一条')
 })
 
+/**
+ * 插件页（2026-10-04 用户要求在设置里加插件入口；同日真机返修两处）。
+ *
+ * 两处都是"CSS 漏写"这一类：HTML 画出来了、脚本也接上了，但少了定位和缩进，
+ * 光看代码很像是对的。所以这里把**观感契约**钉成断言。
+ */
+test('插件页面：是盖在设置上面的一层浮层，不是掉到输入框下面去', () => {
+  const from = css.indexOf('/* ---------- 插件页面（2026-10-04）')
+  const to = css.indexOf('/* 行负着左右两边的 16px')
+  assert.ok(from > 0 && to > from, '找不到插件页那段样式，锚点变了先修测试')
+  const block = css.slice(from, to)
+
+  // ① 整屏浮层。少了 position:fixed/inset:0，它就留在正常文档流里，
+  //    在页面上渲染成输入框下面的一截——2026-10-04 用户真机报的正是这条。
+  assert.match(block, /#plugins\s*\{[^}]*position:\s*fixed/, '插件页要脱离文档流')
+  assert.match(block, /#plugins\s*\{[^}]*inset:\s*0/, '要盖住整屏')
+  assert.match(block, /#plugins\s*\{[^}]*display:\s*none/, '默认不显示')
+  assert.match(block, /#plugins\.open\s*\{\s*display:\s*flex/, '点了才显示')
+
+  // ② 它是从设置里点开的，层级必须比设置抽屉高一档：写死 z-index，
+  //    别靠 DOM 先后顺序——顺序一变它就掉到设置下面。
+  const zOf = (sel) => {
+    const m = css.match(new RegExp(sel + '\\s*\\{[^}]*z-index:\\s*(\\d+)'))
+    return m ? Number(m[1]) : null
+  }
+  const zPlugins = zOf('#plugins')
+  const zSettings = zOf('#settings')
+  assert.ok(zPlugins !== null && zSettings !== null, '两层的 z-index 都要写死')
+  assert.ok(zPlugins > zSettings, `插件页要盖在设置上面（${zPlugins} > ${zSettings}）`)
+
+  // ③ 两侧留白。.sa-list 带着 -16px（让分隔线横贯抽屉），行得自己补回来；
+  //    少这一笔，文字就贴到屏幕上（用户报的「两侧没有留白」）。
+  assert.match(block, /\.plugin-row\s*\{[^}]*padding:\s*\d+px\s+16px/, '行要有左右 16px 内缩')
+  assert.match(block, /\.plugin-group-title\s*\{[^}]*margin:\s*[^;}]*16px/, '分组标题同样内缩 16px')
+
+  // ④ 主题与护栏：不造新令牌（造了得在浅色里再写一份，漏一边就有元素在那个主题下隐身）、
+  //    不碰那两个强调色、圆角只用现成那一档。
+  const declared = [...block.matchAll(/(--[a-z0-9-]+)\s*:/g)].map((m) => m[1])
+  assert.deepEqual(declared, [], `插件页不该声明新令牌：${JSON.stringify(declared)}`)
+  assert.ok(!block.includes('var(--act)') && !block.includes('var(--gold)'), '插件页不放强调色')
+  for (const m of block.matchAll(/border-radius:\s*([^;]+);/g)) {
+    assert.equal(m[1].trim(), 'var(--r)', `插件页只许用 var(--r)：${m[1].trim()}`)
+  }
+})
+
 test('统一操作面板：指令行沿用菜单那一套，名字说明不溢出，小旗不折行', () => {
   // 面板里的行和打 / 弹出的菜单是同一份规则（不另写一套），所以这两条要一起看。
   const from = css.indexOf('.cmd-menu .cmd-row')

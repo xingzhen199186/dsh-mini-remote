@@ -156,14 +156,30 @@
     font: inherit; font-size: 14px; cursor: pointer; padding: 0;
   }
   .sa-none { color: var(--muted); font-size: 14px; padding: 6px 0 2px; }
-  /* 插件页面的分组标题 */
-  .plugin-group { padding: 12px 0 4px; }
-  .plugin-group-title { font-size: 13px; color: var(--muted); margin: 0 0 6px; }
-  .plugin-row { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+
+  /* ---------- 插件页面（2026-10-04） ----------
+     外壳和设置抽屉 / 子智能体**同一套**（#xxx.open + .sheet），不新建样式体系。
+     层级比设置抽屉高一档（60 > 50）：它从设置里点开，得盖在设置**上面**，
+     而不是掉到输入框下面去（2026-10-04 用户真机报的正是这一条）。 */
+  #plugins {
+    position: fixed; inset: 0; background: var(--scrim);
+    display: none; align-items: flex-end; z-index: 60;
+  }
+  #plugins.open { display: flex; }
+  /* .sa-list 把两边拽到贴屏边（负 16px，让分隔线横贯），所以这里的左右缩进
+     得自己补回同一个 16px——少这一笔，文字就贴着屏幕边（用户报的「两侧没有留白」）。 */
+  .plugin-group-title { font-size: 13px; color: var(--muted); margin: 18px 16px 6px; }
+  .plugin-group-title:first-child { margin-top: 0; }
+  .plugin-row {
+    display: flex; align-items: center; gap: 10px;
+    padding: 12px 16px; border-bottom: 1px solid var(--line);
+  }
   .plugin-row:last-child { border-bottom: none; }
   .plugin-info { flex: 1 1 auto; min-width: 0; }
-  .plugin-name { display: block; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .plugin-desc { display: block; font-size: 11.5px; color: var(--muted); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .plugin-name { display: block; font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .plugin-desc { display: block; font-size: 12px; color: var(--muted); margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* 插件报错/装不上：那一行说人话，颜色用状态语义色 --err（不是强调色）。 */
+  .plugin-problem { color: var(--err); }
   .plugin-badge { flex: 0 0 auto; font-size: 10px; padding: 2px 6px; border-radius: var(--r); }
   .plugin-badge.on { color: var(--ok); border: 1px solid var(--ok); }
   .plugin-badge.off { color: var(--dim); border: 1px solid var(--line); }
@@ -1368,7 +1384,7 @@
       <button class="btn" id="btnReconnect">重连</button>
     </div>
 
-    <div class="row" style="cursor:pointer" id="rowPlugins">
+    <div class="row">
       <div>
         <div class="label">插件</div>
         <div class="hint">查看官方插件和已安装插件</div>
@@ -1446,7 +1462,7 @@
       <button class="btn" id="pluginsClose">关闭</button>
     </div>
     <div class="sa-list" id="pluginsList">
-      <div class="sa-none">正在读取插件列表…</div>
+      <div class="sa-none sa-none-indent">正在读取插件列表…</div>
     </div>
   </div>
 </div>
@@ -5511,58 +5527,72 @@
   $('subagentsClose').addEventListener('click', function () { saPanel.classList.remove('open'); });
 
   // ---------------- 插件页面（2026-10-04） ----------------
+  // 从设置里点「插件」→ 立刻盖到设置上面（#plugins 的 z-index 比 #settings 高一档）；
+  // 关掉它就回到设置，不用退出设置再去找。分层和两条留白见上面 #plugins 那段 CSS。
   var pluginsPanel = $('plugins');
   $('btnPlugins').addEventListener('click', function () {
     pluginsPanel.classList.add('open');
     loadPlugins();
   });
   $('pluginsClose').addEventListener('click', function () { pluginsPanel.classList.remove('open'); });
+  // 点浮层空白处也关掉（和子智能体面板同一套）。
+  pluginsPanel.addEventListener('click', function (e) {
+    if (e.target === pluginsPanel) pluginsPanel.classList.remove('open');
+  });
 
   function loadPlugins() {
     var listEl = $('pluginsList');
-    listEl.innerHTML = '<div class="sa-none">正在读取插件列表…</div>';
+    listEl.innerHTML = '<div class="sa-none sa-none-indent">正在读取插件列表…</div>';
     api('/mini/api/plugins').then(function (r) {
       if (!r || !r.ok) {
-        listEl.innerHTML = '<div class="sa-none">读不到插件列表：'
+        listEl.innerHTML = '<div class="sa-none sa-none-indent">读不到插件列表：'
           + escapeHtml((r && r.reason) || '服务未提供') + '</div>';
         return;
       }
       var bundles = r.bundles || [];
-      // 分类：官方（optional 且未安装）、已安装（installed 或非 optional）
+      // 分类和 PC 端插件页同一套口径（dsh-client-ui-plugin-manager）：
+      //   官方 = optional 且还没装；已安装 = 装过、或者本来就不是可选项。
       var official = bundles.filter(function (b) { return b.optional && !b.installed; });
       var installed = bundles.filter(function (b) { return b.installed || !b.optional; });
-      // 已安装再分：内置（@deepseek-ai/ 开头）和第三方
+      // 已安装再拆两堆：内置（DSH 自己的 @deepseek-ai/ 包）和第三方（用户自己装的）。
       var builtin = installed.filter(function (b) { return b.name.indexOf('@deepseek-ai/') === 0; });
       var thirdParty = installed.filter(function (b) { return b.name.indexOf('@deepseek-ai/') !== 0; });
 
       var html = '';
-      if (official.length) {
-        html += '<div class="plugin-group"><div class="plugin-group-title">官方 ' + official.length + '</div>';
-        html += official.map(pluginRow).join('') + '</div>';
-      }
-      if (builtin.length) {
-        html += '<div class="plugin-group"><div class="plugin-group-title">已安装 · 内置 ' + builtin.length + '</div>';
-        html += builtin.map(pluginRow).join('') + '</div>';
-      }
-      if (thirdParty.length) {
-        html += '<div class="plugin-group"><div class="plugin-group-title">已安装 · 第三方 ' + thirdParty.length + '</div>';
-        html += thirdParty.map(pluginRow).join('') + '</div>';
-      }
-      if (!html) html = '<div class="sa-none">没有插件。</div>';
+      html += pluginGroup('官方', official);
+      html += pluginGroup('已安装 · 内置', builtin);
+      html += pluginGroup('已安装 · 第三方', thirdParty);
+      if (!html) html = '<div class="sa-none sa-none-indent">没有插件。</div>';
       listEl.innerHTML = html;
     }).catch(function (err) {
-      listEl.innerHTML = '<div class="sa-none">读不到插件列表：' + escapeHtml(err.message || '出错了') + '</div>';
+      listEl.innerHTML = '<div class="sa-none sa-none-indent">读不到插件列表：'
+        + escapeHtml(err.message || '出错了') + '</div>';
     });
   }
 
+  /** 一堆插件：标题 + 若干行。空的那堆整个不画（不占地方、也不说假话）。 */
+  function pluginGroup(title, rows) {
+    if (!rows.length) return '';
+    return '<div class="plugin-group-title">' + escapeHtml(title) + ' ' + rows.length + '</div>'
+      + rows.map(pluginRow).join('');
+  }
+
+  /**
+   * 一行插件。显示名用服务端给的 `title`（本地化标题），没有就是包名——
+   * 官方插件在 PC 上显示的正是「智能体团队」这类中文名，第三方插件多半只有包名。
+   * 出问题的那一笔（if 有）照实说，不装作没事。
+   */
   function pluginRow(b) {
     var badge = b.enabled
       ? '<span class="plugin-badge on">已启用</span>'
       : '<span class="plugin-badge off">已停用</span>';
+    var desc = b.description || '';
+    if (b.problem) desc = desc ? desc + ' · ' + b.problem : b.problem;
     return '<div class="plugin-row">'
       + '<div class="plugin-info">'
-      + '<span class="plugin-name">' + escapeHtml(b.name) + '</span>'
-      + (b.description ? '<span class="plugin-desc">' + escapeHtml(b.description) + '</span>' : '')
+      + '<span class="plugin-name">' + escapeHtml(b.title || b.name) + '</span>'
+      + (desc ? '<span class="plugin-desc' + (b.problem ? ' plugin-problem' : '') + '">'
+          + escapeHtml(desc) + '</span>' : '')
       + '</div>' + badge + '</div>';
   }
   $('subagentsBack').addEventListener('click', saToList);
