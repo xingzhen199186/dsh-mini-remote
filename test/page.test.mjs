@@ -4262,8 +4262,10 @@ test('完整模式：失败原因首行顶在折叠处（错误色），点开�
 
   h.toggleTrajEntry('e1')
   const open = h.replyEl.innerHTML
-  assert.ok(open.includes('参数：'), '点开正文仍见 args')
+  assert.ok(open.includes('输入'), '点开正文见「输入」栏（照 PC 的 IN/OUT 卡标签）')
+  assert.ok(open.includes('输出'), '点开正文见「输出」栏')
   assert.ok(open.includes('部分结果'), '点开正文仍见 output')
+  assert.match(open, /traj-io-err/, '出错时「输出」整段红（照 PC）')
 
   // 组头同一口径：手动把出错的组收起来，失败首行还得挂在组头上。
   h.toggleTrajGroup(4)
@@ -4306,6 +4308,44 @@ test('完整模式：进行中有明确标识，跑着的行有扫光（照 PC�
   assert.deepEqual([...trajCss.matchAll(/@keyframes\s+([A-Za-z0-9_-]+)/g)].map((m) => m[1]),
     ['shimSweep'], '轨迹区只许这一种动效（2026-10-04 用户点名）')
   assert.ok(!/animation\s*:(?![^;]*shimSweep)/.test(trajCss), '除扫光外零动效')
+})
+
+test('完整模式：思考展开后行上只留「思考」，正文是 Markdown 段落（照 PC）', () => {
+  // PC 的 ReasoningRow：摘录是折叠态的预览，展开就退场；正文是 compact Markdown
+  // （13px/20px、三级灰、左缩进 22px），不是等宽、不是灰框。
+  const h = trajHarness()
+  h.state.trajectory = [{ turn: 1, state: 'done', reason: null, entries: [
+    trajTool('t1', { kind: 'think', name: null, args: null, summary: null,
+      output: '第一行摘录\n\n正文 **加粗** 见 `代码`' }),
+  ] }]
+  h.render()
+  const closed = h.replyEl.innerHTML
+  assert.match(closed, /class="traj-name">思考<\/span><span class="traj-detail"> · 第一行摘录</,
+    '收起：思考 · 首行摘录（星号照 PC 去掉）')
+  h.toggleTrajEntry('t1')
+  const open = h.replyEl.innerHTML
+  assert.match(open, /class="traj-name">思考<\/span><span class="traj-detail"><\/span>/,
+    '展开后行上只剩「思考」——摘录从行上退场（照 PC；全文仍在正文里）')
+  assert.match(open, /class="traj-think"/, '正文是思考段落那一层（22px 缩进、三级灰）')
+  assert.ok(open.includes('<strong>加粗</strong>') && open.includes('<code>代码</code>'),
+    '思考正文走 Markdown（照 PC 的 compact 段落）')
+})
+
+test('完整模式：自动审查被拒按 PC 的专用文案——不显参数，只说为什么没跑', () => {
+  const h = trajHarness()
+  h.state.trajectory = [{ turn: 1, state: 'error', reason: null, entries: [
+    trajTool('a1', {
+      turn: 1, state: 'error', name: 'pwsh', args: '{"command":"危险命令"}', summary: '危险命令',
+      error: { name: 'AutoReviewDeniedError', code: 'AUTO_REVIEW_DENIED', reason: '命令不在白名单' },
+    }),
+  ] }]
+  h.render()
+  const out = h.replyEl.innerHTML
+  assert.match(out, /Auto review 已拒绝/, '行上摘要换成 PC 的专用说法')
+  h.toggleTrajEntry('a1')
+  const open = h.replyEl.innerHTML
+  assert.match(open, /工具未执行。原因：命令不在白名单/, '展开只说原因（照 PC）')
+  assert.ok(!open.includes('危险命令'), '参数不显示（照 PC：这一步根本没跑）')
 })
 
 test('完整模式：截断如实标注——truncated 在场就写明原始总字符数，没截的不瞎标', () => {

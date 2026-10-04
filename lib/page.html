@@ -902,12 +902,29 @@
   }
   .traj-say p { margin: 0 0 6px; }
   .traj-say p:last-child { margin-bottom: 0; }
-  .traj-body {
-    margin: 2px 0 8px; padding: 8px 10px;
-    white-space: pre-wrap; word-break: break-word;
-    background: var(--panel-2); border: 1px solid var(--line); border-radius: var(--r);
-    color: var(--muted); font-size: 12.5px; line-height: 1.6;
+  /* 思考正文（照 PC 的 compact Markdown）：普通段落、三级灰、左缩进 22px，不套框。 */
+  .traj-think {
+    margin: 2px 0 8px; padding: 4px 0 4px 22px;
+    color: var(--muted); font-size: 13px; line-height: 20px;
+    word-break: break-word;
   }
+  .traj-think p { margin: 0 0 6px; }
+  .traj-think p:last-child { margin-bottom: 0; }
+  /* 工具展开卡（照 PC 的通用 IN/OUT 卡）：标签小字灰、正文等宽、细线分隔、出错整段红。 */
+  .traj-io {
+    margin: 2px 0 8px;
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: var(--r);
+  }
+  .traj-io-row { display: flex; gap: 10px; padding: 8px 10px; }
+  .traj-io-row + .traj-io-row { border-top: 1px solid var(--line); }
+  .traj-io-label { flex: none; width: 34px; color: var(--muted); font-size: 11px; line-height: 1.7; }
+  .traj-io-body { flex: 1 1 auto; min-width: 0; color: var(--muted); font-size: 12.5px; line-height: 1.6; }
+  .traj-io-body pre {
+    margin: 0; white-space: pre-wrap; word-break: break-word;
+    font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px;
+  }
+  .traj-io-err pre { color: var(--err); }
+  .traj-io-note { margin-top: 4px; color: var(--dim); font-size: 11px; }
   /* 四类状态的字样：只上色、零动效（动效守卫只认那五种关键帧），颜色全取现成令牌。 */
   .traj-err { color: var(--err); }   /* 失败首行：折叠处一眼可见 */
   .traj-run { color: var(--run); }   /* 进行中：有标识；2026-10-04 起再加一道扫光（用户点名） */
@@ -3235,20 +3252,60 @@
   }
 
   /**
-   * 一条的正文。工具是「参数 + 结果」两段（都可能还没有——running 时结果未回），
-   * 思考只有想的内容本身。两头都没有就不开这一层，免得点出一个空框。
+   * 一条的正文（照 PC 的展开卡）：
+   *   思考 = 普通 Markdown 段落（PC 的 compact 变体：13px/20px、三级灰、左缩进 22px，
+   *          **不是等宽**——它是想的东西，不是机器吐的字节）；
+   *   工具 = 「输入 / 输出」两栏卡（标签小字灰、正文等宽、细线分隔）——输入是美化后
+   *          的 JSON（两空格，解析不了就原样），输出是结果文本，出错整段红色。
+   * 自动审查被拒（照 PC）：参数不显示，只说清楚为什么没跑。
+   * 截断标注照旧如实跟在后面。
    */
   function trajEntryBody(e) {
     var tr = e.truncated || {};
-    var parts = [];
     if (e.kind === 'think') {
-      if (e.output) parts.push(escapeHtml(e.output) + trajTruncNote(tr.think, e.output));
-    } else {
-      if (e.args) parts.push('参数：\n' + escapeHtml(e.args) + trajTruncNote(tr.args, e.args));
-      if (e.output) parts.push('结果：\n' + escapeHtml(e.output) + trajTruncNote(tr.output, e.output));
+      if (!e.output) return '';
+      return '<div class="traj-think">' + mdToHtml(e.output) + trajTruncLine(tr.think, e.output) + '</div>';
     }
-    if (!parts.length) return '';
-    return '<div class="traj-body">' + parts.join('\n\n') + '</div>';
+    if (e.error && e.error.name === 'AutoReviewDeniedError' && e.error.code === 'AUTO_REVIEW_DENIED') {
+      var reason = typeof e.error.reason === 'string' && e.error.reason
+        ? e.error.reason : 'Auto review 未授权此次操作';
+      return '<div class="traj-io"><div class="traj-io-row"><div class="traj-io-label">输出</div>'
+        + '<div class="traj-io-body traj-io-err"><pre>工具未执行。原因：'
+        + escapeHtml(reason) + '</pre></div></div></div>';
+    }
+    var rows = '';
+    if (e.args) {
+      rows += '<div class="traj-io-row"><div class="traj-io-label">输入</div>'
+        + '<div class="traj-io-body"><pre>' + escapeHtml(trajPretty(e.args)) + '</pre>'
+        + trajTruncLine(tr.args, e.args) + '</div></div>';
+    }
+    var outText = e.output;
+    if (!outText && e.error) {
+      // 照 PC 的 resultText 兜底：空内容且失败时，给一行「名字: 码」，不装作没有结果。
+      outText = (e.error.name || 'Error') + (e.error.code ? ': ' + e.error.code : '');
+    }
+    if (outText) {
+      rows += '<div class="traj-io-row"><div class="traj-io-label">输出</div>'
+        + '<div class="traj-io-body' + (e.error ? ' traj-io-err' : '') + '"><pre>'
+        + escapeHtml(outText) + '</pre>' + trajTruncLine(tr.output, e.output || '') + '</div></div>';
+    }
+    if (!rows) return '';
+    return '<div class="traj-io">' + rows + '</div>';
+  }
+
+  /** 截断标注（如实）：单起一行小字。 */
+  function trajTruncLine(t, text) {
+    var note = trajTruncNote(t, text);
+    return note ? '<div class="traj-io-note">' + escapeHtml(note.trim()) + '</div>' : '';
+  }
+
+  /** 参数按 PC 的 formatToolBody：能解析就美化 JSON（两空格），解析不了就原样。 */
+  function trajPretty(raw) {
+    try {
+      return JSON.stringify(JSON.parse(raw), null, 2);
+    } catch (err) {
+      return String(raw);
+    }
   }
 
   // —— PC 同款词典（照抄 DSH 桌面端 0.2.0-rc.1，一个字不自创）——
@@ -3325,9 +3382,11 @@
   function trajIco(kind) {
     return TRAJ_ICO[kind] || TRAJ_ICO.tools;
   }
-  /** 折叠处给思考行的那一句：正文首行，压成一行、限 160 字（DSH 的行内摘要同款口径）。 */
+  /** 折叠处给思考行的那一句：正文首行，压成一行、限 160 字（DSH 的行内摘要同款口径）。
+      星号去掉（PC 同款：摘录是给人扫的，星号只会碍眼——5854）。 */
   function trajFirstLine(text) {
     var s = String(text == null ? '' : text).split('\n')[0].replace(/\s+/g, ' ').trim();
+    s = s.replace(/\*\*/g, '');
     return s.length > 160 ? s.slice(0, 159) + '…' : s;
   }
 
@@ -3406,7 +3465,14 @@
     var think = e.kind === 'think';
     var kind = think ? 'thinking' : trajActivity(e.name || '');
     var label = think ? '思考' : trajToolTitle(e.name || '');
-    var detail = think ? trajFirstLine(e.output) : (e.summary || '');
+    // 自动审查拒绝（照 PC）：行上摘要直接换成「Auto review 已拒绝」，别的都不重要了。
+    var denial = e.error && e.error.name === 'AutoReviewDeniedError'
+      && e.error.code === 'AUTO_REVIEW_DENIED';
+    // 思考行展开后行上只留「思考」（照 PC：摘录是折叠态的预览，展开了就退场）；
+    // 工具行不一样——展开后标题·摘要照旧留着（PC 的 keepContentWhenOpen）。
+    var open = trajEntryIsOpen(e);
+    var detail = denial ? 'Auto review 已拒绝'
+      : think ? (open ? '' : trajFirstLine(e.output)) : (e.summary || '');
     // 跑着的行整行扫光（2026-10-04 用户点名：「某一行正在运行时会有一个渐变的效果
     // 闪过去」）。不跑的行一个字节不变——类名后缀为空时拼出来就是原样。
     var shim = e.state === 'running';
