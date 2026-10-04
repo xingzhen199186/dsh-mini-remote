@@ -40,6 +40,7 @@
     --act: #c9a55c;       /* 强调色当**底**用：一屏一个的主按钮 */
     --ok: #4fb477;
     --run: #a9c8e8;
+    --shimmer: #eaf4ff;   /* 跑着的行那道扫光的亮色（照 PC 的 label-shimmer，2026-10-04） */
     --err: #d4614f;
     --r: 2px;
     --sh-1: 0 1px 2px rgba(0, 0, 0, .28);
@@ -71,6 +72,7 @@
     --act: #3b6fc4;       /* 主按钮底：用宣传图那个宝蓝（用户 2026-09-27 裁决） */
     --ok: #2e9a5f;
     --run: #3b6fc4;
+    --shimmer: #7ea6e6;   /* 浅色下的扫光要比 --run 亮、又不能白到看不见 */
     --err: #c0392b;
     --sh-1: 0 1px 2px rgba(28, 60, 110, .07);
     --sh-2: 0 2px 8px rgba(28, 60, 110, .12);
@@ -613,6 +615,8 @@
     .work-stage { animation: none; }
     .pose { animation: none; transition: none; }
     .work-progress i { width: 100%; opacity: .45; animation: none; }
+    /* 扫光是状态指示、不是装饰，但用户要「减少动效」时整条关掉——底色照旧。 */
+    .traj-shimmer { animation: none; background-image: none; color: var(--run); }
     .queue .q-node i { transition: none; }
     .dot { transition: none; }
   }
@@ -906,7 +910,24 @@
   }
   /* 四类状态的字样：只上色、零动效（动效守卫只认那五种关键帧），颜色全取现成令牌。 */
   .traj-err { color: var(--err); }   /* 失败首行：折叠处一眼可见 */
-  .traj-run { color: var(--run); }   /* 进行中：有标识，但不闪 */
+  .traj-run { color: var(--run); }   /* 进行中：有标识；2026-10-04 起再加一道扫光（用户点名） */
+  /* 跑着的行有一道渐变光扫过去（照 DSH 的 TextShimmer，2026-10-04 用户点名复现，
+     要适配主题）。机制照 PC：底色还是语义色（--run），一道亮色（--shimmer）扫过；
+     每秒 48 格、1.5 秒一轮、走前 2/3 停后 1/3，与 PC 同参。颜色全走现成令牌，
+     深浅两套主题各看各的。行上带一个负 delay（trajShimStyle）：页面整块重画会把
+     动画打回开头，接上全局时钟的相位才不会变成频闪。 */
+  .traj-shimmer {
+    background-image: linear-gradient(105deg,
+      var(--run) 38%, var(--shimmer) 50%, var(--run) 62%);
+    background-size: 260% 100%;
+    -webkit-background-clip: text; background-clip: text;
+    color: transparent;
+    animation: shimSweep 1.5s steps(48, end) infinite;
+  }
+  @keyframes shimSweep {
+    0% { background-position: 150% 0; }
+    66.6667%, 100% { background-position: -50% 0; }
+  }
   .traj-note {
     margin: 0 0 10px; padding: 6px 8px;
     background: var(--panel-2); border: 1px solid var(--line); border-radius: var(--r);
@@ -3309,6 +3330,15 @@
     var s = String(text == null ? '' : text).split('\n')[0].replace(/\s+/g, ' ').trim();
     return s.length > 160 ? s.slice(0, 159) + '…' : s;
   }
+
+  /**
+   * 扫光的起点接「全局时钟」：页面每次整块重画都会把动画打回开头，每次都从头扫
+   * 就成了频闪。带上当前时间在 1.5 秒周期里的位置（负 delay），重画之后接着
+   * 上次的相位走，肉眼看不出断口。
+   */
+  function trajShimStyle() {
+    return ' style="animation-delay:-' + ((Date.now() % 1500) / 1000).toFixed(3) + 's"';
+  }
   /**
    * 收官标题：照抄 DSH 的 processTitle——工具条目按动作分类计数（多的在前，一样多按
    * 出现先后），取前三类拼完成词；两类共享「已」字时第二个去「已」用「并」连，
@@ -3377,15 +3407,21 @@
     var kind = think ? 'thinking' : trajActivity(e.name || '');
     var label = think ? '思考' : trajToolTitle(e.name || '');
     var detail = think ? trajFirstLine(e.output) : (e.summary || '');
+    // 跑着的行整行扫光（2026-10-04 用户点名：「某一行正在运行时会有一个渐变的效果
+    // 闪过去」）。不跑的行一个字节不变——类名后缀为空时拼出来就是原样。
+    var shim = e.state === 'running';
+    var shimCls = shim ? ' traj-shimmer' : '';
+    var shimSty = shim ? trajShimStyle() : '';
     // 内容段与状态段**分开**：内容段一行截断（照 PC 的折叠行——折叠行是给人扫的），
     // 出错/进行中的字样是独立的一段，不许被省略号吃掉（2026-10-04 真机返修）。
-    var body = '<span class="traj-detail">' + (detail ? ' · ' + escapeHtml(detail) : '') + '</span>';
+    var body = '<span class="traj-detail' + shimCls + '"' + shimSty
+      + '>' + (detail ? ' · ' + escapeHtml(detail) : '') + '</span>';
     var chips = '';
     if (e.error) chips = ' · <span class="traj-err">' + escapeHtml(trajErrLine(e)) + '</span>';
     else if (e.state === 'running') chips = ' · <span class="traj-run">进行中</span>';
     var row = '<button type="button" class="traj-row" data-traj-entry="'
       + escapeHtml(e.id) + '"><span class="traj-ico">' + trajIco(kind) + '</span>'
-      + '<span class="traj-name">' + escapeHtml(label) + '</span>'
+      + '<span class="traj-name' + shimCls + '"' + shimSty + '>' + escapeHtml(label) + '</span>'
       + body + chips + '</button>';
     return '<div class="traj-entry">' + row
       + (trajEntryIsOpen(e) ? trajEntryBody(e) : '') + '</div>';
@@ -3396,7 +3432,7 @@
     var open = trajGroupIsOpen(g);
     var t = trajGroupTitle(g);
     var title = t.live
-      ? '<span class="traj-run">' + escapeHtml(t.text) + '</span>'
+      ? '<span class="traj-run traj-shimmer"' + trajShimStyle() + '>' + escapeHtml(t.text) + '</span>'
       : '<span class="traj-title">' + escapeHtml(t.text) + '</span>';
     // 收官的三种结局：完成词本身就说了「已…」，不再另挂字样；出错与被停要如实挂出来。
     var chip = g.state === 'error' ? ' · <span class="traj-err">出错了</span>'

@@ -37,14 +37,18 @@ test('圆角只有 2px / 999px / 50% 三档，没有中间值', () => {
   assert.deepEqual(bad, [], `圆角出现了规格外的档位：${JSON.stringify(bad)}`)
 })
 
-test('动效只剩这五种关键帧：光标、立绘翻帧（两套）、上传转圈、进度条逐格推进', () => {
+test('动效只剩这六种关键帧：光标、立绘翻帧（两套）、上传转圈、进度条逐格推进、跑着的行扫光', () => {
   // 第四个是 2026-09-27 补回来的：进度条原来是静止的，用户实机看着像卡住了。
   // 它动的只有位置、宽度写死，所以不违背"别表演"那条——原委写在 page.html 的注释里。
   // 第五个（poseFlip6，2026-09-29）**不是新动效**：冲刺那张立绘从 2 帧变 6 帧，
   // 翻帧这同一件事要多一套关键帧（2 帧那套仍然是其余七个姿势在用的）。运动种类还是四种。
+  // 第六个（shimSweep，2026-10-04）用户点名加的：「DSH 里某一行正在运行时会有一个
+  // 渐变的效果闪过去，这种逻辑也可以做移动端上复现，但要适配具体的主题」——
+  // 它是运行状态的指示（只挂跑着的行），不是"界面在表演"；亮色走 --shimmer 令牌，
+  // 深浅两套主题各看各的，减少动效时整条关掉。
   const names = [...css.matchAll(/@keyframes\s+([A-Za-z0-9_-]+)/g)].map((m) => m[1]).sort()
-  assert.deepEqual(names, ['barStep', 'caret', 'poseFlip', 'poseFlip6', 'spin', 'subagent-spin'],
-    '只允许这些：子智能体运行状态需要一个明确的入口动效，其余都是"界面在表演"')
+  assert.deepEqual(names, ['barStep', 'caret', 'poseFlip', 'poseFlip6', 'shimSweep', 'spin', 'subagent-spin'],
+    '只允许这些：子智能体运行状态需要一个明确的入口动效，跑着的行需要一道扫光，其余都是"界面在表演"')
 })
 
 test('状态点不再闪动，只留 160ms 的颜色过渡', () => {
@@ -106,7 +110,7 @@ test('浅色主题覆盖了每一个颜色令牌（缺一个就有元素在那�
 
   const namesIn = (block) => [...block.matchAll(/(--[a-z0-9-]+)\s*:/g)].map((m) => m[1])
   // 只比"颜色"这一类：圆角 --r 是尺寸，两套主题共用一份，不该跟着主题变。
-  const COLOUR = /^--(bg|bg-top|bg-deep|panel|panel-2|line|fg|muted|dim|ice|gold|act|ok|run|err|sh-\d|glass|tint|pop|scrim|on-act)$/
+  const COLOUR = /^--(bg|bg-top|bg-deep|panel|panel-2|line|fg|muted|dim|ice|gold|act|ok|run|shimmer|err|sh-\d|glass|tint|pop|scrim|on-act)$/
   const want = namesIn(dark).filter((n) => COLOUR.test(n))
   const have = new Set(namesIn(light))
   assert.ok(want.length >= 21, `颜色令牌只认出 ${want.length} 个，大概正则写歪了`)

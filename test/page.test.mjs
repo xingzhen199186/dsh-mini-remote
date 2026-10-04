@@ -4272,7 +4272,10 @@ test('完整模式：失败原因首行顶在折叠处（错误色），点开�
   assert.match(shut, /class="traj-err"[^>]*>读不到 a\.txt</, '收着的组头也带失败首行')
 })
 
-test('完整模式：进行中有明确标识，轨迹区零动效（有标识但不闪）', () => {
+test('完整模式：进行中有明确标识，跑着的行有扫光（照 PC，其余零动效）', () => {
+  // 2026-10-04 用户点名：「DSH 里某一行正在运行时会有一个渐变的效果闪过去，
+  // 这种逻辑也可以做移动端上复现，但要适配具体的主题」——轨迹区「零动效」那条
+  // 旧规矩为此开一个口子：只许 shimSweep 这一种，且只挂在跑着的行上。
   const h = trajHarness()
   h.state.trajectory = [{
     turn: 2, state: 'running', reason: null,
@@ -4280,22 +4283,29 @@ test('完整模式：进行中有明确标识，轨迹区零动效（有标识�
   }]
   h.render()
   const out = h.replyEl.innerHTML
-  assert.equal((out.match(/class="traj-run"/g) || []).length, 2,
-    '组头和条目行各挂一个「进行中」标识')
+  assert.equal((out.match(/class="traj-run/g) || []).length, 2,
+    '组头和条目行各挂一个「进行中」标识（前缀匹配：跑着的行还带扫光类）')
   assert.ok(out.includes('进行中'), '标识要写人话：进行中')
+  assert.ok(out.includes('traj-shimmer'), '跑着的行带上扫光（照 PC 的 TextShimmer）')
+  assert.match(out, /animation-delay:-\d/, '扫光起点接全局时钟——整块重画也不许变频闪')
 
   h.state.trajectory[0].state = 'ok'
   h.state.trajectory[0].entries[0].state = 'ok'
   h.render()
-  assert.equal((h.replyEl.innerHTML.match(/class="traj-run"/g) || []).length, 0,
+  const done = h.replyEl.innerHTML
+  assert.equal((done.match(/class="traj-run/g) || []).length, 0,
     '跑完就摘掉标识，不许留着谎报')
+  assert.ok(!done.includes('traj-shimmer'), '跑完扫光也撤——不跑的行一个字节不变')
 
-  // 颜色与「不闪」都在样式里钉：颜色只从现成令牌取，轨迹区一个动效都不加。
+  // 颜色全走现成令牌；动效只许 shimSweep 一种（用户点名要的那道扫光）。
   const trajCss = html.slice(html.indexOf('.traj-group {'), html.indexOf('/* ---------- 设置抽屉'))
   assert.ok(trajCss.length > 0, '锚点：轨迹样式块要找得到')
   assert.match(trajCss, /\.traj-err\s*\{[^}]*color:\s*var\(--err\)/, '失败首行走 --err')
   assert.match(trajCss, /\.traj-run\s*\{[^}]*color:\s*var\(--run\)/, '进行中行走 --run')
-  assert.ok(!/@keyframes|animation\s*:/.test(trajCss), '轨迹区零动效：有标识但不闪')
+  assert.match(trajCss, /var\(--shimmer\)/, '扫光的亮色是主题令牌——深浅两套各看各的')
+  assert.deepEqual([...trajCss.matchAll(/@keyframes\s+([A-Za-z0-9_-]+)/g)].map((m) => m[1]),
+    ['shimSweep'], '轨迹区只许这一种动效（2026-10-04 用户点名）')
+  assert.ok(!/animation\s*:(?![^;]*shimSweep)/.test(trajCss), '除扫光外零动效')
 })
 
 test('完整模式：截断如实标注——truncated 在场就写明原始总字符数，没截的不瞎标', () => {
