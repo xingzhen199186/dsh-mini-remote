@@ -5203,9 +5203,10 @@ test('设置页底部的版本行：产品名写全称 DeepSeek Harness，不用
   assert.ok(!/'DSH ' \+ r\.dshVersion/.test(html), '别退回 DSH 缩写——那只有我们自己人认')
 })
 
-test('插件页面：会话插件的行数不重复计——同一个插件被多个预设带上只算一个', () => {
-  // 真机上的形状：4 个预设共 95 行，其实只有 32 个不重复的插件。
-  // 只报 95 会让人以为装了 95 个会话插件，所以两个数都要写出来，并说清为什么对不上。
+test('插件页面：会话插件那层不再拿括号解释数目', () => {
+  // 2026-10-05 用户点名去掉那句（截图里是「会话插件 95（32 个不重复，4 个预设各算各的）」）。
+  // 数目本身仍**四个预设各自行数之和**（同一个插件被多个预设带上会重复计），
+  // 但下面每个预设各报各的数，加起来就对得上，不用再拿括号解释。
   const out = renderPlugins({
     bundles: [], entries: [],
     presets: [
@@ -5213,11 +5214,15 @@ test('插件页面：会话插件的行数不重复计——同一个插件被�
       { id: 'ptc', name: 'PTC 模式', rows: [{ moduleName: 'a' }, { moduleName: 'c' }] },
     ],
   })
-  assert.match(out, /会话插件 4（3 个不重复，2 个预设各算各的）/,
-    '行数是 4，不重复是 3——两个数都在，别让人把行数当成插件数')
+  assert.match(out, /<summary>会话插件 4<\/summary>/, '会话插件那层只留数目')
+  assert.ok(!out.includes('不重复'), '那句解释不许再出现')
+  // 下面是分好的：2 + 2 正好是上面那个 4，顺着看下去就能对上。
+  assert.match(out, /标准模式（默认） 2<\/summary>/)
+  assert.match(out, /PTC 模式 2<\/summary>/)
 })
 
-test('插件页面：空的组整个不画，读不到的那块如实说', () => {  const empty = renderPlugins({ bundles: [], entries: [], presets: [] })
+test('插件页面：空的组整个不画，读不到的那块如实说', () => {
+  const empty = renderPlugins({ bundles: [], entries: [], presets: [] })
   assert.ok(!empty.includes('官方 0'), '一个都没有时不许画一个「官方 0」的空标题')
   assert.ok(!empty.includes('已安装 · 第三方 0'))
   assert.match(empty, /没报出内置插件/, '内置那一块空了要如实说，不是静悄悄留白')

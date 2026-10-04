@@ -5709,9 +5709,10 @@
       var inner = '';
       if (entries.length) inner += pluginGroup('全局插件', entries, invRow, 2);
       if (sessionRows) {
-        // 同一个插件常常被好几个预设都带上，所以行数会重复计（实测 4 个预设共 95 行、
-        // 其实只有 32 个不重复的插件）。**只报行数会让人以为有 95 个插件**，
-        // 所以这里把两个数都写出来，并说清为什么对不上。
+        // 这一层的数目是**四个预设各自行数之和**：同一个插件被好几个预设都带上，
+        // 所以会重复计（实测共 95 行、其实只有 32 个不重复的插件）。
+        // 这里**不再拿括号去解释**（2026-10-05 用户要那句去掉）——下面每个预设
+        // 各报各的数（29/30/6/30），加起来就是这个数，顺着看下去就能对上。
         var sessionInner = '';
         presets.forEach(function (p) {
           var rows = p.rows || [];
@@ -5724,8 +5725,7 @@
             ? pluginFold(p.name + (p.isDefault ? '（默认）' : ''), rows.length, body, 2)
             : body;
         });
-        inner += pluginFold('会话插件', sessionRows, sessionInner, 2,
-          distinctModules(presets) + ' 个不重复，' + presets.length + ' 个预设各算各的');
+        inner += pluginFold('会话插件', sessionRows, sessionInner, 2);
       }
       html += inner
         ? pluginFold('已安装 · 内置', entries.length + sessionRows, inner, 1)
@@ -5735,15 +5735,6 @@
     html += pluginGroup('已安装 · 第三方', third, bundleRow);
     if (!html) html = pluginNote('没有插件。');
     return html;
-  }
-
-  /** 一批预设里一共点名了几个**不重复**的模块（同一个插件被多个预设带上时只算一个）。 */
-  function distinctModules(presets) {
-    var seen = {};
-    presets.forEach(function (p) {
-      (p.rows || []).forEach(function (row) { seen[row.moduleName] = 1; });
-    });
-    return Object.keys(seen).length;
   }
 
   function pluginNote(text, isErr) {
