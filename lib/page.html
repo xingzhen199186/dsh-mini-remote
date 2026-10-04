@@ -156,6 +156,17 @@
     font: inherit; font-size: 14px; cursor: pointer; padding: 0;
   }
   .sa-none { color: var(--muted); font-size: 14px; padding: 6px 0 2px; }
+  /* 插件页面的分组标题 */
+  .plugin-group { padding: 12px 0 4px; }
+  .plugin-group-title { font-size: 13px; color: var(--muted); margin: 0 0 6px; }
+  .plugin-row { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+  .plugin-row:last-child { border-bottom: none; }
+  .plugin-info { flex: 1 1 auto; min-width: 0; }
+  .plugin-name { display: block; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .plugin-desc { display: block; font-size: 11.5px; color: var(--muted); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .plugin-badge { flex: 0 0 auto; font-size: 10px; padding: 2px 6px; border-radius: var(--r); }
+  .plugin-badge.on { color: var(--ok); border: 1px solid var(--ok); }
+  .plugin-badge.off { color: var(--dim); border: 1px solid var(--line); }
   /* 行负着左右两边的 16px：让分隔线横贯整个抽屉，而不是在里面缩一截。 */
   .sa-list { margin: 0 -16px; }
   .sa-row {
@@ -1357,6 +1368,14 @@
       <button class="btn" id="btnReconnect">重连</button>
     </div>
 
+    <div class="row" style="cursor:pointer" id="rowPlugins">
+      <div>
+        <div class="label">插件</div>
+        <div class="hint">查看官方插件和已安装插件</div>
+      </div>
+      <button class="btn" id="btnPlugins">查看</button>
+    </div>
+
     <div class="foot">
       <button class="btn" id="btnForget">清除 token</button>
       <button class="btn primary" id="btnClose">完成</button>
@@ -1415,6 +1434,20 @@
     </div>
     <div class="sa-list" id="subagentsList"></div>
     <div class="sa-doc" id="subagentsDoc" hidden></div>
+  </div>
+</div>
+
+<!-- 插件页面（2026-10-04 用户要求：移动端设置里加插件入口）。
+     外壳和子智能体面板同一套（.sheet），显示官方插件和已安装插件（内置+第三方）。 -->
+<div id="plugins">
+  <div class="sheet">
+    <div class="sa-head">
+      <h2>插件</h2>
+      <button class="btn" id="pluginsClose">关闭</button>
+    </div>
+    <div class="sa-list" id="pluginsList">
+      <div class="sa-none">正在读取插件列表…</div>
+    </div>
   </div>
 </div>
 
@@ -5476,6 +5509,62 @@
     saLoad();
   });
   $('subagentsClose').addEventListener('click', function () { saPanel.classList.remove('open'); });
+
+  // ---------------- 插件页面（2026-10-04） ----------------
+  var pluginsPanel = $('plugins');
+  $('btnPlugins').addEventListener('click', function () {
+    pluginsPanel.classList.add('open');
+    loadPlugins();
+  });
+  $('pluginsClose').addEventListener('click', function () { pluginsPanel.classList.remove('open'); });
+
+  function loadPlugins() {
+    var listEl = $('pluginsList');
+    listEl.innerHTML = '<div class="sa-none">正在读取插件列表…</div>';
+    api('/mini/api/plugins').then(function (r) {
+      if (!r || !r.ok) {
+        listEl.innerHTML = '<div class="sa-none">读不到插件列表：'
+          + escapeHtml((r && r.reason) || '服务未提供') + '</div>';
+        return;
+      }
+      var bundles = r.bundles || [];
+      // 分类：官方（optional 且未安装）、已安装（installed 或非 optional）
+      var official = bundles.filter(function (b) { return b.optional && !b.installed; });
+      var installed = bundles.filter(function (b) { return b.installed || !b.optional; });
+      // 已安装再分：内置（@deepseek-ai/ 开头）和第三方
+      var builtin = installed.filter(function (b) { return b.name.indexOf('@deepseek-ai/') === 0; });
+      var thirdParty = installed.filter(function (b) { return b.name.indexOf('@deepseek-ai/') !== 0; });
+
+      var html = '';
+      if (official.length) {
+        html += '<div class="plugin-group"><div class="plugin-group-title">官方 ' + official.length + '</div>';
+        html += official.map(pluginRow).join('') + '</div>';
+      }
+      if (builtin.length) {
+        html += '<div class="plugin-group"><div class="plugin-group-title">已安装 · 内置 ' + builtin.length + '</div>';
+        html += builtin.map(pluginRow).join('') + '</div>';
+      }
+      if (thirdParty.length) {
+        html += '<div class="plugin-group"><div class="plugin-group-title">已安装 · 第三方 ' + thirdParty.length + '</div>';
+        html += thirdParty.map(pluginRow).join('') + '</div>';
+      }
+      if (!html) html = '<div class="sa-none">没有插件。</div>';
+      listEl.innerHTML = html;
+    }).catch(function (err) {
+      listEl.innerHTML = '<div class="sa-none">读不到插件列表：' + escapeHtml(err.message || '出错了') + '</div>';
+    });
+  }
+
+  function pluginRow(b) {
+    var badge = b.enabled
+      ? '<span class="plugin-badge on">已启用</span>'
+      : '<span class="plugin-badge off">已停用</span>';
+    return '<div class="plugin-row">'
+      + '<div class="plugin-info">'
+      + '<span class="plugin-name">' + escapeHtml(b.name) + '</span>'
+      + (b.description ? '<span class="plugin-desc">' + escapeHtml(b.description) + '</span>' : '')
+      + '</div>' + badge + '</div>';
+  }
   $('subagentsBack').addEventListener('click', saToList);
   saPanel.addEventListener('click', function (e) {
     if (e.target === saPanel) saPanel.classList.remove('open');
