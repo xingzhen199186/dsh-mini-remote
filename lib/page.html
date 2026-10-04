@@ -1045,6 +1045,40 @@
     backdrop-filter: blur(14px) saturate(1.1);
   }
   .sheet h2 { margin: 0 0 14px; font-size: 16px; }
+
+  /* ---------- 设置页：整屏（2026-10-05 用户要求） ----------
+     内容越来越多，贴底那张最高 86vh 的抽屉不够用了。
+
+     **只改设置这一处**，不动 .sheet 本身——设置 / 统一操作面板 / 子智能体 / 插件页
+     共用那一套，另外三处本来就短，照旧贴底。
+
+     三处跟着改，各有各的理由：
+       · 圆角和上边框是「贴着底边只露一截」才需要的；整屏之后那两条边就是屏幕边，
+         留着反而像没铺满。
+       · 底色换成实色面板（--panel）：整屏之后背后只剩一层遮罩，模糊看不出区别，
+         却实打实吃手机 GPU；而且 --glass 那 72% 的透光会让遮罩的暗色浮上来，
+         整页比别处暗一档。
+       · 上内边距挪给吸顶标题（见 .sheet-head）：这样它滚起来吸在顶上时，
+         仍然让开刘海/状态栏，不会钻到下面去。 */
+  #settings .sheet {
+    max-height: none; height: 100%;
+    border-radius: 0; border-top: none;
+    background: var(--panel);
+    -webkit-backdrop-filter: none; backdrop-filter: none;
+    padding-top: 0;
+  }
+  /* 吸顶标题。**整屏之后必须有一个一直看得见的关闭口**：原来「点抽屉外面」那条路
+     没了（没有露在外面的遮罩可点），光靠底部那个「完成」得先滚到底才行。
+     吸顶用的还是 position: sticky，不写脚本。 */
+  .sheet-head {
+    position: sticky; top: 0; z-index: 1;
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    margin: 0 0 14px;
+    padding: calc(env(safe-area-inset-top) + 16px) 0 10px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--line);
+  }
+  .sheet-head h2 { margin: 0; }
   .row {
     display: flex; align-items: center; justify-content: space-between;
     gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--line);
@@ -1321,7 +1355,12 @@
 
 <div id="settings">
   <div class="sheet">
-    <h2>设置</h2>
+    <!-- 吸顶标题。整屏之后「点外面关掉」没了，所以这里必须有一个一直看得见的关闭口
+         （滚到哪儿都在）；底部那个「完成」照样留着。 -->
+    <div class="sheet-head">
+      <h2>设置</h2>
+      <button class="btn" id="btnSettingsClose">关闭</button>
+    </div>
 
     <div class="row">
       <div>
@@ -5316,6 +5355,8 @@
     watchBuild();
   });
   $('btnClose').addEventListener('click', function () { sheet.classList.remove('open'); });
+  // 顶部吸顶那个关闭口（2026-10-05 设置页改整屏时加的）。
+  $('btnSettingsClose').addEventListener('click', function () { sheet.classList.remove('open'); });
   sheet.addEventListener('click', function (e) { if (e.target === sheet) sheet.classList.remove('open'); });
 
   // ---------------- 子智能体 ----------------

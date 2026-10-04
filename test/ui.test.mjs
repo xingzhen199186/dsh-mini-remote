@@ -218,6 +218,40 @@ test('统一操作面板：不新造令牌、不放强调色、长文字省略�
 })
 
 /**
+ * 设置页整屏（2026-10-05 用户要求：内容越来越多，改全屏）。
+ *
+ * 钉两件事：
+ *   ① 只改设置这一处——.sheet 是设置 / 统一操作面板 / 子智能体 / 插件页**四处共用**的，
+ *      顺手改它会把另外三处也顶成整屏；
+ *   ② **整屏之后必须还有一个一直看得见的关闭口**。原来「点抽屉外面」那条路没了
+ *      （没有露在外面的遮罩可点），光靠底部那个「完成」得先滚到底——内容一多，
+ *      这就是「卡在一整屏里出不来」。光看代码很像是对的，真机上才发现。
+ */
+test('设置页整屏：只改设置这一处，且整屏之后关得掉', () => {
+  const from = css.indexOf('/* ---------- 设置页：整屏')
+  const to = css.indexOf('.row {')
+  assert.ok(from > 0 && to > from, '找不到设置页整屏那段样式，锚点变了先修测试')
+  const block = css.slice(from, to)
+
+  assert.match(block, /#settings \.sheet\s*\{[^}]*height:\s*100%/, '设置页要铺满整屏')
+  assert.match(block, /#settings \.sheet\s*\{[^}]*max-height:\s*none/, '那句 86vh 的限高要解开')
+  assert.match(block, /#settings \.sheet\s*\{[^}]*border-radius:\s*0/, '整屏了就不要那两角')
+  assert.match(block, /#settings \.sheet\s*\{[^}]*background:\s*var\(--panel\)/,
+    '背后只剩一层遮罩，用实色面板（半透明会让整页比别处暗一档）')
+  assert.ok(!/backdrop-filter:\s*blur/.test(block), '整屏别再用毛玻璃：看不出区别还吃 GPU')
+
+  // 共用那套不许被顶成整屏。
+  const base = css.slice(css.indexOf('.sheet {'), css.indexOf('.sheet h2'))
+  assert.match(base, /max-height:\s*86vh/, '.sheet 四处共用，另外三处照旧贴底')
+
+  // 关闭口。
+  assert.match(block, /\.sheet-head\s*\{[^}]*position:\s*sticky/, '顶部关闭口要吸顶，滚到哪儿都在')
+  assert.match(block, /\.sheet-head\s*\{[^}]*env\(safe-area-inset-top\)/, '吸顶时还要让开刘海/状态栏')
+  assert.match(html, /<button class="btn" id="btnSettingsClose">关闭<\/button>/, '顶部要有那个关闭按钮')
+  assert.match(html, /\$\('btnSettingsClose'\)\.addEventListener\('click'/, '而且它得真的接上')
+})
+
+/**
  * 设置抽屉最底下那行版本号（2026-10-05 用户要「加一点设计感，比如两侧加横线」）。
  *
  * 钉的是那个**只能靠肉眼发现的坑**：为了做两侧横线得写 display: flex，
