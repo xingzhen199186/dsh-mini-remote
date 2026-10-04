@@ -3556,3 +3556,40 @@ test('插件页面：问不到设置文档时，官方卡片整块不出现（�
   assert.equal(out.officialError, '', '「这台没提供这个能力」不算出错，不该红字吓人')
 })
 
+/**
+ * DSH 版本号（2026-10-04 实测翻出来的那条：手机上一直显示 unknown）。
+ *
+ * 早先几个地方都去翻磁盘上的 `node_modules/@deepseek-ai/dsh/package.json`：那是**命令行
+ * 那份 dsh** 的版本，未必等于正在跑的这只 Host（实测桌面端跑 0.2.0-rc.2、那份写着
+ * 0.2.0-rc.1），而且桌面端的工作目录里根本没这个文件——读不到就退成 unknown。
+ * 现在改问正在跑的 Host。
+ */
+test('DSH 版本号：问正在跑的 Host，不翻磁盘上那份 package.json', async (t) => {
+  const p = await bootPlugin({
+    pluginManager: {
+      listVersionExemptions: async () => ({ runtimeVersion: '9.9.9-rc.9', exemptions: {}, warnings: [] }),
+    },
+  })
+  t.after(p.stop)
+
+  const out = await (await fetch(`${p.base}/mini/api/version?token=${p.token}`)).json()
+  assert.equal(out.dshVersion, '9.9.9-rc.9', '宿主说自己是哪个版本，就显示哪个')
+})
+
+test('DSH 版本号：问不到就退到核心包的版本，再问不到才如实说 unknown', async (t) => {
+  const stepped = await bootPlugin({
+    pluginManager: {
+      listVersionExemptions: async () => { throw new Error('这台没这个接口') },
+      listBundles: async () => [{ name: '@deepseek-ai/dsh-base', version: '1.2.3' }],
+    },
+  })
+  t.after(stepped.stop)
+  const one = await (await fetch(`${stepped.base}/mini/api/version?token=${stepped.token}`)).json()
+  assert.equal(one.dshVersion, '1.2.3', '退一步：核心包自己的版本就是 DSH 的版本')
+
+  const nothing = await bootPlugin() // 连 pluginManager 都没有
+  t.after(nothing.stop)
+  const two = await (await fetch(`${nothing.base}/mini/api/version?token=${nothing.token}`)).json()
+  assert.equal(two.dshVersion, 'unknown', '一个都问不到就如实说不知道')
+})
+

@@ -3055,13 +3055,17 @@ test('打开设置抽屉会重读一次权限档位（不是只在启动时读�
     textContent: '',
   }
   let loads = 0
-  new Function('$', 'sheet', 'state', 'loadPermissions', html.slice(a, b))(
-    () => el, el, { connected: true }, () => { loads += 1 },
+  let builds = 0
+  // 打开设置时页面还顺手重读一次「版本号」（那行只在设置页里看得见），
+  // 所以这里也要给它一个桩——它和权限档位是同一处触发。
+  new Function('$', 'sheet', 'state', 'loadPermissions', 'watchBuild', html.slice(a, b))(
+    () => el, el, { connected: true }, () => { loads += 1 }, () => { builds += 1 },
   )
 
   assert.equal(bound.length, 1, '这个按钮上正好绑一个监听')
   bound[0][1]()
   assert.equal(loads, 1, '打开设置时必须重读一次档位盘，否则开机那一次没读成就永远缺这一块')
+  assert.equal(builds, 1, '顺手也重读一次版本号（那行只在设置页里看得见）')
 })
 
 test('四档（含宿主保留档 auto）都要画出来，当前那一档要标出来', () => {
@@ -5153,6 +5157,20 @@ test('插件页面：官方那一栏是「包 + 设置卡片」两样拼的', ()
   // 徽标只有包有（「已启用」）；卡片是一张设置页，不该给它编一个状态。
   assert.equal((out.match(/plugin-badge/g) || []).length, 1, '3 行里只有那个包带状态徽标')
   assert.match(out, /限制每条命令最多能跑多久、最多输出多少内容。/, '卡片的说明照实显示')
+})
+
+test('插件页面：会话插件的行数不重复计——同一个插件被多个预设带上只算一个', () => {
+  // 真机上的形状：4 个预设共 95 行，其实只有 32 个不重复的插件。
+  // 只报 95 会让人以为装了 95 个会话插件，所以两个数都要写出来，并说清为什么对不上。
+  const out = renderPlugins({
+    bundles: [], entries: [],
+    presets: [
+      { id: 'standard', name: '标准模式', isDefault: true, rows: [{ moduleName: 'a' }, { moduleName: 'b' }] },
+      { id: 'ptc', name: 'PTC 模式', rows: [{ moduleName: 'a' }, { moduleName: 'c' }] },
+    ],
+  })
+  assert.match(out, /会话插件 4（3 个不重复，2 个预设各算各的）/,
+    '行数是 4，不重复是 3——两个数都在，别让人把行数当成插件数')
 })
 
 test('插件页面：空的组整个不画，读不到的那块如实说', () => {  const empty = renderPlugins({ bundles: [], entries: [], presets: [] })
