@@ -28,6 +28,8 @@
     color-scheme: dark;
     --bg: #0a0f16;
     --bg-top: #101a27;
+    /* 基准字号：设置页「字体大小」三档控制，默认 15.5px */
+    --font-base: 15.5px;
     --bg-deep: #070b11;
     --panel: #121a25;
     --panel-2: #18222f;
@@ -234,7 +236,7 @@
        回答正文第一行之间贴得太紧」——10px 是「同一条消息内部」的距离，
        而这里跨的是「我说的话」和「它答的话」，是更大的一个断点，该给更多。 */
     margin-bottom: 18px; white-space: pre-wrap; word-break: break-word;
-    font-size: 15.5px; line-height: 1.7;
+    font-size: var(--font-base); line-height: 1.7;
   }
   .bubble.user { margin-left: auto; background: var(--panel-2); border: 1px solid var(--line); }
   .bubble.assistant { margin-right: auto; background: var(--panel); border: 1px solid var(--line); }
@@ -250,7 +252,7 @@
   /* ---------- Markdown 正文 ---------- */
   /* 外层是 pre-wrap（用户消息和旧内容靠它），markdown 输出的是真块级元素，
      所以要在这里把 pre-wrap 收掉，否则段落之间会多出一堆空行。 */
-  .md { white-space: normal; }
+  .md { white-space: normal; font-size: var(--font-base); line-height: 1.7; }
   /* 回复里的图。地址有两种写法，见下面 mdInline() 里那段注释。
      宽度只封顶不写死：窄屏上占满可用宽度、按比例缩，圆角沿用全站那 2 像素。 */
   /* 图片没加载出来时的那一圈虚线。用中性灰，不动暖金——那是唯一的强调色，一屏最多两次。 */
@@ -1263,6 +1265,18 @@
       </div>
     </div>
 
+    <!-- 字体大小：三档，存 localStorage，改 CSS 变量 --font-base -->
+    <div class="row">
+      <div>
+        <div class="label">字体大小</div>
+      </div>
+      <div class="seg" id="segFont">
+        <button data-font="small">小</button>
+        <button data-font="normal">标准</button>
+        <button data-font="large">大</button>
+      </div>
+    </div>
+
     <!-- 权限档位。整块由脚本填：这台电脑有哪些档位是**运行时读**的，一个都不写死。
          服务拿不到时整块不显示——它是附加能力，缺了遥控本身照常。 -->
     <div id="permBlock" hidden>
@@ -1430,6 +1444,8 @@
     // 外观：'dark' | 'light' | 'auto'。默认深色——不给老用户换掉现在的样子；
     // 要浅色或跟着系统走，去设置页「外观」点一下。
     theme: localStorage.getItem('dshMiniTheme') || 'dark',
+    // 字体大小：'small' | 'normal' | 'large'。默认标准。
+    fontSize: localStorage.getItem('dshMiniFont') || 'normal',
     sound: localStorage.getItem('dshMiniSound') !== 'off',
     // 锁屏也能提醒（系统通知）。默认关着——它要用户主动点一下才会申请权限，
     // 不能替他决定。明文连接下这一项永远是空转的，见下面「锁屏也能提醒」那一段。
@@ -5659,6 +5675,21 @@
   }
   applyTheme();   // 补上首屏那次没做的一件事：把状态栏颜色对齐
 
+  // ---------------- 字体大小（小 / 标准 / 大） ----------------
+  function applyFontSize() {
+    var sizes = { small: '13px', normal: '15.5px', large: '18px' };
+    document.documentElement.style.setProperty('--font-base', sizes[state.fontSize] || sizes.normal);
+  }
+  Array.prototype.forEach.call($('segFont').children, function (btn) {
+    btn.addEventListener('click', function () {
+      state.fontSize = btn.dataset.font;
+      localStorage.setItem('dshMiniFont', state.fontSize);
+      applyFontSize();
+      syncSeg();
+    });
+  });
+  applyFontSize();  // 首屏应用
+
   function syncSeg() {
     Array.prototype.forEach.call($('segMode').children, function (b) {
       b.classList.toggle('active', b.dataset.mode === state.mode);
@@ -5668,6 +5699,9 @@
     });
     Array.prototype.forEach.call($('segTheme').children, function (b) {
       b.classList.toggle('active', b.dataset.theme === state.theme);
+    });
+    Array.prototype.forEach.call($('segFont').children, function (b) {
+      b.classList.toggle('active', b.dataset.font === state.fontSize);
     });
   }
 
