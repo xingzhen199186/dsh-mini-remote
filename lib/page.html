@@ -881,6 +881,11 @@
   .traj-ico svg { display: block; width: 14px; height: 14px; }
   .traj-name { flex: none; color: var(--muted); }
   .traj-detail { color: var(--fg); word-break: break-all; }
+  .traj-say {
+    margin: 4px 0 8px; padding: 0 2px;
+    white-space: pre-wrap; word-break: break-word;
+    color: var(--fg); font-size: 13px; line-height: 1.7;
+  }
   .traj-body {
     margin: 2px 0 8px; padding: 8px 10px;
     white-space: pre-wrap; word-break: break-word;
@@ -3338,8 +3343,19 @@
     return trajTitleOf(g);
   }
 
+  /**
+   * 旁白那一段（对用户说的话，别的模式由鲸鱼娘气泡念，2026-10-04 起完整模式塞回轨迹）：
+   * 照 PC 是过程里的一段正文——不带图标、不可点开，说完就摆在这儿。
+   */
+  function trajSayHtml(e) {
+    var tr = e.truncated || {};
+    return '<div class="traj-say">' + escapeHtml(e.output || '')
+      + trajTruncNote(tr.output, e.output || '') + '</div>';
+  }
+
   /** 一行一条（PC 的成员行）：图标 +「显示名 · 摘要」，失败/进行中顶在这一行上。 */
   function trajEntryHtml(e) {
+    if (e.kind === 'say') return trajSayHtml(e);
     var think = e.kind === 'think';
     var kind = think ? 'thinking' : trajActivity(e.name || '');
     var label = think ? '思考' : trajToolTitle(e.name || '');

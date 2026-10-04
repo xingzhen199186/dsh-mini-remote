@@ -4803,6 +4803,23 @@ test('完整模式：活片段挂在跑着的组头（正在分析请求 · 片�
   assert.match(h.replyEl.innerHTML, /正在分析请求 · 先看看仓库结构/, '回到完整模式照旧有')
 })
 
+test('完整模式：旁白是一段正文（照 PC 的过程段落），不是可点的条目行', () => {
+  // 2026-10-04 用户裁决：其他模式由鲸鱼娘气泡念的那句话，完整模式塞回轨迹——
+  // 照 PC，它是过程里的一段正文，不是一行图标。
+  const h = trajHarness()
+  h.state.trajectory = [{ turn: 1, state: 'running', reason: null, entries: [
+    trajTool('p1', { name: 'pwsh', summary: 'dir' }),
+    {
+      id: 'y1', turn: 1, step: 1, kind: 'say', name: null, args: null, summary: null,
+      output: '我先看一下这个文件', state: 'ok', error: null, truncated: null, timestamp: 1,
+    },
+  ] }]
+  h.render()
+  const out = h.replyEl.innerHTML
+  assert.match(out, /class="traj-say"[^>]*>我先看一下这个文件</, '旁白照 PC 是一段正文')
+  assert.ok(!out.includes('data-traj-entry="y1"'), '旁白不占可点的条目行')
+})
+
 // ---------------------------------------------------------------------------
 // S8：轨迹穿插进对话（2026-10-03 用户裁决「一定要让执行轨迹的逻辑符合DSH本身」）
 // ---------------------------------------------------------------------------

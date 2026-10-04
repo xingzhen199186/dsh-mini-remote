@@ -107,10 +107,35 @@ test('提取：一轮 2 步 1 次工具调用 → 3 条轨迹（2 条思考 + 1 
   assert.equal(g.entries[0].name, null, '思考没有工具名')
 })
 
-test('提取：旁白和用户那句话都不进轨迹（轨迹要的是「块」，不是说的话）', () => {
-  const groups = replayTrajectory(turnWithTool())
-  assert.deepEqual(groups[0].entries.map((e) => e.kind), ['think', 'tool'])
-  assert.ok(!groups[0].entries.some((e) => e.output === '帮我改一下'), '用户那句话不该进来')
+test('提取：旁白进轨迹（kind=say），用户那句话和收尾回答不进', () => {
+  // 用户 2026-10-04 裁决推翻旧口径「旁白不进轨迹」：完整模式把鲸鱼娘气泡藏了，
+  // 旁白（对用户说的话）没处去，塞回执行轨迹——照 PC，它是过程里的一段正文。
+  // 收尾那条回答照旧不进：回答区已经有它，进轨迹就是重复。
+  const events = [
+    ev('turn/start', { turn: 1 }),
+    ev('user/message', { id: 'm1', source: { kind: 'user' }, content: text('帮我改一下') }),
+    ev('step/start', { turn: 1, step: 1 }),
+    ev('assistant/message', {
+      turn: 1, step: 1,
+      message: {
+        content: [
+          { type: 'reasoning', text: '先看一下文件' },
+          { type: 'text', text: '我先看一下这个文件' },
+          { type: 'tool-call', id: 'c1', name: 'read', arguments: '{"path":"a.txt"}' },
+        ],
+      },
+    }),
+    ev('tool/call', { turn: 1, step: 1, callId: 'c1', name: 'read', arguments: '{"path":"a.txt"}' }),
+    ev('tool/result', { turn: 1, step: 1, message: { role: 'tool', toolCallId: 'c1', content: text('文件内容') } }),
+    ev('assistant/message', { turn: 1, step: 2, message: { content: text('改好了。') } }),
+    ev('turn/end', { turn: 1, reason: { kind: 'completed' } }),
+  ]
+  const g = replayTrajectory(events)[0]
+  assert.deepEqual(g.entries.map((e) => e.kind), ['think', 'say', 'tool'],
+    '带工具调用那一步的正文 = 旁白，按发生顺序排在中间')
+  assert.equal(g.entries[1].output, '我先看一下这个文件', '旁白的正文原样进轨迹')
+  assert.ok(!g.entries.some((e) => e.output === '改好了。'), '收尾回答不进轨迹——回答区已经有它')
+  assert.ok(!g.entries.some((e) => e.output === '帮我改一下'), '用户那句话不进轨迹')
 })
 
 test('提取：工具失败 → error，原因是事件里那个，取不到就是 null（不编）', () => {
