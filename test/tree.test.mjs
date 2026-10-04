@@ -332,6 +332,18 @@ test('在指定工作区里建会话，返回新会话的 id', async () => {
   assert.deepEqual(controller.calls, [{ workspaceId: 'w2' }], '要建在 w2 上，不是随便哪个')
 })
 
+test('agentPreset 原样传给 DSH 的 create；没选就不带这个字段', async () => {
+  // 2026-10-04 用户要求：新建会话时手机上也要能选 agent 模式（PC 一直可以）。
+  const registry = registryOf(ws('w1', 'I:\\a', '甲', []))
+  const controller = controllerOf(async (req) => ({ sessionId: 's9', agentPreset: req.agentPreset }))
+  const out = await createSessionIn({ controller, registry, workspaceId: 'w1', agentPreset: 'mode-x' })
+  assert.equal(out.ok, true)
+  assert.deepEqual(controller.calls[0], { workspaceId: 'w1', agentPreset: 'mode-x' }, '选了哪个模式就传哪个')
+  await createSessionIn({ controller, registry, workspaceId: 'w1' })
+  assert.deepEqual(controller.calls[1], { workspaceId: 'w1' },
+    '没选就不带这个字段——让 DSH 用它自己的默认，不猜')
+})
+
 test('建会话时把工作区标题带回去，手机能说清建在哪儿', async () => {
   const registry = registryOf(ws('w1', 'I:\\a', '极简遥控器', []))
   const controller = controllerOf(async () => ({ sessionId: 's9' }))

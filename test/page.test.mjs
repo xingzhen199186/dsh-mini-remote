@@ -2252,7 +2252,9 @@ function navHarness({ apiImpl } = {}) {
     `${html.slice(a, b)}
      return { renderNav, sessionsHtml, createSession, toggleWorkspace,
               getSessions: () => navSessions,
-              setSessions: (v) => { navSessions = v } };`,
+              setSessions: (v) => { navSessions = v },
+              setNavPresets: (v) => { navPresets = v },
+              setPicker: (w) => { navPickerWs = w } };`,
   )
   const scope = build(
     state,
@@ -2313,6 +2315,40 @@ test('导航栏：一个会话都没有时，「＋ 新建会话」照样在', (
   const out = h.scope.sessionsHtml('w1')
   assert.match(out, /ws-new/)
   assert.match(out, /还没有会话/)
+})
+
+test('导航栏：多于一种模式时先展开模式清单，点谁建谁（2026-10-04 用户要求）', async () => {
+  // PC 建会话能选 agent 模式，手机一直不能——补上。照「新建文件夹」的先例：
+  // 行内展开，不弹窗；没得选的时候直接建，不摆"只有一个选项的选择题"。
+  const h = navHarness()
+  h.scope.setNavPresets({ ok: true, defaultId: 'code', presets: [
+    { id: 'code', name: '写代码', description: '改代码、跑命令' },
+    { id: 'write', name: '写东西', description: '文案与文档' },
+    { id: 'old', name: '坏掉的', broken: '插件没装' },
+  ] })
+  h.scope.setSessions({ w1: { total: 0, truncated: false, sessions: [] } })
+
+  h.scope.setPicker('w1')
+  const out = h.scope.sessionsHtml('w1')
+  assert.match(out, /data-mode-preset="code"/, '清单里每一项都能点')
+  assert.match(out, /data-mode-preset="write"/)
+  assert.match(out, /默认/, '默认那一档标出来')
+  assert.match(out, /坏掉的[\s\S]{0,80}不可用/, '坏档如实标「不可用」，不装作能点')
+
+  await h.scope.createSession('w1', 'write')
+  const c = h.creates()[0]
+  assert.match(c.opts.body, /"agentPreset":"write"/, '点谁就带着谁建')
+})
+
+test('导航栏：只有一种模式、或读不到模式清单时，点「新建会话」直接建', async () => {
+  const h = navHarness()
+  h.scope.setSessions({ w1: { total: 0, truncated: false, sessions: [] } })
+  h.scope.setNavPresets({ ok: true, defaultId: 'code', presets: [{ id: 'code', name: '写代码' }] })
+  await h.scope.createSession('w1')
+  assert.equal(h.creates().length, 1, '只有一种：直接建，不摆选择题')
+  h.scope.setNavPresets({ ok: false, reason: 'unavailable' })
+  await h.scope.createSession('w1')
+  assert.equal(h.creates().length, 2, '读不到能力：照旧直接建（DSH 用它自己的默认）')
 })
 
 test('导航栏：点了「新建会话」打的是 POST 到那个工作区的会话路径', () => {

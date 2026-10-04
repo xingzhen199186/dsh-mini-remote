@@ -790,6 +790,22 @@
   .ws-new:active { background: var(--panel-2); }
   .ws-new[disabled] { color: var(--muted); cursor: default; }
 
+  /* 「新建会话」下展开的模式清单（2026-10-04）。行内展开、点谁建谁——照
+     「新建文件夹」的先例不弹窗；左侧一条细线表明它是那一行展开的内容；
+     坏档灰字不可点。 */
+  .ws-modes { margin: 2px 0 8px; padding-left: 10px; border-left: 1px solid var(--line); }
+  .ws-mode {
+    display: block; width: 100%; text-align: left; cursor: pointer;
+    font: inherit; font-size: 12.5px; line-height: 1.5;
+    padding: 7px 8px; color: var(--fg);
+    background: none; border: none;
+  }
+  .ws-mode:active { background: var(--panel-2); }
+  .ws-mode b { font-weight: 650; }
+  .ws-mode-desc { display: block; color: var(--muted); font-size: 11.5px; }
+  .ws-mode-def { margin-left: 8px; color: var(--dim); font-size: 11px; }
+  .ws-mode-broken { color: var(--muted); cursor: default; }
+
   /* 导航栏最上面那条「新建工作区」。跟工作区条目之间用一条线隔开：
      它是这一屏的入口，不是一个工作区。 */
   .nav-cta {
@@ -3678,6 +3694,9 @@
   var navFollowTimers = {}; // workspaceId -> 当前标题补齐轮询定时器
   var navExpanded = {};    // workspaceId -> 是否展开
   var navWsFetching = {};  // workspaceId -> 会话列表请求在途（同一工作区只发一趟）
+  var navPresets = null;   // Agent 模式清单（2026-10-04：新建会话时手机上也要能选模式）
+  var navPresetsLoaded = false;
+  var navPickerWs = '';    // 正在挑模式的那个工作区（清单行内展开在它的「新建会话」下）
 
   function openNav() {
     $('nav').classList.add('open');
@@ -3716,6 +3735,8 @@
   // 趁页面空闲先取一次；真正打开菜单时若已完成就直接画，不再把等待放在点击之后。
   var navPrefetchPromise = null;
   function prefetchWorkspaces() {
+    // Agent 模式清单也是导航栏要用的、也几乎不变——顺手一起预取（见 prefetchPresets）。
+    prefetchPresets();
     if (navList || navPrefetchPromise || navView !== 'tree' || !state.token) return;
     var run = function () {
       navPrefetchPromise = api('/mini/api/workspaces').then(function (body) {
@@ -3732,6 +3753,22 @@
     } else {
       setTimeout(run, 0);
     }
+  }
+
+  /**
+   * Agent 模式清单（2026-10-04 用户要求：新建会话时手机上也要能选模式，PC 一直可以）。
+   * 只取一次；读不到就如实记「没有可选的」——建会话那条路会直接建默认，
+   * **不摆一个只有一项的选择题**，也不假装自己知道 DSH 有哪些模式。
+   */
+  function prefetchPresets() {
+    if (navPresetsLoaded || !state.token) return;
+    navPresetsLoaded = true;
+    api('/mini/api/agent-presets').then(function (body) {
+      navPresets = body && body.ok ? body : { ok: false, reason: (body && body.reason) || 'failed' };
+      if (navPickerWs && $('nav').classList.contains('open')) renderNav();
+    }).catch(function () {
+      navPresets = { ok: false, reason: 'failed' };
+    });
   }
 
   function dayLabel(ts) {
@@ -3781,6 +3818,22 @@
     // 这一行都在。放在列表末尾的话，一个 452 条会话的工作区要划到底才看得到。
     var html = '<button class="ws-new" type="button" data-newws="' + escapeHtml(wsId) + '">'
       + '＋ 新建会话</button>';
+    // 模式清单（2026-10-04）：多于一种模式时，「新建会话」先把清单行内展开，
+    // 点谁建谁；坏档如实标「不可用」——不装作能点。
+    if (navPickerWs === wsId && navPresets && navPresets.ok && navPresets.presets.length > 1) {
+      html += '<div class="ws-modes">' + navPresets.presets.map(function (m) {
+        var title = '<b>' + escapeHtml(m.name || m.id) + '</b>';
+        var desc = m.description
+          ? '<span class="ws-mode-desc">' + escapeHtml(m.description) + '</span>' : '';
+        var def = navPresets.defaultId === m.id ? '<span class="ws-mode-def">默认</span>' : '';
+        if (m.broken) {
+          return '<div class="ws-mode ws-mode-broken">' + title
+            + '<span class="ws-mode-desc">不可用：' + escapeHtml(m.broken) + '</span></div>';
+        }
+        return '<button class="ws-mode" type="button" data-mode-ws="' + escapeHtml(wsId)
+          + '" data-mode-preset="' + escapeHtml(m.id) + '">' + title + desc + def + '</button>';
+      }).join('') + '</div>';
+    }
     var got = navSessions[wsId];
     if (!got) return html + '<div class="placeholder">正在读取…</div>';
     if (!got.sessions.length) return html + '<div class="placeholder">这个工作区还没有会话。</div>';
@@ -4082,7 +4135,17 @@
   // 服务端那道闸门拦不住这个：两个请求都是合法的。
   var creatingSession = false;
 
-  function createSession(wsId) {
+  function createSession(wsId, agentPreset) {
+    // 2026-10-04 用户要求：新建会话时手机上也要能选 agent 模式（PC 一直可以）。
+    // 多于一种模式、又没点名要哪种：先把清单行内展开让用户挑（照「新建文件夹」的
+    // 先例，不弹窗）；只有一种、或读不到清单：直接建 DSH 的默认模式——
+    // **不摆只有一个选项的选择题**，也不替用户猜。
+    if (agentPreset === undefined && navPresets && navPresets.ok && navPresets.presets.length > 1) {
+      navPickerWs = navPickerWs === wsId ? '' : wsId;
+      renderNav();
+      return Promise.resolve();
+    }
+    navPickerWs = '';
     if (creatingSession) return;
     creatingSession = true;
     Array.prototype.forEach.call($('navBody').querySelectorAll('.ws-new'), function (el) {
@@ -4102,7 +4165,7 @@
     // 不返回的话外面拿到的是 undefined，接不上任何后续。
     return api('/mini/api/workspaces/' + encodeURIComponent(wsId) + '/sessions', {
       method: 'POST',
-      body: '{}',
+      body: agentPreset ? JSON.stringify({ agentPreset: agentPreset }) : '{}',
     }).then(function (res) {
       done();
       // 接口把绑定后的快照一起给了，直接渲染——不这样的话，切过去的一瞬间
@@ -4173,6 +4236,12 @@
     if (at('[data-mkdir-cancel]')) { browseMkdir = false; renderNav(); return; }
     if (at('[data-mkdir-ok]')) { makeFolder(); return; }
 
+    // 模式清单里点一项：带着这个模式去建（2026-10-04，手机上也能选 agent 模式）。
+    var mode = at('[data-mode-preset]');
+    if (mode) {
+      createSession(mode.getAttribute('data-mode-ws'), mode.getAttribute('data-mode-preset'));
+      return;
+    }
     // 「新建会话」要排在 ws-head 之前判：它在 ws-body 里面、不是 ws-head，
     // 顺序上无所谓，但放在前面更清楚——这一支是动作，那一支是展开/收起。
     var fresh = at('.ws-new');

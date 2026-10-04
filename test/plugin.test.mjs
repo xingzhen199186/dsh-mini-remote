@@ -58,7 +58,7 @@ function makeCtx(services, directNames) {
   })
 }
 
-function mockCtx({ attachments, sessionQuery, commands, sessionController, subagents, sessionProjections, sessions } = {}) {
+function mockCtx({ attachments, sessionQuery, commands, sessionController, subagents, sessionProjections, sessions, agentPresets, workspaceRegistry } = {}) {
   const handlers = new Map()
   // `ctx.on` 的第三个参数（注册选项）也要留下来：提问钩子靠 `prepend` 才能排到
   // 电脑浏览器前面，而漏掉它**不报错、只是永远轮不到**。这种错只能靠断言钉住。
@@ -119,12 +119,17 @@ function mockCtx({ attachments, sessionQuery, commands, sessionController, subag
       ...(subagents ? { subagents } : {}),
       ...(sessionProjections ? { sessionProjections } : {}),
       ...(sessions ? { sessions } : {}),
+      // 同上：Agent 模式注册表（2026-10-04，新建会话时手机上也要能选模式）。
+      // **可缺席**也是要覆盖的路径：没有它的时候手机直接建默认模式，不摆没得选的选择题。
+      ...(agentPresets ? { agentPresets } : {}),
+      // 工作区注册表：建会话要拿它核对「有没有这个工作区」（tree.createSessionIn）。
+      ...(workspaceRegistry ? { workspaceRegistry } : {}),
     }, ['agents', 'logger', 'on', 'effect']),
   }
 }
 
 /** 起一个被测插件实例，返回访问它所需的一切。 */
-async function bootPlugin({ agents = {}, config = {}, attachments = null, sessionQuery = null, commands = null, stored = null, sessionController = null, subagents = null, sessionProjections = null, sessions = null } = {}) {
+async function bootPlugin({ agents = {}, config = {}, attachments = null, sessionQuery = null, commands = null, stored = null, sessionController = null, subagents = null, sessionProjections = null, sessions = null, agentPresets = null, workspaceRegistry = null } = {}) {
   const home = mkdtempSync(join(tmpdir(), 'dsh-mini-home-'))
   process.env.DSH_HOME = home
 
@@ -135,7 +140,7 @@ async function bootPlugin({ agents = {}, config = {}, attachments = null, sessio
   }
 
   const port = await freePort()
-  const mock = mockCtx({ attachments, sessionQuery, commands, sessionController, subagents, sessionProjections, sessions })
+  const mock = mockCtx({ attachments, sessionQuery, commands, sessionController, subagents, sessionProjections, sessions, agentPresets, workspaceRegistry })
   const { ctx, handlers, handlerOptions, agents: agentMap } = mock
   for (const [id, agent] of Object.entries(agents)) agentMap.set(id, agent)
 
@@ -3336,4 +3341,53 @@ test('执行轨迹·活气：思考片段逐字顺出来，回答正文一个字
     '没声明完整模式的连接，活片段也不收')
   await chat.reader.cancel()
   await full.reader.cancel()
+})
+
+// ---------------------------------------------------------------------------
+// Agent 模式：新建会话时手机上也能选（2026-10-04 用户要求，PC 一直可以）
+// ---------------------------------------------------------------------------
+
+test('Agent 模式：模式清单可读（含默认档与坏档），读不到就如实说读不到', async (t) => {
+  const p = await bootPlugin({
+    agentPresets: {
+      defaultId: 'code',
+      list: async () => [
+        { id: 'code', name: '写代码', description: '改代码、跑命令' },
+        { id: 'write', name: '写东西', description: '文案与文档' },
+        { id: 'old', name: '坏掉的', broken: '插件没装' },
+      ],
+    },
+  })
+  t.after(p.stop)
+  const [status, body] = await apiCall(p, '/mini/api/agent-presets')
+  assert.equal(status, 200)
+  assert.equal(body.ok, true)
+  assert.equal(body.defaultId, 'code', '默认哪一档要标出来')
+  assert.deepEqual(body.presets.map((x) => x.id), ['code', 'write', 'old'], '清单原样给，坏档也给（如实）')
+
+  // 服务缺席（纯 headless 组合）：如实说没有——不摆一个没得选的选择题。
+  const p2 = await bootPlugin()
+  t.after(p2.stop)
+  const [s2, b2] = await apiCall(p2, '/mini/api/agent-presets')
+  assert.equal(s2, 200)
+  assert.equal(b2.ok, false)
+  assert.equal(b2.reason, 'unavailable', '没有这个能力就说没有')
+})
+
+test('Agent 模式：建会话把选中的模式带给 DSH 的 create', async (t) => {
+  // 「agentPreset 原样进 create」在 tree.test.mjs 钉；这里钉 HTTP 这一头接得住。
+  const calls = []
+  const p = await bootPlugin({
+    sessionController: { create: async (req) => { calls.push(req); return { sessionId: 'sess-new' } } },
+    workspaceRegistry: { list: () => [{ id: 'w1', title: '甲', path: 'I:\\a', sessions: [] }] },
+  })
+  t.after(p.stop)
+  const res = await fetch(`${p.base}/mini/api/workspaces/w1/sessions?token=${p.token}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ agentPreset: 'write' }),
+  })
+  const out = await res.json()
+  assert.equal(out.ok, true, `建失败了：${JSON.stringify(out)}`)
+  assert.equal(calls[0].agentPreset, 'write', '手机点了哪个模式，create 就收到哪个')
 })
