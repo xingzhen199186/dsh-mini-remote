@@ -5577,7 +5577,10 @@
 
     var html = '';
     if (r.bundlesError) html += pluginNote('包清单读不到：' + escapeHtml(r.bundlesError), true);
-    html += pluginGroup('官方', official, bundleRow);
+    if (r.officialError) html += pluginNote('官方卡片读不到：' + escapeHtml(r.officialError), true);
+    // 官方那一栏是两样拼的（PC 也是这个次序）：可开关的官方包在前，
+    // 注册了设置卡片的官方插件（终端 / Agent 循环 / 子智能体 / 网页搜索）在后。
+    html += pluginGroup('官方', official.concat(r.official || []), officialRow);
 
     if (r.builtinError) {
       html += pluginNote('内置插件读不到：' + escapeHtml(r.builtinError), true);
@@ -5644,6 +5647,16 @@
     return rowHtml(b.title || b.name, desc,
       [b.enabled ? 'on' : 'off', b.enabled ? '已启用' : '已停用'],
       b.problem ? ' plugin-problem' : '');
+  }
+
+  /**
+   * 官方那一栏的一行：两种东西都在这里。
+   *   · 包（bundles）——带启用状态，能开关；
+   *   · 设置卡片（cards）——不是开关，是一张设置页，所以没有状态徽标（PC 上也是这样）。
+   */
+  function officialRow(item) {
+    if (item.kind === 'card') return rowHtml(item.title, item.description || '', null);
+    return bundleRow(item);
   }
 
   /**

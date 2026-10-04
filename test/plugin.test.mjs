@@ -58,7 +58,7 @@ function makeCtx(services, directNames) {
   })
 }
 
-function mockCtx({ attachments, sessionQuery, commands, sessionController, subagents, sessionProjections, sessions, agentPresets, workspaceRegistry, pluginManager, loader, pluginPackages } = {}) {
+function mockCtx({ attachments, sessionQuery, commands, sessionController, subagents, sessionProjections, sessions, agentPresets, workspaceRegistry, pluginManager, loader, pluginPackages, settings } = {}) {
   const handlers = new Map()
   // `ctx.on` 的第三个参数（注册选项）也要留下来：提问钩子靠 `prepend` 才能排到
   // 电脑浏览器前面，而漏掉它**不报错、只是永远轮不到**。这种错只能靠断言钉住。
@@ -132,12 +132,15 @@ function mockCtx({ attachments, sessionQuery, commands, sessionController, subag
       ...(pluginManager ? { pluginManager } : {}),
       ...(loader ? { loader } : {}),
       ...(pluginPackages ? { pluginPackages } : {}),
+      // 设置文档：问「这台部署 served 了哪些设置命名空间」——官方那几张设置卡片
+      // 就是按它决定出不出现（DSH 那边是 configForms.whileServed）。可缺席。
+      ...(settings ? { settings } : {}),
     }, ['agents', 'logger', 'on', 'effect']),
   }
 }
 
 /** 起一个被测插件实例，返回访问它所需的一切。 */
-async function bootPlugin({ agents = {}, config = {}, attachments = null, sessionQuery = null, commands = null, stored = null, sessionController = null, subagents = null, sessionProjections = null, sessions = null, agentPresets = null, workspaceRegistry = null, pluginManager = null, loader = null, pluginPackages = null } = {}) {
+async function bootPlugin({ agents = {}, config = {}, attachments = null, sessionQuery = null, commands = null, stored = null, sessionController = null, subagents = null, sessionProjections = null, sessions = null, agentPresets = null, workspaceRegistry = null, pluginManager = null, loader = null, pluginPackages = null, settings = null } = {}) {
   const home = mkdtempSync(join(tmpdir(), 'dsh-mini-home-'))
   process.env.DSH_HOME = home
 
@@ -148,7 +151,7 @@ async function bootPlugin({ agents = {}, config = {}, attachments = null, sessio
   }
 
   const port = await freePort()
-  const mock = mockCtx({ attachments, sessionQuery, commands, sessionController, subagents, sessionProjections, sessions, agentPresets, workspaceRegistry, pluginManager, loader, pluginPackages })
+  const mock = mockCtx({ attachments, sessionQuery, commands, sessionController, subagents, sessionProjections, sessions, agentPresets, workspaceRegistry, pluginManager, loader, pluginPackages, settings })
   const { ctx, handlers, handlerOptions, agents: agentMap } = mock
   for (const [id, agent] of Object.entries(agents)) agentMap.set(id, agent)
 
@@ -3499,5 +3502,57 @@ test('插件页面：三块各带各的错，一块读不到不把另两块弄�
   assert.equal(out.builtinError, 'unavailable', 'Loader 不在就如实说没有，不拿空清单充数')
   assert.deepEqual(out.entries, [])
   assert.deepEqual(out.bundles, [])
+})
+
+/**
+ * 官方那一栏的第二半：注册了设置卡片的官方插件（2026-10-04 用户确认官方就是这 8 个）。
+ *
+ * 这 4 张卡片由**浏览器端**插件在运行时注册，宿主看不见浏览器的插槽注册表，
+ * 所以名单只能照 DSH 客户端源码列一张表；但**出不出现**照 DSH 同一条规矩来——
+ * 宿主的设置文档 served 了它那几个命名空间才出现。这里钉的就是后半句。
+ */
+test('插件页面：官方那 4 张设置卡片，按宿主 served 的命名空间决定出不出现', async (t) => {
+  const p = await bootPlugin({
+    // 真机上 desktop 部署这几个都在（用户截图里 4 张卡都在）
+    settings: {
+      describe: () => [
+        { ns: 'pwsh-sandbox' }, // 终端看 bash-sandbox / pwsh-sandbox 任一个
+        { ns: 'agent-loop' },
+        { ns: 'subagent' },
+        { ns: 'web-search-deepseek' },
+      ],
+    },
+  })
+  t.after(p.stop)
+
+  const out = await (await fetch(`${p.base}/mini/api/plugins?token=${p.token}`)).json()
+  assert.deepEqual(out.official.map((c) => c.title), ['终端', 'Agent 循环', '子智能体', '网页搜索'],
+    '次序照 DSH 的 order：终端 → Agent 循环 → 子智能体 → 网页搜索')
+  assert.deepEqual(out.official.map((c) => c.kind), ['card', 'card', 'card', 'card'],
+    '带 kind 标记，前端才知道它们不是开关、没有状态徽标')
+  assert.equal(out.official[0].description, '限制每条命令最多能跑多久、最多输出多少内容。',
+    '文案逐字取自 DSH 自己的语言包，不自己编')
+})
+
+test('插件页面：宿主没 served 的设置卡片，手机上也不许凭空出现', async (t) => {
+  // 一个只 served 了子智能体「模型选择」那一个命名空间的部署：子智能体卡片仍在
+  // （两个命名空间任一个 served 就注册，照 DSH 的 whileServed），另外三张不出现。
+  const p = await bootPlugin({
+    settings: { describe: () => [{ ns: 'subagent-model-selection-settings' }] },
+  })
+  t.after(p.stop)
+
+  const out = await (await fetch(`${p.base}/mini/api/plugins?token=${p.token}`)).json()
+  assert.deepEqual(out.official.map((c) => c.title), ['子智能体'],
+    '两个命名空间任一个 served 就该出现；没 served 的一张都不许多')
+})
+
+test('插件页面：问不到设置文档时，官方卡片整块不出现（宁可少画，不凭空多画）', async (t) => {
+  const p = await bootPlugin() // 不给 settings
+  t.after(p.stop)
+
+  const out = await (await fetch(`${p.base}/mini/api/plugins?token=${p.token}`)).json()
+  assert.deepEqual(out.official, [], '问不到就不画——不猜「大概都有」')
+  assert.equal(out.officialError, '', '「这台没提供这个能力」不算出错，不该红字吓人')
 })
 

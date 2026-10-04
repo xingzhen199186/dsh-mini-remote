@@ -5129,6 +5129,32 @@ test('插件页面：第三方是「装过的、非 DSH 自家」，一个都不
   assert.ok(!inThird.includes('dsh-experimental-x'), '用户装的 DSH 自家包也不进第三方')
 })
 
+/**
+ * 官方那一栏是两样拼的（2026-10-04 用户确认官方就是 8 个）。
+ * PC 上也是：可开关的官方包在前，注册了设置卡片的官方插件在后。
+ * 卡片不是开关，所以没有状态徽标；包有。
+ */
+test('插件页面：官方那一栏是「包 + 设置卡片」两样拼的', () => {
+  const out = renderPlugins({
+    bundles: [{
+      name: '@deepseek-ai/dsh-experimental-agent-team-profile', title: '智能体团队',
+      optional: true, installed: false, enabled: true,
+    }],
+    official: [
+      { kind: 'card', title: '终端', description: '限制每条命令最多能跑多久、最多输出多少内容。' },
+      { kind: 'card', title: 'Agent 循环', description: '控制 Agent 派发工具调用的方式。' },
+    ],
+    entries: [], presets: [],
+  })
+
+  assert.match(out, /官方 3/, '官方＝1 个可开关的包 + 2 张设置卡片')
+  assert.ok(out.indexOf('智能体团队') < out.indexOf('终端'),
+    '次序照 PC：包在前，设置卡片在后')
+  // 徽标只有包有（「已启用」）；卡片是一张设置页，不该给它编一个状态。
+  assert.equal((out.match(/plugin-badge/g) || []).length, 1, '3 行里只有那个包带状态徽标')
+  assert.match(out, /限制每条命令最多能跑多久、最多输出多少内容。/, '卡片的说明照实显示')
+})
+
 test('插件页面：空的组整个不画，读不到的那块如实说', () => {  const empty = renderPlugins({ bundles: [], entries: [], presets: [] })
   assert.ok(!empty.includes('官方 0'), '一个都没有时不许画一个「官方 0」的空标题')
   assert.ok(!empty.includes('已安装 · 第三方 0'))
