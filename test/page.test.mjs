@@ -4836,6 +4836,26 @@ test('完整模式：旁白是一段正文（照 PC 的过程段落），不是�
   assert.ok(!out.includes('data-traj-entry="y1"'), '旁白不占可点的条目行')
 })
 
+test('完整模式：折叠行右侧内容一行截断（照 PC），状态字样不许被省略号吃掉', () => {
+  // 2026-10-04 用户真机报「词条右边把内容全铺出来」：PC 的折叠行是一行、多了省略号，
+  // 具体内容在展开里；出错/进行中的字样独立成段，不跟内容挤在一个会被截断的段里。
+  const h = trajHarness()
+  h.state.trajectory = [{ turn: 2, state: 'error', reason: null, entries: [
+    trajTool('e1', {
+      turn: 2, name: 'pwsh', summary: '很长的说明'.repeat(30),
+      state: 'error', error: { name: 'Error', code: null, reason: '读不到 a.txt' },
+    }),
+  ] }]
+  h.render()
+  const out = h.replyEl.innerHTML
+  assert.match(out, /class="traj-detail">[^<]*<\/span>/, '内容段里只有文字——没有别的标签挤进来')
+  assert.match(out, /<\/span> · <span class="traj-err">/, '状态字样独立成段，排在内容段之后')
+
+  const trajCss = html.slice(html.indexOf('.traj-group {'), html.indexOf('/* ---------- 设置抽屉'))
+  assert.match(trajCss, /\.traj-detail\s*\{[^}]*text-overflow:\s*ellipsis/, '右侧内容超出一行就省略号')
+  assert.match(trajCss, /\.traj-detail\s*\{[^}]*white-space:\s*nowrap/, '折叠行不换行')
+})
+
 // ---------------------------------------------------------------------------
 // S8：轨迹穿插进对话（2026-10-03 用户裁决「一定要让执行轨迹的逻辑符合DSH本身」）
 // ---------------------------------------------------------------------------

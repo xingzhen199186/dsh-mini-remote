@@ -880,7 +880,17 @@
   .traj-ico { flex: none; width: 14px; height: 14px; color: var(--muted); }
   .traj-ico svg { display: block; width: 14px; height: 14px; }
   .traj-name { flex: none; color: var(--muted); }
-  .traj-detail { color: var(--fg); word-break: break-all; }
+  /* 折叠行右侧的内容一行截断（照 PC）：折叠行是给人扫的，不是给人读的——
+     具体东西在展开里。组头标题同款处理（活片段再长也不许换行刷屏）。 */
+  .traj-detail {
+    flex: 1 1 auto; min-width: 0;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    color: var(--fg);
+  }
+  .traj-head .traj-title, .traj-head .traj-run {
+    flex: 1 1 auto; min-width: 0;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
   .traj-say {
     margin: 4px 0 8px; padding: 0 2px;
     white-space: pre-wrap; word-break: break-word;
@@ -3363,13 +3373,16 @@
     var kind = think ? 'thinking' : trajActivity(e.name || '');
     var label = think ? '思考' : trajToolTitle(e.name || '');
     var detail = think ? trajFirstLine(e.output) : (e.summary || '');
-    var tail = detail ? ' · ' + escapeHtml(detail) : '';
-    if (e.error) tail += ' · <span class="traj-err">' + escapeHtml(trajErrLine(e)) + '</span>';
-    else if (e.state === 'running') tail += ' · <span class="traj-run">进行中</span>';
+    // 内容段与状态段**分开**：内容段一行截断（照 PC 的折叠行——折叠行是给人扫的），
+    // 出错/进行中的字样是独立的一段，不许被省略号吃掉（2026-10-04 真机返修）。
+    var body = '<span class="traj-detail">' + (detail ? ' · ' + escapeHtml(detail) : '') + '</span>';
+    var chips = '';
+    if (e.error) chips = ' · <span class="traj-err">' + escapeHtml(trajErrLine(e)) + '</span>';
+    else if (e.state === 'running') chips = ' · <span class="traj-run">进行中</span>';
     var row = '<button type="button" class="traj-row" data-traj-entry="'
       + escapeHtml(e.id) + '"><span class="traj-ico">' + trajIco(kind) + '</span>'
       + '<span class="traj-name">' + escapeHtml(label) + '</span>'
-      + '<span class="traj-detail">' + tail + '</span></button>';
+      + body + chips + '</button>';
     return '<div class="traj-entry">' + row
       + (trajEntryIsOpen(e) ? trajEntryBody(e) : '') + '</div>';
   }

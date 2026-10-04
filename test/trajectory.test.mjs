@@ -272,16 +272,29 @@ test('截断：工具步的原始参数也会截，和输出的截断信息各�
   assert.deepEqual(tool.summary.slice(-1), '…', '折叠行也收着点，但原始参数在 args 里')
 })
 
-test('参数摘要：常用字段优先、压成一行；不是 JSON 就原样（不假装解析成功）', () => {
-  assert.equal(argSummary('{"command":"npm test","cwd":"I:\\\\a"}'), 'npm test')
-  assert.equal(argSummary('{"path":"a.txt","limit":10}'), 'a.txt')
-  assert.equal(argSummary('{"limit":10,"force":true}'), 'limit: 10 · force: true')
-  assert.equal(argSummary('{\n  "path": "a\\nb.txt"\n}'), 'a b.txt', '摘要是一行，不留换行')
+test('参数摘要：照抄 PC 的取值顺序（SUMMARY_KEYS）——说明优先、一行、不铺原文', () => {
+  // PC（dsh-client-ui-tool 的 SUMMARY_KEYS / deriveSummary）折叠行右边取的是「说明」，
+  // 不是原始命令：bash → description, command；read → path/file_path/url；
+  // search → query/pattern/url；write/edit → path/file_path；code → description；
+  // 认不出的工具 → 第一个非空字符串；都没有就原样一行。
+  // 2026-10-04 用户真机报「词条右边把整条命令铺出来」——根因就是手机把 command 排了第一。
+  assert.equal(
+    argSummary('{"description":"找活体检查失败项","command":"node tools/live-check.mjs --port 3090 2>&1"}', 'pwsh'),
+    '找活体检查失败项', '命令类：人写的说明优先，命令原文收在展开里')
+  assert.equal(argSummary('{"command":"npm test","cwd":"I:\\\\a"}', 'bash'), 'npm test', '没说明才退到命令')
+  assert.equal(argSummary('{"path":"a.txt","limit":10}', 'read'), 'a.txt')
+  assert.equal(argSummary('{"query":"foo","pattern":"b*"}', 'grep'), 'foo')
+  assert.equal(argSummary('{"path":"a.txt","content":"一大篇"}', 'write'), 'a.txt')
+  assert.equal(argSummary('{"description":"验一遍"}', 'run_code'), '验一遍')
+  assert.equal(argSummary('{"title":"小活","x":1}', 'mystery_tool'), '小活', '认不出的工具：第一个非空字符串（照 PC）')
+  assert.equal(argSummary('{"limit":10,"force":true}', 'mystery_tool'), '{"limit":10,"force":true}',
+    '一个字符串都没有：原样一行（照 PC，不自造「key: value」的拼法）')
+  assert.equal(argSummary('{\n  "path": "a\\nb.txt"\n}', 'read'), 'a b.txt', '摘要是一行，不留换行')
   assert.equal(argSummary('{"broken":'), '{"broken":')
   assert.equal(argSummary('[]'), '[]', '不是对象的 JSON 就原样')
   assert.equal(argSummary(''), '')
   assert.equal(argSummary(undefined), '')
-  const long = argSummary(JSON.stringify({ command: 'z'.repeat(500) }))
+  const long = argSummary(JSON.stringify({ description: 'z'.repeat(500) }), 'pwsh')
   assert.ok(long.length <= 201, '折叠行有个长度上限——原始参数在 args 里，不丢内容')
 })
 
