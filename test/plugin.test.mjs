@@ -3350,9 +3350,10 @@ test('执行轨迹·活气：思考片段逐字顺出来，回答正文一个字
 test('Agent 模式：模式清单可读（含默认档与坏档），读不到就如实说读不到', async (t) => {
   const p = await bootPlugin({
     agentPresets: {
-      defaultId: 'code',
+      defaultId: 'standard',
       list: async () => [
-        { id: 'code', name: '写代码', description: '改代码、跑命令' },
+        { id: 'standard' },
+        { id: 'ptc', name: '我自己起的名', description: '自建的说明' },
         { id: 'write', name: '写东西', description: '文案与文档' },
         { id: 'old', name: '坏掉的', broken: '插件没装' },
       ],
@@ -3362,8 +3363,16 @@ test('Agent 模式：模式清单可读（含默认档与坏档），读不到�
   const [status, body] = await apiCall(p, '/mini/api/agent-presets')
   assert.equal(status, 200)
   assert.equal(body.ok, true)
-  assert.equal(body.defaultId, 'code', '默认哪一档要标出来')
-  assert.deepEqual(body.presets.map((x) => x.id), ['code', 'write', 'old'], '清单原样给，坏档也给（如实）')
+  assert.equal(body.defaultId, 'standard', '默认哪一档要标出来')
+  assert.deepEqual(body.presets.map((x) => x.id), ['standard', 'ptc', 'write', 'old'], '清单原样给，坏档也给（如实）')
+
+  // 名字两条政策（照 PC；用户 2026-10-04 点名「模式选择应该为中文」）：
+  // 内置档没自带名字 → 落中文词条表；自建模式声明了自己的名字 → 用它自己的，不翻译。
+  const byId = Object.fromEntries(body.presets.map((x) => [x.id, x]))
+  assert.equal(byId.standard.name, '标准模式', '内置档落中文词条表')
+  assert.match(byId.standard.description, /处理代码、文件和资料/, '说明也照抄 PC 词条表')
+  assert.equal(byId.ptc.name, '我自己起的名', '自建的名字不翻译（PC 政策：不翻译用户自造的词）')
+  assert.equal(byId.old.broken, '插件没装', '坏档如实带原因')
 
   // 服务缺席（纯 headless 组合）：如实说没有——不摆一个没得选的选择题。
   const p2 = await bootPlugin()
