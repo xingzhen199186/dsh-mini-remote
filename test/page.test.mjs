@@ -4066,13 +4066,13 @@ function trajHarness(chat) {
 
   // eslint-disable-next-line no-new-func
   const build = new Function(
-    'state', 'replyEl', 'escapeHtml', 'renderChat', 'renderMinimal', 'modeHint', '$',
+    'state', 'replyEl', 'escapeHtml', 'mdToHtml', 'renderChat', 'renderMinimal', 'modeHint', '$',
     'buildChat', 'mainEl', 'atBottom', 'scrollChat',
     `${html.slice(a, b)}
      return { render, renderFull, toggleTrajGroup, toggleTrajEntry, state, replyEl, getEl: $ };`,
   )
   return build(
-    state, replyEl, md.escapeHtml,
+    state, replyEl, md.escapeHtml, md.mdToHtml,
     chatStub,
     () => { replyEl.innerHTML = '' },
     () => '',
@@ -4832,8 +4832,21 @@ test('完整模式：旁白是一段正文（照 PC 的过程段落），不是�
   ] }]
   h.render()
   const out = h.replyEl.innerHTML
-  assert.match(out, /class="traj-say"[^>]*>我先看一下这个文件</, '旁白照 PC 是一段正文')
+  assert.match(out, /class="traj-say"[\s\S]{0,60}?我先看一下这个文件/, '旁白照 PC 是一段正文')
   assert.ok(!out.includes('data-traj-entry="y1"'), '旁白不占可点的条目行')
+
+  // 旁白要走 markdown 渲染（跟回答区一个待遇），不是原样贴星号——
+  // 2026-10-04 用户顺手报的：「那些对用户说的话似乎没有 markdown 渲染」。
+  h.state.trajectory = [{ turn: 1, state: 'running', reason: null, entries: [
+    {
+      id: 'y2', turn: 1, step: 1, kind: 'say', name: null, args: null, summary: null,
+      output: '**服务端全对**，见 `scratch` 说明', state: 'ok', error: null, truncated: null, timestamp: 1,
+    },
+  ] }]
+  h.render()
+  const md = h.replyEl.innerHTML
+  assert.match(md, /<strong>服务端全对<\/strong>/, '粗体渲染出来')
+  assert.match(md, /<code>scratch<\/code>/, '行内代码渲染出来')
 })
 
 test('完整模式：折叠行右侧内容一行截断（照 PC），状态字样不许被省略号吃掉', () => {

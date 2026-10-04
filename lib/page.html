@@ -893,9 +893,11 @@
   }
   .traj-say {
     margin: 4px 0 8px; padding: 0 2px;
-    white-space: pre-wrap; word-break: break-word;
+    word-break: break-word;
     color: var(--fg); font-size: 13px; line-height: 1.7;
   }
+  .traj-say p { margin: 0 0 6px; }
+  .traj-say p:last-child { margin-bottom: 0; }
   .traj-body {
     margin: 2px 0 8px; padding: 8px 10px;
     white-space: pre-wrap; word-break: break-word;
@@ -3359,11 +3361,13 @@
   /**
    * 旁白那一段（对用户说的话，别的模式由鲸鱼娘气泡念，2026-10-04 起完整模式塞回轨迹）：
    * 照 PC 是过程里的一段正文——不带图标、不可点开，说完就摆在这儿。
+   * 正文走 markdown 渲染（和回答区一个待遇：粗体、行内代码、列表都认），
+   * 不是原样贴星号（同日用户顺手报的）。
    */
   function trajSayHtml(e) {
     var tr = e.truncated || {};
-    return '<div class="traj-say">' + escapeHtml(e.output || '')
-      + trajTruncNote(tr.output, e.output || '') + '</div>';
+    return '<div class="traj-say">'
+      + mdToHtml((e.output || '') + trajTruncNote(tr.output, e.output || '')) + '</div>';
   }
 
   /** 一行一条（PC 的成员行）：图标 +「显示名 · 摘要」，失败/进行中顶在这一行上。 */
