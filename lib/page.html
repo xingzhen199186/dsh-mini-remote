@@ -1050,35 +1050,37 @@
      内容越来越多，贴底那张最高 86vh 的抽屉不够用了。
 
      **只改设置这一处**，不动 .sheet 本身——设置 / 统一操作面板 / 子智能体 / 插件页
-     共用那一套，另外三处本来就短，照旧贴底。
+     共用那一套（✓ 毛玻璃底色照旧，一个字没改），另外三处本来就短，照旧贴底。
 
-     三处跟着改，各有各的理由：
-       · 圆角和上边框是「贴着底边只露一截」才需要的；整屏之后那两条边就是屏幕边，
-         留着反而像没铺满。
-       · 底色换成实色面板（--panel）：整屏之后背后只剩一层遮罩，模糊看不出区别，
-         却实打实吃手机 GPU；而且 --glass 那 72% 的透光会让遮罩的暗色浮上来，
-         整页比别处暗一档。
-       · 上内边距挪给吸顶标题（见 .sheet-head）：这样它滚起来吸在顶上时，
-         仍然让开刘海/状态栏，不会钻到下面去。 */
+     布局改成一列：页眉（.sheet-head）待在**滚动区外面**，内容（.sheet-body）自己滚。
+     为什么要这样而不是把页眉做成吸顶的：吸顶的页眉得自己铺一层底色去挡滚上来的内容，
+     而它铺在抽屉的毛玻璃之上会**再叠一层**、叠出更深的色，顶上就一道色差。
+     页眉不进滚动区，底下就还是抽屉本来的那层毛玻璃，什么都不用铺。
+
+     圆角和上边框去掉：它们本来是「贴着底边只露一截」才需要的，整屏之后那两条边
+     就是屏幕边。 */
   #settings .sheet {
+    display: flex; flex-direction: column;
+    overflow: hidden;
     max-height: none; height: 100%;
     border-radius: 0; border-top: none;
-    background: var(--panel);
-    -webkit-backdrop-filter: none; backdrop-filter: none;
-    padding-top: 0;
+    padding: 0;
   }
-  /* 吸顶标题。**整屏之后必须有一个一直看得见的关闭口**：原来「点抽屉外面」那条路
-     没了（没有露在外面的遮罩可点），光靠底部那个「完成」得先滚到底才行。
-     吸顶用的还是 position: sticky，不写脚本。 */
+  /* 页眉。**整屏之后必须有一个一直看得见的关闭口**：原来「点抽屉外面」那条路没了
+     （没有露在外面的遮罩可点），光靠底部那个「完成」得先滚到底才行。 */
   .sheet-head {
-    position: sticky; top: 0; z-index: 1;
+    flex: 0 0 auto;
     display: flex; align-items: center; justify-content: space-between; gap: 12px;
-    margin: 0 0 14px;
-    padding: calc(env(safe-area-inset-top) + 16px) 0 10px;
-    background: var(--panel);
+    padding: calc(env(safe-area-inset-top) + 16px) 16px 10px;
     border-bottom: 1px solid var(--line);
   }
   .sheet-head h2 { margin: 0; }
+  /* 设置页真正滚的那一块。左右 16px 和底部安全区都是从 .sheet 挪过来的
+     （那边 padding 已归零，账不能丢）。 */
+  #settings .sheet-body {
+    flex: 1 1 auto; overflow-y: auto;
+    padding: 14px 16px calc(env(safe-area-inset-bottom) + 18px);
+  }
   .row {
     display: flex; align-items: center; justify-content: space-between;
     gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--line);
@@ -1355,12 +1357,16 @@
 
 <div id="settings">
   <div class="sheet">
-    <!-- 吸顶标题。整屏之后「点外面关掉」没了，所以这里必须有一个一直看得见的关闭口
-         （滚到哪儿都在）；底部那个「完成」照样留着。 -->
+    <!-- 页眉。整屏之后「点外面关掉」没了，所以这里必须有一个一直看得见的关闭口
+         （滚到哪儿都在）；底部那个「完成」照样留着。
+
+         它在**滚动区外面**（里面那个 .sheet-body 才是滚动区）：这样页眉底下就是抽屉
+         本来那层毛玻璃，不用为它另铺一层底色——铺了会叠出更深的色，顶部一道色差。 -->
     <div class="sheet-head">
       <h2>设置</h2>
       <button class="btn" id="btnSettingsClose">关闭</button>
     </div>
+    <div class="sheet-body">
 
     <div class="row">
       <div>
@@ -1489,6 +1495,7 @@
     </div>
 
     <div class="version" id="dshVersion" hidden></div>
+    </div>
   </div>
 </div>
 

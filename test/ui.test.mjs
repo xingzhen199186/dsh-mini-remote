@@ -236,19 +236,32 @@ test('设置页整屏：只改设置这一处，且整屏之后关得掉', () =>
   assert.match(block, /#settings \.sheet\s*\{[^}]*height:\s*100%/, '设置页要铺满整屏')
   assert.match(block, /#settings \.sheet\s*\{[^}]*max-height:\s*none/, '那句 86vh 的限高要解开')
   assert.match(block, /#settings \.sheet\s*\{[^}]*border-radius:\s*0/, '整屏了就不要那两角')
-  assert.match(block, /#settings \.sheet\s*\{[^}]*background:\s*var\(--panel\)/,
-    '背后只剩一层遮罩，用实色面板（半透明会让整页比别处暗一档）')
-  assert.ok(!/backdrop-filter:\s*blur/.test(block), '整屏别再用毛玻璃：看不出区别还吃 GPU')
+
+  // 底色**不许动**（2026-10-05 用户点名「底色毛玻璃不要换」）：
+  // 也不许在这儿另铺一层去挡内容——那会叠在毛玻璃上，叠出更深的色。
+  assert.ok(!/background:/.test(block), '整屏这一条不许改底色')
+  assert.ok(!/backdrop-filter/.test(block), '也不许把毛玻璃关掉')
 
   // 共用那套不许被顶成整屏。
   const base = css.slice(css.indexOf('.sheet {'), css.indexOf('.sheet h2'))
   assert.match(base, /max-height:\s*86vh/, '.sheet 四处共用，另外三处照旧贴底')
+  assert.match(base, /background:\s*var\(--glass\)/, '.sheet 的毛玻璃照旧')
+
+  // 页眉在滚动区外面：内容滚它的，页眉不跟着走，底下就还是抽屉那层毛玻璃。
+  assert.match(block, /#settings \.sheet\s*\{[^}]*display:\s*flex;\s*flex-direction:\s*column/,
+    '整屏要排成一列：页眉一行、内容一行')
+  assert.match(block, /#settings \.sheet\s*\{[^}]*overflow:\s*hidden/,
+    '抽屉本身不滚，交给里面那一块滚')
+  assert.match(block, /\.sheet-head\s*\{[^}]*flex:\s*0 0 auto/, '页眉固定，不参与滚动')
+  assert.match(block, /#settings \.sheet-body\s*\{[^}]*overflow-y:\s*auto/, '滚动的是内容那一块')
+  assert.match(block, /#settings \.sheet-body\s*\{[^}]*padding:\s*[^;}]*16px[^;}]*env\(safe-area-inset-bottom\)/,
+    '左右 16px 和底部安全区从 .sheet 挪过来了，账不能丢')
 
   // 关闭口。
-  assert.match(block, /\.sheet-head\s*\{[^}]*position:\s*sticky/, '顶部关闭口要吸顶，滚到哪儿都在')
-  assert.match(block, /\.sheet-head\s*\{[^}]*env\(safe-area-inset-top\)/, '吸顶时还要让开刘海/状态栏')
   assert.match(html, /<button class="btn" id="btnSettingsClose">关闭<\/button>/, '顶部要有那个关闭按钮')
   assert.match(html, /\$\('btnSettingsClose'\)\.addEventListener\('click'/, '而且它得真的接上')
+  assert.ok(html.indexOf('id="btnSettingsClose"') < html.indexOf('class="sheet-body"'),
+    '关闭口要在页眉里（滚动区之外），不然一滚就找不着了')
 })
 
 /**
