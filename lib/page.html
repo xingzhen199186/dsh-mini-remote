@@ -21,7 +21,7 @@
          需要"显眼一点"的地方一律用鲸鱼娘的冰蓝 --ice，别动这两个。
        · --ok/--run/--err 是状态点的语义色，占的是 8px 一个小点，不算强调色。
        · 配色以鲸鱼娘为准心：深海墨蓝打底，她的冰蓝作次级色。
-       · 两套主题：这套（默认，深色）和 [data-theme="light"]，色调跟宣传图
+       · 两套主题：[data-theme="light"]（默认，浅色）和深色，色调跟宣传图
          （docs/promo.png）统一。**颜色令牌两边必须一一对应**——缺一个，就有元素
          在某个主题下"隐身"，而且只在那个主题下才看得出来。守卫在 test/ui.test.mjs。 */
   :root {
@@ -1119,11 +1119,14 @@
   // 所以这一段留在 <head> 里、样式表后面，**别挪到页面底部那段脚本区去**。
   (function () {
     try {
-      var pick = localStorage.getItem('dshMiniTheme') || 'dark';
+      var pick = localStorage.getItem('dshMiniTheme') || 'light';
       var dark = !window.matchMedia || window.matchMedia('(prefers-color-scheme: dark)').matches;
-      document.documentElement.setAttribute('data-theme',
-        pick === 'auto' ? (dark ? 'dark' : 'light') : pick);
-    } catch (e) { /* 无痕模式下 localStorage 会抛；按默认深色走，不影响页面 */ }
+      var use = pick === 'auto' ? (dark ? 'dark' : 'light') : pick;
+      document.documentElement.setAttribute('data-theme', use);
+      // 首屏时也更新状态栏颜色，否则浅色页配深色状态栏会闪一下
+      var meta = document.querySelector('meta[name="theme-color"]');
+      if (meta) meta.setAttribute('content', use === 'light' ? '#eaf3fc' : '#0a0f16');
+    } catch (e) { /* 无痕模式下 localStorage 会抛；按默认浅色走，不影响页面 */ }
   })();
 </script>
 </head>
@@ -1446,7 +1449,7 @@
     mode: localStorage.getItem('dshMiniMode') || DEFAULT_MODE || 'minimal',
     // 外观：'dark' | 'light' | 'auto'。默认深色——不给老用户换掉现在的样子；
     // 要浅色或跟着系统走，去设置页「外观」点一下。
-    theme: localStorage.getItem('dshMiniTheme') || 'dark',
+    theme: localStorage.getItem('dshMiniTheme') || 'light',
     // 字体大小：'small' | 'normal' | 'large'。默认标准。
     fontSize: localStorage.getItem('dshMiniFont') || 'normal',
     sound: localStorage.getItem('dshMiniSound') !== 'off',
