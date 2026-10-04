@@ -6167,11 +6167,13 @@
   function watchBuild() {
     if (!state.token) return;
     api('/mini/api/version').then(function (r) {
-      // 设置页底部那行 DSH 版本。**问到才显示**——问不到就整行不出现，
-      // 不拿「DSH unknown」糊一行上去（那个字对用户没意义，还像页面坏了）。
+      // 设置页底部那行版本。**问到才显示**——问不到就整行不出现，
+      // 不拿「unknown」糊一行上去（那个字对用户没意义，还像页面坏了）。
+      // 产品名写全称（DeepSeek Harness）：缩写 DSH 只有我们自己人认。
+      // 大小写照 DSH 自己的界面串（实测 49 处全是这个写法）。
       if (r && r.dshVersion && r.dshVersion !== 'unknown') {
         var el = $('dshVersion');
-        if (el) { el.textContent = 'DSH ' + r.dshVersion; el.hidden = false; }
+        if (el) { el.textContent = 'DeepSeek Harness ' + r.dshVersion; el.hidden = false; }
       }
       if (!r || !r.build || r.build === BUILD) return;
       if (inputEl.value && inputEl.value.trim()) return;
