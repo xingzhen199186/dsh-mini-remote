@@ -253,6 +253,17 @@ test('设置页整屏：只改设置这一处，且整屏之后关得掉', () =>
   assert.match(block, /#settings \.sheet\s*\{[^}]*overflow:\s*hidden/,
     '抽屉本身不滚，交给里面那一块滚')
   assert.match(block, /\.sheet-head\s*\{[^}]*flex:\s*0 0 auto/, '页眉固定，不参与滚动')
+  // 页眉的高度（2026-10-05 用户说太高）：
+  // 它由两样顶出来——页眉自己的上下内边距，以及右边那个按钮。
+  assert.match(block, /\.sheet-head\s*\{[^}]*padding:\s*calc\(env\(safe-area-inset-top\) \+ 10px\)/,
+    '页眉的竖向节奏和页面顶栏（header）一致：10px，别再退回 16px')
+  assert.match(block, /\.sheet-head \.btn\s*\{[^}]*padding:\s*\d+px\s+\d+px/,
+    '页眉里那个按钮要单独紧凑一档——那条页眉的高度就是它顶出来的')
+  assert.match(block, /\.sheet-head \.btn\s*\{[^}]*font-size:\s*13px/,
+    '页眉里的按钮字号也收一档')
+  // 通用 .btn 是别处到处在用的，改它等于整页跟着变——只许收紧页眉里那一个。
+  assert.match(css, /select, \.btn \{\s*padding: 8px 12px/,
+    '通用 .btn 的内边距不许动，紧凑那一档只能挂在 .sheet-head 下面')
   assert.match(block, /#settings \.sheet-body\s*\{[^}]*overflow-y:\s*auto/, '滚动的是内容那一块')
   assert.match(block, /#settings \.sheet-body\s*\{[^}]*padding:\s*[^;}]*16px[^;}]*env\(safe-area-inset-bottom\)/,
     '左右 16px 和底部安全区从 .sheet 挪过来了，账不能丢')

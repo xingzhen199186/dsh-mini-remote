@@ -1067,14 +1067,24 @@
     padding: 0;
   }
   /* 页眉。**整屏之后必须有一个一直看得见的关闭口**：原来「点抽屉外面」那条路没了
-     （没有露在外面的遮罩可点），光靠底部那个「完成」得先滚到底才行。 */
+     （没有露在外面的遮罩可点），光靠底部那个「完成」得先滚到底才行。
+
+     高度是省出来的（2026-10-05 用户说太高）：原来上下留 16/10px，而真正把这条页眉
+     顶高的是右边那个按钮——.btn 默认上下各 8px 内边距、14px 字，光它就 39px，
+     加起来 65px，比页面自己那条顶栏还高。
+       · 上内边距收到 10px，和页面顶栏（header）**同一条竖向节奏**；
+       · 页眉里这一个按钮单独紧凑一档（见下），别处照旧。
+     两处合起来约 50px。 */
   .sheet-head {
     flex: 0 0 auto;
     display: flex; align-items: center; justify-content: space-between; gap: 12px;
-    padding: calc(env(safe-area-inset-top) + 16px) 16px 10px;
+    padding: calc(env(safe-area-inset-top) + 10px) 16px 10px;
     border-bottom: 1px solid var(--line);
   }
   .sheet-head h2 { margin: 0; }
+  /* 只收紧页眉里这一个按钮：整条页眉的高度就是它顶出来的。横向仍留 11px，
+     点起来的面积（约 32×52）远在 24×24 的可点下限之上。 */
+  .sheet-head .btn { padding: 5px 11px; font-size: 13px; }
   /* 设置页真正滚的那一块。左右 16px 和底部安全区都是从 .sheet 挪过来的
      （那边 padding 已归零，账不能丢）。 */
   #settings .sheet-body {
