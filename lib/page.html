@@ -1038,7 +1038,25 @@
   .btn { cursor: pointer; }
   .btn.primary { background: var(--act); border-color: var(--act); color: var(--on-act); font-weight: 600; }
   .sheet .foot { margin-top: 18px; display: flex; gap: 10px; }
-  .sheet .version { text-align: center; padding: 16px 0 8px; font-size: 12px; color: var(--muted); }
+  /* 设置抽屉最底下那行 DSH 版本：做成一条**收尾的分隔线**——两侧各一条细线、
+     版本号居中，把这一屏收住，免得孤零零一行小字吊在最后（2026-10-05 用户要的
+     「加一点设计感，比如两侧加横线」）。
+     线用现成的 --line（细线色），不新造令牌、不加关键帧、不碰圆角——这一屏的
+     层次本来就靠这条 1px 细线建立，别为了一行版本号另起一套。
+
+     `[hidden]` 那一句**不能省**：下面写了 display: flex，而作者样式表里的
+     display 会盖掉 HTML `hidden` 自带的 display: none——少了它，问不到版本时
+     这一行照样显示，变成一条空的分隔条。 */
+  .sheet .version {
+    display: flex; align-items: center; gap: 10px;
+    padding: 18px 0 6px; font-size: 12px; color: var(--muted);
+    letter-spacing: 0.04em;
+  }
+  .sheet .version[hidden] { display: none; }
+  .sheet .version::before,
+  .sheet .version::after {
+    content: ""; flex: 1 1 0; height: 1px; background: var(--line);
+  }
   .sheet .foot .btn { flex: 1 1 0; text-align: center; }
 
   /* ---------- 统一操作面板（输入框旁边那一个入口点开的东西） ----------

@@ -218,6 +218,31 @@ test('统一操作面板：不新造令牌、不放强调色、长文字省略�
 })
 
 /**
+ * 设置抽屉最底下那行版本号（2026-10-05 用户要「加一点设计感，比如两侧加横线」）。
+ *
+ * 钉的是那个**只能靠肉眼发现的坑**：为了做两侧横线得写 display: flex，
+ * 而作者样式表里的 display 会盖掉 HTML `hidden` 自带的 display: none——
+ * 少了 [hidden] 那一句，问不到版本时这行照样显示，变成一条空的分隔条。
+ */
+test('设置页的版本号那行：两侧横线用伪元素，且 hidden 还得管用', () => {
+  const from = css.indexOf('/* 设置抽屉最底下那行 DSH 版本')
+  const to = css.indexOf('.sheet .foot .btn {')
+  assert.ok(from > 0 && to > from, '找不到版本号那段样式，锚点变了先修测试')
+  const block = css.slice(from, to)
+
+  assert.match(block, /\.version::before,\s*\n\s*\.sheet \.version::after/, '两侧横线用伪元素')
+  assert.match(block, /content:\s*""/, '伪元素要有内容才画得出来')
+  assert.match(block, /background:\s*var\(--line\)/, '线用现成的细线色，不新造')
+  assert.match(block, /\.version\[hidden\]\s*\{\s*display:\s*none/, 'flex 会顶掉 hidden，必须补这一句')
+
+  // 这一块同样不新造令牌、不碰圆角、不加动效（全页那几条断言也管着，这里钉最易写歪的）。
+  const declared = [...block.matchAll(/(--[a-z0-9-]+)\s*:/g)].map((m) => m[1])
+  assert.deepEqual(declared, [], `这行不该声明新令牌：${JSON.stringify(declared)}`)
+  assert.ok(!/border-radius/.test(block), '这行不该有圆角')
+  assert.ok(!/animation|@keyframes/.test(block), '这行不该有动效')
+})
+
+/**
  * 插件页（2026-10-04 用户要求在设置里加插件入口；同日真机返修两处）。
  *
  * 两处都是"CSS 漏写"这一类：HTML 画出来了、脚本也接上了，但少了定位和缩进，
