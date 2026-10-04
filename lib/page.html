@@ -3236,14 +3236,14 @@
 
   /**
    * 失败首行。reason 的第一行；reason 取不到就用错误名/错误码，都没有就如实说
-   * 「这一步失败了」——**不编原因**（和 lib/trajectory.js readError 同一条口径）。
+   * 「失败」——**不编原因**（和 lib/trajectory.js readError 同一条口径）。
    */
   function trajErrLine(e) {
     if (!e || !e.error) return '';
     var r = typeof e.error.reason === 'string' ? e.error.reason : '';
     if (!r && typeof e.error.name === 'string' && e.error.name) r = e.error.name;
     if (!r && typeof e.error.code === 'string' && e.error.code) r = e.error.code;
-    if (!r) return '这一步失败了';
+    if (!r) return '失败';
     return r.split('\n')[0];
   }
   /** 组头上的失败首行：组里第一条带失败身份的条目的那一行。 */
@@ -3516,16 +3516,11 @@
     var title = t.live
       ? '<span class="traj-run traj-shimmer"' + trajShimStyle() + '>' + escapeHtml(t.text) + '</span>'
       : '<span class="traj-title">' + escapeHtml(t.text) + '</span>';
-    // 收官的三种结局：完成词本身就说了「已…」，不再另挂字样；出错与被停要如实挂出来。
-    var chip = g.state === 'error' ? ' · <span class="traj-err">出错了</span>'
-      : g.state === 'stopped' ? ' · 已停止' : '';
-    // 失败首行也顶到组头上：收着的时候，错误原因必须一眼可见。
-    var err = trajGroupErrLine(g);
-    if (err) err = ' · <span class="traj-err">' + escapeHtml(err) + '</span>';
+    // 组头只显示状态词/标题，失败信息在下方条目行里显示，不重复。
     var head = '<button type="button" class="traj-head" data-traj-group="'
       + escapeHtml(String(g.turn)) + '"><span class="traj-ico">' + trajIco(t.kind) + '</span>'
       + '<span class="traj-chev">' + (open ? '▾' : '▸') + '</span>'
-      + title + chip + err + '</button>';
+      + title + '</button>';
     var entries = open && g.entries.length
       ? '<div class="traj-entries">' + g.entries.map(trajEntryHtml).join('') + '</div>'
       : '';
@@ -3542,6 +3537,7 @@
    * rows[i] 与 list[i] 一一对应（list＝裁好窗的消息，all＝滤掉排队后的全量）。
    * 返回插好之后的新数组，不动入参。
    */
+
   function trajInterleave(rows, list, all) {
     var groups = (state.trajectory || []).filter(function (g) {
       // 空组也可能是「正在想」的那一轮：turn/start 刚到、条目要等这一步说完才落
@@ -4252,6 +4248,21 @@
   });
 
   // ---------------- SSE ----------------
+  /** 从轨迹中取当前轮号：正在跑的那一组的轮号。没有就返回 null。 */
+  function currentTrajectoryTurn() {
+    var groups = state.trajectory || [];
+    for (var i = groups.length - 1; i >= 0; i--) {
+      var g = groups[i];
+      if (g && g.state === 'running' && g.turn != null) return g.turn;
+    }
+    // 没有正在跑的，取最近一个有轮号的
+    for (var j = groups.length - 1; j >= 0; j--) {
+      var h = groups[j];
+      if (h && h.turn != null) return h.turn;
+    }
+    return null;
+  }
+
   /**
    * 这条流是谁——轨迹订阅按连接记，就得先有身份。
    *
@@ -4387,6 +4398,9 @@
           {
             role: 'assistant', text: payload.text, timestamp: payload.timestamp,
             sessionId: payload.sessionId, interrupted: cut,
+            // 完整模式把轨迹块插回对话原位要用：从轨迹中取当前轮号。
+            // 手机本地回显时轮还没开，先留空；服务端快照补上来时会带上真轮号。
+            turn: currentTrajectoryTurn(),
           }
         ]);
       }
@@ -4984,7 +4998,10 @@
         // 顺带也解决了发送失败时屏幕上留一条假气泡的问题。
         if (state.mode !== 'minimal') {
           state.history = (state.history || []).concat([
-            { role: 'user', text: shown, timestamp: Date.now() }
+            { role: 'user', text: shown, timestamp: Date.now(),
+              // 完整模式把轨迹块插回对话原位要用：从轨迹中取当前轮号。
+              // 手机本地回显时轮还没开，先留空；服务端快照补上来时会带上真轮号。
+              turn: currentTrajectoryTurn() }
           ]);
           render();
         }

@@ -1709,6 +1709,7 @@ function buildSend({ running = false, serverSays = { ok: true }, rejects = false
     $: el,
     escapeHtml: md.escapeHtml,
     MAX_UPLOAD: 50 * 1024 * 1024,
+    currentTrajectoryTurn: () => null, // 测试桩：没有轨迹数据时返回 null
     api: (path, opts) => {
       calls.push({ path, opts })
       return rejects ? Promise.reject(new Error('发不出去')) : Promise.resolve(serverSays)
@@ -4303,11 +4304,11 @@ test('完整模式：失败原因首行顶在折叠处（错误色），点开�
   assert.ok(open.includes('部分结果'), '点开正文仍见 output')
   assert.match(open, /traj-io-err/, '出错时「输出」整段红（照 PC）')
 
-  // 组头同一口径：手动把出错的组收起来，失败首行还得挂在组头上。
+  // 组头只显示状态词/标题，失败信息在下方条目行里显示，不重复。
   h.toggleTrajGroup(4)
   const shut = h.replyEl.innerHTML
   assert.ok(!shut.includes('data-traj-entry='), '组确实收着')
-  assert.match(shut, /class="traj-err"[^>]*>读不到 a\.txt</, '收着的组头也带失败首行')
+  assert.ok(!shut.includes('class="traj-err"'), '组头上不带失败首行——失败信息在条目行里')
 })
 
 test('完整模式：进行中有明确标识，跑着的行有扫光（照 PC，其余零动效）', () => {

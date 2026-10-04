@@ -159,7 +159,7 @@ test('提取：工具失败 → error，原因是事件里那个，取不到就�
     ev('tool/result', { turn: 1, step: 1, message: { role: 'tool', toolCallId: 'c1', isError: true, content: text('') } }),
   ])
   assert.deepEqual(bare[0].entries[0].error, { name: null, code: null, reason: null },
-    '事件里没给原因就不编一个——页面那边写「这一步失败了」')
+    '事件里没给原因就不编一个——页面那边写「失败」')
 })
 
 test('提取：时间戳用事件自己的 time，没有就是 null（不编「现在」）', () => {
