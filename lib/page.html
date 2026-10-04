@@ -1359,7 +1359,7 @@
       <button class="btn primary" id="btnClose">完成</button>
     </div>
 
-    <div class="version">dsh-mini-remote v__VERSION__</div>
+    <div class="version" id="dshVersion">dsh-mini-remote v__VERSION__</div>
   </div>
 </div>
 
@@ -5929,6 +5929,11 @@
   function watchBuild() {
     if (!state.token) return;
     api('/mini/api/version').then(function (r) {
+      // 更新设置页的 DSH 版本显示
+      if (r && r.dshVersion) {
+        var el = $('dshVersion');
+        if (el) el.textContent = 'DSH ' + r.dshVersion + ' · dsh-mini-remote v' + '__VERSION__';
+      }
       if (!r || !r.build || r.build === BUILD) return;
       if (inputEl.value && inputEl.value.trim()) return;
       location.reload();
