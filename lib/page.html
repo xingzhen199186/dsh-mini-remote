@@ -1536,7 +1536,10 @@
           id: raw.id,
           turn: typeof raw.turn === 'number' ? raw.turn : group.turn,
           step: raw.step,
-          kind: raw.kind === 'think' ? 'think' : 'tool',
+          // 三种条目照单全收（think / say / tool）——旁白（say）是 2026-10-04 加的，
+          // 这里原来写死成两种，实时帧里的旁白会被画成「工具调用」空壳行，
+          // 等下一次整份对齐才变回正文段落（真机上就是「展现不对」）。
+          kind: raw.kind === 'think' || raw.kind === 'say' ? raw.kind : 'tool',
           name: raw.name,
           args: raw.args,
           summary: raw.summary,

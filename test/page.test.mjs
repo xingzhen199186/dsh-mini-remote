@@ -4451,6 +4451,22 @@ test('轨迹接线：订阅跟着「完整」开关走——切进先 POST 订�
   assert.equal(w2.connects(), 1, '404 = 流没了：立刻重连')
 })
 
+test('轨迹接线：旁白（say）走增量帧不掉种类——照旧是一段正文，不是工具空壳', () => {
+  // 2026-10-04 真机「展现不对」的根因之一：收帧处写死 think/tool 两种，
+  // 实时帧里的旁白被画成「工具调用」空壳行，等下一次整份对齐才变回段落。
+  const w = wiringHarness(() => new Promise(() => {}))
+  w.h.receiveTrajectoryFrame({
+    epoch: 'E1', seq: 1, sessionId: 's1', turn: 1,
+    add: [{
+      id: 'y1', turn: 1, step: 1, kind: 'say',
+      name: null, args: null, summary: null, output: '我先看一下这个文件',
+      state: 'ok', error: null, truncated: null, timestamp: 1,
+    }],
+    update: [],
+  })
+  assert.equal(w.state.trajectory[0].entries[0].kind, 'say', '旁白照旧是 say，不许被写成 tool')
+})
+
 test('轨迹接线：收帧按 id 增补改、seq 只进不退，跳一截不硬拼而是 GET 重拉', () => {
   const w = wiringHarness(() => new Promise(() => {})) // GET 挂起：别让它把 state 换掉
   const f1 = {
