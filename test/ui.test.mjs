@@ -253,17 +253,10 @@ test('设置页整屏：只改设置这一处，且整屏之后关得掉', () =>
   assert.match(block, /#settings \.sheet\s*\{[^}]*overflow:\s*hidden/,
     '抽屉本身不滚，交给里面那一块滚')
   assert.match(block, /\.sheet-head\s*\{[^}]*flex:\s*0 0 auto/, '页眉固定，不参与滚动')
-  // 页眉的高度（2026-10-05 用户说太高）：
-  // 它由两样顶出来——页眉自己的上下内边距，以及右边那个按钮。
+  // 页眉的高度（2026-10-05 用户说太高）：页眉自己那点上下内边距是一半，
+  // 另一半是里面那个按钮——它四个面板共用一档，单独有测试，见下一条。
   assert.match(block, /\.sheet-head\s*\{[^}]*padding:\s*calc\(env\(safe-area-inset-top\) \+ 10px\)/,
     '页眉的竖向节奏和页面顶栏（header）一致：10px，别再退回 16px')
-  assert.match(block, /\.sheet-head \.btn\s*\{[^}]*padding:\s*\d+px\s+\d+px/,
-    '页眉里那个按钮要单独紧凑一档——那条页眉的高度就是它顶出来的')
-  assert.match(block, /\.sheet-head \.btn\s*\{[^}]*font-size:\s*13px/,
-    '页眉里的按钮字号也收一档')
-  // 通用 .btn 是别处到处在用的，改它等于整页跟着变——只许收紧页眉里那一个。
-  assert.match(css, /select, \.btn \{\s*padding: 8px 12px/,
-    '通用 .btn 的内边距不许动，紧凑那一档只能挂在 .sheet-head 下面')
   assert.match(block, /#settings \.sheet-body\s*\{[^}]*overflow-y:\s*auto/, '滚动的是内容那一块')
   assert.match(block, /#settings \.sheet-body\s*\{[^}]*padding:\s*[^;}]*16px[^;}]*env\(safe-area-inset-bottom\)/,
     '左右 16px 和底部安全区从 .sheet 挪过来了，账不能丢')
@@ -273,6 +266,30 @@ test('设置页整屏：只改设置这一处，且整屏之后关得掉', () =>
   assert.match(html, /\$\('btnSettingsClose'\)\.addEventListener\('click'/, '而且它得真的接上')
   assert.ok(html.indexOf('id="btnSettingsClose"') < html.indexOf('class="sheet-body"'),
     '关闭口要在页眉里（滚动区之外），不然一滚就找不着了')
+})
+
+test('四个面板页眉里的「关闭」按钮共用一档紧凑尺寸', () => {
+  // 2026-10-05 用户两次报到这里：先说设置页「页眉高度太大」，又说插件页
+  // 「关闭按钮太大了，没跟插件两个字对齐」。根子是同一个——页眉里那个按钮用的是
+  // 通用 .btn（上下各 8px 内边距、14px 字，约 39px 高），比标题那行字高出一圈。
+  const rule = /\.ops-head \.btn, \.sa-head \.btn, \.sheet-head \.btn\s*\{([^}]*)\}/
+  const m = css.match(rule)
+  assert.ok(m, '找不到页眉按钮那一档样式——它必须同时管住四个面板，别一处一处补')
+  assert.match(m[1], /padding:\s*5px 11px/, '四个页眉的按钮都紧凑一档')
+  assert.match(m[1], /font-size:\s*13px/, '字号也收一档，才和标题那行对得上')
+  // 横向留 11px：点起来的面积约 32×52，远在 24×24 的可点下限之上。
+  assert.match(m[1], /padding:\s*5px 11px/, '不许把横向也收到没有——那会点不准')
+
+  // 通用 .btn 不许动：它别处到处在用（完成 / 重连 / 查看…），动它等于整页跟着变。
+  assert.match(css, /select, \.btn \{\s*padding:\s*8px 12px/, '通用 .btn 的内边距不许改')
+
+  // 三处页眉的骨架都还是「一行 + 两端对齐」，否则按钮会掉到标题下面去。
+  for (const cls of ['.ops-head', '.sa-head']) {
+    const sel = cls.replace('.', '\\.')
+    assert.match(css, new RegExp(sel + ' \\{[^}]*display:\\s*flex'), `${cls} 要排成一行`)
+    assert.match(css, new RegExp(sel + ' \\{[^}]*align-items:\\s*center'),
+      `${cls} 要竖向居中——按钮才跟标题同一行`)
+  }
 })
 
 /**

@@ -1082,9 +1082,6 @@
     border-bottom: 1px solid var(--line);
   }
   .sheet-head h2 { margin: 0; }
-  /* 只收紧页眉里这一个按钮：整条页眉的高度就是它顶出来的。横向仍留 11px，
-     点起来的面积（约 32×52）远在 24×24 的可点下限之上。 */
-  .sheet-head .btn { padding: 5px 11px; font-size: 13px; }
   /* 设置页真正滚的那一块。左右 16px 和底部安全区都是从 .sheet 挪过来的
      （那边 padding 已归零，账不能丢）。 */
   #settings .sheet-body {
@@ -1113,6 +1110,20 @@
   }
   .btn { cursor: pointer; }
   .btn.primary { background: var(--act); border-color: var(--act); color: var(--on-act); font-weight: 600; }
+  /* 页眉里那个动作按钮（关闭）比通用 .btn 紧凑一档。
+
+     通用 .btn 是给面板正身用的：上下各 8px 内边距 + 14px 字，约 39px 高。
+     摆进页眉就比标题高出一大截——**整条页眉的高度其实是它顶出来的**，而且那个
+     方框比标题那行字高出一圈，看着又大又不像跟标题对齐。
+     2026-10-05 用户两次报到这里：先说设置页「页眉高度太大」，又说插件页
+     「关闭按钮太大了，没跟插件两个字对齐」。
+
+     **四个面板页眉共用这一档**（统一操作面板 / 子智能体 / 插件页 / 设置页），
+     免得一处收了一处没收、几个面板长得不一样。
+     通用 .btn 的内边距一个字没动——它别处到处在用，动它等于整页跟着变。 */
+  .ops-head .btn, .sa-head .btn, .sheet-head .btn {
+    padding: 5px 11px; font-size: 13px;
+  }
   .sheet .foot { margin-top: 18px; display: flex; gap: 10px; }
   /* 设置抽屉最底下那行 DSH 版本：做成一条**收尾的分隔线**——两侧各一条细线、
      版本号居中，把这一屏收住，免得孤零零一行小字吊在最后（2026-10-05 用户要的
