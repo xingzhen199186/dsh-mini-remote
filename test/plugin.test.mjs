@@ -3593,3 +3593,35 @@ test('DSH 版本号：问不到就退到核心包的版本，再问不到才如�
   assert.equal(two.dshVersion, 'unknown', '一个都问不到就如实说不知道')
 })
 
+/**
+ * 插件页「会话插件」按预设分组时，预设名要走中文词条表（2026-10-05 重启后实测抓到的）。
+ *
+ * 组合清单（compositionInventory）里的 `name` 是预设自己声明的**原名**——内置那几档
+ * 就是 standard / ptc / minimal / cordis 这种英文代号，不是给用户看的。给用户看的
+ * 名字在名册（agentPresets.list）那边，政策照 `presetCopyOf`：自建模式用声明里
+ * 自己的名字，内置档才落 AGENT_MODE_COPY，都没才退代号。
+ */
+test('插件页面：会话插件分组用的预设名是中文，不露 standard 这种代号', async (t) => {
+  const p = await bootPlugin({
+    // 内置插件那一块整块要 Loader（会话插件也挂在它下面）——不给就如实说 unavailable。
+    loader: { entries: function* () { yield* [] } },
+    agentPresets: {
+      // 名册：内置两档（没有 name）+ 一个自建模式（自带 name）
+      list: async () => [{ id: 'standard' }, { id: 'cordis' }, { id: 'my-mode', name: '我的模式' }],
+      // 组合清单：三档的 name 都只是代号（真机就是这样）
+      compositionInventory: async () => [
+        { id: 'standard', name: 'standard', isDefault: true, rows: [] },
+        { id: 'cordis', name: 'cordis', rows: [] },
+        { id: 'my-mode', name: 'my-mode', rows: [] },
+      ],
+    },
+  })
+  t.after(p.stop)
+
+  const out = await (await fetch(`${p.base}/mini/api/plugins?token=${p.token}`)).json()
+  assert.deepEqual(out.presets.map((x) => x.name), ['标准模式', '创造模式', '我的模式'],
+    '内置档落词条表、自建模式用声明里自己的名字')
+  assert.deepEqual(out.presets.map((x) => x.isDefault), [true, false, false], '默认那一档要标出来')
+})
+
+

@@ -5621,7 +5621,10 @@
           var rows = p.rows || [];
           if (!rows.length) return;
           // 只有一个预设就不必再套一层标题；多预设才把预设名露出来（PC 那边是个下拉）。
-          if (presets.length > 1) html += pluginSubtitle(p.name, rows.length);
+          // 「（默认）」照 PC 标上：它说的是「不指定模式时按它来」，用户得有这个参照。
+          if (presets.length > 1) {
+            html += pluginSubtitle(p.name + (p.isDefault ? '（默认）' : ''), rows.length);
+          }
           if (p.broken) html += pluginNote('这个预设的组合读不出来：' + escapeHtml(p.broken), true);
           html += rows.map(invRow).join('');
         });

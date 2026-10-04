@@ -5159,6 +5159,18 @@ test('插件页面：官方那一栏是「包 + 设置卡片」两样拼的', ()
   assert.match(out, /限制每条命令最多能跑多久、最多输出多少内容。/, '卡片的说明照实显示')
 })
 
+test('插件页面：会话插件分组时，预设名带「（默认）」标记（照 PC）', () => {
+  const out = renderPlugins({
+    bundles: [], entries: [],
+    presets: [
+      { id: 'standard', name: '标准模式', isDefault: true, rows: [{ moduleName: 'x', title: 'x' }] },
+      { id: 'ptc', name: 'PTC 模式', rows: [{ moduleName: 'y', title: 'y' }] },
+    ],
+  })
+  assert.match(out, /标准模式（默认） 1/, '默认那一档要标出来（说的是「不指定模式时按它来」）')
+  assert.match(out, /PTC 模式 1/, '不是默认的就不标')
+})
+
 test('设置页底部的版本行：产品名写全称 DeepSeek Harness，不用 DSH 缩写', () => {
   // 2026-10-05 用户点名要的：「底部的 DSH 改成 deepseek harness」。
   // 大小写照 DSH 自己的界面串（实测 49 处全是 DeepSeek Harness，别的大小写 0 处）。
