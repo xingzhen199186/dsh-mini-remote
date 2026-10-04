@@ -5090,8 +5090,46 @@ test('插件页面：官方 / 已安装·内置 / 已安装·第三方 的分组
   assert.match(out, /plugin-badge off">已停用/)
 })
 
-test('插件页面：空的组整个不画，读不到的那块如实说', () => {
-  const empty = renderPlugins({ bundles: [], entries: [], presets: [] })
+/**
+ * 「第三方」按 profile 装过的算，不按包名瞎猜（2026-10-04）。
+ *
+ * 上一版的用例只放了一个第三方包，分辨不出「1 个」和「18 个」——写测试时数字太小，
+ * 等于没量。这里照真机上的形状摆：Host 的 list_bundles 报回来 28 个包，
+ * 其中 DSH 自带的 10 个（4 个可选未装 + 6 个必需层、也都未装），用户自己装的 18 个。
+ * 再加 2 个「用户装的 DSH 自家包」——它们属官方，不该混进第三方。
+ */
+test('插件页面：第三方是「装过的、非 DSH 自家」，一个都不能少', () => {
+  const dshSupplied = [
+    ...Array.from({ length: 4 }, (_, i) => ({
+      name: `@deepseek-ai/dsh-opt-${i}`, optional: true, installed: false, enabled: true,
+    })),
+    ...Array.from({ length: 6 }, (_, i) => ({
+      name: `@deepseek-ai/dsh-req-${i}`, optional: false, installed: false, enabled: true,
+    })),
+  ]
+  const thirdParty = Array.from({ length: 18 }, (_, i) => ({
+    name: `dsh-third-${i}`, installed: true, enabled: true,
+  }))
+  // 用户自己装的 DSH 官方包：既不是「可装未装」，也不该算第三方。
+  const dshOwnButInstalled = [{
+    name: '@deepseek-ai/dsh-experimental-x', optional: true, installed: true, enabled: true,
+  }]
+
+  const out = renderPlugins({
+    bundles: [...dshSupplied, ...thirdParty, ...dshOwnButInstalled],
+    entries: [], presets: [],
+  })
+
+  assert.match(out, /官方 4/, '官方＝可选且未装的那 4 个')
+  assert.match(out, /已安装 · 第三方 18/, '第三方＝用户自己装的那 18 个，一个都不能漏')
+  // 只校验「第三方」标题**之后**那一段：dsh-opt-* 本来就该出现在「官方」里。
+  const inThird = out.slice(out.indexOf('已安装 · 第三方'))
+  assert.ok(!inThird.includes('dsh-opt-'), '未装的可选项只进官方，不进第三方')
+  assert.ok(!inThird.includes('dsh-req-'), 'DSH 必需层不进第三方（它们在「内置」里以模块身份出现）')
+  assert.ok(!inThird.includes('dsh-experimental-x'), '用户装的 DSH 自家包也不进第三方')
+})
+
+test('插件页面：空的组整个不画，读不到的那块如实说', () => {  const empty = renderPlugins({ bundles: [], entries: [], presets: [] })
   assert.ok(!empty.includes('官方 0'), '一个都没有时不许画一个「官方 0」的空标题')
   assert.ok(!empty.includes('已安装 · 第三方 0'))
   assert.match(empty, /没报出内置插件/, '内置那一块空了要如实说，不是静悄悄留白')
