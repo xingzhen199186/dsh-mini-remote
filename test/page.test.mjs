@@ -4778,6 +4778,31 @@ test('完整模式：鲸鱼娘、气泡、光流条收起来；页面上没有�
     '搜索链整条删干净（输入、高亮、命中强开都没了）')
 })
 
+test('完整模式：活片段挂在跑着的组头（正在分析请求 · 片段），别的模式看不见', () => {
+  // 2026-10-04 用户解禁：完整模式要「正在想的片段一点点顺出来」（PC 的 label · detail），
+  // 但只进完整模式——聊天/单帧、鲸鱼娘气泡一个字节都不动。
+  const h = trajHarness()
+  h.state.trajectory = [{ turn: 2, state: 'running', reason: null, entries: [] }]
+  h.state.trajectoryLive = '先看看仓库结构'
+  h.render()
+  const out = h.replyEl.innerHTML
+  assert.match(out, /正在分析请求 · 先看看仓库结构/, 'PC 的 label · detail 同款，随打字刷新')
+
+  h.state.trajectoryLive = ''
+  h.render()
+  assert.ok(!h.replyEl.innerHTML.includes('先看看仓库结构'),
+    '清空帧一到就回原样——活片段只是「还没落定」的影子')
+
+  h.state.trajectoryLive = '先看看仓库结构'
+  h.state.mode = 'chat'
+  h.render()
+  assert.ok(!h.replyEl.innerHTML.includes('先看看仓库结构'),
+    '聊天模式看不见活片段——别的模式不受影响')
+  h.state.mode = 'full'
+  h.render()
+  assert.match(h.replyEl.innerHTML, /正在分析请求 · 先看看仓库结构/, '回到完整模式照旧有')
+})
+
 // ---------------------------------------------------------------------------
 // S8：轨迹穿插进对话（2026-10-03 用户裁决「一定要让执行轨迹的逻辑符合DSH本身」）
 // ---------------------------------------------------------------------------

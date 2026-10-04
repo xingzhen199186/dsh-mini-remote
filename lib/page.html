@@ -1407,6 +1407,7 @@
     trajectoryLoading: false,  // 服务端还在读会话记录（**不等于「没有过程」**）
     trajectoryEpoch: '',       // 服务换了一代（重启）就不能再往旧的那份上面接
     trajectorySeq: 0,          // 收到第几帧，用来认出「我漏了几帧」（只进不退）
+    trajectoryLive: '',        // 活片段：正在想的那一句（只有完整模式有值，落盘即清）
     // 斜杠指令的列表（在输入框里打 / 时弹出来的那个菜单）。
     // **按绑定的会话缓存**：指令表是每个会话一份的，而这个会话没在跑时服务端一条都
     // 读不到（回 ok:false + 一句话）。所以换了会话必须重取——否则用户点到的是上一个
@@ -1542,6 +1543,8 @@
         });
       }
     }
+    // 真条目进来了：活片段让位（服务端也会喊清，这里兜一道——影子不许盖住落定的字）。
+    if (add.length) state.trajectoryLive = '';
     var upd = Array.isArray(frame.update) ? frame.update : [];
     for (var k = 0; k < upd.length; k++) {
       var patch = upd[k];
@@ -3326,9 +3329,10 @@
       }
       // 还没有工具步在跑（正在想）就落「正在分析请求」——和 PC 的兜底同一个词。
       var kind = last && last.kind === 'tool' ? trajActivity(last.name || '') : 'thinking';
-      var detail = last
-        ? (last.kind === 'think' ? trajFirstLine(last.output) : (last.summary || ''))
-        : '';
+      // 活片段优先（正在想的那一句，随打字刷新，PC 的 label · detail 同款）；
+      // 没有片段才退到条目自己的摘要。
+      var detail = state.trajectoryLive
+        || (last ? (last.kind === 'think' ? trajFirstLine(last.output) : (last.summary || '')) : '');
       return { kind: kind, live: true, text: TRAJ_LIVE[kind] + (detail ? ' · ' + detail : '') };
     }
     return trajTitleOf(g);
@@ -4101,6 +4105,16 @@
       var frame;
       try { frame = JSON.parse(e.data); } catch (err) { return; }
       receiveTrajectoryFrame(frame);
+    });
+    // 活片段帧（2026-10-04 用户解禁：完整模式要「正在想的片段一点点顺出来」）。
+    // 只进完整模式的轨迹组头；聊天/单帧、鲸鱼娘气泡一个字节都不碰。
+    es.addEventListener('trajectory-live', function (e) {
+      var frame;
+      try { frame = JSON.parse(e.data); } catch (err) { return; }
+      if (state.mode !== 'full') return;
+      if (frame.sessionId && state.boundSessionId && frame.sessionId !== state.boundSessionId) return;
+      state.trajectoryLive = typeof frame.detail === 'string' ? frame.detail : '';
+      render();
     });
     es.addEventListener('navigation-title', function (e) {
       var payload;
