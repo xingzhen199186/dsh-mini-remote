@@ -181,6 +181,42 @@ test('镜像：官方 cookie 认不出来了（401）就重铸一次再试', asy
   assert.equal(auths.length, 2, `401 之后应当重铸一次（实际走了 ${auths.length} 次认证）`)
 })
 
+test('镜像：上游地址可以传函数（webServer 就绪得晚），而且只解析一次', async (t) => {
+  const app = await fakeApp()
+  let calls = 0
+  const mirror = createMirror({
+    // 真机上这里是一个「去问 webServer 端口」的函数。**这一条是补写的**：
+    // 把上游改成函数形态时我漏改了一处内部引用，四条测试当场全红——
+    // 说明原先根本没有覆盖到这条路。
+    upstream: () => { calls += 1; return `http://127.0.0.1:${app.port}` },
+    tokenUrl: () => `http://127.0.0.1:${app.port}/?token=LAUNCH-TOKEN`,
+  })
+  const f = await front(mirror)
+  t.after(async () => { await f.close(); await app.close() })
+
+  assert.equal(mirror.available(), true, '解析得出来才算可用')
+
+  await fetch(`http://127.0.0.1:${f.port}/a`)
+  await fetch(`http://127.0.0.1:${f.port}/b`)
+  assert.equal(calls, 1,
+    '只解析一次就记住——Host 要用来签官方 cookie，每次重新解析就可能换来换去')
+})
+
+test('镜像：上游地址解析不出来时说自己不可用，而且如实报错不硬闯', async (t) => {
+  const mirror = createMirror({
+    upstream: () => null,
+    tokenUrl: () => 'http://127.0.0.1:1/?token=x',
+  })
+  const f = await front(mirror)
+  t.after(() => f.close())
+
+  assert.equal(mirror.available(), false,
+    '没有可镜像的界面时要说不可用——界面那一侧靠这个决定要不要露出这一项')
+  const res = await fetch(`http://127.0.0.1:${f.port}/x`)
+  assert.equal(res.status, 502)
+  assert.match(await res.text(), /找不到可用的电脑端界面地址/)
+})
+
 test('镜像：拿不到「带令牌的地址」时如实报错，不假装能转发', async (t) => {
   const app = await fakeApp()
   const mirror = createMirror({
