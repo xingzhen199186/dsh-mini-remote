@@ -5517,3 +5517,71 @@ test('附件按钮的图标是桌面端那个鲸鱼：实心、按原比例、�
     `宽高比不对（${w}×${h} = ${(w / h).toFixed(2)}，应为 ${want.toFixed(2)}）——会被拉扁`)
 })
 
+/**
+ * 上传中鲸鱼「原地游动」（2026-10-05 用户审核过的方案 A）。
+ *
+ * 为什么换掉转圈：转圈是「物件在转」的语汇，用在活物身上像标本被转着看。
+ * 参数是用户定的：上下各 1.5px、鼻尖 ±4 度、一个来回 1.8 秒。
+ *
+ * **俯仰方向是这条测试的重点**——它极容易写反，而且 4 度肉眼看不出来。
+ * 鲸鱼朝左（鼻头在左），CSS 里正角度是顺时针、顺时针把**左边**抬起来，
+ * 所以「鼻尖抬起」= **正角度**。要的效果是「朝着前进的方向点头」：
+ * 最高点（上浮）鼻尖朝上、最低点（下潜）鼻尖朝下。
+ * 第一版就是写反的（上浮时头朝下，像倒着游），靠放大到 10 度渲染才看出来。
+ */
+test('上传中的鲸鱼是「原地游动」：幅度照定值，俯仰方向不能写反', () => {
+  const kf = html.match(/@keyframes whaleSwim\s*\{([^}]*\}[^}]*)\}/)
+  assert.ok(kf, '找不到 whaleSwim 关键帧')
+  const body = kf[1]
+
+  // 幅度和角度照用户审核过的值
+  assert.match(body, /translateY\(-1\.5px\)/, '最高点要上浮 1.5px')
+  assert.match(body, /translateY\(1\.5px\)/, '最低点要下潜 1.5px')
+  assert.match(body, /rotate\(4deg\)/, '要有一个 +4deg（鼻尖抬起）')
+  assert.match(body, /rotate\(-4deg\)/, '要有一个 -4deg（鼻尖下压）')
+
+  // **方向**：最高点（translateY 负）配正角度、最低点配负角度
+  const top = body.match(/([^;{}]*translateY\(-1\.5px\)[^;{}]*)/)
+  const bottom = body.match(/([^;{}]*translateY\(1\.5px\)[^;{}]*)/)
+  assert.ok(top && bottom, '两帧都要找得到')
+  assert.match(top[1], /rotate\(4deg\)/,
+    '最高点要 rotate(4deg)——鲸鱼朝左，正角度才是鼻尖抬起（上浮时头朝上）')
+  assert.match(bottom[1], /rotate\(-4deg\)/,
+    '最低点要 rotate(-4deg)——下潜时头朝下。写反了看起来像它在倒着游')
+
+  // 挂在按钮上：1.8 秒、ease-in-out
+  const rule = html.match(/\.attach\.busy svg\s*\{[^}]*\}/)
+  assert.ok(rule, '找不到上传中图标的规则')
+  assert.match(rule[0], /animation:\s*whaleSwim\s+1\.8s\s+ease-in-out\s+infinite/,
+    '要挂 whaleSwim，1.8 秒、ease-in-out、无限循环')
+
+  // 「减少动效」时必须不动（顺带补掉了转圈那个遗留缺口）
+  // 注意别用 `@media … \{[^@]*\.attach\.busy svg` 这种写法：`[^@]*` 会一路扫过
+  // 后面那条**正常**规则（`.attach.busy svg { animation: whaleSwim … }`），
+  // 于是删掉媒体块它照样匹配——第一版就这么假绿的。要真去括号匹配那个块。
+  const rmBody = (() => {
+    const head = '@media (prefers-reduced-motion: reduce)'
+    let at = html.indexOf(head)
+    while (at >= 0) {
+      const open = html.indexOf('{', at)
+      let depth = 0
+      for (let i = open; i < html.length; i += 1) {
+        if (html[i] === '{') depth += 1
+        else if (html[i] === '}') {
+          depth -= 1
+          if (depth === 0) {
+            const body = html.slice(open + 1, i)
+            if (body.includes('.attach.busy svg')) return body
+            break
+          }
+        }
+      }
+      at = html.indexOf(head, at + head.length)
+    }
+    return null
+  })()
+  assert.ok(rmBody, '减少动效那块里要有 .attach.busy svg——原来那个转圈压根没管这条')
+  assert.match(rmBody, /\.attach\.busy svg\s*\{\s*animation:\s*none/,
+    '减少动效时要 animation: none')
+})
+

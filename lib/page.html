@@ -721,9 +721,30 @@
      颜色走 currentColor（跟着按钮的 var(--muted)），所以深浅两套主题各自适配。 */
   .attach svg { width: 22px; height: 16.2px; fill: currentColor; stroke: none; }
   .attach:disabled { opacity: .4; }
-  /* 上传中：图标转起来。这条路上没有进度条，至少要让人看出「它在动」。 */
-  .attach.busy svg { animation: spin 1s linear infinite; }
-  @keyframes spin { to { transform: rotate(360deg); } }
+  /* 上传中：鲸鱼**原地游动**（2026-10-05 用户要求换掉转圈）。
+     为什么不用转圈：转圈是「物件在转」的语汇（齿轮、加载器），用在活物身上
+     读起来像标本被转着看。鲸鱼该有的动作是**游**。
+
+     这一组值是用户审核过的：上下各 1.5px、鼻尖 ±4 度、一个来回 1.8 秒。
+     幅度只占图标高度的 9%（16.2px 里的 1.5px），不会跑出 42px 的按钮。
+
+     **俯仰的方向别写反**（第一版就写反了，靠量像素才发现）：
+     鲸鱼是**朝左**的（鼻头在左、尾巴在右上），而 CSS 里正角度是顺时针
+     ——顺时针会把**左边**抬起来（拿 rotate(90deg) 想：左边的点会转到上方）。
+     所以「鼻尖抬起」是**正角度**。要的效果是「朝着前进的方向点头」：
+     上浮时鼻尖朝上、下潜时鼻尖朝下。于是 0%/100%（最高点）用 +4deg，
+     50%（最低点）用 -4deg。写反了看起来就像它在倒着游。 */
+  .attach.busy svg { animation: whaleSwim 1.8s ease-in-out infinite; }
+  @keyframes whaleSwim {
+    0%, 100% { transform: translateY(-1.5px) rotate(4deg); }
+    50%      { transform: translateY(1.5px) rotate(-4deg); }
+  }
+  /* 用户要「减少动效」时它就不动——但**忙碌的表示没丢**：
+     按钮此时是禁用态（opacity .4），本来就是「正在进行」的样子。
+     （这一条同时补掉一个遗留缺口：原来那个转圈压根没管减少动效。） */
+  @media (prefers-reduced-motion: reduce) {
+    .attach.busy svg { animation: none; }
+  }
 
   /* 附件小条：排在输入框上面，让你发之前看得见自己带了什么。 */
   .attach-bar {
