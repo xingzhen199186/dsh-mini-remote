@@ -5478,3 +5478,42 @@ test('选文件取消时（一个都没挑）不该关面板、也不该传东�
   assert.deepEqual(uploaded, [], '取消不该传任何东西')
 })
 
+/**
+ * 输入框左边那个图标是 DSH 桌面端的鲸鱼（2026-10-05 用户要求：
+ * 「改成 dsh 桌面端的那个鲸鱼图标，但颜色做移动端主题适配」）。
+ *
+ * 它和原来的回形针有两点不一样，缺一条都会画坏：
+ *   ① 是**实心**路径（fill），不是描边的——留着 stroke 会把轮廓再描一圈；
+ *   ② 是横长条（23.16 : 17.04），不是正方形——照 19×19 会被拉扁。
+ * 颜色走 currentColor，所以跟着按钮的 var(--muted) 走，深浅两套主题各自适配。
+ */
+test('附件按钮的图标是桌面端那个鲸鱼：实心、按原比例、颜色跟主题', () => {
+  const btnStart = html.indexOf('<button class="attach" id="btnAttach"')
+  const btnEnd = html.indexOf('</button>', btnStart)
+  assert.ok(btnStart > 0 && btnEnd > btnStart, '找不到附件按钮')
+  const btn = html.slice(btnStart, btnEnd)
+
+  // viewBox 必须是桌面端 FishLogo 那个（23.16 × 17.04），不是随便一个方框
+  assert.match(btn, /viewBox="0 0 23\.16 17\.04"/,
+    '图标要用桌面端 FishLogo 的 viewBox（0 0 23.16 17.04）')
+  // 路径要有东西，而且得是实心填充 currentColor（主题适配靠这个）
+  const path = btn.match(/<path d="([^"]+)" fill="currentColor"\/>/)
+  assert.ok(path, '路径要用 fill="currentColor" —— 主题适配就是靠它')
+  assert.ok(path[1].length > 1000, `路径太短（${path[1].length} 字符），像是被截断了`)
+  assert.ok(path[1].startsWith('M22.9168 1.43018'), '路径开头和桌面端不一致，可能抄错了')
+  // 不许还留着描边那套
+  assert.ok(!/stroke-width/.test(btn), '鲸鱼是实心的，别再加描边')
+
+  // 样式：实心填充、没有描边、尺寸按原比例（宽 : 高 ≈ 23.16 : 17.04）
+  const rule = html.match(/\.attach svg\s*\{[^}]*\}/)
+  assert.ok(rule, '找不到 .attach svg 的样式')
+  assert.match(rule[0], /fill:\s*currentColor/, '填充要 currentColor（跟着按钮的颜色令牌走）')
+  assert.match(rule[0], /stroke:\s*none/, '鲸鱼是实心的，不能描边')
+  const w = Number((rule[0].match(/width:\s*([\d.]+)px/) || [])[1])
+  const h = Number((rule[0].match(/height:\s*([\d.]+)px/) || [])[1])
+  assert.ok(w > 0 && h > 0, '宽高都要写成具体像素值')
+  const want = 23.16 / 17.04
+  assert.ok(Math.abs(w / h - want) < 0.05,
+    `宽高比不对（${w}×${h} = ${(w / h).toFixed(2)}，应为 ${want.toFixed(2)}）——会被拉扁`)
+})
+
