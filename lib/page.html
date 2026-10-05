@@ -1438,6 +1438,23 @@
       <div class="seg" id="segPerm"></div>
     </div>
 
+    <!-- 繁忙时的发送行为（2026-10-05 用户要求搬进手机设置）。
+         PC 上「设置 → 通用 → 繁忙时的发送行为」就是它：智能体跑着的时候，
+         你发的那句话是排队等这一轮跑完，还是当场插进去让它调整方向。
+         **两端共用宿主那一份设置**——手机上改，电脑上也是这个值。
+         文案照抄 PC 词条表（settings.enter.*），一个字不自创。
+         读不到时整条藏起来（见 loadBusyEnter），不摆一个点了没用的开关。 -->
+    <div class="row" id="rowBusyEnter" hidden>
+      <div>
+        <div class="label">繁忙时的发送行为</div>
+        <div class="hint">智能体运行时发送按钮的行为</div>
+      </div>
+      <div class="seg" id="segBusyEnter">
+        <button data-busy="queue">排队发送</button>
+        <button data-busy="steer">插话发送</button>
+      </div>
+    </div>
+
     <!--
       这里原来有两行：「完成后提醒」和「语音输入」。
 
@@ -1508,23 +1525,6 @@
         <div class="hint">查看官方插件和已安装插件</div>
       </div>
       <button class="btn" id="btnPlugins">查看</button>
-    </div>
-
-    <!-- 繁忙时的发送行为（2026-10-05 用户要求搬进手机设置）。
-         PC 上「设置 → 通用 → 繁忙时的发送行为」就是它：智能体跑着的时候，
-         你发的那句话是排队等这一轮跑完，还是当场插进去让它调整方向。
-         **两端共用宿主那一份设置**——手机上改，电脑上也是这个值。
-         文案照抄 PC 词条表（settings.enter.*），一个字不自创。
-         读不到时整条藏起来（见 applyBusyEnter），不摆一个假的开关。 -->
-    <div class="row" id="rowBusyEnter" hidden>
-      <div>
-        <div class="label">繁忙时的发送行为</div>
-        <div class="hint">智能体运行时发送按钮的行为</div>
-      </div>
-      <div class="seg" id="segBusyEnter">
-        <button data-busy="queue">排队发送</button>
-        <button data-busy="steer">插话发送</button>
-      </div>
     </div>
 
     <div class="foot">
