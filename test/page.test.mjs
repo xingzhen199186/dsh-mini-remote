@@ -5311,3 +5311,30 @@ test('权限档位下面要有分割线：照其他线的做法，让那一块�
   assert.ok(busyRow > permOpen, '「繁忙时的发送行为」应该在权限档位后面（用户 2026-10-05 指的位置）')
 })
 
+/**
+ * 权限档位那排按钮要撑满它的框（2026-10-05 用户截图点名：
+ * 「权限档位自动审查那一格背景颜色没填满」）。
+ *
+ * 根因：别的 .seg 都套在 .row 里（弹性容器）→ 框缩到内容那么宽，按钮正好填满；
+ * 而权限档位这一排是 #permBlock 的直接子元素，**在块级上下文里** →
+ * 框被拉成整行宽，而四个按钮只占自己文字那么宽 → 右边空出一条（实测约 10 CSS 像素），
+ * 露出框自己的底色，看着就像那一格没填满。
+ *
+ * 修法：#segPerm button { flex: 1 1 auto } —— 按内容分配、把多出来的空间摊平。
+ * **不能用 flex: 1 1 0（四等分）**：「工作区内修改」六个字比别的宽，强行等分会挤到换行。
+ */
+test('权限档位那排按钮要撑满框，且不是四等分', () => {
+  const rule = html.match(/#segPerm\s+button\s*\{[^}]*\}/)
+  assert.ok(rule, '缺了「#segPerm 的按钮撑满」这条规则——'
+    + '按钮只占自己文字那么宽，右边会空出一条露出框底色（用户 2026-10-05 截图）')
+  assert.match(rule[0], /flex:\s*1\s+1\s+auto/,
+    '要用 flex: 1 1 auto（按内容分配再把余量摊平），不能四等分')
+  assert.ok(!/flex:\s*1\s+1\s+0/.test(rule[0]),
+    '不许四等分——「工作区内修改」六个字比别的宽，等分会把它挤到换行')
+
+  // 这排按钮确实在 #permBlock 里（在块级上下文里 → 才有撑满的问题）
+  const permOpen = html.indexOf('<div id="permBlock"')
+  const segPerm = html.indexOf('id="segPerm"')
+  assert.ok(segPerm > permOpen, 'segPerm 应该在 permBlock 里面')
+})
+
