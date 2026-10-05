@@ -6399,6 +6399,37 @@
     }
   }
 
+  /**
+   * 点「打开」。**不能只靠 `<a target="_blank">`**（2026-10-06 用户实机报
+   * 「点击打开没反应」）。
+   *
+   * 根因：`target="_blank"` 在**内嵌浏览器里常被直接拦掉**（微信里打开这类页面时
+   * 很常见），拦掉之后**一点动静都没有**——不报错、不开页，用户只能看着一个
+   * 「点了没用」的按钮。用户自己在别处也遇到过同款（「那种弹窗会被直接屏蔽」）。
+   *
+   * 所以保留 `<a href>`（长按「在新标签页打开」仍然可用，那条路不受影响），
+   * 但自己接管点击：先试着开新标签，**开不出来就同标签打开**——宁可换个地方打开，
+   * 也不要让按钮变成死的。
+   */
+  $('btnMirrorOpen').addEventListener('click', function (e) {
+    var url = this.getAttribute('href');
+    if (!url) return;   // 地址还没拼出来（没开的时候不该走到这儿），交给默认行为
+    var opened = null;
+    try {
+      opened = window.open(url, '_blank', 'noopener');
+    } catch (err) {
+      opened = null;
+    }
+    // `window.open` 被拦时返回 null（有的浏览器返回一个 closed 的壳，也一并当拦了）。
+    var blocked = !opened || opened.closed || typeof opened.closed === 'undefined';
+    if (!blocked) {
+      e.preventDefault();
+      return;
+    }
+    e.preventDefault();
+    location.href = url;
+  });
+
   function loadMirror() {
     api('/mini/api/mirror').then(function (r) {
       if (!r || !r.ok || !r.available) {

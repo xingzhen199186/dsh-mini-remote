@@ -180,6 +180,72 @@ test('进阶设置：开关那排按钮要绑上处理（逻辑对、没人喊�
     '开关上必须绑监听——真机上「逻辑对但没接线」这个坑踩过一次')
 })
 
+/**
+ * 点「打开」不能只靠 `<a target="_blank">`（2026-10-06 用户实机报「点击打开没反应」）。
+ *
+ * 根因：`target="_blank"` 在**内嵌浏览器里常被直接拦掉**，拦掉之后一点动静都没有——
+ * 不报错、不开页，用户只看到一个「点了没用」的按钮。所以自己接管点击，
+ * **开不出新标签就同标签打开**。这一组把那三种情况都钉住。
+ */
+function clickHarness(openResult) {
+  const A = "$('btnMirrorOpen').addEventListener('click'"
+  const B = 'function loadMirror()'
+  const a = html.indexOf(A)
+  const b = html.indexOf(B)
+  assert.ok(a > 0, `在 page.html 里找不到锚点「${A}」`)
+  assert.ok(b > a, `在 page.html 里找不到锚点「${B}」`)
+
+  const bound = []
+  const el = {
+    getAttribute: () => '/mini/mirror/?token=TK',
+    addEventListener: (type, fn) => bound.push([type, fn]),
+  }
+  const calls = { opened: [], navigated: null, prevented: 0 }
+  const win = {
+    open: (...args) => {
+      calls.opened.push(args)
+      if (openResult === 'throw') throw new Error('被拦了')
+      return openResult
+    },
+  }
+  const loc = {
+    get href() { return '' },
+    set href(v) { calls.navigated = v },
+  }
+  new Function('$', 'window', 'location', html.slice(a, b))(() => el, win, loc)
+
+  assert.equal(bound.length, 1, '这个按钮上正好绑一个监听')
+  assert.equal(bound[0][0], 'click')
+  const event = { preventDefault: () => { calls.prevented += 1 } }
+  bound[0][1].call(el, event)
+  return calls
+}
+
+test('进阶设置：能开新标签就开新标签，不跳走当前页', () => {
+  const calls = clickHarness({ closed: false })
+  assert.equal(calls.opened.length, 1, '要先试着开新标签')
+  assert.equal(calls.opened[0][0], '/mini/mirror/?token=TK')
+  assert.equal(calls.navigated, null, '新标签开出来了就别动当前页')
+  assert.equal(calls.prevented, 1, '要拦掉默认行为，否则会同时跳两次')
+})
+
+test('进阶设置：新标签被拦（返回 null）就同标签打开——不许变成一个点了没用的按钮', () => {
+  const calls = clickHarness(null)
+  assert.equal(calls.navigated, '/mini/mirror/?token=TK',
+    '开不出新标签就同标签打开：宁可换个地方打开，也不要让按钮变成死的（用户实机报的就是这个）')
+  assert.equal(calls.prevented, 1)
+})
+
+test('进阶设置：window.open 直接抛错也要兜住', () => {
+  const calls = clickHarness('throw')
+  assert.equal(calls.navigated, '/mini/mirror/?token=TK', '抛错也要落到同标签打开')
+})
+
+test('进阶设置：链接本身留着（长按「在新标签页打开」那条路不受影响）', () => {
+  assert.match(html, /id="btnMirrorOpen"[^>]*target="_blank"/,
+    'target 要留着：长按菜单里那条「在新标签页打开」正是靠它')
+})
+
 test('进阶设置：设置抽屉每次打开都要重读一次（电脑端能把它关掉）', () => {
   const A = "$('btnSettings').addEventListener('click'"
   const B = "$('btnClose').addEventListener('click'"
