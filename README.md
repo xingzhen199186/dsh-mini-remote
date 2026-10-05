@@ -139,8 +139,6 @@ dsh plugin --profile web add <你放源码的目录>
 
 <img width="290" alt="执行中（深色，手机实拍）：鲸鱼娘正在跑、已计时 15 秒" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/running-dark-phone.jpg" /> <img width="290" alt="执行中（浅色，手机实拍）：鲸鱼娘正在跑、已计时 7 分 43 秒、队列排着一条" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/running-light-phone.jpg" />
 
-两张都是手机实拍（浏览器自带的状态栏也在画面上，所以比渲染图略高一点）。
-
 **两种显示模式。** 点右上角的 ⚙ 切换。「单帧」（默认）整屏只留最新一条回复，适合「我就想看这次的结果」；「聊天」是一来一回的气泡列表，适合连着追问好几轮。用一阵子你会知道自己偏哪个。
 
 **点开一个会话，能看到它之前聊过什么。** 在左边切到一个早就存在的会话，聊天模式会把之前的每一轮都列出来（你发过的指令、每一轮的结论），单帧模式只显示最后一条结论。**特别大的会话只给最近一段**：那种几万个事件的会话，整份读下来会把电脑上的 DSH 拖垮，所以只读末尾那一小段，并在最上面写明「这不是全部，只显示了最近一段」——你看到的那句话不是客套话，是实情。
