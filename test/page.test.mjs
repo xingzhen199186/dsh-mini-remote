@@ -5585,3 +5585,37 @@ test('上传中的鲸鱼是「原地游动」：幅度照定值，俯仰方向�
     '减少动效时要 animation: none')
 })
 
+/**
+ * 执行轨迹条目行里的「进行中 / 出错」字样不许被压扁折行
+ * （2026-10-06 用户真机反馈：「进行中」的「中」挂到下一行）。
+ *
+ * 根因：它们是直接拼在 .traj-row 里的裸 <span>，而 .traj-row 是**弹性容器**
+ * ——各自变成一个弹性项，默认 flex: 0 1 auto、min-width: auto。
+ * 中文的「最小内容宽度」是**一个字**，空间一紧就缩成一字宽、文字自己折行，
+ * 变成「进 / 行 / 中」竖着排，还把整行撑高。真机复现过（长摘要那一行最明显）。
+ *
+ * 修法：`flex: none; white-space: nowrap` ——正好也是 2026-10-04 定下的口径
+ * （「出错/进行中的字样是独立的一段，不许被省略号吃掉」）：
+ * 它保持完整宽度，让左边那段 .traj-detail 去缩、去打省略号。
+ */
+test('轨迹条目行里的「进行中/出错」字样不许被压扁折行', () => {
+  const rule = html.match(/\.traj-row \.traj-err,\s*\.traj-row \.traj-run\s*\{[^}]*\}/)
+  assert.ok(rule, '缺了「条目行里的状态字样不压缩、不折行」这条规则——'
+    + '中文的最小内容宽度是一个字，空间一紧「进行中」就会竖着排（用户 2026-10-06 真机反馈）')
+  assert.match(rule[0], /flex:\s*none/, '要 flex: none，不许参与压缩')
+  assert.match(rule[0], /white-space:\s*nowrap/, '要 white-space: nowrap，不许折行')
+
+  // 只挂条目行：组头那份自带 nowrap + 省略号，不许被这条覆盖掉
+  const headRule = html.match(/\.traj-head \.traj-title,\s*\.traj-head \.traj-run\s*\{[^}]*\}/)
+  assert.ok(headRule, '组头那条规则不见了')
+  assert.match(headRule[0], /text-overflow:\s*ellipsis/, '组头仍要打省略号（它是给人扫的，不是给人读的）')
+  assert.match(headRule[0], /white-space:\s*nowrap/, '组头仍要 nowrap')
+
+  // 摘要那一段仍要能缩、能打省略号——不然挤不下时就没有让位的一方了
+  const detail = html.match(/\.traj-detail\s*\{[^}]*\}/)
+  assert.ok(detail, '找不到 .traj-detail 的样式')
+  assert.match(detail[0], /flex:\s*1 1 auto/, '.traj-detail 要能伸能缩')
+  assert.match(detail[0], /min-width:\s*0/, '.traj-detail 要 min-width: 0，否则缩不下去')
+  assert.match(detail[0], /text-overflow:\s*ellipsis/, '.traj-detail 要打省略号')
+})
+
