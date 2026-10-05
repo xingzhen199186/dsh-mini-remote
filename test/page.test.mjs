@@ -3080,11 +3080,13 @@ test('打开设置抽屉会重读一次权限档位（不是只在启动时读�
   let loads = 0
   let builds = 0
   let busy = 0
+  let mirror = 0
   // 打开设置时页面还顺手重读一次「版本号」（那行只在设置页里看得见），
-  // 2026-10-05 又多了「繁忙时的发送行为」（那项电脑上随时能改）——
-  // 三样都是同一处触发，所以这里各给一个桩。
-  new Function('$', 'sheet', 'state', 'loadPermissions', 'watchBuild', 'loadBusyEnter', html.slice(a, b))(
-    () => el, el, { connected: true }, () => { loads += 1 }, () => { builds += 1 }, () => { busy += 1 },
+  // 2026-10-05 多了「繁忙时的发送行为」（那项电脑上随时能改），
+  // 2026-10-06 又多了「进阶设置（电脑端界面）」（电脑端能从小标签把它关掉）——
+  // 四样都是同一处触发，所以这里各给一个桩。
+  new Function('$', 'sheet', 'state', 'loadPermissions', 'watchBuild', 'loadBusyEnter', 'loadMirror', html.slice(a, b))(
+    () => el, el, { connected: true }, () => { loads += 1 }, () => { builds += 1 }, () => { busy += 1 }, () => { mirror += 1 },
   )
 
   assert.equal(bound.length, 1, '这个按钮上正好绑一个监听')
@@ -3092,6 +3094,7 @@ test('打开设置抽屉会重读一次权限档位（不是只在启动时读�
   assert.equal(loads, 1, '打开设置时必须重读一次档位盘，否则开机那一次没读成就永远缺这一块')
   assert.equal(builds, 1, '顺手也重读一次版本号（那行只在设置页里看得见）')
   assert.equal(busy, 1, '「繁忙时的发送行为」也要重读——电脑上随时能改，只读一次会过期')
+  assert.equal(mirror, 1, '「进阶设置」也要重读——电脑端能把它关掉，手机上不能一直停在开着')
 })
 
 test('四档（含宿主保留档 auto）都要画出来，当前那一档要标出来', () => {

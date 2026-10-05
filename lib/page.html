@@ -1618,6 +1618,39 @@
       <button class="btn" id="btnPlugins">查看</button>
     </div>
 
+    <!--
+      「进阶设置（电脑端界面）」（2026-10-06 用户要求）。
+
+      手机上这张遥控页是**专门为手机做的**，所以电脑上那些插件贡献的设置页它进不去。
+      这一项是退路：**把电脑端的界面整个搬过来看**——同一份界面，不迁移、不逐个适配。
+
+      **默认关，而且开着要付代价**：打开它 = 把这个令牌的权限从「我们那张手机页暴露的
+      那点事」扩到**整个电脑端设置面**（模型配置、凭据页、插件装卸、会话记录……）。
+      所以：默认关、后果写在提示里、开启要点两次（见下面 tapMirror）。
+
+      服务端没这个能力时（没拿到 DSH_WEB_URL）整行不显示——**不摆一个假的开关**，
+      和「繁忙时的发送行为」同一条口径。 -->
+    <div class="row" id="rowMirror" hidden>
+      <div>
+        <div class="label">进阶设置</div>
+        <div class="hint" id="mirrorHint">打开电脑上的 DSH 界面，改那些手机上没有的设置</div>
+      </div>
+      <div class="seg" id="segMirror">
+        <button data-mirror="on">开</button>
+        <button data-mirror="off">关</button>
+      </div>
+    </div>
+
+    <div class="row" id="rowMirrorOpen" hidden>
+      <div>
+        <div class="label">电脑端设置界面</div>
+        <div class="hint">那是给电脑做的，手机上可能不太好点</div>
+      </div>
+      <!-- 开新标签，不内嵌：这个设置抽屉本身已经占满一屏，再往里套一层会很难用。
+           地址由 paintMirror 拼（要带上 token）。 -->
+      <a class="btn" id="btnMirrorOpen" target="_blank" rel="noopener">打开</a>
+    </div>
+
     <div class="foot">
       <button class="btn" id="btnForget">清除 token</button>
       <button class="btn primary" id="btnClose">完成</button>
@@ -5538,6 +5571,9 @@
     watchBuild();
     // 繁忙时的发送行为也现读一次：**电脑上随时能改**，开机读那一次会过期。
     loadBusyEnter();
+    // 进阶设置（电脑端界面）同样现读。它还会被电脑端从小标签关掉——
+    // 手机上那份状态不能一直停在「开着」。
+    loadMirror();
   });
   $('btnClose').addEventListener('click', function () { sheet.classList.remove('open'); });
   // 顶部吸顶那个关闭口（2026-10-05 设置页改整屏时加的）。
@@ -6314,6 +6350,119 @@
       paintBusyEnter();
       toast('没能改成，检查一下连接');
     });
+  });
+
+  /**
+   * 「进阶设置（电脑端界面）」（2026-10-06 用户要求）。
+   *
+   * 手机上这张遥控页是**专门为手机做的**，所以电脑上那些插件贡献的设置页它进不去。
+   * 这一项是退路：**把电脑端的界面整个搬过来看**——同一份界面，不迁移、不逐个适配。
+   * 服务端怎么把这个界面转出来的，写在 lib/mirror.js 开头。
+   *
+   * **它是个权限开关，不是普通偏好。** 打开它 = 这个令牌的权限从「我们这张手机页
+   * 暴露的那点事」扩到整个电脑端设置面（模型配置、凭据页、插件装卸、会话记录……）。
+   * 所以三件事一个都不能省：
+   *   ① 默认关；
+   *   ② 后果写在提示里，而且要等**第二次点击**才真开（`armed`）——照「完全权限」
+   *      那一档的规矩，理由也一样（页内两步，不用 window.confirm：那种弹窗在微信
+   *      这类内嵌浏览器里会被直接屏蔽，屏蔽时万一返回真值就等于确认被跳过）；
+   *   ③ 关着的时候**入口那一行也不显示**——不是露一个点了没用的按钮。
+   *
+   * 读不到就整块不画：这台电脑没这个能力时（没拿到 DSH_WEB_URL），
+   * 藏起来就好，不摆一个假开关。
+   */
+  var mirror = { available: false, enabled: false, armed: false, ready: false };
+
+  function paintMirror() {
+    $('rowMirror').hidden = !mirror.available;
+    if (!mirror.available) {
+      $('rowMirrorOpen').hidden = true;
+      return;
+    }
+    Array.prototype.forEach.call($('segMirror').children, function (b) {
+      b.classList.toggle('active', (b.dataset.mirror === 'on') === mirror.enabled);
+    });
+    $('mirrorHint').textContent = mirror.enabled
+      ? '已打开。手机现在能进整个电脑设置面'
+      : mirror.armed
+        ? '打开的后果：手机将获得完整的电脑设置权限。再点一次「开」确认'
+        : '打开电脑上的 DSH 界面，改那些手机上没有的设置';
+    $('rowMirrorOpen').hidden = !mirror.enabled;
+    if (mirror.enabled) {
+      // 新标签里没有 X-Mini-Token 头，所以靠地址带 token。服务端在入口那一下会顺手
+      // 把 cookie 写上——那之后界面自己发的那些 /api/... 请求才认得出是自己人。
+      $('btnMirrorOpen').href = '/mini/mirror?token=' + encodeURIComponent(state.token || '');
+    }
+  }
+
+  function loadMirror() {
+    api('/mini/api/mirror').then(function (r) {
+      if (!r || !r.ok || !r.available) {
+        mirror.available = false;
+        paintMirror();
+        return;
+      }
+      mirror.available = true;
+      mirror.enabled = r.enabled === true;
+      mirror.ready = true;
+      paintMirror();
+    }).catch(function () {
+      mirror.available = false;
+      mirror.armed = false;
+      paintMirror();
+    });
+  }
+
+  function tapMirror(next) {
+    if (!mirror.ready) return;
+    if (next === 'off') {
+      // 关掉不需要确认：往「更安全」的方向走，不用拦。
+      mirror.armed = false;
+      if (!mirror.enabled) { paintMirror(); return; }
+      mirror.enabled = false;
+      paintMirror();
+      api('/mini/api/mirror', { method: 'POST', body: JSON.stringify({ enabled: false }) })
+        .then(function (r) {
+          if (r && r.ok) { toast('已关掉电脑端界面'); return; }
+          mirror.enabled = true;
+          paintMirror();
+          toast('没能关掉，再试一次');
+        })
+        .catch(function () {
+          mirror.enabled = true;
+          paintMirror();
+          toast('没能关掉，检查一下连接');
+        });
+      return;
+    }
+    // 开：第一次点只是「举起来」，把后果摆出来；再点一次才真开。
+    if (!mirror.enabled && !mirror.armed) {
+      mirror.armed = true;
+      paintMirror();
+      return;
+    }
+    if (mirror.enabled) return;
+    mirror.armed = false;
+    mirror.enabled = true;
+    paintMirror();
+    api('/mini/api/mirror', { method: 'POST', body: JSON.stringify({ enabled: true }) })
+      .then(function (r) {
+        if (r && r.ok) { toast('已打开，点下面的「打开」进去'); return; }
+        mirror.enabled = false;
+        paintMirror();
+        toast(r && r.reason === 'unavailable' ? '这台电脑没有这个能力' : '没能打开，再试一次');
+      })
+      .catch(function () {
+        mirror.enabled = false;
+        paintMirror();
+        toast('没能打开，检查一下连接');
+      });
+  }
+
+  $('segMirror').addEventListener('click', function (e) {
+    var btn = e.target.closest ? e.target.closest('button[data-mirror]') : null;
+    if (!btn) return;
+    tapMirror(btn.dataset.mirror);
   });
 
   if (NOTIFY_OK) {
