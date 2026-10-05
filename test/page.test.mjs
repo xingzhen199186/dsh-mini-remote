@@ -5272,3 +5272,54 @@ test('子智能体面板：塞进 sa-list 的空态文字都要带 sa-none-inden
   }
 })
 
+/**
+ * 权限档位下面那条分割线（2026-10-05 用户截图点名）。
+ *
+ * 现象：权限档位和「繁忙时的发送行为」之间没有分割线，别的板块之间都有。
+ *
+ * 根因：分割线是「每一行自己的下边线」（.row { border-bottom }），
+ * 而「最后一个元素不画」（:last-of-type）。权限档位外面套了一层 #permBlock
+ * （服务拿不到时要整块隐藏），那一层恰好是它自己那层的最后一个元素 →
+ * 它的下边线被去掉了 → 它下面就没有线了。
+ *
+ * 修法：让紧跟着 #permBlock 的那一行自己带一条上边线，**且只在
+ * #permBlock 显示时带**（它藏起来时这一行上面直接就是字体大小的线，
+ * 再补一条会两条挤在一起）。
+ */
+test('权限档位下面要有分割线：跟着它的那一行自带，且只在权限档位显示时带', () => {
+  const rule = html.match(/#permBlock:not\(\[hidden\]\)\s*\+\s*\.row\s*\{[^}]*border-top[^}]*\}/)
+  assert.ok(rule, '缺了「#permBlock 显示时，紧跟它那一行带上边线」这条规则——'
+    + '权限档位下面会没有分割线（别的板块都有）')
+  assert.match(rule[0], /border-top:\s*1px solid var\(--line\)/,
+    '上边线要和别的板块同一套颜色令牌，别自己造一个')
+
+  // 位置：结构上必须紧挨着，否则 + 选择器选不中。
+  // 注意要取 **#permBlock 这一层**的结尾——它里面还套着一层 .row 和一层 .seg，
+  // 直接搜第一个 </div> 会停在内层，误判成「中间夹了东西」（前两版就这么红的）。
+  const permOpen = html.indexOf('<div id="permBlock"')
+  assert.ok(permOpen > 0, '找不到权限档位那一块')
+  // 从它的开标签开始数 div 的开合，配平到它自己闭合的那个 </div>
+  const tagRe = /<div\b|<\/div>/g
+  tagRe.lastIndex = permOpen
+  let depth = 0
+  let permEnd = -1
+  for (let m; (m = tagRe.exec(html)); ) {
+    if (m[0] === '</div>') { depth -= 1; if (depth === 0) { permEnd = m.index + m[0].length; break } }
+    else depth += 1
+  }
+  assert.ok(permEnd > 0, '数不到权限档位那一层的闭合位置')
+
+  const busyRow = html.indexOf('<div class="row" id="rowBusyEnter"')
+  assert.ok(busyRow > permEnd, '「繁忙时的发送行为」应该在权限档位后面（用户 2026-10-05 指的位置）')
+  const between = html.slice(permEnd, busyRow)
+  // 中间只允许有 HTML 注释和空白——有别的元素夹着，+ 选择器就落空了。
+  // （注意别拿 id="rowBusyEnter" 当锚点：上面那条注释里也写着这个词，
+  //   会把注释后面的 <div class="row" 一起框进来——第三版就这么红的。）
+  const strayElements = between.replace(/<!--[\s\S]*?-->/g, '').trim()
+  assert.equal(strayElements, '', `权限档位和那一行之间夹了别的东西，+ 选择器会落空：${strayElements.slice(0, 80)}`)
+
+  // 藏起来时必须没有线：靠 :not([hidden])，不是无条件加
+  assert.ok(html.includes('#permBlock:not([hidden]) + .row'),
+    '这条线必须跟着权限档位的显示状态走——无条件加会在它隐藏时和上面那条线挤在一起')
+})
+

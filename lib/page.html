@@ -1093,6 +1093,14 @@
     gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--line);
   }
   .row:last-of-type { border-bottom: none; }
+  /* 权限档位那一块外面套了一层（#permBlock，因为服务拿不到时整块要藏起来），
+     而「最后一个元素不画下边线」那条规则正好落在那一层上——于是它下面**没有线**，
+     而别的板块之间都有。2026-10-05 用户截图点名。
+     修法：让紧跟着它的那一行（繁忙时的发送行为）**自己带上边线**，
+     位置和别处一样：居中在留白里（padding 12px 上下，线落在正中间）。
+     **只在权限档位真的显示时才带**——它藏起来时这一行上面直接就是字体大小那条线，
+     再补一条会两条挤在一起（靠 :has 判断那个兄弟有没有隐藏）。 */
+  #permBlock:not([hidden]) + .row { border-top: 1px solid var(--line); }
   .row .label { font-size: 15px; }
   .row .hint { font-size: 12px; color: var(--muted); margin-top: 2px; }
   /* flex-shrink: 0 不能省。它是弹性项，左边的说明文字一长就会被压缩；
