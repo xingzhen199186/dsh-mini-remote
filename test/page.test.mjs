@@ -5534,20 +5534,20 @@ test('上传中的鲸鱼是「原地游动」：幅度照定值，俯仰方向�
   assert.ok(kf, '找不到 whaleSwim 关键帧')
   const body = kf[1]
 
-  // 幅度和角度照用户审核过的值
-  assert.match(body, /translateY\(-1\.5px\)/, '最高点要上浮 1.5px')
-  assert.match(body, /translateY\(1\.5px\)/, '最低点要下潜 1.5px')
-  assert.match(body, /rotate\(4deg\)/, '要有一个 +4deg（鼻尖抬起）')
-  assert.match(body, /rotate\(-4deg\)/, '要有一个 -4deg（鼻尖下压）')
+  // 幅度和角度照定值（用户先审 1.5px/4 度，看过之后说「幅度可以再大一些」→ 2.5px/7 度）
+  assert.match(body, /translateY\(-2\.5px\)/, '最高点要上浮 2.5px')
+  assert.match(body, /translateY\(2\.5px\)/, '最低点要下潜 2.5px')
+  assert.match(body, /rotate\(7deg\)/, '要有一个 +7deg（鼻尖抬起）')
+  assert.match(body, /rotate\(-7deg\)/, '要有一个 -7deg（鼻尖下压）')
 
   // **方向**：最高点（translateY 负）配正角度、最低点配负角度
-  const top = body.match(/([^;{}]*translateY\(-1\.5px\)[^;{}]*)/)
-  const bottom = body.match(/([^;{}]*translateY\(1\.5px\)[^;{}]*)/)
+  const top = body.match(/([^;{}]*translateY\(-2\.5px\)[^;{}]*)/)
+  const bottom = body.match(/([^;{}]*translateY\(2\.5px\)[^;{}]*)/)
   assert.ok(top && bottom, '两帧都要找得到')
-  assert.match(top[1], /rotate\(4deg\)/,
-    '最高点要 rotate(4deg)——鲸鱼朝左，正角度才是鼻尖抬起（上浮时头朝上）')
-  assert.match(bottom[1], /rotate\(-4deg\)/,
-    '最低点要 rotate(-4deg)——下潜时头朝下。写反了看起来像它在倒着游')
+  assert.match(top[1], /rotate\(7deg\)/,
+    '最高点要 rotate(7deg)——鲸鱼朝左，正角度才是鼻尖抬起（上浮时头朝上）')
+  assert.match(bottom[1], /rotate\(-7deg\)/,
+    '最低点要 rotate(-7deg)——下潜时头朝下。写反了看起来像它在倒着游')
 
   // 挂在按钮上：1.8 秒、ease-in-out
   const rule = html.match(/\.attach\.busy svg\s*\{[^}]*\}/)
