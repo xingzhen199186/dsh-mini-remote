@@ -5426,7 +5426,7 @@ test('选文件支持多选：非拍照时加 multiple、拍照时去掉', () =>
   assert.equal(attrs.accept, 'image/*', '拍照要限定图片')
 })
 
-test('选文件的 change 要把挑中的每一个都传出去（不是只传第一个）', async () => {
+test('选文件的 change 要把挑中的每一个都传出去，并且**选完就回主页面**', async () => {
   const A = "$('filePick').addEventListener('change'"
   const B = "$('attachBar').addEventListener"
   const a = html.indexOf(A)
@@ -5434,22 +5434,47 @@ test('选文件的 change 要把挑中的每一个都传出去（不是只传第
   assert.ok(a > 0 && b > a, '找不到 filePick change 的切片锚点')
 
   const uploaded = []
+  let closed = 0
   let cb = null
   // 用一个假 $ 捕获注册的 change 回调，再喂三个文件给它。
-  new Function('$', 'uploadFile', html.slice(a, b))(
+  new Function('$', 'uploadFile', 'closeOps', html.slice(a, b))(
     () => ({ addEventListener: (type, fn) => { if (type === 'change') cb = fn } }),
     (f) => { uploaded.push(f.name); return Promise.resolve() },
+    () => { closed += 1 },
   )
   assert.ok(cb, '没注册 change 回调')
 
   const target = { files: [{ name: 'a.jpg' }, { name: 'b.jpg' }, { name: 'c.jpg' }], value: 'x' }
   cb({ target })
   assert.equal(target.value, '', 'value 要清掉，否则连着选同一个文件第二次不触发 change')
+  assert.equal(closed, 1, '选完文件要立刻回主页面（用户 2026-10-05 要求）——'
+    + '关在这里不会打断上传，文件是后台在传的')
 
   // 排队传：整条链都是「微任务」，所以让出一个宏任务等它们跑完
   // （第一版只让了两个微任务，不够，测试自己先红了）。
   await new Promise((r) => setTimeout(r, 0))
   assert.deepEqual(uploaded, ['a.jpg', 'b.jpg', 'c.jpg'],
     '三个文件都要传出去——原来只取 files[0]，这就是「只能单选」的原因')
+})
+
+test('选文件取消时（一个都没挑）不该关面板、也不该传东西', () => {
+  const A = "$('filePick').addEventListener('change'"
+  const B = "$('attachBar').addEventListener"
+  const a = html.indexOf(A)
+  const b = html.indexOf(B)
+
+  const uploaded = []
+  let closed = 0
+  let cb = null
+  new Function('$', 'uploadFile', 'closeOps', html.slice(a, b))(
+    () => ({ addEventListener: (type, fn) => { if (type === 'change') cb = fn } }),
+    (f) => { uploaded.push(f.name); return Promise.resolve() },
+    () => { closed += 1 },
+  )
+
+  // 用户在系统选择器里按了取消：files 是空的
+  cb({ target: { files: [], value: 'x' } })
+  assert.equal(closed, 0, '取消不该关面板——用户可能还想接着挑')
+  assert.deepEqual(uploaded, [], '取消不该传任何东西')
 })
 

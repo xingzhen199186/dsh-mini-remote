@@ -5404,6 +5404,12 @@
     // 用户会觉得「点了没反应」。
     e.target.value = '';
     if (!files.length) return;
+    // **选完就回主页面**（2026-10-05 用户要求：选完文件点完成，直接回到主页面，
+    // 不要停在这张「添加文件」面板上）。
+    // 关在这里是安全的：文件是**后台在传**的，主页面上的附件小条会一条条冒出来；
+    // 面板里那几行「已选文件」本来也只是同一份数据的另一处画法（见 renderAttach），
+    // 关掉面板不会打断上传。
+    closeOps();
     files.reduce(function (chain, f) {
       return chain.then(function () { return uploadFile(f); });
     }, Promise.resolve());
