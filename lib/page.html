@@ -6391,7 +6391,11 @@
     if (mirror.enabled) {
       // 新标签里没有 X-Mini-Token 头，所以靠地址带 token。服务端在入口那一下会顺手
       // 把 cookie 写上——那之后界面自己发的那些 /api/... 请求才认得出是自己人。
-      $('btnMirrorOpen').href = '/mini/mirror?token=' + encodeURIComponent(state.token || '');
+      //
+      // **尾斜杠不能省**：界面外壳写着 `<base href="./">`，在 `/mini/mirror` 上它
+      // 解析成 `/mini/`，在 `/mini/mirror/` 上才是 `/mini/mirror/`——差这一个字符，
+      // 里面引用的脚本会全 404、界面白屏（这是真浏览器打开验出来的）。
+      $('btnMirrorOpen').href = '/mini/mirror/?token=' + encodeURIComponent(state.token || '');
     }
   }
 

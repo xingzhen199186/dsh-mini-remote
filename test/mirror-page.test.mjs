@@ -133,12 +133,14 @@ test('进阶设置：关掉不用确认（往更安全的方向走不拦）', as
   assert.equal(h.els.rowMirrorOpen.hidden, true, '关掉之后入口也要收回去')
 })
 
-test('进阶设置：入口链接要带上令牌（新标签里没有请求头可用）', async () => {
+test('进阶设置：入口链接要带上令牌，并且**带尾斜杠**', async () => {
   const h = mirrorHarness({ apiImpl: () => ({ ok: true, available: true, enabled: true }) })
   await h.loadMirror()
   await tick()
-  assert.equal(h.els.btnMirrorOpen.href, '/mini/mirror?token=TK-123',
-    '新标签里没有 X-Mini-Token 头，只能靠地址带 token；不带的话入口那一下会 401')
+  assert.equal(h.els.btnMirrorOpen.href, '/mini/mirror/?token=TK-123',
+    '新标签里没有 X-Mini-Token 头，只能靠地址带 token；不带的话入口那一下会 401。'
+    + '尾斜杠也不能省：外壳写着 <base href="./">，少了它里面的脚本会解析到'
+    + '/mini/assets/... 上（那是我们自己的地盘），全 404、界面白屏')
 })
 
 test('进阶设置：失败要画回去，不能留一个没生效的状态', async () => {

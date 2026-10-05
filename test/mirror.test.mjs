@@ -301,24 +301,69 @@ test('路由门：开着但没带令牌 → 401；带了才转发', async (t) =>
   const yes = await fetch(`${s.base}/api/whatever?token=TOKEN-123`, { redirect: 'manual' })
   assert.equal(yes.status, 200)
   assert.equal(await yes.text(), '<html>mirror</html>')
-  // `req.url` 是**带查询串**的原文，所以这里连 `?token=` 一起比。
-  // （那串我们的令牌跟着转发过去是无害的：上游就是同一台机器上的 DSH 自己。）
-  assert.deepEqual(hit, ['/api/whatever?token=TOKEN-123'],
-    '认出来了就原样转发（路径不带我们的前缀、也不改写）')
+  assert.deepEqual(hit, ['/api/whatever'],
+    '认出来了就原样转发（路径不带我们的前缀）；我们自己的 token 参数要摘掉')
 })
 
-test('路由门：入口那一下写成 cookie，界面后面自己发的请求才认得出', async (t) => {
+test('路由门：入口那一下写成 cookie，并且补上尾斜杠', async (t) => {
   const hit = []
   const s = await bootServer({ mirror: stubMirror(hit), mirrorEnabled: () => true })
   t.after(s.close)
 
-  const res = await fetch(`${s.base}/mini/mirror?token=TOKEN-123`, { redirect: 'manual' })
-  assert.equal(res.status, 200)
-  const cookie = res.headers.get('set-cookie')
+  // 不带尾斜杠的入口：写 cookie，然后 302 到带斜杠的那条。
+  const bare = await fetch(`${s.base}/mini/mirror?token=TOKEN-123`, { redirect: 'manual' })
+  assert.equal(bare.status, 302)
+  assert.equal(bare.headers.get('location'), '/mini/mirror/')
+  const cookie = bare.headers.get('set-cookie')
   assert.ok(cookie, '入口必须顺手把 cookie 写上——否则界面里那些 /api/... 全是 401')
   assert.match(cookie, /Path=\//, 'cookie 要覆盖整个站，不然 /api/... 带不上')
+  assert.deepEqual(hit, [], '补斜杠这一步不该往上游转发')
 
-  assert.deepEqual(hit, ['/'], '入口那条路径映射到上游的首页')
+  // 带尾斜杠的入口：这就是上游的首页。
+  // **尾斜杠不是洁癖**：外壳写着 `<base href="./">`，少这一个字符，
+  // 它引用的脚本会解析到 /mini/assets/... 上（我们自己的地盘），全 404、界面白屏。
+  // （真机上这一步靠上一条写下的 cookie 过关；这里 fetch 不共享 cookie，所以显式带令牌。）
+  // **查询串整个丢掉**：里面只有我们的令牌，上游不认识它，留着反而会被它那些
+  // 精确匹配的路由判成不匹配。
+  const slash = await fetch(`${s.base}/mini/mirror/?token=TOKEN-123`, { redirect: 'manual' })
+  assert.equal(slash.status, 200)
+  assert.deepEqual(hit, ['/'], '带斜杠的入口映射到上游的首页，且不带查询串')
+})
+
+test('路由门：挂载前缀要剥掉（界面用相对路径，靠的就是它）', async (t) => {
+  const hit = []
+  const s = await bootServer({ mirror: stubMirror(hit), mirrorEnabled: () => true })
+  t.after(s.close)
+
+  // 外壳里的 `./assets/index-xxx.js`，在 `/mini/mirror/` 下会解析成这个地址。
+  const res = await fetch(`${s.base}/mini/mirror/assets/index-abc.js?rev=1&token=TOKEN-123`,
+    { redirect: 'manual' })
+  assert.equal(res.status, 200)
+  assert.deepEqual(hit, ['/assets/index-abc.js?rev=1'],
+    '前缀要剥掉再转发、其余查询串留着——不剥的话上游看到 /mini/mirror/assets/... 会 404')
+})
+
+test('路由门：我们自己那个 token 参数绝不跟着转发（它会撞坏上游的精确匹配）', async (t) => {
+  const hit = []
+  const s = await bootServer({ mirror: stubMirror(hit), mirrorEnabled: () => true })
+  t.after(s.close)
+
+  // 这是真机上试出来的那一条：界面里插件的脚本走**合并加载**路径，
+  // 上游对它是精确匹配，多一个 `&token=` 就 404，脚本一 404 界面就卡在启动画面。
+  const combo = '/plugins/??@deepseek-ai/dsh-client-modules/client.js&rev=09c0a91a00d6'
+  const res = await fetch(`${s.base}${combo}&token=TOKEN-123`, { redirect: 'manual' })
+  assert.equal(res.status, 200)
+  assert.deepEqual(hit, [combo],
+    '我们自己的 token 必须摘掉，其余字符（@ / , 这些）一个都不许动')
+
+  // 同名但不是我们那个值的参数**不许摘**——那可能是界面自己在用的。
+  // 两个同名参数：第一个是我们的（用来过门），第二个不是（该留着）。
+  // （用 ASCII 值：`fetch` 会把中文百分号编码，比对着会看不出在比什么。）
+  hit.length = 0
+  const other = '/plugins/x.js?token=TOKEN-123&rev=1&token=someone-else'
+  await fetch(`${s.base}${other}`, { redirect: 'manual' })
+  assert.deepEqual(hit, ['/plugins/x.js?rev=1&token=someone-else'],
+    '只摘我们自己那一个，别的一律不许动')
 })
 
 test('路由门：拿不到令牌时连 cookie 都不该写（不给一个没验过的会话）', async (t) => {
