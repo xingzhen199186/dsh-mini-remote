@@ -5364,3 +5364,92 @@ test('权限档位标签那行不要下边线（否则和按钮框的边框叠�
     '#permBlock 自己的下边线要留着——那是它和下一块之间的分割线')
 })
 
+/**
+ * 「调用指令」和上面那排按钮之间要有留白（2026-10-05 用户截图点名）。
+ *
+ * 根因：那条规则本来写着 margin: 20px 0 10px，但被 `.sheet h2 { margin: 0 0 14px }`
+ * 盖掉了——`.sheet h2` 是「一个类 + 一个元素」(0,1,1)，比只有「一个类」的
+ * `.ops-sub` (0,1,0) 优先级高，于是 margin-top 变成 0，标题贴着按钮。
+ * 实测（让页面自己算几何）：修之前间距 0.0px、margin-top 0px；
+ * 修之后间距 20.0px、margin-top 20px。
+ */
+test('「调用指令」要有上留白：选择器要压得住 .sheet h2', () => {
+  const rule = html.match(/\.sheet \.ops-sub\s*\{[^}]*\}/)
+  assert.ok(rule, '「调用指令」的样式必须带上 .sheet 前缀——只写 .ops-sub 会被 '
+    + '`.sheet h2 { margin: 0 0 14px }` 盖掉，上留白变 0（用户 2026-10-05 截图）')
+  assert.match(rule[0], /margin:\s*20px\s+0\s+10px/,
+    '上留白要 20px（作者本来写的值）')
+
+  // 反面：不许再出现光杆的 .ops-sub 规则（那一条必然被 .sheet h2 盖掉）。
+  // 注意别用「前面不是 . 或字母」这种写法——`.sheet .ops-sub` 里 .ops-sub 前面
+  // 正好是个空格，会被误判（第一版就这么红的）。直接看每条规则的选择器开头。
+  const opsRules = [...html.matchAll(/([^{}\n]+)\{[^}]*\}/g)]
+    .map((m) => m[1].trim())
+    .filter((sel) => /(^|[\s,])\.ops-sub$/.test(sel))
+  for (const sel of opsRules) {
+    assert.ok(sel.startsWith('.sheet '),
+      `这条 .ops-sub 规则的选择器是「${sel}」——没有 .sheet 前缀就压不过 .sheet h2，上留白会变 0`)
+  }
+  assert.ok(opsRules.length > 0, '一条 .ops-sub 规则都没有？锚点变了？')
+})
+
+/**
+ * 选文件要能多选（2026-10-05 用户要求：「图库和文件里目前只能单选，改为多选」）。
+ *
+ * 两件事缺一不可：
+ *   ① input 要有 multiple（否则系统选择器不给多选）；
+ *   ② change 里要把**全部**文件都传出去（原来只取 files[0]）。
+ * 拍照那条**不加** multiple——相机一次就出一张。
+ */
+test('选文件支持多选：非拍照时加 multiple、拍照时去掉', () => {
+  const A = 'function openFilePicker(camera)'
+  const B = "$('opsPick').addEventListener"
+  const a = html.indexOf(A)
+  const b = html.indexOf(B)
+  assert.ok(a > 0 && b > a, '找不到 openFilePicker 的切片锚点')
+
+  const attrs = {}
+  const pick = {
+    setAttribute: (k, v) => { attrs[k] = v },
+    removeAttribute: (k) => { delete attrs[k] },
+    click: () => {},
+  }
+  const openFilePicker = new Function('$', html.slice(a, b) + '\nreturn openFilePicker;')(() => pick)
+
+  openFilePicker(false) // 「选文件」
+  assert.ok('multiple' in attrs, '「选文件」必须给 input 加 multiple，否则系统选择器不给多选')
+  assert.ok(!('capture' in attrs), '「选文件」不该带 capture')
+
+  openFilePicker(true) // 「拍照」
+  assert.ok(!('multiple' in attrs), '拍照要去掉 multiple——相机一次就出一张')
+  assert.equal(attrs.capture, 'environment', '拍照要调后置摄像头')
+  assert.equal(attrs.accept, 'image/*', '拍照要限定图片')
+})
+
+test('选文件的 change 要把挑中的每一个都传出去（不是只传第一个）', async () => {
+  const A = "$('filePick').addEventListener('change'"
+  const B = "$('attachBar').addEventListener"
+  const a = html.indexOf(A)
+  const b = html.indexOf(B)
+  assert.ok(a > 0 && b > a, '找不到 filePick change 的切片锚点')
+
+  const uploaded = []
+  let cb = null
+  // 用一个假 $ 捕获注册的 change 回调，再喂三个文件给它。
+  new Function('$', 'uploadFile', html.slice(a, b))(
+    () => ({ addEventListener: (type, fn) => { if (type === 'change') cb = fn } }),
+    (f) => { uploaded.push(f.name); return Promise.resolve() },
+  )
+  assert.ok(cb, '没注册 change 回调')
+
+  const target = { files: [{ name: 'a.jpg' }, { name: 'b.jpg' }, { name: 'c.jpg' }], value: 'x' }
+  cb({ target })
+  assert.equal(target.value, '', 'value 要清掉，否则连着选同一个文件第二次不触发 change')
+
+  // 排队传：整条链都是「微任务」，所以让出一个宏任务等它们跑完
+  // （第一版只让了两个微任务，不够，测试自己先红了）。
+  await new Promise((r) => setTimeout(r, 0))
+  assert.deepEqual(uploaded, ['a.jpg', 'b.jpg', 'c.jpg'],
+    '三个文件都要传出去——原来只取 files[0]，这就是「只能单选」的原因')
+})
+

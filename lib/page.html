@@ -1196,7 +1196,13 @@
   .ops-acts .btn { flex: 1 1 0; text-align: center; }
   .ops-files { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
   .ops-files[hidden] { display: none; }
-  .ops-sub { margin: 20px 0 10px; font-size: 16px; }
+  /* 「调用指令」这个小标题**要带上前面的类**，不能只写 .ops-sub。
+     2026-10-05 用户截图点名：「调用指令和上方选文件拍照那一行要有点留白」。
+     根因：这里本来写着 margin: 20px 0 10px，但上面有条 `.sheet h2 { margin: 0 0 14px }`
+     ——它是「一个类 + 一个元素」(0,1,1)，比只有「一个类」的 .ops-sub (0,1,0) 优先级高，
+     于是 margin-top 被盖成 0，那 20px 从来没生效过，标题就贴着按钮。
+     写成 .sheet .ops-sub (0,2,0) 才压得住那条规则。 */
+  .sheet .ops-sub { margin: 20px 0 10px; font-size: 16px; }
   .ops-filter {
     width: 100%; padding: 9px 12px; border-radius: var(--r); border: 1px solid var(--line);
     background: var(--panel-2); color: var(--fg); font: inherit; font-size: 16px;
@@ -5088,10 +5094,13 @@
     // 本地上限和服务端是同一个数（由服务端注入），先拦一道省得白传一场。
     if (MAX_UPLOAD > 0 && file.size > MAX_UPLOAD) {
       toast('「' + name + '」有 ' + humanSize(file.size) + '，超过上限 ' + humanSize(MAX_UPLOAD));
-      return;
+      // 多选时是排队传的（见 filePick 的 change），所以这里也要回一个「承诺」——
+      // 否则这一份被拦下会让整条链断掉，后面几张就再也传不出去了。
+      return Promise.resolve();
     }
     setAttachBusy(true);
-    api('/mini/api/upload?name=' + encodeURIComponent(name) + '&size=' + file.size,
+    // 返回这条链：多选时调用方靠它排队（一张传完再传下一张）。
+    return api('/mini/api/upload?name=' + encodeURIComponent(name) + '&size=' + file.size,
       { method: 'POST', body: file })
       .then(function (res) {
         state.uploads.push({ uploadId: res.uploadId, name: res.name, bytes: res.bytes });
@@ -5354,15 +5363,20 @@
 
   // 「添加文件」两件事：选文件、拍照。都走原来那个藏起来的 #filePick——手机上这两件事
   // 本来就是同一个系统选择器，区别只在「要不要限定图片、要不要调后置摄像头」。
+  //
+  // **多选只给「选文件」**（2026-10-05 用户要求：图库和文件里只能单选，改成多选）。
+  // 拍照那一条不加 multiple：相机一次就出一张，摆个多选没有意义。
   function openFilePicker(camera) {
     var pick = $('filePick');
     if (!pick) return;
     if (camera) {
       pick.setAttribute('accept', 'image/*');
       pick.setAttribute('capture', 'environment');
+      pick.removeAttribute('multiple');
     } else {
       pick.removeAttribute('accept');
       pick.removeAttribute('capture');
+      pick.setAttribute('multiple', '');
     }
     pick.click();
   }
@@ -5381,11 +5395,18 @@
 
   $('btnAttach').addEventListener('click', function () { openOps(); });
   $('filePick').addEventListener('change', function (e) {
-    var f = e.target.files && e.target.files[0];
+    // 多选：一次可能挑了好几张，**一个接一个传**（2026-10-05 用户要求多选）。
+    // 为什么不用并发：上传的「忙碌」是同一个开关（setAttachBusy 控制那个回形针），
+    // 并发传的话最后一个传完就把按钮放开了，其实还有在飞的——用户会以为传完了。
+    // 排队传则从头到尾都是忙的，什么时候能再点一目了然。
+    var files = Array.prototype.slice.call(e.target.files || []);
     // 清掉 value：不清的话，连着选同一个文件第二次不会触发 change，
     // 用户会觉得「点了没反应」。
     e.target.value = '';
-    if (f) uploadFile(f);
+    if (!files.length) return;
+    files.reduce(function (chain, f) {
+      return chain.then(function () { return uploadFile(f); });
+    }, Promise.resolve());
   });
   $('attachBar').addEventListener('click', function (e) {
     var btn = e.target.closest ? e.target.closest('[data-drop]') : null;
