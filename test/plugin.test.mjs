@@ -3557,6 +3557,66 @@ test('插件页面：问不到设置文档时，官方卡片整块不出现（�
 })
 
 /**
+ * 繁忙时的发送行为（2026-10-05 用户要求搬进手机设置）。
+ *
+ * PC 上「设置 → 通用」里那一条的同款：命名空间 ui-conversation、字段 busyEnter。
+ * 这一组只测**应答形状与拒绝口径**——那份设置是宿主唯一的一份，两端共用。
+ */
+test('繁忙时的发送行为：读到就报当前值，读不到就如实说 unavailable', async (t) => {
+  // ① 宿主提供设置，命名空间在，值被改成了 steer
+  const p = await bootPlugin({
+    settings: {
+      describe: () => [{ ns: 'ui-conversation', value: { busyEnter: 'steer' }, revision: 7 }],
+      update: async () => {},
+    },
+  })
+  t.after(p.stop)
+  const ok = await (await fetch(`${p.base}/mini/api/busy-enter?token=${p.token}`)).json()
+  assert.equal(ok.ok, true)
+  assert.equal(ok.current, 'steer', '要报出宿主里真实的值')
+  assert.equal(ok.revision, 7, '带上 revision，写的时候当乐观锁用')
+
+  // ② 宿主没提供这个命名空间（老版本 DSH，或没装那个插件）
+  const q = await bootPlugin({
+    settings: { describe: () => [{ ns: 'bash-sandbox', value: {}, revision: 1 }], update: async () => {} },
+  })
+  t.after(q.stop)
+  const no = await (await fetch(`${q.base}/mini/api/busy-enter?token=${q.token}`)).json()
+  assert.equal(no.ok, false, '没有这一项就不许报一个假的值')
+  assert.equal(no.reason, 'unavailable', '「这里本来就没有」要和「出错」分得开')
+})
+
+test('繁忙时的发送行为：只认 queue 和 steer，别的一律拒绝', async (t) => {
+  let written = null
+  const p = await bootPlugin({
+    settings: {
+      describe: () => [{ ns: 'ui-conversation', value: { busyEnter: 'queue' }, revision: 3 }],
+      update: async (ns, patch, rev) => { written = { ns, patch, rev } },
+    },
+  })
+  t.after(p.stop)
+
+  // 合法值：写进去，而且带上了 revision（免得把电脑上刚改的那次盖掉）
+  const good = await (await fetch(`${p.base}/mini/api/busy-enter?token=${p.token}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ value: 'steer' }),
+  })).json()
+  assert.equal(good.ok, true)
+  assert.equal(good.current, 'steer')
+  assert.deepEqual(written, { ns: 'ui-conversation', patch: { busyEnter: 'steer' }, rev: 3 },
+    '要写进 ui-conversation 的 busyEnter，并带上 revision')
+
+  // 非法值：拒绝，而且**不许落到宿主那边**——不能让一个没见过的值进了设置文档
+  written = null
+  const bad = await (await fetch(`${p.base}/mini/api/busy-enter?token=${p.token}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ value: 'whatever' }),
+  })).json()
+  assert.equal(bad.ok, false, '只有两个值，别的都要拒')
+  assert.equal(written, null, '被拒的值不许写进宿主的设置文档')
+})
+
+/**
  * DSH 版本号（2026-10-04 实测翻出来的那条：手机上一直显示 unknown）。
  *
  * 早先几个地方都去翻磁盘上的 `node_modules/@deepseek-ai/dsh/package.json`：那是**命令行

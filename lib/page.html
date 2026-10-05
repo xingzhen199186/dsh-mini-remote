@@ -1510,6 +1510,23 @@
       <button class="btn" id="btnPlugins">查看</button>
     </div>
 
+    <!-- 繁忙时的发送行为（2026-10-05 用户要求搬进手机设置）。
+         PC 上「设置 → 通用 → 繁忙时的发送行为」就是它：智能体跑着的时候，
+         你发的那句话是排队等这一轮跑完，还是当场插进去让它调整方向。
+         **两端共用宿主那一份设置**——手机上改，电脑上也是这个值。
+         文案照抄 PC 词条表（settings.enter.*），一个字不自创。
+         读不到时整条藏起来（见 applyBusyEnter），不摆一个假的开关。 -->
+    <div class="row" id="rowBusyEnter" hidden>
+      <div>
+        <div class="label">繁忙时的发送行为</div>
+        <div class="hint">智能体运行时发送按钮的行为</div>
+      </div>
+      <div class="seg" id="segBusyEnter">
+        <button data-busy="queue">排队发送</button>
+        <button data-busy="steer">插话发送</button>
+      </div>
+    </div>
+
     <div class="foot">
       <button class="btn" id="btnForget">清除 token</button>
       <button class="btn primary" id="btnClose">完成</button>
@@ -5381,6 +5398,8 @@
     // 版本号那行也现读一次：它只在设置页里看得见，没必要开机就为它跑一趟。
     // （watchBuild 是同一个 script 块里的函数声明，这里调得到。）
     watchBuild();
+    // 繁忙时的发送行为也现读一次：**电脑上随时能改**，开机读那一次会过期。
+    loadBusyEnter();
   });
   $('btnClose').addEventListener('click', function () { sheet.classList.remove('open'); });
   // 顶部吸顶那个关闭口（2026-10-05 设置页改整屏时加的）。
@@ -6090,6 +6109,71 @@
       b.classList.toggle('active', (b.dataset.notify === 'on') === state.notify);
     });
   }
+
+  /**
+   * 繁忙时的发送行为（2026-10-05 用户要求搬进手机设置）。
+   *
+   * 这是 PC「设置 → 通用」里那一条的同款：智能体跑着的时候，你发的话是
+   * 排队等这一轮跑完，还是当场插进去让它调整方向。**两端共用宿主那一份设置**，
+   * 所以这里改完，电脑上也是这个值——这是用户拍板要的（同一个开关，别两端各存一份）。
+   *
+   * **读不到就整条不画**：拿不到宿主设置时把那一行藏起来，不摆一个点了没用的开关。
+   * 这和插件页「宁可少画，不凭空多画」是同一条口径。
+   *
+   * 写的时候带上服务端给的 revision（乐观锁）：万一电脑上刚改过，这次写入会被挡下来，
+   * 而不是把对方那次改动悄悄盖掉——那种覆盖用户看不见，最难查。
+   */
+  var busyEnter = { current: 'queue', revision: null, ready: false };
+  function paintBusyEnter() {
+    Array.prototype.forEach.call($('segBusyEnter').children, function (b) {
+      b.classList.toggle('active', b.dataset.busy === busyEnter.current);
+    });
+  }
+  function loadBusyEnter() {
+    api('/mini/api/busy-enter').then(function (r) {
+      if (!r || !r.ok) {
+        // 这台电脑没提供这个设置（老版本 DSH、或设置文档里没这一项）。
+        // 藏起来就好，不用报错——那不是「出错」，是「这里本来就没有」。
+        $('rowBusyEnter').hidden = true;
+        return;
+      }
+      busyEnter.current = r.current === 'steer' ? 'steer' : 'queue';
+      busyEnter.revision = typeof r.revision === 'number' ? r.revision : null;
+      busyEnter.ready = true;
+      $('rowBusyEnter').hidden = false;
+      paintBusyEnter();
+    }).catch(function () {
+      $('rowBusyEnter').hidden = true;
+    });
+  }
+  $('segBusyEnter').addEventListener('click', function (e) {
+    var btn = e.target.closest ? e.target.closest('button[data-busy]') : null;
+    if (!btn || !busyEnter.ready) return;
+    var next = btn.dataset.busy;
+    if (next === busyEnter.current) return;
+    // 先画再发：这一下是用户自己按的，立刻有反馈；发失败了再画回去并说清。
+    var prev = busyEnter.current;
+    busyEnter.current = next;
+    paintBusyEnter();
+    api('/mini/api/busy-enter', {
+      method: 'POST',
+      body: JSON.stringify({ value: next }),
+    }).then(function (r) {
+      if (r && r.ok) {
+        toast(r.current === 'steer' ? '繁忙时改为插话发送' : '繁忙时改为排队发送');
+        busyEnter.revision = typeof r.revision === 'number' ? r.revision : busyEnter.revision;
+        return;
+      }
+      // 失败要画回去——留着那个没生效的选中态，用户会以为改成功了。
+      busyEnter.current = prev;
+      paintBusyEnter();
+      toast(r && r.reason === 'unavailable' ? '这台电脑改不了这一项' : '没能改成，再试一次');
+    }).catch(function () {
+      busyEnter.current = prev;
+      paintBusyEnter();
+      toast('没能改成，检查一下连接');
+    });
+  });
 
   if (NOTIFY_OK) {
     // 先注册 service worker。**这一步不申请权限**——权限要用户主动点一下才给，
