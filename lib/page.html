@@ -5483,14 +5483,17 @@
 
   function saRenderList(body) {
     var listEl = $('subagentsList');
+    // 这两句空态都落在 .sa-list 里，而那个容器用负 16px 把内容拽到贴屏边
+    // （为了让分隔线横贯整屏）——所以得补上 sa-none-indent 把 16px 加回来，
+    // 否则这行字会顶到屏幕最左边。这个类是早就写好的，之前没给空态用上。
     if (!body || !body.ok) {
-      listEl.innerHTML = '<div class="sa-none">'
+      listEl.innerHTML = '<div class="sa-none sa-none-indent">'
         + escapeHtml((body && body.error) || '读不到子智能体。') + '</div>';
       return;
     }
     saRows = body.subagents || [];
     if (!saRows.length) {
-      listEl.innerHTML = '<div class="sa-none">这个会话还没有派出过子智能体。</div>';
+      listEl.innerHTML = '<div class="sa-none sa-none-indent">这个会话还没有派出过子智能体。</div>';
       return;
     }
     listEl.innerHTML = saRows.map(saRowHtml).join('');
@@ -5520,7 +5523,7 @@
       }
       saRenderList(body);
     }).catch(function (err) {
-      $('subagentsList').innerHTML = '<div class="sa-none">'
+      $('subagentsList').innerHTML = '<div class="sa-none sa-none-indent">'
         + escapeHtml(err && err.message || '没读出来。') + '</div>';
     }).finally(function () {
       if (saInflight && saInflight.request === request) saInflight = null;

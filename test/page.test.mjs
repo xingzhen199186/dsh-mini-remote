@@ -5236,3 +5236,39 @@ test('插件页面：空的组整个不画，读不到的那块如实说', () =>
   assert.ok(!broken.includes('已安装 · 内置'), '读不到就别画一个内置组的壳')
 })
 
+/**
+ * 子智能体那块的「空态」要留白（2026-10-05 用户截图点名）。
+ *
+ * 现象：子智能体面板里「这个会话还没有派出过子智能体」那行字**贴到屏幕最左边**。
+ *
+ * 根因：`.sa-list` 用了 `margin: 0 -16px` 把内容拽到贴屏边（为了让行的分隔线
+ * 横贯整屏），凡是塞进这个容器的纯文字都会被一起拽出去。作者早就预料到了这一点，
+ * 写好了 `.sa-none-indent`（把 16px 加回来），**但有三处空态忘了加这个类名**。
+ *
+ * 这条测试盯的是「往 .sa-list 里塞的每一处文字都带着 sa-none-indent」——
+ * 靠扫源码字符串，因为真实场景要等清单读空/读错才出现，桩起来不值当。
+ */
+test('子智能体面板：塞进 sa-list 的空态文字都要带 sa-none-indent（否则贴屏边）', () => {
+  // 往 subagentsList 里写内容有两种写法：
+  //   1) 直接 $('subagentsList').innerHTML = '…'
+  //   2) 先 var listEl = $('subagentsList')，再 listEl.innerHTML = '…'
+  // 所以要两路都扫；只扫一种会漏（第一版就漏了，测试自己先红了）。
+  const direct = [...html.matchAll(/subagentsList'\)\.innerHTML\s*=\s*([^\n]*)/g)].map((m) => m[1])
+  // listEl 这个变量名在本文件里被三块复用（指令/子智能体/插件），所以先定位
+  // 「var listEl = $('subagentsList')」之后的那一段，再扫它里面的 listEl.innerHTML。
+  const anchor = "var listEl = $('subagentsList')"
+  const from = html.indexOf(anchor)
+  assert.ok(from > 0, `找不到锚点「${anchor}」，函数被改名或挪位了`)
+  const seg = html.slice(from, from + 4000)
+  const viaVar = [...seg.matchAll(/listEl\.innerHTML\s*=\s*([^\n]*)/g)].map((m) => m[1])
+
+  const writes = [...direct, ...viaVar]
+  const empties = writes.filter((s) => s.includes('sa-none'))
+  assert.ok(empties.length >= 3,
+    `空态至少三处（读不到 / 还没派过 / 读取出错），实际 ${empties.length}——扫法又漏了？`)
+  for (const s of empties) {
+    assert.ok(s.includes('sa-none sa-none-indent'),
+      `这处空态少了 sa-none-indent，会被 .sa-list 的 -16px 拽到贴屏边：${s}`)
+  }
+})
+
