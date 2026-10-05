@@ -3684,4 +3684,128 @@ test('插件页面：会话插件分组用的预设名是中文，不露 standar
   assert.deepEqual(out.presets.map((x) => x.isDefault), [true, false, false], '默认那一档要标出来')
 })
 
+/**
+ * 「插话发送」要真的插话（2026-10-06 用户实机发现：「插话发送似乎没实现，
+ * 依然是排队发生」）。
+ *
+ * 原来 onInstruction 只会 `agent.followup()`——那是**永远排队**。手机设置里那条
+ * 「繁忙时的发送行为」当时只做了设置界面、**没接进发送这条路**，所以选了插话也照样排队。
+ *
+ * 两条都是 DSH 自己的接口（dsh-agent 的类型注释原文）：
+ *   followup(message) → "Queue an ordinary follow-up turn"，进 inbox.nextTurn，等这一轮跑完
+ *   steer(message)    → "Submit steering for the nearest step"，进 inbox.nextStep，
+ *                       跑着的驱动在**下一个步骤边界**就取走（一个工具调用 = 一个步骤）
+ *
+ * 三条保守口径也一并钉住：不跑的时候不插话；老 DSH 上没有 steer 就退回排队；
+ * 插话和排队在应答里不能同时为真。
+ */
+test('跑着 + 设置是插话 → 调 agent.steer()，不再一律 followup()', async (t) => {
+  const steers = []
+  const follows = []
+  const agent = {
+    status: 'running',
+    session: { id: 'sess-st', header: { id: 'sess-st' } },
+    steer: (m) => steers.push(m),
+    followup: (m) => follows.push(m),
+  }
+  const p = await bootPlugin({
+    agents: { 'sess-st': agent },
+    settings: {
+      describe: () => [{ ns: 'ui-conversation', value: { busyEnter: 'steer' }, revision: 1 }],
+      update: async () => {},
+    },
+  })
+  t.after(p.stop)
+  p.handlers.get('session/event')(agent.session, ev('turn/start', { turn: 1 }))
+
+  const body = await (await fetch(`${p.base}/mini/api/send?token=${p.token}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text: '先别动那个文件' }),
+  })).json()
+
+  assert.equal(body.ok, true)
+  assert.equal(steers.length, 1, '要调 agent.steer()')
+  assert.equal(follows.length, 0, '不许再一律排队')
+  assert.equal(body.steered, true, '要如实告诉界面这条是插话')
+  assert.equal(body.queued, false, '插话和排队不能同时为真')
+  assert.equal(steers[0].role, 'user', '插话的还是一条用户消息')
+})
+
+test('设置是排队（或不跑）时照旧 followup()，插话只发生在「跑着 + 选了插话」', async (t) => {
+  // ① 跑着，但设置是排队
+  const s1 = [], f1 = []
+  const a1 = {
+    status: 'running',
+    session: { id: 's1', header: { id: 's1' } },
+    steer: (m) => s1.push(m),
+    followup: (m) => f1.push(m),
+  }
+  const p1 = await bootPlugin({
+    agents: { s1: a1 },
+    settings: {
+      describe: () => [{ ns: 'ui-conversation', value: { busyEnter: 'queue' }, revision: 1 }],
+      update: async () => {},
+    },
+  })
+  t.after(p1.stop)
+  p1.handlers.get('session/event')(a1.session, ev('turn/start', { turn: 1 }))
+  const r1 = await (await fetch(`${p1.base}/mini/api/send?token=${p1.token}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text: '甲' }),
+  })).json()
+  assert.equal(s1.length, 0, '选了排队就不该插话')
+  assert.equal(f1.length, 1, '该走 followup')
+  assert.equal(r1.queued, true, '要如实说它排队了')
+
+  // ② 设置是插话，但**没在跑**——没什么可插的，走正常发送
+  const s2 = [], f2 = []
+  const a2 = {
+    status: 'idle',
+    session: { id: 's2', header: { id: 's2' } },
+    steer: (m) => s2.push(m),
+    followup: (m) => f2.push(m),
+  }
+  const p2 = await bootPlugin({
+    agents: { s2: a2 },
+    settings: {
+      describe: () => [{ ns: 'ui-conversation', value: { busyEnter: 'steer' }, revision: 1 }],
+      update: async () => {},
+    },
+  })
+  t.after(p2.stop)
+  p2.handlers.get('session/event')(a2.session, ev('turn/start', { turn: 1 }))
+  const r2 = await (await fetch(`${p2.base}/mini/api/send?token=${p2.token}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text: '乙' }),
+  })).json()
+  assert.equal(s2.length, 0, '不跑的时候不该插话')
+  assert.equal(f2.length, 1, '走正常发送')
+  assert.equal(r2.steered, false, '不是插话就别报插话（要是个明确的布尔值，不是缺字段）')
+  assert.equal(r2.queued, false, '没在跑，也没排队')
+
+  // ③ 老版本 DSH：agent 上没有 steer（它是后加的）→ 退回排队，不能让指令发不出去
+  const f3 = []
+  const a3 = {
+    status: 'running',
+    session: { id: 's3', header: { id: 's3' } },
+    followup: (m) => f3.push(m),
+  }
+  const p3 = await bootPlugin({
+    agents: { s3: a3 },
+    settings: {
+      describe: () => [{ ns: 'ui-conversation', value: { busyEnter: 'steer' }, revision: 1 }],
+      update: async () => {},
+    },
+  })
+  t.after(p3.stop)
+  p3.handlers.get('session/event')(a3.session, ev('turn/start', { turn: 1 }))
+  const r3 = await (await fetch(`${p3.base}/mini/api/send?token=${p3.token}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text: '丙' }),
+  })).json()
+  assert.equal(r3.ok, true, '没有 steer 也要能把指令发出去')
+  assert.equal(f3.length, 1, '退回 followup')
+  assert.equal(r3.queued, true, '如实说它排队了')
+})
+
 

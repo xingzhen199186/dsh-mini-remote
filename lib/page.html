@@ -656,6 +656,14 @@
     display: flex; align-items: center; gap: 8px; padding: 3px 0;
     font-size: 13.5px; line-height: 1.45;
   }
+  /* 「插话」那一行的标记（2026-10-06）。不标的话，插话和排队在列表里长得一模一样，
+     而两者的等待时间差一个数量级（插话几秒、排队可能几分钟）——用户根本分不出
+     自己那条到底插进去了没有。颜色用既有的状态色 --run（和轨迹里的「进行中」同色）。 */
+  .queue .q-tag {
+    flex: 0 0 auto; font-size: 11px; line-height: 1;
+    padding: 2px 5px; border-radius: var(--r);
+    color: var(--run); border: 1px solid var(--run);
+  }
   /* 长指令折行，但最多两行——队列是「提醒还有几条」，不是给人重读全文的地方。 */
   .queue .q-text {
     flex: 1 1 auto; min-width: 0; color: var(--fg);
@@ -2755,13 +2763,30 @@
     if (list.length > shown) nodes += '<div class="q-node"><i></i><b>…</b></div>';
     var rows = '';
     for (var i = 0; i < list.length; i += 1) {
+      // 插话和排队**要分得出来**（2026-10-06）：服务端每条都带 placement，
+      // `next-step` 是插话（下一个步骤边界就取走，通常几秒），
+      // `next-turn` 是排队（等这一轮跑完，可能几分钟）。原来两条画得一模一样。
+      var isSteer = list[i].placement === 'next-step';
       rows += '<div class="q-row">'
+        + (isSteer ? '<span class="q-tag">插话</span>' : '')
         + '<span class="q-text">' + escapeHtml(list[i].text) + '</span>'
         + '<button class="q-drop" type="button" data-drop="' + escapeHtml(list[i].id) + '"'
         + ' aria-label="撤掉这条"><svg viewBox="0 0 24 24" aria-hidden="true">'
         + '<path d="M6 6l12 12M18 6L6 18"/></svg></button></div>';
     }
-    el.innerHTML = '<div class="q-head">排队中 ' + list.length + ' 条 · 跑完这轮就轮到它们</div>'
+    // 标题得跟着实际内容说：**只要有一条插话，「跑完这轮就轮到它们」就是假话**。
+    // 三种情况各说各的，不糊一句通用的。
+    var steerCount = 0;
+    for (var k = 0; k < list.length; k += 1) {
+      if (list[k].placement === 'next-step') steerCount += 1;
+    }
+    var waitCount = list.length - steerCount;
+    var head = steerCount && waitCount
+      ? '插话 ' + steerCount + ' 条（下一步就看到） · 排队 ' + waitCount + ' 条'
+      : steerCount
+        ? '插话 ' + steerCount + ' 条 · 它下一步就看到'
+        : '排队中 ' + list.length + ' 条 · 跑完这轮就轮到它们';
+    el.innerHTML = '<div class="q-head">' + head + '</div>'
       + '<div class="q-scale">' + nodes + '</div>' + rows;
   }
 
@@ -5276,15 +5301,24 @@
 
     api('/mini/api/send', { method: 'POST', body: JSON.stringify({ text: text, uploadIds: uploadIds }) })
       .then(function (res) {
-        // 服务端说这条排队了（发的时候正在跑），给一句话。
+        // 服务端说这条排队了 / 插话了（发的时候正在跑），给一句话。
         // 队列那块也会跟着推过来，但那要等一个来回；先给个即时反馈，
         // 免得用户以为又石沉大海了。
+        //
+        // **两条要说不同的话**（2026-10-06）：插话是「下一个步骤边界就取走」，
+        // 通常几秒；排队是「等这一轮跑完」，可能好几分钟。都回一句「已排队」
+        // 就等于把插话也说成了排队——用户就是这么发现「插话好像没实现」的。
+        if (res && res.steered) {
+          toast('已插话，它下一步就看到');
+          return;
+        }
         if (res && res.queued) {
           toast('已排队，跑完这轮就轮到它');
           // **排队不算发出去，所以这里不回显气泡。** 用户 2026-09-22 实机提的：
           // 排队的指令立刻长成一条指令气泡，看着就像已经发出去了，其实还在队列里。
           // 它已经在下面的排队列表里露过面了，那就是它此刻该待的地方；
           // 轮到它真跑起来时，服务端会把它记进 history，气泡那时才出现。
+          // 插话走的是同一条账（等它真被取走时才长气泡），所以这里一起 return。
           return;
         }
         // 真发出去了才回显。放在这里而不是发之前，是因为**发之前还不知道会不会排队**；

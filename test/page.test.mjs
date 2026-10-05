@@ -1610,11 +1610,34 @@ test('队列画出来：每条一句、带 id 的撤销按钮、条数写在标�
   w.paintQueue()
   assert.equal(w.els.queue.hidden, false)
   const out = w.els.queue.innerHTML
-  assert.match(out, /排队中 2 条/, '得说清楚有几条')
   assert.match(out, /顺便把测试也跑一遍/)
   assert.match(out, /先别动那个文件/)
   assert.match(out, /data-drop="m1"/, '撤销按钮要认得出是哪一条')
   assert.match(out, /data-drop="m2"/)
+  // 一条插话 + 一条排队：**标题必须两种都说**（2026-10-06）。
+  // 原来这里写死「排队中 2 条 · 跑完这轮就轮到它们」——对那条插话来说是假话，
+  // 而两者的等待时间差一个数量级（插话几秒、排队可能几分钟）。
+  assert.match(out, /插话 1 条（下一步就看到） · 排队 1 条/, '两种各有多少条都要说')
+  assert.ok(!/跑完这轮就轮到它们/.test(out),
+    '混着插话时不能说「跑完这轮就轮到它们」——那是在骗人')
+  assert.equal((out.match(/q-tag/g) || []).length, 1, '只有插话那条带标记，排队的没有')
+})
+
+test('队列里全是排队时标题照旧；全是插话时改说「下一步就看到」', () => {
+  const w = buildWhale()
+  w.state.queued = [
+    { id: 'm1', text: '甲', placement: 'next-turn' },
+    { id: 'm2', text: '乙', placement: 'next-turn' },
+  ]
+  w.paintQueue()
+  assert.match(w.els.queue.innerHTML, /排队中 2 条 · 跑完这轮就轮到它们/)
+  assert.ok(!/q-tag/.test(w.els.queue.innerHTML), '全是排队就不该有插话标记')
+
+  w.state.queued = [{ id: 'm3', text: '丙', placement: 'next-step' }]
+  w.paintQueue()
+  assert.match(w.els.queue.innerHTML, /插话 1 条 · 它下一步就看到/)
+  assert.ok(!/跑完这轮就轮到它们/.test(w.els.queue.innerHTML))
+  assert.match(w.els.queue.innerHTML, /q-tag/, '插话那条要有标记')
 })
 
 test('队列空了就把那块收起来，不留个空框', () => {
