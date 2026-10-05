@@ -1107,6 +1107,15 @@
      藏起来时（hidden = display:none）这条线自然不画，
      上面「字体大小」那条线正好接上，不会两条挤在一起。 */
   #permBlock { padding-bottom: 12px; border-bottom: 1px solid var(--line); }
+  /* 权限档位里面那行标签**不要自己的下边线**（2026-10-05 用户截图点名：
+     「权限档位格子的上缘有一条粗线」）。
+     原因：那行标签按 .row 的规矩带着一条下边线，而它下面紧挨着的就是**按钮框**
+     （.seg 自带整圈边框）——两条 1px 的线贴在一起，看起来就是一条粗线。
+     实测：上缘 2 个 CSS 像素、下缘 1 个，粗细不一样。
+     为什么那行没被「最后一个不画下边线」那条规则管到：权限档位这一层里，
+     按钮框排在标签**后面**，所以标签那行不算「最后一个」。
+     它本来也不该有线——它是下面那排按钮的标签，中间画一条分割线没有道理。 */
+  #permBlock .row { border-bottom: none; }
   .row .label { font-size: 15px; }
   .row .hint { font-size: 12px; color: var(--muted); margin-top: 2px; }
   /* flex-shrink: 0 不能省。它是弹性项，左边的说明文字一长就会被压缩；
