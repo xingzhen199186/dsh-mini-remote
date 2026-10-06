@@ -115,6 +115,7 @@ async function fakeApp() {
     seen.push({
       url: req.url,
       host: req.headers.host,
+      origin: req.headers.origin ?? null,
       cookie: req.headers.cookie ?? null,
       upgrade: req.headers.upgrade ?? null,
       method: req.method,
@@ -610,6 +611,10 @@ test('镜像：WebSocket 也要转（不然界面一直「正在重新连接」�
   assert.equal(hit.upgrade, 'websocket',
     '**`Upgrade` 头必须原样留着**——它是握手本身，不是「逐跳杂音」；'
     + '按普通转发那样摘掉，握手就废了')
+  assert.equal(hit.origin, `http://127.0.0.1:${app.port}`,
+    '**`Origin` 必须换成上游自己**——这是 WebSocket 独有的坑：浏览器的普通同源请求不带 Origin，'
+    + '但握手一定带。实测过：不带 Origin → 101；带手机那个 Origin → 403；'
+    + '带上游自己的 → 101。不换的话手机上就是「重新连接中…」一直转。')
   assert.match(String(hit.cookie), /dsh-auth-/,
     '握手时也要替手机带上官方 cookie；不带的话上游会拒掉这条连接')
 })
