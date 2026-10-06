@@ -1228,6 +1228,34 @@
   }
   .sheet .foot .btn { flex: 1 1 0; text-align: center; }
 
+  /* ---------- 「电脑端设置界面」那一整屏（内嵌，不跳转） ----------
+     原委写在页面里 `#mirrorView` 上面那段注释里：跳转那条路在用户手机上三次都没成，
+     所以改成嵌在这一页里——点一下只是把这一层显示出来、给里面的框设个地址，
+     **浏览器没有任何东西可以拦**。
+
+     层级 80：要盖住设置抽屉（50）和那些动态小面板（70），但**必须在**授权卡（300+）
+     和门禁页（100）**下面**——那两样是打断性的，任何时候都该在最上面。
+
+     `[hidden]` 那一句不能省：下面写了 display: flex，作者样式表里的 [hidden] 会被压住
+     （和 `.sheet .version[hidden]` 同一个道理，见上面那段注释）。 */
+  #mirrorView {
+    position: fixed; inset: 0; z-index: 80;
+    display: flex; flex-direction: column;
+    background: var(--bg);
+  }
+  #mirrorView[hidden] { display: none; }
+  .mv-bar {
+    flex: 0 0 auto; display: flex; align-items: center; gap: 10px;
+    padding: 10px 12px;
+    padding-top: calc(10px + env(safe-area-inset-top, 0px));
+    border-bottom: 1px solid var(--line);
+    background: var(--bg-top);
+  }
+  .mv-title { flex: 1 1 auto; font-size: 14px; color: var(--fg); }
+  #mirrorFrame {
+    flex: 1 1 auto; width: 100%; border: 0; background: var(--bg);
+  }
+
   /* ---------- 统一操作面板（输入框旁边那一个入口点开的东西） ----------
      骨架和设置抽屉**是同一套**：同一个 `#xxx.open` 即时显隐、同一个贴底的 `.sheet`
      （它自带 max-height / overflow-y / safe-area 那三样，窄屏顶不出去），不新建样式体系。
@@ -1644,23 +1672,9 @@
     <div class="row" id="rowMirrorOpen" hidden>
       <div>
         <div class="label">电脑端设置界面</div>
-        <div class="hint">点开会直接换过去，按返回回来</div>
+        <div class="hint">点开就在这一页里打开，关掉就回来</div>
       </div>
-      <!--
-        **不开新标签，就在当前标签打开。**（2026-10-06 用户两次实机报「点击打开没反应」）
-
-        走过两版弯路，都记在这儿，别再改回去：
-        · 第一版 `<a target="_blank">`：内嵌浏览器（微信这类）常把新标签**直接拦掉**，
-          拦掉之后一点动静都没有。
-        · 第二版加了 JS 兜底（先 `window.open`，开不出来再同标签跳）：**还是没反应**。
-          因为那些浏览器里 `window.open` 会**「成功」返回一个对象**，于是代码以为开好了、
-          就不再跳当前页——而那个新标签**开在后台或被静默压掉**，用户屏幕上什么都没变。
-
-        **同标签跳转是唯一无法被拦的**：地址栏一变，屏幕上就一定看得到东西。
-        代价是要按返回才能回到手机页——这个代价换来的是「按钮一定有用」，值。
-        仍然用 `<a href>`（不是按钮），所以长按菜单里那条「在新标签页打开」照旧可用。
-      -->
-      <a class="btn" id="btnMirrorOpen">打开</a>
+      <button class="btn" id="btnMirrorOpen" type="button">打开</button>
     </div>
 
     <div class="foot">
@@ -1671,6 +1685,33 @@
     <div class="version" id="dshVersion" hidden></div>
     </div>
   </div>
+</div>
+
+<!--
+  「电脑端设置界面」那一整屏：**嵌在这一页里，不跳转、不开新标签。**
+
+  ## 为什么最后做成内嵌（2026-10-06 用户三次实机报「点击打开没反应」）
+
+  前两版都想让它「打开」出去，都栽了：
+  · 第一版 `<a target="_blank">`：内嵌浏览器（微信这类）常把新标签直接拦掉；
+  · 第二版加了 JS 兜底（`window.open` 失败就同标签跳）：还是没反应——那些浏览器里
+    `window.open` 会「成功」返回一个对象，代码以为开好了就不再跳，而新标签开在后台；
+  · 第三版干脆用普通 `<a href>` 同标签跳（理论上拦不掉）：**用户那边仍然没反应**。
+
+  三次都在赌「跳转」这个动作本身。**这一版不赌了**：点一下只是把这一层显示出来、
+  给里面的框设个地址——没有跳转、没有新标签、没有弹窗，**浏览器没有任何东西可以拦**。
+  已经用真浏览器验过：那个界面**愿意被嵌**（不设「不许被嵌」的响应头，实测里面
+  标题、侧栏、欢迎页全都正常）。
+
+  另外整行都能点（不只右边那个按钮）——按钮只有 54×40，手指容易点偏。
+-->
+<div id="mirrorView" hidden>
+  <div class="mv-bar">
+    <span class="mv-title">电脑端设置界面</span>
+    <button class="btn" id="mirrorClose" type="button">返回</button>
+  </div>
+  <!-- 地址是点开那一刻才设的：没点之前一个字节都不加载。 -->
+  <iframe id="mirrorFrame" title="电脑端设置界面"></iframe>
 </div>
 
 <!-- 统一操作面板：输入框旁边那一个入口点开的就是它，上面「添加文件」、下面「调用指令」。
@@ -6400,16 +6441,55 @@
         ? '打开的后果：手机将获得完整的电脑设置权限。再点一次「开」确认'
         : '打开电脑上的 DSH 界面，改那些手机上没有的设置';
     $('rowMirrorOpen').hidden = !mirror.enabled;
-    if (mirror.enabled) {
-      // 新标签里没有 X-Mini-Token 头，所以靠地址带 token。服务端在入口那一下会顺手
-      // 把 cookie 写上——那之后界面自己发的那些 /api/... 请求才认得出是自己人。
-      //
-      // **尾斜杠不能省**：界面外壳写着 `<base href="./">`，在 `/mini/mirror` 上它
-      // 解析成 `/mini/`，在 `/mini/mirror/` 上才是 `/mini/mirror/`——差这一个字符，
-      // 里面引用的脚本会全 404、界面白屏（这是真浏览器打开验出来的）。
-      $('btnMirrorOpen').href = '/mini/mirror/?token=' + encodeURIComponent(state.token || '');
-    }
   }
+
+  /**
+   * 镜像入口那个地址。
+   *
+   * **尾斜杠不能省**：那个界面外壳写着 `<base href="./">`，在 `/mini/mirror` 上它
+   * 解析成 `/mini/`，在 `/mini/mirror/` 上才是 `/mini/mirror/`——差这一个字符，
+   * 里面引用的脚本会全 404、界面白屏（真浏览器验出来的）。
+   *
+   * 地址里带 token：框里那些请求不一定都带得上 cookie（这个框是新开的文档），
+   * 入口那一下顺手把 cookie 写上，之后就靠 cookie 认人了。
+   */
+  function mirrorUrl() {
+    return '/mini/mirror/?token=' + encodeURIComponent(state.token || '');
+  }
+
+  /**
+   * 点「打开」：把那一整屏显示出来，并**在那一刻**才给框设地址（没点之前不加载）。
+   *
+   * 这一版为什么能成：**没有跳转、没有新标签、没有弹窗**——浏览器没有任何东西可以拦。
+   * 前两版都在赌「跳转」这个动作（详见页面里 `#mirrorView` 上面那段注释）。
+   */
+  function openMirror() {
+    if (!mirror.enabled) return;
+    // **先给一句提示，再显示那一屏。**
+    //
+    // 这一句不是装饰，是**诊断**（2026-10-06 用户三次报「点了没反应」之后加的）：
+    // 三种情况从此分得开——看到提示且界面出来＝成了；只看到提示＝显示那一步的问题；
+    // 连提示都没有＝点击压根没到按钮上。前三次就是分不开这三种，才一路猜错。
+    toast('正在打开电脑端界面…');
+    $('mirrorFrame').src = mirrorUrl();
+    $('mirrorView').hidden = false;
+  }
+
+  function closeMirror() {
+    $('mirrorView').hidden = true;
+    // 把地址清掉：那一屏里是个完整应用（还在跑、还连着），关掉就该真停，
+    // 而不是留在后台继续占内存和连接。
+    $('mirrorFrame').src = 'about:blank';
+  }
+
+  // 按钮和**整行**都绑：那个按钮只有 54×40，手指容易点偏；整行点下去都算数。
+  $('btnMirrorOpen').addEventListener('click', openMirror);
+  $('rowMirrorOpen').addEventListener('click', function (e) {
+    // 点在按钮上时上面那个监听已经处理了，别处理两遍。
+    if (e.target === $('btnMirrorOpen')) return;
+    openMirror();
+  });
+  $('mirrorClose').addEventListener('click', closeMirror);
 
   function loadMirror() {
     api('/mini/api/mirror').then(function (r) {

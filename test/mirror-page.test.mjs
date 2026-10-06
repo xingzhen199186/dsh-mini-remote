@@ -26,23 +26,28 @@ function mirrorHarness({ apiImpl } = {}) {
   assert.ok(a > 0, `在 page.html 里找不到锚点「${A}」`)
   assert.ok(b > a, `在 page.html 里找不到锚点「${B}」`)
 
+  // 「要什么给什么」：这一段的代码会去拿好几个元素（开关、入口、那一整屏、里面的框、
+  // 关闭按钮），**逐个列出来会漏**——加了新元素就得回来补，忘一次就是一片红。
+  const made = new Map()
   const fakeEl = () => ({
     hidden: false,
     textContent: '',
     href: '',
+    src: '',
     children: [],
     dataset: {},
     classList: { toggle() {} },
-    addEventListener() {},
+    listeners: {},
+    addEventListener(type, fn) { (this.listeners[type] = this.listeners[type] || []).push(fn) },
   })
-  const rowMirror = fakeEl()
-  const rowMirrorOpen = fakeEl()
-  const mirrorHint = fakeEl()
-  const btnMirrorOpen = fakeEl()
+  const table = {}
+  const el = (k) => {
+    if (!table[k]) table[k] = fakeEl()
+    return table[k]
+  }
   const on = fakeEl(); on.dataset = { mirror: 'on' }
   const off = fakeEl(); off.dataset = { mirror: 'off' }
-  const segMirror = fakeEl(); segMirror.children = [on, off]
-  const table = { rowMirror, segMirror, mirrorHint, rowMirrorOpen, btnMirrorOpen }
+  table.segMirror = fakeEl(); table.segMirror.children = [on, off]
 
   const calls = []
   const toasts = []
@@ -55,7 +60,7 @@ function mirrorHarness({ apiImpl } = {}) {
 
   const src = `${html.slice(a, b)}; return { mirror, paintMirror, loadMirror, tapMirror };`
   const out = new Function('$', 'state', 'api', 'toast', src)(
-    (k) => table[k], { token: 'TK-123' }, api, (m) => toasts.push(m),
+    el, { token: 'TK-123' }, api, (m) => toasts.push(m),
   )
   return { ...out, els: table, calls, toasts, on, off }
 }
@@ -133,16 +138,6 @@ test('进阶设置：关掉不用确认（往更安全的方向走不拦）', as
   assert.equal(h.els.rowMirrorOpen.hidden, true, '关掉之后入口也要收回去')
 })
 
-test('进阶设置：入口链接要带上令牌，并且**带尾斜杠**', async () => {
-  const h = mirrorHarness({ apiImpl: () => ({ ok: true, available: true, enabled: true }) })
-  await h.loadMirror()
-  await tick()
-  assert.equal(h.els.btnMirrorOpen.href, '/mini/mirror/?token=TK-123',
-    '新标签里没有 X-Mini-Token 头，只能靠地址带 token；不带的话入口那一下会 401。'
-    + '尾斜杠也不能省：外壳写着 <base href="./">，少了它里面的脚本会解析到'
-    + '/mini/assets/... 上（那是我们自己的地盘），全 404、界面白屏')
-})
-
 test('进阶设置：失败要画回去，不能留一个没生效的状态', async () => {
   const h = mirrorHarness({
     apiImpl: (path, options) => {
@@ -180,37 +175,126 @@ test('进阶设置：开关那排按钮要绑上处理（逻辑对、没人喊�
 })
 
 /**
- * 「打开」必须在**当前标签**打开，不许走新标签。
+ * 「打开」**内嵌**那一整屏，不许再走「跳转」。
  *
- * 2026-10-06 用户**两次**实机报「点击打开没反应」，两版都栽在同一件事上：
- *   · 第一版 `<a target="_blank">`——内嵌浏览器（微信这类）常把新标签直接拦掉；
- *   · 第二版加了 JS 兜底（`window.open` 失败就同标签跳）——**还是没反应**，
- *     因为那些浏览器里 `window.open` 会**「成功」返回一个对象**，代码以为开好了、
- *     就不再跳当前页，而那个新标签开在后台或被静默压掉，屏幕上什么都没变。
+ * 2026-10-06 用户**三次**实机报「点击打开没反应」，三版都在赌「跳转」这个动作：
+ *   · `<a target="_blank">`——内嵌浏览器（微信这类）常把新标签直接拦掉；
+ *   · 加 JS 兜底（`window.open` 失败就同标签跳）——还是没反应，因为那些浏览器里
+ *     `window.open` 会**「成功」返回一个对象**，代码以为开好了就不再跳，新标签开在后台；
+ *   · 干脆用普通 `<a href>` 同标签跳（理论上拦不掉）——**用户那边仍然没反应**。
  *
- * **同标签跳转是唯一无法被拦的**。所以这一组钉死：没有 `target`、没有自己接管点击。
+ * 所以改成内嵌：点一下只是把一层显示出来、给里面的框设个地址。**没有跳转、没有新标签、
+ * 没有弹窗——浏览器没有任何东西可以拦。**（已用真浏览器验过那个界面愿意被嵌。）
  */
-test('进阶设置：「打开」必须在当前标签打开（新标签那条路两次都栽了）', () => {
-  const tag = html.match(/<a[^>]*id="btnMirrorOpen"[^>]*>/)
-  assert.ok(tag, '找不到「打开」那个链接')
-  assert.ok(!/target=/.test(tag[0]),
-    '不许带 target：新标签在内嵌浏览器里会被拦掉或静默压到后台，'
-    + '用户看到的就是「点了没反应」（这个坑踩过两次）')
-  assert.match(tag[0], /href|id="btnMirrorOpen"/, '它得是个链接')
+function mirrorOpenHarness() {
+  // 从 `var mirror = …` 起切：`openMirror` 会引用 `mirror`，不带上它整段跑不起来
+  // （切点选在 `mirrorUrl` 那会儿就踩过这个坑）。
+  const A = 'var mirror = { available:'
+  const B = 'function loadMirror()'
+  const a = html.indexOf(A)
+  const b = html.indexOf(B)
+  assert.ok(a > 0, `在 page.html 里找不到锚点「${A}」`)
+  assert.ok(b > a, `在 page.html 里找不到锚点「${B}」`)
+
+  const made = new Map()
+  const el = (key) => {
+    if (!made.has(key)) {
+      made.set(key, {
+        hidden: false, src: '', textContent: '', dataset: {},
+        classList: { toggle() {} },
+        children: [],
+        listeners: {},
+        addEventListener(type, fn) { (this.listeners[type] = this.listeners[type] || []).push(fn) },
+      })
+    }
+    return made.get(key)
+  }
+  const table = {}
+  for (const k of ['rowMirror', 'rowMirrorOpen', 'mirrorHint', 'segMirror', 'btnMirrorOpen', 'mirrorView', 'mirrorFrame', 'mirrorClose']) {
+    table[k] = el(k)
+  }
+  const src = `${html.slice(a, b)}; return { mirror, mirrorUrl, openMirror, closeMirror };`
+  const toasts = []
+  const out = new Function('$', 'state', 'api', 'toast', src)(
+    (k) => table[k], { token: 'TK-123' }, () => Promise.resolve({ ok: true }), (m) => toasts.push(m),
+  )
+  return { ...out, els: table, toasts }
+}
+
+test('进阶设置：地址要带令牌和尾斜杠（框里那些请求不一定都带得上 cookie）', () => {
+  const h = mirrorOpenHarness()
+  assert.equal(h.mirrorUrl(), '/mini/mirror/?token=TK-123',
+    '尾斜杠不能省：外壳写着 <base href="./">，少了它里面的脚本会解析到 /mini/assets/...'
+    + '（那是我们自己的地盘）上，全 404、界面白屏')
 })
 
-test('进阶设置：「打开」不许自己接管点击（第二版就是这么栽的）', () => {
-  assert.ok(!/\$\('btnMirrorOpen'\)\.addEventListener\('click'/.test(html),
-    '不要自己接管点击：`window.open` 在被拦的浏览器里会「成功」返回一个对象，'
-    + '于是代码以为开好了、就不跳当前页，屏幕上什么都没变。交给浏览器默认行为最稳')
-  assert.ok(!/window\.open\(/.test(html),
-    '整页不许再用 window.open——它在被拦的浏览器里「假装成功」，是第二次栽的原因')
+test('进阶设置：点「打开」只显示那一层并设地址——没有跳转', () => {
+  const h = mirrorOpenHarness()
+  h.mirror.enabled = true
+  h.openMirror()
+  assert.equal(h.els.mirrorView.hidden, false, '要把那一整屏显示出来')
+  assert.equal(h.els.mirrorFrame.src, '/mini/mirror/?token=TK-123', '地址设在里面的框上')
 })
 
-test('进阶设置：链接本身留着（长按「在新标签页打开」那条路仍可用）', () => {
-  assert.match(html, /<a class="btn" id="btnMirrorOpen">/,
-    '用 <a> 而不是 <button>：长按菜单里那条「在新标签页打开」正是靠它，'
-    + '不想被自动跳转的人还能自己选')
+test('进阶设置：点「打开」要先给一句提示（它是诊断，不是装饰）', () => {
+  const h = mirrorOpenHarness()
+  h.mirror.enabled = true
+  h.openMirror()
+  assert.ok(h.toasts.length > 0,
+    '三次「点了没反应」都是因为分不开这三种情况：点击没到按钮 / 到了但没显示 / 显示了但里面没加载。'
+    + '先弹一句提示，就能一眼分开——这一句不能省')
+})
+
+test('进阶设置：没开的时候点不动（不给一个能绕过开关的入口）', () => {
+  const h = mirrorOpenHarness()
+  h.mirror.enabled = false
+  // 真页面上那一层初始就是 hidden（HTML 里带着这个属性）；替身默认不是，先摆成真实状态。
+  h.els.mirrorView.hidden = true
+  h.openMirror()
+  assert.equal(h.els.mirrorView.hidden, true, '开关关着时那一层不该出现')
+  assert.equal(h.els.mirrorFrame.src, '', '地址也不该设——否则等于绕过了开关')
+})
+
+test('进阶设置：关掉那一层要把框的地址清掉（里面是个还在跑的应用）', () => {
+  const h = mirrorOpenHarness()
+  h.mirror.enabled = true
+  h.openMirror()
+  h.closeMirror()
+  assert.equal(h.els.mirrorView.hidden, true)
+  assert.equal(h.els.mirrorFrame.src, 'about:blank',
+    '要真停掉：那一屏里是完整应用，还在跑、还连着，留着会继续占内存和连接')
+})
+
+test('进阶设置：整页不许再出现 window.open / target（三次都栽在跳转上）', () => {
+  assert.ok(!/window\.open\(/.test(html), '整页不许再用 window.open')
+  const tag = html.match(/<[a-z]+[^>]*id="btnMirrorOpen"[^>]*>/)
+  assert.ok(tag, '找不到「打开」那个元素')
+  assert.ok(!/target=/.test(tag[0]), '不许带 target——不再走新标签那条路')
+  assert.ok(!/<a[^>]*id="btnMirrorOpen"/.test(html),
+    '它不再是链接了（不再靠 href 跳转），应当是个按钮')
+})
+
+test('进阶设置：按钮和**整行**都要绑上（那个按钮只有 54×40，手指容易点偏）', () => {
+  assert.match(html, /\$\('btnMirrorOpen'\)\.addEventListener\('click', openMirror\)/,
+    '按钮上要绑')
+  assert.match(html, /\$\('rowMirrorOpen'\)\.addEventListener\('click'/,
+    '整行也要绑——三次失败之后不该再赌「手指正好点在按钮上」')
+  assert.match(html, /\$\('mirrorClose'\)\.addEventListener\('click', closeMirror\)/,
+    '关的那个按钮也要绑，否则进去出不来')
+})
+
+test('进阶设置：那一层要盖住设置抽屉，但在授权卡和门禁页**下面**', () => {
+  const rule = html.match(/#mirrorView\s*\{[^}]*\}/)
+  assert.ok(rule, '找不到 #mirrorView 的样式')
+  const z = Number((rule[0].match(/z-index:\s*(\d+)/) || [])[1])
+  assert.ok(z > 50, '要盖住设置抽屉（50）和动态小面板（70）')
+  assert.ok(z < 100, '但要在门禁页（100）和授权卡（300+）下面——那两样是打断性的，永远最上面')
+})
+
+test('进阶设置：display:flex 的那一层必须补 [hidden]（作者样式表会被压住）', () => {
+  assert.match(html, /#mirrorView\[hidden\]\s*\{\s*display:\s*none/,
+    '写了 display: flex 就必须补 [hidden] { display: none }，'
+    + '否则 hidden 压不住它（和 .sheet .version[hidden] 同一个坑）')
 })
 
 test('进阶设置：设置抽屉每次打开都要重读一次（电脑端能把它关掉）', () => {
