@@ -358,7 +358,16 @@ test('镜像：把别的插件的移动端适配挡在门外（这一页的适�
   assert.match(body, /dsh-remote-header-seated/, '同上')
   assert.match(body, /data-plugin-css/, '还要摘掉它插的那段样式——里面有没带标记的规则，光摘标记挡不住')
   assert.match(body, /MutationObserver/, '它会在尺寸变化时重插，所以要盯着')
-  assert.match(body, /attributeFilter:\["class"\]/, '观察范围要收窄（只看 body 的 class），别盯着整棵树')
+  assert.match(body, /attributeFilter:\s*\["class"\]/, '观察范围要收窄（只看 body 的 class），别盯着整棵树')
+
+  // **通用层**（2026-10-06 用户问「装了别的遥控插件是不是也会影响」之后加的）：
+  // 只靠点名等于每装一个新插件就要再加一个名字，所以补一层——
+  // 第三方（非官方的包）的样式表，整份只写在窄屏条件里的，一律摘掉。
+  assert.match(body, /isNarrowOnly/, '要有「整份只在窄屏生效」的判断')
+  assert.match(body, /cssRules/, '判断要交给浏览器的 CSS 解析器，别自己拆字符串数大括号')
+  assert.match(body, /r\.type !== 4/, '顶层规则必须全是媒体查询才算数')
+  assert.match(body, /@deepseek-ai\//, '**官方的包一律不动**——那是界面本身，摘了就把界面弄坏')
+  assert.match(body, /NARROW_MAX/, '窄屏要有个上限值，不能把宽屏媒体查询也算进去')
 
   // 我们自己的适配必须还在
   assert.match(body, /mini-mirror-adapt/, '这一页的适配仍然由我们自己提供')
