@@ -326,12 +326,21 @@ test('镜像：手机布局适配（把设置面板抬到侧栏上面 + 底部�
  * 用户原话：「让我们的插件参考那个插件的方式来做『被搬过来的那个 DSH 界面』，
  * **而不是直接搬那个插件适配的界面**。等于电脑端设置界面实际上也应该是我们自己的插件的产物。」
  *
- * 机器上装着的 `@linxin666/dsh-remote-web-ui` 会**在运行时**往这一页插适配样式、
- * 往 `<body>` 贴标记；它的选择器**写宽了**（按类名后缀匹配），而官方界面的类名正好也是那几个
- * ——于是官方面板被它一起改了（用户报的「上半部分永远是图标格子」「字要点一下才出来」）。
+ * 机器上装着两家会在运行时改这一页的适配：
  *
- * **上一版是在它的地基上打补丁**（它改哪两处我就掰哪两处）——被动挨打。
- * 现在改成从根上挡掉：摘掉它插的样式、摘掉它贴的三个标记，并持续盯着（它会重插）。
+ * · `@linxin666/dsh-remote-web-ui` —— 插适配样式、往 `<body>` 贴标记，选择器按类名后缀匹配，
+ *   而官方界面的类名正好也是那几个，于是官方面板被它一起改了；
+ * · `@dsh-external/dsh-mobile-nav` —— **`dsh-pocket` 插件客户端给自己起的名字**。
+ *   2026-10-06 用户报「设置页上方永远是一块三列图标格子、占掉大半屏」，
+ *   逐条比对后确认就是它这一条：
+ *     `[aria-modal="true"]:has(> :first-child > :last-child > button):not(:has([role="navigation"]))
+ *      > :first-child > :last-child { display: grid !important; grid-template-columns: repeat(3, 1fr) !important }`
+ *   它的特异性（0,6,1）比我们按 `[data-shortcut-modal="settings"]` 写的规则（0,2,0）高，
+ *   两边都带 `!important` 时**特异性高的赢**——所以上一版我们那条 `flex-direction:row !important`
+ *   是白写的（元素还是 `display:grid`，改方向没用）。**补丁打不过它，只能把它的样式摘掉。**
+ *
+ * **上一版是在它们的地基上打补丁**（它们改哪两处我就掰哪两处）——被动挨打。
+ * 现在改成从根上挡掉：按名单摘掉它们插的样式、摘掉那几个标记，并持续盯着（它们会重插）。
  */
 test('镜像：把别的插件的移动端适配挡在门外（这一页的适配由我们自己来）', async (t) => {
   const app = await fakeApp()
@@ -359,6 +368,15 @@ test('镜像：把别的插件的移动端适配挡在门外（这一页的适�
   const stripper = scripts.find((s) => s.includes('dsh-remote-portrait'))
   assert.ok(stripper, '要能找到那段挡人的脚本')
   assert.doesNotThrow(() => new Function(stripper), '那段脚本必须能通过语法解析')
+
+  // **按名单摘**：名单里必须同时有两家，而且判断依据是 `data-plugin-css` 里那一段名字。
+  assert.match(stripper, /STYLE_OWNERS\s*=\s*\[[^\]]*"remote-web-ui"[^\]]*\]/,
+    '名单里要有 remote-web-ui')
+  assert.match(stripper, /STYLE_OWNERS\s*=\s*\[[^\]]*"dsh-mobile-nav"[^\]]*\]/,
+    '名单里要有 dsh-mobile-nav——就是 dsh-pocket 那段把设置导航改成三列网格的适配')
+  assert.match(stripper, /data-plugin-css/, '判断归属看的是 data-plugin-css 这个标记')
+  assert.match(stripper, /indexOf\(STYLE_OWNERS\[k\]\)/,
+    '按名单逐个比对，以后再加一家只改名单这一行，不用再动摘除逻辑')
 })
 
 /**
@@ -401,8 +419,15 @@ test('镜像：打开就直接进设置（替用户点一次，之后绝不再�
  *
  * 读官方源码确认：官方面板本来是「左边一列导航 188px + 右边内容」，
  * 而它自己的 `wide` **只影响侧栏那个按钮、完全不影响面板内部布局**。
- * 所以这里不追究是谁把它弄横的，直接按我们要的样子定下来：面板竖排、
- * 导航一行不折行可横向滑动、名字露出来（官方是用 clip+1px 把它视觉隐藏的）。
+ * 「横排在上方」是 `@dsh-external/dsh-mobile-nav`（`dsh-pocket`）注入的三列网格规则干的
+ * ——现在那条已被按名单摘掉（见上面那条测试），这里只按我们要的样子定下来：
+ * 面板竖排、导航一行不折行可横向滑动、名字露出来。
+ *
+ * **「名字被藏」这件事的真相**（2026-10-06 在活的镜像页里逐条比对）：
+ * 没有任何规则藏它——只有官方那条 `white-space:nowrap + text-overflow:ellipsis + flex:1`
+ * （实测计算宽度 76px、可见）。旧注释说的「官方用 clip + 1px 视觉隐藏」是把面板右上角
+ * **关闭按钮**的 `hiddenLabel` 看成它了。那几行规则**留着当保险**：真有插件再用
+ * 「视觉隐藏」那套把名字藏起来时，这里能把它放回来。
  *
  * 选择器用 `[data-shortcut-modal="settings"]`——官方渲染在面板上的固定标记，不受类名哈希影响。
  */
@@ -423,7 +448,7 @@ test('镜像：设置面板的导航压成一条可滑动的标签条，把屏�
   assert.match(body, /\[data-shortcut-modal="settings"\] nav\[class\*="_nav"\]\{[^}]*overflow-x:auto !important/,
     '一行放不下就横向滑动')
   assert.match(body, /\[data-shortcut-modal="settings"\] \[class\*="_navLabel"\]\{[^}]*clip:auto !important/,
-    '名字要放回来——官方是用 clip + 1px 把它视觉隐藏的')
+    '名字要保证露出来（实测现在没有规则藏它，这几行是保险）')
 })
 
 /**
