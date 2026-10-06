@@ -503,6 +503,32 @@ test('路由门：挂载前缀要剥掉（界面用相对路径，靠的就是�
     '前缀要剥掉再转发、其余查询串留着——不剥的话上游看到 /mini/mirror/assets/... 会 404')
 })
 
+/**
+ * 前缀下面**不是只有 GET**（2026-10-06 真机：界面上整片「加载不出来」）。
+ *
+ * 界面外壳写着 `<base href="./">`，所以**它所有请求都带这个前缀**——包括那些 POST：
+ * `/mini/mirror/api/session/list`、`settings/describe`、`agentPresets/list` …
+ * 当时这里限制成「只收 GET」，那些 POST 全掉进我们自己的 404。
+ *
+ * 前缀下面的路径**本来就只可能是界面的**（我们自己的接口都在 `/mini/api/`），
+ * 所以不该按方法设限——这条就是钉住这一点。
+ */
+test('路由门：前缀下面的 POST 也要转（界面所有请求都带这个前缀）', async (t) => {
+  const hit = []
+  const s = await bootServer({ mirror: stubMirror(hit), mirrorEnabled: () => true })
+  t.after(s.close)
+
+  const res = await fetch(`${s.base}/mini/mirror/api/session/list?token=TOKEN-123`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: '{}',
+    redirect: 'manual',
+  })
+  assert.equal(res.status, 200, 'POST 不能掉进我们自己的 404')
+  assert.deepEqual(hit, ['/api/session/list'],
+    '前缀照剥、方法照转——限制成只收 GET 时，界面上就是一片「加载不出来」')
+})
+
 test('路由门：我们自己那个 token 参数绝不跟着转发（它会撞坏上游的精确匹配）', async (t) => {
   const hit = []
   const s = await bootServer({ mirror: stubMirror(hit), mirrorEnabled: () => true })
