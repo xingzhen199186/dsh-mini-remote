@@ -282,12 +282,13 @@ test('镜像：那个「你是主机」的标记要插在最前面（启动项�
  * 手机上那两条布局适配（2026-10-06，用户选定「只做布局」）。
  *
  * 都是**实测出来的**：
- * · 侧栏是 `z-index:1100`，设置面板那层浮层是 `1000`——**侧栏高一百**，窄屏下整屏盖住
- *   面板，点「设置」什么都看不见（真机复现过）。降到 20 就够：它是定位元素，
- *   比正文（非定位）仍然画在上面，所以侧栏照常能用。
- * · 底部要让开手势条。
+ * · 侧栏 `z-index:1100`，设置面板那层浮层 `1000`——**侧栏高一百**，窄屏下整屏盖住面板，
+ *   点「设置」什么都看不见。
+ * · **第一版把侧栏压到 20，那是反的，真机立刻出问题**：面板的**遮罩**（同一层）反过来
+ *   盖住侧栏，用户看到侧栏发暗、**点击落在遮罩上**——遮罩一收侧栏就消失，设置页也进不去。
+ *   **所以要把面板抬上去（1200），不能把侧栏压下去。**
  */
-test('镜像：手机布局适配（侧栏压在设置面板下面 + 底部安全区）', async (t) => {
+test('镜像：手机布局适配（把设置面板抬到侧栏上面 + 底部安全区）', async (t) => {
   const app = await fakeApp()
   const mirror = createMirror({
     upstream: `http://127.0.0.1:${app.port}`,
@@ -297,11 +298,12 @@ test('镜像：手机布局适配（侧栏压在设置面板下面 + 底部安�
   t.after(async () => { await f.close(); await app.close() })
 
   const body = await (await fetch(`http://127.0.0.1:${f.port}/blocked`)).text()
-  assert.match(body, /\[class\*="_sidebarCol"\]\{z-index:20/,
-    '侧栏层级要压到设置面板（1000）下面——不然窄屏下点「设置」什么都看不见')
+  assert.match(body, /\[class\*="_overlay"\]\{z-index:1200/,
+    '要把设置面板那层浮层抬到侧栏（1100）上面')
+  assert.ok(!/_sidebarCol"\]\{z-index/.test(body),
+    '**不许把侧栏压下去**——第一版就是这么写的：遮罩反过来盖住侧栏、点击落在遮罩上，'
+    + '真机上「一点侧栏就消失、还进不去设置」')
   assert.match(body, /safe-area-inset-bottom/, '底部要让开手势条（顶部那条由我们自己的横条管）')
-  assert.ok(body.includes('_sidebarCol'),
-    '**按后缀命中**：它的类名是「哈希_名字」，哈希每次构建都变，只有后半段稳')
   assert.ok(body.indexOf('mini-mirror-adapt') < body.indexOf('</head>'), '这段样式要在 head 里')
 })
 
