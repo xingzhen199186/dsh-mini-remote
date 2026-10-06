@@ -321,6 +321,37 @@ test('镜像：手机布局适配（把设置面板抬到侧栏上面 + 底部�
 })
 
 /**
+ * 把官方设置面板的导航**掰回竖排、让字始终显示**（2026-10-06）。
+ *
+ * 这一条是**为另一个插件擦屁股**：机器上装着的 `@linxin666/dsh-remote-web-ui` 会给 `<body>`
+ * 贴一个 `dsh-remote-portrait`，然后一整套 `[class$="_overlay"] [class$="_panel"] …` 的规则
+ * 就开始**作用在官方设置面板上**（它的类名和官方那套撞名）。用户报的两件事正是它的后果：
+ *   · `[class$="_nav"]{flex-wrap:wrap}` + `[class$="_navCell"]{height:34px;flex:none}`
+ *     → 导航折成三列网格、一直赖在上半屏；
+ *   · 导航格被压成 34px 高之后**字被挤没了**，点一下（聚焦）才露出来
+ *     ——**用户反复验证过「不是字没到，是被藏了、点一下才出来」**。
+ */
+test('镜像：把官方设置面板的导航掰回竖排、字始终显示（另一个插件的适配改了它）', async (t) => {
+  const app = await fakeApp()
+  const mirror = createMirror({
+    upstream: `http://127.0.0.1:${app.port}`,
+    tokenUrl: () => `http://127.0.0.1:${app.port}/?token=LAUNCH-TOKEN`,
+  })
+  const f = await front(mirror)
+  t.after(async () => { await f.close(); await app.close() })
+
+  const body = await (await fetch(`http://127.0.0.1:${f.port}/blocked`)).text()
+  assert.match(body, /\[class\*="_overlay"\] \[class\*="_panel"\] \[class\*="_nav"\]\{[^}]*flex-direction:column !important/,
+    '导航要恢复成竖排一列——它被折成了三列网格、一直赖在上半屏')
+  assert.match(body, /\[class\*="_navLabel"\]\{[^}]*display:block !important/,
+    '导航里的字要始终显示——它被挤没了、点一下才出来')
+  assert.match(body, /\[class\*="_navCell"\]\{[^}]*height:auto !important/,
+    '导航格不能再被压成固定 34px 高（字就是被这个挤没的）')
+  assert.ok(/\[class\*="_overlay"\] \[class\*="_panel"\]/.test(body),
+    '要限定在面板内部（和它同款选择器），别把别处的导航也改了')
+})
+
+/**
  * **压缩照旧转发**（2026-10-06）。
  *
  * 第一版把 `accept-encoding` 摘掉了，理由是「HTML 保持明文好注入」——**但那只对 HTML
