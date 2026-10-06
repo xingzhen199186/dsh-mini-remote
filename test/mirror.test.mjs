@@ -362,6 +362,42 @@ test('镜像：上游压缩着发 HTML 时，解开、注入、明文发出去',
   assert.ok(body.includes('hi</body>'), '正文要完好')
 })
 
+/**
+ * **给带内容指纹的静态资源补长期缓存**（2026-10-06）。
+ *
+ * 量出来的：34 MB 里，主程序包和插件包加起来 25 MB，**上游一个缓存头都没给**
+ * （首页 HTML 也没有）。浏览器只能"猜着缓存"，每次打开都可能重新拉——蜂窝下就是这么卡死的。
+ *
+ * 敢长期留，是因为这两类地址里都带**内容指纹**（`index-5SrrfWpU.js` 的哈希、
+ * `plugins/??a,b&rev=…` 的 rev）：**内容一变地址就变**，旧的留着不会让人看到旧代码。
+ */
+test('镜像：给带指纹的静态资源补长期缓存，HTML 绝不缓存', async (t) => {
+  const app = await fakeApp()
+  const mirror = createMirror({
+    upstream: `http://127.0.0.1:${app.port}`,
+    tokenUrl: () => `http://127.0.0.1:${app.port}/?token=LAUNCH-TOKEN`,
+  })
+  const f = await front(mirror)
+  t.after(async () => { await f.close(); await app.close() })
+
+  const asset = await fetch(`http://127.0.0.1:${f.port}/assets/index-abc.js`)
+  assert.match(String(asset.headers.get('cache-control')), /max-age=604800/,
+    '带哈希的主程序包要能长期留')
+
+  const combo = await fetch(`http://127.0.0.1:${f.port}/plugins/??a/client.js,b/client.js&rev=1`)
+  assert.match(String(combo.headers.get('cache-control')), /max-age=604800/,
+    '带 rev 的插件包也要能长期留')
+
+  // HTML 是外壳，还要我们注入，**绝不能缓存**
+  const html = await fetch(`http://127.0.0.1:${f.port}/blocked`)
+  assert.equal(html.headers.get('cache-control'), null, 'HTML 不能带长期缓存')
+
+  // 上游给了自己的判断就尊重它，别去覆盖
+  const pet = await fetch(`http://127.0.0.1:${f.port}/pet/whale.webp`)
+  assert.ok(!String(pet.headers.get('cache-control')).includes('604800'),
+    '不在那两类里的资源，一律不碰')
+})
+
 test('镜像：不是 HTML 的一律不碰（那条常驻连接绝不能因为注入而被缓冲）', async (t) => {
   const app = await fakeApp()
   const mirror = createMirror({
