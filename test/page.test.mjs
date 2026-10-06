@@ -4136,13 +4136,13 @@ function trajHarness(chat) {
 
   // eslint-disable-next-line no-new-func
   const build = new Function(
-    'state', 'replyEl', 'escapeHtml', 'mdToHtml', 'renderChat', 'renderMinimal', 'modeHint', '$',
+    'state', 'replyEl', 'escapeHtml', 'mdInline', 'mdToHtml', 'renderChat', 'renderMinimal', 'modeHint', '$',
     'buildChat', 'mainEl', 'atBottom', 'scrollChat',
     `${html.slice(a, b)}
      return { render, renderFull, toggleTrajGroup, toggleTrajEntry, state, replyEl, getEl: $ };`,
   )
   return build(
-    state, replyEl, md.escapeHtml, md.mdToHtml,
+    state, replyEl, md.escapeHtml, md.mdInline, md.mdToHtml,
     chatStub,
     () => { replyEl.innerHTML = '' },
     () => '',
@@ -4937,6 +4937,35 @@ test('完整模式：活片段挂在跑着的组头（正在分析请求 · 片�
   h.state.mode = 'full'
   h.render()
   assert.match(h.replyEl.innerHTML, /正在分析请求 · 先看看仓库结构/, '回到完整模式照旧有')
+})
+
+test('完整模式：组头右侧的活片段走 markdown 渲染，记号不许原样端出来', () => {
+  // 2026-10-06 用户报的：「正在分析请求」右边那段没做渲染——它是模型正在想的**原话**
+  // （lib/index.js 的 reasoning-delta），星号、反引号都在里面，和 2026-09-27 气泡
+  // 那回同一个根因。顺带钉住安全那条：换成行内渲染之后，原话里的尖括号仍只是字面文字。
+  const h = trajHarness()
+  h.state.trajectory = [{ turn: 2, state: 'running', reason: null, entries: [] }]
+  h.state.trajectoryLive = '**先看仓库结构**，再跑 `npm test` 和 <b>这行</b>'
+  h.render()
+  const out = h.replyEl.innerHTML
+  assert.match(out, /正在分析请求 · <strong>先看仓库结构<\/strong>/, '粗体要成标签，不是星号')
+  assert.match(out, /<code>npm test<\/code>/, '行内代码要成标签，不是反引号')
+  assert.ok(!out.includes('**先看仓库结构**') && !out.includes('`npm test`'),
+    '记号不许原样端到用户面前')
+  assert.ok(out.includes('&lt;b&gt;这行&lt;/b&gt;'),
+    '先转义再上标签：原话里的尖括号仍然只是字面的尖括号')
+
+  // 同一行右边换成工具摘要（命令原文）时**不**渲染：摘要不是 prose，
+  // 「ls *.ts *.js」里那两个星号会被斜体规则当成一对吃下去（真渲染器上试过）。
+  h.state.trajectoryLive = ''
+  h.state.trajectory = [{
+    turn: 3, state: 'running', reason: null,
+    entries: [trajTool('r1', { turn: 3, name: 'bash', summary: 'ls *.ts *.js', state: 'running' })],
+  }]
+  h.render()
+  const head = h.replyEl.innerHTML
+  assert.ok(head.includes('正在运行命令 · ls *.ts *.js'), '命令原文照旧一个字不改')
+  assert.ok(!head.includes('<em>'), 'glob 里的星号不许被当成斜体吃掉')
 })
 
 test('完整模式：旁白是一段正文（照 PC 的过程段落），不是可点的条目行', () => {

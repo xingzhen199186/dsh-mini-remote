@@ -3857,9 +3857,15 @@
       var kind = last && last.kind === 'tool' ? trajActivity(last.name || '') : 'thinking';
       // 活片段优先（正在想的那一句，随打字刷新，PC 的 label · detail 同款）；
       // 没有片段才退到条目自己的摘要。
-      var detail = state.trajectoryLive
-        || (last ? (last.kind === 'think' ? trajFirstLine(last.output) : (last.summary || '')) : '');
-      return { kind: kind, live: true, text: TRAJ_LIVE[kind] + (detail ? ' · ' + detail : '') };
+      var prose = state.trajectoryLive
+        || (last && last.kind === 'think' ? trajFirstLine(last.output) : '');
+      var plain = !prose && last ? (last.summary || '') : '';
+      // 右边那半边是模型原话时走行内渲染：**加粗**、`代码` 要成样式，不是把记号原样贴在
+      // 脸上（2026-10-06 用户报的，和 2026-09-27 气泡那回同一个根因）。
+      // 工具摘要**不**走——那是命令/路径原文，一条「ls *.ts *.js」里的两个星号会被斜体
+      // 规则吃掉（在真渲染器上试过），摘要就照旧只转义。
+      var detail = prose ? mdInline(prose) : (plain ? escapeHtml(plain) : '');
+      return { kind: kind, live: true, text: TRAJ_LIVE[kind], detailHtml: detail };
     }
     return trajTitleOf(g);
   }
@@ -3914,8 +3920,11 @@
   function trajGroupHtml(g) {
     var open = trajGroupIsOpen(g);
     var t = trajGroupTitle(g);
+    // 右半边（活片段/思考原话）在来源处已经渲染好、也转义过，见 trajGroupTitle；
+    // 状态词与收官标题是我们自己拼的词，这里照旧转义。
     var title = t.live
-      ? '<span class="traj-run traj-shimmer"' + trajShimStyle() + '>' + escapeHtml(t.text) + '</span>'
+      ? '<span class="traj-run traj-shimmer"' + trajShimStyle() + '>' + escapeHtml(t.text)
+        + (t.detailHtml ? ' · ' + t.detailHtml : '') + '</span>'
       : '<span class="traj-title">' + escapeHtml(t.text) + '</span>';
     // 组头只显示状态词/标题，失败信息在下方条目行里显示，不重复。
     var head = '<button type="button" class="traj-head" data-traj-group="'
