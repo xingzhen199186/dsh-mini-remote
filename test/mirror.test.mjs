@@ -362,6 +362,71 @@ test('镜像：把别的插件的移动端适配挡在门外（这一页的适�
 })
 
 /**
+ * **打开镜像就直接进设置**（2026-10-06 用户要的）。
+ *
+ * 用户原话：「我们能否在移动端设置页点打开，打开的就是这个设置页面？」
+ *
+ * 官方**没有网址入口**（读源码确认：面板开合是应用内部状态，不看地址），
+ * 所以只能替用户点一下那个「设置」按钮——它的可靠特征是
+ * `aria-haspopup="dialog"` + `aria-expanded`（官方渲染时写死的语义属性，不受类名哈希影响）。
+ *
+ * **只点一次**是关键：用户关掉面板之后绝不能再弹回来，否则他没法用底下那个主页面。
+ */
+test('镜像：打开就直接进设置（替用户点一次，之后绝不再弹）', async (t) => {
+  const app = await fakeApp()
+  const mirror = createMirror({
+    upstream: `http://127.0.0.1:${app.port}`,
+    tokenUrl: () => `http://127.0.0.1:${app.port}/?token=LAUNCH-TOKEN`,
+  })
+  const f = await front(mirror)
+  t.after(async () => { await f.close(); await app.close() })
+
+  const body = await (await fetch(`http://127.0.0.1:${f.port}/blocked`)).text()
+  assert.match(body, /aria-haspopup="dialog"/, '要按那个语义标记找「设置」按钮')
+  assert.match(body, /aria-expanded/, '按钮上还有 aria-expanded，两个一起才稳')
+
+  const scripts = [...body.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1])
+  const opener = scripts.find((s) => s.includes('aria-haspopup'))
+  assert.ok(opener, '要能找到那段自动打开的脚本')
+  assert.doesNotThrow(() => new Function(opener), '那段脚本必须能通过语法解析')
+  assert.match(opener, /done\s*=\s*true/, '点过就要收手')
+  assert.match(opener, /clearInterval/, '点过要把定时器停掉——不能反复弹回来')
+})
+
+/**
+ * **设置面板：导航压成一条可横向滑动的标签条**（2026-10-06 用户报的）。
+ *
+ * 用户原话：「上方的图标部分，下方点了图标的具体页面，然后上方页面一直固定在那，
+ * 具体页面只有半个手机屏，这一块能优化吗？」
+ *
+ * 读官方源码确认：官方面板本来是「左边一列导航 188px + 右边内容」，
+ * 而它自己的 `wide` **只影响侧栏那个按钮、完全不影响面板内部布局**。
+ * 所以这里不追究是谁把它弄横的，直接按我们要的样子定下来：面板竖排、
+ * 导航一行不折行可横向滑动、名字露出来（官方是用 clip+1px 把它视觉隐藏的）。
+ *
+ * 选择器用 `[data-shortcut-modal="settings"]`——官方渲染在面板上的固定标记，不受类名哈希影响。
+ */
+test('镜像：设置面板的导航压成一条可滑动的标签条，把屏幕让给内容', async (t) => {
+  const app = await fakeApp()
+  const mirror = createMirror({
+    upstream: `http://127.0.0.1:${app.port}`,
+    tokenUrl: () => `http://127.0.0.1:${app.port}/?token=LAUNCH-TOKEN`,
+  })
+  const f = await front(mirror)
+  t.after(async () => { await f.close(); await app.close() })
+
+  const body = await (await fetch(`http://127.0.0.1:${f.port}/blocked`)).text()
+  assert.match(body, /\[data-shortcut-modal="settings"\]\{flex-direction:column !important\}/,
+    '面板要改成竖排：导航在上、内容在下')
+  assert.match(body, /\[data-shortcut-modal="settings"\] nav\[class\*="_nav"\]\{[^}]*flex-wrap:nowrap !important/,
+    '导航要**一行不折行**——折成三列网格就是它占掉半个屏幕的原因')
+  assert.match(body, /\[data-shortcut-modal="settings"\] nav\[class\*="_nav"\]\{[^}]*overflow-x:auto !important/,
+    '一行放不下就横向滑动')
+  assert.match(body, /\[data-shortcut-modal="settings"\] \[class\*="_navLabel"\]\{[^}]*clip:auto !important/,
+    '名字要放回来——官方是用 clip + 1px 把它视觉隐藏的')
+})
+
+/**
  * **压缩照旧转发**（2026-10-06）。
  *
  * 第一版把 `accept-encoding` 摘掉了，理由是「HTML 保持明文好注入」——**但那只对 HTML
