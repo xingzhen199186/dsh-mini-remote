@@ -165,14 +165,13 @@ test('进阶设置：失败要画回去，不能留一个没生效的状态', as
 // 结构 / 接线：这几条是「逻辑对、但没人喊它」那一类错
 // ---------------------------------------------------------------------------
 
-test('进阶设置：结构上该有的都在，入口开新标签且不带 opener', () => {
+test('进阶设置：结构上该有的都在，两行默认都不显示', () => {
   assert.ok(html.includes('<div class="row" id="rowMirror" hidden>'),
     '开关那一行要在，而且**默认 hidden**——这是个权限开关，默认必须是关的')
   assert.ok(html.includes('<div class="row" id="rowMirrorOpen" hidden>'),
     '入口那一行也要默认 hidden')
   assert.ok(html.includes('id="segMirror"'), '缺了开关本体')
-  assert.match(html, /id="btnMirrorOpen"[^>]*target="_blank"/, '入口要开新标签')
-  assert.match(html, /id="btnMirrorOpen"[^>]*rel="noopener"/, '开新标签要带 rel="noopener"')
+  assert.ok(html.includes('id="btnMirrorOpen"'), '缺了入口那个链接')
 })
 
 test('进阶设置：开关那排按钮要绑上处理（逻辑对、没人喊它是另一种坏法）', () => {
@@ -181,69 +180,37 @@ test('进阶设置：开关那排按钮要绑上处理（逻辑对、没人喊�
 })
 
 /**
- * 点「打开」不能只靠 `<a target="_blank">`（2026-10-06 用户实机报「点击打开没反应」）。
+ * 「打开」必须在**当前标签**打开，不许走新标签。
  *
- * 根因：`target="_blank"` 在**内嵌浏览器里常被直接拦掉**，拦掉之后一点动静都没有——
- * 不报错、不开页，用户只看到一个「点了没用」的按钮。所以自己接管点击，
- * **开不出新标签就同标签打开**。这一组把那三种情况都钉住。
+ * 2026-10-06 用户**两次**实机报「点击打开没反应」，两版都栽在同一件事上：
+ *   · 第一版 `<a target="_blank">`——内嵌浏览器（微信这类）常把新标签直接拦掉；
+ *   · 第二版加了 JS 兜底（`window.open` 失败就同标签跳）——**还是没反应**，
+ *     因为那些浏览器里 `window.open` 会**「成功」返回一个对象**，代码以为开好了、
+ *     就不再跳当前页，而那个新标签开在后台或被静默压掉，屏幕上什么都没变。
+ *
+ * **同标签跳转是唯一无法被拦的**。所以这一组钉死：没有 `target`、没有自己接管点击。
  */
-function clickHarness(openResult) {
-  const A = "$('btnMirrorOpen').addEventListener('click'"
-  const B = 'function loadMirror()'
-  const a = html.indexOf(A)
-  const b = html.indexOf(B)
-  assert.ok(a > 0, `在 page.html 里找不到锚点「${A}」`)
-  assert.ok(b > a, `在 page.html 里找不到锚点「${B}」`)
-
-  const bound = []
-  const el = {
-    getAttribute: () => '/mini/mirror/?token=TK',
-    addEventListener: (type, fn) => bound.push([type, fn]),
-  }
-  const calls = { opened: [], navigated: null, prevented: 0 }
-  const win = {
-    open: (...args) => {
-      calls.opened.push(args)
-      if (openResult === 'throw') throw new Error('被拦了')
-      return openResult
-    },
-  }
-  const loc = {
-    get href() { return '' },
-    set href(v) { calls.navigated = v },
-  }
-  new Function('$', 'window', 'location', html.slice(a, b))(() => el, win, loc)
-
-  assert.equal(bound.length, 1, '这个按钮上正好绑一个监听')
-  assert.equal(bound[0][0], 'click')
-  const event = { preventDefault: () => { calls.prevented += 1 } }
-  bound[0][1].call(el, event)
-  return calls
-}
-
-test('进阶设置：能开新标签就开新标签，不跳走当前页', () => {
-  const calls = clickHarness({ closed: false })
-  assert.equal(calls.opened.length, 1, '要先试着开新标签')
-  assert.equal(calls.opened[0][0], '/mini/mirror/?token=TK')
-  assert.equal(calls.navigated, null, '新标签开出来了就别动当前页')
-  assert.equal(calls.prevented, 1, '要拦掉默认行为，否则会同时跳两次')
+test('进阶设置：「打开」必须在当前标签打开（新标签那条路两次都栽了）', () => {
+  const tag = html.match(/<a[^>]*id="btnMirrorOpen"[^>]*>/)
+  assert.ok(tag, '找不到「打开」那个链接')
+  assert.ok(!/target=/.test(tag[0]),
+    '不许带 target：新标签在内嵌浏览器里会被拦掉或静默压到后台，'
+    + '用户看到的就是「点了没反应」（这个坑踩过两次）')
+  assert.match(tag[0], /href|id="btnMirrorOpen"/, '它得是个链接')
 })
 
-test('进阶设置：新标签被拦（返回 null）就同标签打开——不许变成一个点了没用的按钮', () => {
-  const calls = clickHarness(null)
-  assert.equal(calls.navigated, '/mini/mirror/?token=TK',
-    '开不出新标签就同标签打开：宁可换个地方打开，也不要让按钮变成死的（用户实机报的就是这个）')
-  assert.equal(calls.prevented, 1)
+test('进阶设置：「打开」不许自己接管点击（第二版就是这么栽的）', () => {
+  assert.ok(!/\$\('btnMirrorOpen'\)\.addEventListener\('click'/.test(html),
+    '不要自己接管点击：`window.open` 在被拦的浏览器里会「成功」返回一个对象，'
+    + '于是代码以为开好了、就不跳当前页，屏幕上什么都没变。交给浏览器默认行为最稳')
+  assert.ok(!/window\.open\(/.test(html),
+    '整页不许再用 window.open——它在被拦的浏览器里「假装成功」，是第二次栽的原因')
 })
 
-test('进阶设置：window.open 直接抛错也要兜住', () => {
-  const calls = clickHarness('throw')
-  assert.equal(calls.navigated, '/mini/mirror/?token=TK', '抛错也要落到同标签打开')
-})
-
-test('进阶设置：链接本身留着（长按「在新标签页打开」那条路不受影响）', () => {
-  assert.match(html, /id="btnMirrorOpen"[^>]*target="_blank"/,
-    'target 要留着：长按菜单里那条「在新标签页打开」正是靠它')
+test('进阶设置：链接本身留着（长按「在新标签页打开」那条路仍可用）', () => {
+  assert.match(html, /<a class="btn" id="btnMirrorOpen">/,
+    '用 <a> 而不是 <button>：长按菜单里那条「在新标签页打开」正是靠它，'
+    + '不想被自动跳转的人还能自己选')
 })
 
 test('进阶设置：设置抽屉每次打开都要重读一次（电脑端能把它关掉）', () => {

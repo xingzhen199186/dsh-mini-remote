@@ -1644,11 +1644,23 @@
     <div class="row" id="rowMirrorOpen" hidden>
       <div>
         <div class="label">电脑端设置界面</div>
-        <div class="hint">那是给电脑做的，手机上可能不太好点</div>
+        <div class="hint">点开会直接换过去，按返回回来</div>
       </div>
-      <!-- 开新标签，不内嵌：这个设置抽屉本身已经占满一屏，再往里套一层会很难用。
-           地址由 paintMirror 拼（要带上 token）。 -->
-      <a class="btn" id="btnMirrorOpen" target="_blank" rel="noopener">打开</a>
+      <!--
+        **不开新标签，就在当前标签打开。**（2026-10-06 用户两次实机报「点击打开没反应」）
+
+        走过两版弯路，都记在这儿，别再改回去：
+        · 第一版 `<a target="_blank">`：内嵌浏览器（微信这类）常把新标签**直接拦掉**，
+          拦掉之后一点动静都没有。
+        · 第二版加了 JS 兜底（先 `window.open`，开不出来再同标签跳）：**还是没反应**。
+          因为那些浏览器里 `window.open` 会**「成功」返回一个对象**，于是代码以为开好了、
+          就不再跳当前页——而那个新标签**开在后台或被静默压掉**，用户屏幕上什么都没变。
+
+        **同标签跳转是唯一无法被拦的**：地址栏一变，屏幕上就一定看得到东西。
+        代价是要按返回才能回到手机页——这个代价换来的是「按钮一定有用」，值。
+        仍然用 `<a href>`（不是按钮），所以长按菜单里那条「在新标签页打开」照旧可用。
+      -->
+      <a class="btn" id="btnMirrorOpen">打开</a>
     </div>
 
     <div class="foot">
@@ -6398,37 +6410,6 @@
       $('btnMirrorOpen').href = '/mini/mirror/?token=' + encodeURIComponent(state.token || '');
     }
   }
-
-  /**
-   * 点「打开」。**不能只靠 `<a target="_blank">`**（2026-10-06 用户实机报
-   * 「点击打开没反应」）。
-   *
-   * 根因：`target="_blank"` 在**内嵌浏览器里常被直接拦掉**（微信里打开这类页面时
-   * 很常见），拦掉之后**一点动静都没有**——不报错、不开页，用户只能看着一个
-   * 「点了没用」的按钮。用户自己在别处也遇到过同款（「那种弹窗会被直接屏蔽」）。
-   *
-   * 所以保留 `<a href>`（长按「在新标签页打开」仍然可用，那条路不受影响），
-   * 但自己接管点击：先试着开新标签，**开不出来就同标签打开**——宁可换个地方打开，
-   * 也不要让按钮变成死的。
-   */
-  $('btnMirrorOpen').addEventListener('click', function (e) {
-    var url = this.getAttribute('href');
-    if (!url) return;   // 地址还没拼出来（没开的时候不该走到这儿），交给默认行为
-    var opened = null;
-    try {
-      opened = window.open(url, '_blank', 'noopener');
-    } catch (err) {
-      opened = null;
-    }
-    // `window.open` 被拦时返回 null（有的浏览器返回一个 closed 的壳，也一并当拦了）。
-    var blocked = !opened || opened.closed || typeof opened.closed === 'undefined';
-    if (!blocked) {
-      e.preventDefault();
-      return;
-    }
-    e.preventDefault();
-    location.href = url;
-  });
 
   function loadMirror() {
     api('/mini/api/mirror').then(function (r) {
