@@ -81,7 +81,14 @@ async function fakeApp() {
         'content-security-policy': "frame-ancestors 'none'",
         'content-type': 'text/html',
       })
-      res.end('<html>hi</html>')
+      // 像个真页面：有 head，head 里还有一段内联启动脚本。
+      // （第一版夹具只有一句 `<html>hi</html>`，于是「插在 head 里」那条断言测了个空。）
+      res.end('<html><head><script>boot()</script></head><body>hi</body></html>')
+      return
+    }
+    if (url.pathname === '/no-head') {
+      res.writeHead(200, { 'content-type': 'text/html' })
+      res.end('<p>没有 head 的一段</p>')
       return
     }
     if (url.pathname === '/boom') {
@@ -157,7 +164,79 @@ test('镜像：去掉「禁止被嵌」的响应头', async (t) => {
   assert.equal(res.status, 200)
   assert.equal(res.headers.get('x-frame-options'), null, 'x-frame-options 要去掉')
   assert.equal(res.headers.get('content-security-policy'), null, 'CSP 的 frame-ancestors 要去掉')
-  assert.equal(await res.text(), '<html>hi</html>', '正文不该被改动')
+  const body = await res.text()
+  assert.ok(body.includes('hi</body>'), '上游的正文要原样留着')
+  assert.match(body, /ownsHost/, 'HTML 里要注入「你是主机」那个标记（见下面那条测试）')
+})
+
+/**
+ * 这两条是「消化原理之后只实现我们要的那部分」的结果（2026-10-06）。
+ *
+ * 装在这台机器上的 `dsh-remote-web-ui` 会把手机上发的请求改写成 `/remote/<原路径>`
+ * 并带上设备令牌——没有令牌就 401，于是它显示「此设备未配对」那道闸门。
+ *
+ * 我们不需要设备令牌：**我们的代理本来就从回环发出、Host 也固定成上游自己**，
+ * 宿主已经把我们当本机了。所以只要把前缀剥掉，那条通道就会「成功」。
+ * 再加上告诉界面「你是主机」的那个标记，配置面就整片打开。
+ */
+test('镜像：把那条门控通道的前缀剥掉（我们的代理本来就是那条通道）', async (t) => {
+  const app = await fakeApp()
+  const mirror = createMirror({
+    upstream: `http://127.0.0.1:${app.port}`,
+    tokenUrl: () => `http://127.0.0.1:${app.port}/?token=LAUNCH-TOKEN`,
+  })
+  const f = await front(mirror)
+  t.after(async () => { await f.close(); await app.close() })
+
+  const res = await fetch(`http://127.0.0.1:${f.port}/remote/api/session/list?x=1`)
+  assert.equal(res.status, 200)
+  const hit = app.seen.filter((s) => s.url.startsWith('/api/session/list'))
+  assert.equal(hit.length, 1, '应当以剥掉前缀后的路径去问上游')
+  assert.equal(hit[0].url, '/api/session/list?x=1',
+    '`/remote/api/...` → `/api/...`；查询串要留着')
+  // 不带前缀的照旧原样转发
+  const plain = await fetch(`http://127.0.0.1:${f.port}/api/other`)
+  assert.equal(plain.status, 200)
+  assert.equal(await plain.text(), '上游内容 /api/other')
+})
+
+test('镜像：那个「你是主机」的标记要插在最前面（启动项是内联脚本，晚一步就读不到）', async (t) => {
+  const app = await fakeApp()
+  const mirror = createMirror({
+    upstream: `http://127.0.0.1:${app.port}`,
+    tokenUrl: () => `http://127.0.0.1:${app.port}/?token=LAUNCH-TOKEN`,
+  })
+  const f = await front(mirror)
+  t.after(async () => { await f.close(); await app.close() })
+
+  const body = await (await fetch(`http://127.0.0.1:${f.port}/blocked`)).text()
+  const hookAt = body.indexOf('ownsHost')
+  const headAt = body.indexOf('<head')
+  assert.ok(hookAt > 0, '要注入那个标记')
+  assert.ok(hookAt < body.indexOf('</head>'),
+    '要插在 head 里——官方界面的启动项就是内联脚本，跑在 head 里')
+  assert.ok(headAt < hookAt, '插在 <head> 之后、其余内容之前')
+  assert.ok(hookAt < body.indexOf('<script>boot()'),
+    '要排在那段启动脚本前面，晚一步它就读不到了')
+
+  // 没有 head 的碎片：退回插在最前面——宁可位置差一点，也不要什么都不插
+  const noHead = await (await fetch(`http://127.0.0.1:${f.port}/no-head`)).text()
+  assert.match(noHead, /^<script>globalThis\.__DSH_TRANSPORT__/, '没有 head 就插在最前面')
+})
+
+test('镜像：不是 HTML 的一律不碰（那条常驻连接绝不能因为注入而被缓冲）', async (t) => {
+  const app = await fakeApp()
+  const mirror = createMirror({
+    upstream: `http://127.0.0.1:${app.port}`,
+    tokenUrl: () => `http://127.0.0.1:${app.port}/?token=LAUNCH-TOKEN`,
+  })
+  const f = await front(mirror)
+  t.after(async () => { await f.close(); await app.close() })
+
+  const res = await fetch(`http://127.0.0.1:${f.port}/some/path`)
+  const body = await res.text()
+  assert.ok(!body.includes('ownsHost'), '不是 HTML 就不要注入')
+  assert.equal(body, '上游内容 /some/path')
 })
 
 test('镜像：官方 cookie 认不出来了（401）就重铸一次再试', async (t) => {
