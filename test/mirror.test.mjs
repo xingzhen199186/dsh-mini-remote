@@ -419,13 +419,11 @@ test('镜像：打开就直接进设置（替用户点一次，之后绝不再�
   assert.match(opener, /done\s*=\s*true/, '点过就要收手')
   assert.match(opener, /clearInterval/, '点过要把定时器停掉——不能反复弹回来')
 
-  // 点完要「推一下」逼界面重画（2026-10-06 用户真机报「点一下才有字」）：
-  // 官方源码里那个名字是**无条件渲染**的（`children: row.label`），字**在 DOM 里**、
-  // 只是**没画出来**；点一下触发重画才出现——**这是绘制问题，不是样式问题**。
-  assert.match(opener, /dispatchEvent\(new Event\("resize"\)\)/, '要发一次无害的重排信号')
-  assert.match(opener, /void p\.offsetHeight/, '还要强制回流一次')
-  assert.ok((opener.match(/setTimeout\(nudge/g) ?? []).length >= 2,
-    '要推两次——设置面板要加载十几个小节，第一次可能还没排完')
+  // **不再有定时兜底**（2026-10-06 顾问群会诊后删掉的）：
+  // 「打开设置后定时发 resize + 强制回流」是盲目 hack，而且它本身就是一次布局/重绘，
+  // **会让「首帧到底画没画」再也测不准**。真根因已按顾问建议从样式上根治，见下一条测试。
+  assert.ok(!/dispatchEvent\(new Event\("resize"\)\)/.test(opener), '不许留定时重排兜底')
+  assert.ok(!/offsetHeight/.test(opener), '不许留强制回流兜底')
 })
 
 /**
@@ -466,6 +464,37 @@ test('镜像：设置面板的导航压成一条可滑动的标签条，把屏�
     '一行放不下就横向滑动')
   assert.match(body, /\[data-shortcut-modal="settings"\] \[class\*="_navLabel"\]\{[^}]*clip:auto !important/,
     '名字要保证露出来（实测现在没有规则藏它，这几行是保险）')
+})
+
+/**
+ * **首帧没字的真根因：官方那个名字的 flex 是为竖列设计的，被我们改成横排后首帧被压到零宽**
+ * （2026-10-06 顾问群会诊给出的判断，能对上全部证据）。
+ *
+ * 官方 `_navLabel{white-space:nowrap;text-overflow:ellipsis;flex:1;min-width:0}` 是给
+ * 「左边一竖列 188px 宽」用的：占满剩余宽度、太长就截断。我们把它改成了一行横排之后，
+ * **首帧里它被分到接近零的宽度**（或被省略号截空）→ 只剩图标；
+ * **点一下触发重排、宽度重新分配，字才出来**——正是用户反复确认的现象。
+ * 图标是矢量图、有固有尺寸，所以不受影响，这也对得上。
+ *
+ * 根治：让它**按内容取宽、彻底不参与收缩**。`min-width` 必须一起覆盖——
+ * 只改 `flex` 而留着官方的 `min-width:0`，收缩那条路还是开着的。
+ */
+test('镜像：导航名字要按内容取宽、不参与收缩（首帧没字的根因）', async (t) => {
+  const app = await fakeApp()
+  const mirror = createMirror({
+    upstream: `http://127.0.0.1:${app.port}`,
+    tokenUrl: () => `http://127.0.0.1:${app.port}/?token=LAUNCH-TOKEN`,
+  })
+  const f = await front(mirror)
+  t.after(async () => { await f.close(); await app.close() })
+
+  const body = await (await fetch(`http://127.0.0.1:${f.port}/blocked`)).text()
+  assert.match(body, /\[class\*="_navLabel"\]\{[^}]*flex:0 0 auto !important/,
+    '名字要按内容取宽——不伸不缩，否则首帧会被压到零宽')
+  assert.match(body, /\[class\*="_navLabel"\]\{[^}]*min-width:max-content !important/,
+    '**min-width 必须一起覆盖**——只改 flex 而留着官方的 min-width:0，收缩那条路还开着')
+  assert.match(body, /\[class\*="_navLabel"\]\{[^}]*width:max-content !important/,
+    '宽度也钉成按内容')
 })
 
 /**
