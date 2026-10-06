@@ -16,6 +16,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
 import { once } from 'node:events'
+import { gzipSync } from 'node:zlib'
 
 import { createMirror } from '../lib/mirror.js'
 import { createMiniServer } from '../lib/server.js'
@@ -63,6 +64,7 @@ async function fakeApp() {
       url: req.url,
       host: req.headers.host,
       origin: req.headers.origin ?? null,
+      acceptEncoding: req.headers['accept-encoding'] ?? null,
       cookie: req.headers.cookie ?? null,
       method: req.method,
     })
@@ -100,6 +102,17 @@ async function fakeApp() {
     if (url.pathname === '/no-head') {
       res.writeHead(200, { 'content-type': 'text/html' })
       res.end('<p>没有 head 的一段</p>')
+      return
+    }
+    if (url.pathname === '/gz') {
+      // 上游**压缩着发** HTML——我们把 `accept-encoding` 照旧转发了，它就会这么干。
+      const buf = gzipSync(Buffer.from('<html><head><script>boot()</script></head><body>hi</body></html>'))
+      res.writeHead(200, {
+        'content-type': 'text/html',
+        'content-encoding': 'gzip',
+        'content-length': buf.length,
+      })
+      res.end(buf)
       return
     }
     if (url.pathname === '/boom') {
@@ -305,6 +318,48 @@ test('镜像：手机布局适配（把设置面板抬到侧栏上面 + 底部�
     + '真机上「一点侧栏就消失、还进不去设置」')
   assert.match(body, /safe-area-inset-bottom/, '底部要让开手势条（顶部那条由我们自己的横条管）')
   assert.ok(body.indexOf('mini-mirror-adapt') < body.indexOf('</head>'), '这段样式要在 head 里')
+})
+
+/**
+ * **压缩照旧转发**（2026-10-06）。
+ *
+ * 第一版把 `accept-encoding` 摘掉了，理由是「HTML 保持明文好注入」——**但那只对 HTML
+ * 成立，我把所有东西都关掉了**：整个界面裸着搬，一次 34 MB（121 个请求）。
+ * 本机压一遍是原体积的 24%～29%。现在照旧转发；HTML 那一份单独解开再注入。
+ */
+test('镜像：`accept-encoding` 照旧转发（压缩是省流量的大头）', async (t) => {
+  const app = await fakeApp()
+  const mirror = createMirror({
+    upstream: `http://127.0.0.1:${app.port}`,
+    tokenUrl: () => `http://127.0.0.1:${app.port}/?token=LAUNCH-TOKEN`,
+  })
+  const f = await front(mirror)
+  t.after(async () => { await f.close(); await app.close() })
+
+  await fetch(`http://127.0.0.1:${f.port}/some/path`, {
+    headers: { 'accept-encoding': 'gzip, br' },
+  })
+  const hit = app.seen.filter((s) => s.url.startsWith('/some/path')).pop()
+  assert.match(String(hit?.acceptEncoding), /gzip/,
+    '`accept-encoding` 要照旧转发给上游。摘掉它 = 整个界面裸着搬（实测 34 MB），'
+    + '而压缩后只剩两三成')
+})
+
+test('镜像：上游压缩着发 HTML 时，解开、注入、明文发出去', async (t) => {
+  const app = await fakeApp()
+  const mirror = createMirror({
+    upstream: `http://127.0.0.1:${app.port}`,
+    tokenUrl: () => `http://127.0.0.1:${app.port}/?token=LAUNCH-TOKEN`,
+  })
+  const f = await front(mirror)
+  t.after(async () => { await f.close(); await app.close() })
+
+  const res = await fetch(`http://127.0.0.1:${f.port}/gz`, { headers: { 'accept-encoding': 'gzip' } })
+  assert.equal(res.status, 200)
+  assert.equal(res.headers.get('content-encoding'), null, '发给手机的应当是明文（已经解开过了）')
+  const body = await res.text()
+  assert.match(body, /ownsHost/, '压缩过的 HTML 也要能注入那个标记')
+  assert.ok(body.includes('hi</body>'), '正文要完好')
 })
 
 test('镜像：不是 HTML 的一律不碰（那条常驻连接绝不能因为注入而被缓冲）', async (t) => {
