@@ -62,6 +62,7 @@ async function fakeApp() {
     seen.push({
       url: req.url,
       host: req.headers.host,
+      origin: req.headers.origin ?? null,
       cookie: req.headers.cookie ?? null,
       method: req.method,
     })
@@ -164,6 +165,28 @@ test('镜像：转发到上游，并把 Host 固定成上游自己（官方 cook
   assert.equal(real[0].host, `127.0.0.1:${app.port}`,
     'Host 必须是上游自己的地址——官方 cookie 的权威域名就是按它签的，换一个每个请求都 401')
   assert.match(String(real[0].cookie), /dsh-auth-/, '转发时要替手机带上官方 cookie')
+})
+
+test('镜像：`Origin` 要换成上游自己（POST 和 WebSocket 都会带它，带错就 403）', async (t) => {
+  const app = await fakeApp()
+  const mirror = createMirror({
+    upstream: `http://127.0.0.1:${app.port}`,
+    tokenUrl: () => `http://127.0.0.1:${app.port}/?token=LAUNCH-TOKEN`,
+  })
+  const f = await front(mirror)
+  t.after(async () => { await f.close(); await app.close() })
+
+  // 浏览器发 POST 一定带 Origin（普通 GET 不带）——「页面全好、数据全空」就是这么来的。
+  await fetch(`http://127.0.0.1:${f.port}/api/thing`, {
+    method: 'POST',
+    headers: { origin: 'http://192.168.1.2:3090', 'content-type': 'application/json' },
+    body: '{}',
+  })
+  const hit = app.seen.filter((s) => s.method === 'POST').pop()
+  assert.ok(hit, '上游应当收到这次 POST')
+  assert.equal(hit.origin, `http://127.0.0.1:${app.port}`,
+    'Origin 要换成上游自己。实测过：不带 Origin → 200；带手机那个 → 403；带上游自己的 → 200。'
+    + '症状很有欺骗性——页面、脚本、样式全都正常加载，**只有那些 POST 出来的数据全空**')
 })
 
 test('镜像：官方那枚会话 cookie 绝不转发给手机', async (t) => {
