@@ -321,17 +321,19 @@ test('镜像：手机布局适配（把设置面板抬到侧栏上面 + 底部�
 })
 
 /**
- * 把官方设置面板的导航**掰回竖排、让字始终显示**（2026-10-06）。
+ * **把别的插件的「移动端适配」挡在门外**（2026-10-06 用户定的方向）。
  *
- * 这一条是**为另一个插件擦屁股**：机器上装着的 `@linxin666/dsh-remote-web-ui` 会给 `<body>`
- * 贴一个 `dsh-remote-portrait`，然后一整套 `[class$="_overlay"] [class$="_panel"] …` 的规则
- * 就开始**作用在官方设置面板上**（它的类名和官方那套撞名）。用户报的两件事正是它的后果：
- *   · `[class$="_nav"]{flex-wrap:wrap}` + `[class$="_navCell"]{height:34px;flex:none}`
- *     → 导航折成三列网格、一直赖在上半屏；
- *   · 导航格被压成 34px 高之后**字被挤没了**，点一下（聚焦）才露出来
- *     ——**用户反复验证过「不是字没到，是被藏了、点一下才出来」**。
+ * 用户原话：「让我们的插件参考那个插件的方式来做『被搬过来的那个 DSH 界面』，
+ * **而不是直接搬那个插件适配的界面**。等于电脑端设置界面实际上也应该是我们自己的插件的产物。」
+ *
+ * 机器上装着的 `@linxin666/dsh-remote-web-ui` 会**在运行时**往这一页插适配样式、
+ * 往 `<body>` 贴标记；它的选择器**写宽了**（按类名后缀匹配），而官方界面的类名正好也是那几个
+ * ——于是官方面板被它一起改了（用户报的「上半部分永远是图标格子」「字要点一下才出来」）。
+ *
+ * **上一版是在它的地基上打补丁**（它改哪两处我就掰哪两处）——被动挨打。
+ * 现在改成从根上挡掉：摘掉它插的样式、摘掉它贴的三个标记，并持续盯着（它会重插）。
  */
-test('镜像：把官方设置面板的导航掰回竖排、字始终显示（另一个插件的适配改了它）', async (t) => {
+test('镜像：把别的插件的移动端适配挡在门外（这一页的适配由我们自己来）', async (t) => {
   const app = await fakeApp()
   const mirror = createMirror({
     upstream: `http://127.0.0.1:${app.port}`,
@@ -341,14 +343,22 @@ test('镜像：把官方设置面板的导航掰回竖排、字始终显示（�
   t.after(async () => { await f.close(); await app.close() })
 
   const body = await (await fetch(`http://127.0.0.1:${f.port}/blocked`)).text()
-  assert.match(body, /\[class\*="_overlay"\] \[class\*="_panel"\] \[class\*="_nav"\]\{[^}]*flex-direction:column !important/,
-    '导航要恢复成竖排一列——它被折成了三列网格、一直赖在上半屏')
-  assert.match(body, /\[class\*="_navLabel"\]\{[^}]*display:block !important/,
-    '导航里的字要始终显示——它被挤没了、点一下才出来')
-  assert.match(body, /\[class\*="_navCell"\]\{[^}]*height:auto !important/,
-    '导航格不能再被压成固定 34px 高（字就是被这个挤没的）')
-  assert.ok(/\[class\*="_overlay"\] \[class\*="_panel"\]/.test(body),
-    '要限定在面板内部（和它同款选择器），别把别处的导航也改了')
+
+  assert.match(body, /dsh-remote-portrait/, '要摘掉它那个「适配生效」标记')
+  assert.match(body, /dsh-remote-compact-picker/, '它另外两处改官方界面的标记也要摘')
+  assert.match(body, /dsh-remote-header-seated/, '同上')
+  assert.match(body, /data-plugin-css/, '还要摘掉它插的那段样式——里面有没带标记的规则，光摘标记挡不住')
+  assert.match(body, /MutationObserver/, '它会在尺寸变化时重插，所以要盯着')
+  assert.match(body, /attributeFilter:\["class"\]/, '观察范围要收窄（只看 body 的 class），别盯着整棵树')
+
+  // 我们自己的适配必须还在
+  assert.match(body, /mini-mirror-adapt/, '这一页的适配仍然由我们自己提供')
+
+  // **那段脚本必须语法正确**：真机上它一报错就等于没挡，而且是静默的。
+  const scripts = [...body.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1])
+  const stripper = scripts.find((s) => s.includes('dsh-remote-portrait'))
+  assert.ok(stripper, '要能找到那段挡人的脚本')
+  assert.doesNotThrow(() => new Function(stripper), '那段脚本必须能通过语法解析')
 })
 
 /**
