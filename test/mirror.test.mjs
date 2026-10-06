@@ -418,6 +418,14 @@ test('镜像：打开就直接进设置（替用户点一次，之后绝不再�
   assert.doesNotThrow(() => new Function(opener), '那段脚本必须能通过语法解析')
   assert.match(opener, /done\s*=\s*true/, '点过就要收手')
   assert.match(opener, /clearInterval/, '点过要把定时器停掉——不能反复弹回来')
+
+  // 点完要「推一下」逼界面重画（2026-10-06 用户真机报「点一下才有字」）：
+  // 官方源码里那个名字是**无条件渲染**的（`children: row.label`），字**在 DOM 里**、
+  // 只是**没画出来**；点一下触发重画才出现——**这是绘制问题，不是样式问题**。
+  assert.match(opener, /dispatchEvent\(new Event\("resize"\)\)/, '要发一次无害的重排信号')
+  assert.match(opener, /void p\.offsetHeight/, '还要强制回流一次')
+  assert.ok((opener.match(/setTimeout\(nudge/g) ?? []).length >= 2,
+    '要推两次——设置面板要加载十几个小节，第一次可能还没排完')
 })
 
 /**
