@@ -358,7 +358,8 @@ test('镜像：把别的插件的移动端适配挡在门外（这一页的适�
   assert.match(body, /dsh-remote-header-seated/, '同上')
   assert.match(body, /data-plugin-css/, '还要摘掉它插的那段样式——里面有没带标记的规则，光摘标记挡不住')
   assert.match(body, /MutationObserver/, '它会在尺寸变化时重插，所以要盯着')
-  assert.match(body, /attributeFilter:\s*\["class"\]/, '观察范围要收窄（只看 body 的 class），别盯着整棵树')
+  // （观察范围那条断言搬到下面「第三层：摘标记」去了：现在除了 body 的 class，
+  //   还要盯面板上那个标记，范围仍然钉死在属性名上。）
 
   // **通用层**（2026-10-06 用户问「装了别的遥控插件是不是也会影响」之后加的）：
   // 只靠点名等于每装一个新插件就要再加一个名字，所以补一层——
@@ -386,6 +387,26 @@ test('镜像：把别的插件的移动端适配挡在门外（这一页的适�
   assert.match(stripper, /data-plugin-css/, '判断归属看的是 data-plugin-css 这个标记')
   assert.match(stripper, /indexOf\(STYLE_OWNERS\[k\]\)/,
     '按名单逐个比对，以后再加一家只改名单这一行，不用再动摘除逻辑')
+
+  // **第三层：摘标记**（2026-10-06 在真面板上量出根因之后补的）。
+  // `meow-smooth` 用 `opacity:0` 把导航名字按成透明，而它那几条选择器里
+  // **一个类名都没有**——按类名搜选择器永远搜不到它。
+  assert.match(stripper, /data-meow-smooth-settings/,
+    '要把面板上那个「手机端设置页」标记摘掉——真凶就是它把名字按成透明的')
+  assert.match(stripper, /removeAttribute\(SETTINGS_MOBILE_ATTR\)/,
+    '摘的是那个标记本身：它的规则和它的点击监听都只在有标记时才动手，摘掉两边一起失效')
+  assert.match(stripper, /subtree:\s*true/,
+    '那个标记挂在面板上（body 深处的节点），所以这一条观察必须管到子树')
+  assert.match(stripper, /attributeFilter:\s*\[SETTINGS_MOBILE_ATTR\]/,
+    '范围只钉在这一个属性名上——别的属性怎么变都不叫醒它，重页面上不能白烧性能')
+  assert.match(stripper, /moSettings/,
+    '单独开一个观察者：合成一条就得把 class 也放进 subtree 范围里（同一节点再 observe 是替换，'
+    + '不是叠加），那才是真的会烧性能')
+  assert.match(stripper, /style\[data-plugin-css\],\s*style\[data-plugin\]/,
+    '**`style[data-plugin]` 也要看**：meow-smooth 那份样式写的是 data-plugin，'
+    + '只按 data-plugin-css 找等于把这类整份漏掉')
+  assert.match(stripper, /getAttribute\("data-plugin"\)/,
+    '两个属性里的名字都要能取到，名单和通用层才都看得到它')
 })
 
 /**
@@ -467,19 +488,19 @@ test('镜像：设置面板的导航压成一条可滑动的标签条，把屏�
 })
 
 /**
- * **首帧没字的真根因：官方那个名字的 flex 是为竖列设计的，被我们改成横排后首帧被压到零宽**
- * （2026-10-06 顾问群会诊给出的判断，能对上全部证据）。
+ * **导航名字要按内容取宽、不参与收缩**（首帧没字的兜底，以及真根因的说明）。
  *
- * 官方 `_navLabel{white-space:nowrap;text-overflow:ellipsis;flex:1;min-width:0}` 是给
- * 「左边一竖列 188px 宽」用的：占满剩余宽度、太长就截断。我们把它改成了一行横排之后，
- * **首帧里它被分到接近零的宽度**（或被省略号截空）→ 只剩图标；
- * **点一下触发重排、宽度重新分配，字才出来**——正是用户反复确认的现象。
- * 图标是矢量图、有固有尺寸，所以不受影响，这也对得上。
+ * 上一版这里写着「首帧没字的根因就是官方的 flex 为竖列设计」——**那个判断真机验证是错的**。
+ * 2026-10-06 在本地把真面板打开、逐张样式表 `matches()` 一遍，真凶是 `meow-smooth`：
+ * 狭窄屏下面板被标成「收起态」，一条 `... > button > span { flex:0; max-width:0; opacity:0 }`
+ * 让名字**有宽度、有文字、整片透明**（实测 rect 52×22、textContent="通用设置"、opacity 0，
+ * 同一个格子里的 svg 图标 opacity 1）。
  *
- * 根治：让它**按内容取宽、彻底不参与收缩**。`min-width` 必须一起覆盖——
- * 只改 `flex` 而留着官方的 `min-width:0`，收缩那条路还是开着的。
+ * 真凶已按第三层（摘标记）治掉；`ADAPT_CSS` 这几行留作兜底，**所以必须连 opacity 和
+ * max-width 一起钉住**：只改 flex 而漏掉 opacity，正是上一版「改了却没用」的原因；
+ * 漏掉 max-width，`width:max-content` 会被插件那条 `max-width:0` 掐死。
  */
-test('镜像：导航名字要按内容取宽、不参与收缩（首帧没字的根因）', async (t) => {
+test('镜像：导航名字要「按内容取宽 + 一定可见」（真根因的兜底）', async (t) => {
   const app = await fakeApp()
   const mirror = createMirror({
     upstream: `http://127.0.0.1:${app.port}`,
@@ -490,11 +511,16 @@ test('镜像：导航名字要按内容取宽、不参与收缩（首帧没字�
 
   const body = await (await fetch(`http://127.0.0.1:${f.port}/blocked`)).text()
   assert.match(body, /\[class\*="_navLabel"\]\{[^}]*flex:0 0 auto !important/,
-    '名字要按内容取宽——不伸不缩，否则首帧会被压到零宽')
+    '名字要按内容取宽——不伸不缩')
   assert.match(body, /\[class\*="_navLabel"\]\{[^}]*min-width:max-content !important/,
     '**min-width 必须一起覆盖**——只改 flex 而留着官方的 min-width:0，收缩那条路还开着')
   assert.match(body, /\[class\*="_navLabel"\]\{[^}]*width:max-content !important/,
     '宽度也钉成按内容')
+  // 真根因量出来之后补的两条兜底：藏字的是 opacity，掐宽度的是 max-width。
+  assert.match(body, /\[class\*="_navLabel"\]\{[^}]*opacity:1 !important/,
+    'opacity 必须钉死：真凶就是它（meow-smooth 的 collapsed 态把名字按成 opacity:0）')
+  assert.match(body, /\[class\*="_navLabel"\]\{[^}]*max-width:none !important/,
+    'max-width 也要覆盖：插件那条 max-width:0 会把 width:max-content 掐死')
 })
 
 /**
@@ -724,10 +750,12 @@ async function bootServer({ mirror = null, mirrorEnabled = () => true } = {}) {
 }
 
 /** 一个永远回 200 的镜像桩，用来证明「请求到底有没有走到代理那一步」。 */
-function stubMirror(log) {
+function stubMirror(log, optsLog) {
   return {
-    handle: async (req, res) => {
+    handle: async (req, res, opts) => {
       log.push(req.url)
+      // 第三个参数（`{ diag }`）也要留痕：诊断开关就是靠它传到镜像那边的。
+      if (optsLog) optsLog.push(opts)
       res.writeHead(200, { 'content-type': 'text/html' })
       res.end('<html>mirror</html>')
     },
@@ -1005,3 +1033,158 @@ test('镜像：我们自己的地盘不转 WebSocket（`/mini/...` 不是上游�
   assert.ok(!/101/.test(r.handshake), '我们自己的路径不该被转给上游')
   assert.equal(app.seen.filter((s) => s.upgrade).length, 0, '上游不该收到它')
 })
+
+// ---------------------------------------------------------------------------
+// 诊断模式（`?diag=1`）：只在开关打开时注入，样本落盘
+// ---------------------------------------------------------------------------
+//
+// ## 为什么要有这一套（2026-10-06）
+//
+// 「进设置后导航栏只有图标、随便点一下文字才出来」这件事，之前所有结论都是
+// **用一个假面板在本地量出来的**，量不到真机上的运行时状态（运行时挂的行内样式、
+// 颜色/透明度/可见性、字体到没到、有没有透明层盖着字）；本地又复现不了
+// （无头浏览器里那个「设置」按钮在折叠侧栏内、尺寸 0×0，点不开）。
+// **那就让真机自己把数据报回来**——一次打开就能拿到「点击前 / 点击后」两份对照。
+//
+// 这一组要钉住两件事：
+//   ① **不带 `diag=1` 时行为完全不变**（一个字节都不多）——正常路径不许被诊断污染；
+//   ② 带上之后，脚本真的注入、开关真的传到镜像那边、样本真的落到 `scratch/diag.log`。
+//      **最后这条最要紧**：真机跑一次成本很高，链路不通就白跑。
+
+/** 把查询串里的 `diag=1` 翻成 `handle` 的第三个参数（lib/server.js 就是这么做的）。 */
+async function frontWithDiag(mirror) {
+  return listen((req, res) => {
+    const diag = /[?&]diag=1(?:&|$)/.test(String(req.url ?? ''))
+    mirror.handle(req, res, { diag })
+  })
+}
+
+test('镜像：诊断脚本只在 ?diag=1 时注入，正常路径一个字节都不多', async (t) => {
+  const app = await fakeApp()
+  const mirror = createMirror({
+    upstream: `http://127.0.0.1:${app.port}`,
+    tokenUrl: () => `http://127.0.0.1:${app.port}/?token=LAUNCH-TOKEN`,
+  })
+  const f = await frontWithDiag(mirror)
+  t.after(async () => { await f.close(); await app.close() })
+
+  // ① 正常路径：**不许出现诊断脚本**（用户平时打开的每一页都不该因此重一点、
+  //    也不该在页面上多出一条提示条）。
+  const plain = await (await fetch(`http://127.0.0.1:${f.port}/blocked`)).text()
+  assert.ok(!plain.includes('mini-mirror-diag'),
+    '不带 diag 时**一个字节都不许多**——正常路径的行为必须完全不变')
+  assert.match(plain, /ownsHost/, '该有的注入一样不少')
+
+  // ② 诊断路径：脚本要在场，而且**必须语法正确**——真机上它一报错就是白跑一次。
+  const diag = await (await fetch(`http://127.0.0.1:${f.port}/blocked?diag=1`)).text()
+  const scripts = [...diag.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1])
+  const probe = scripts.find((s) => s.includes('mini-mirror-diag'))
+  assert.ok(probe, '带上 diag=1 要注入那段采样脚本')
+  assert.doesNotThrow(() => new Function(probe),
+    '那段脚本必须能通过语法解析（真机上它报错的话，用户跑一次就白跑了）')
+
+  // 顾问群给的判别树，四条路各要有一个探针——少一条就得多跑一次真机。
+  assert.match(probe, /elementsFromPoint/, '要能发现「有透明层盖在字上面」（第一条）')
+  assert.match(probe, /-webkit-text-fill-color|webkitTextFillColor/,
+    '颜色这一路要连着 -webkit-text-fill-color 一起看：Chromium 系它优先于 color')
+  assert.match(probe, /document\.fonts/, '字体晚到不重绘也要看得出来')
+  assert.match(probe, /pointerdown/, '「点一下字才出」要靠点击那一刻的样本对照')
+  assert.match(probe, /getAttribute\('style'\)/, '运行时挂上去的行内样式也要采')
+  assert.match(probe, /_navLabel/, '只采第一个 _navLabel')
+  assert.match(probe, /querySelector\('svg'\)/, '要有同一个格子里那个图标的对照组')
+  assert.match(probe, /closest\(/, '要沿祖先链逐层量，看宽度塌在哪一层')
+  assert.match(probe, /clientRects/, '首帧被压到零宽的话，clientRects 会是空的')
+  assert.match(probe, /devicePixelRatio/, '真机的视口信息也要带上')
+
+  // 脚本本身不许把注入顺序搞反：必须排在**我们那套适配之后**，
+  // 否则量到的是「适配生效前」的样子，不是用户看到的样子。
+  assert.ok(diag.indexOf('mini-mirror-adapt') < diag.indexOf('mini-mirror-diag'),
+    '采样脚本要排在我们的适配样式后面')
+})
+
+test('路由门：?diag=1 要原样传到镜像那边（入口会把查询串丢掉，只能这么传）', async (t) => {
+  const hit = []
+  const opts = []
+  const s = await bootServer({ mirror: stubMirror(hit, opts), mirrorEnabled: () => true })
+  t.after(s.close)
+
+  // 带斜杠的入口：这就是上游首页，查询串整个丢掉——但诊断开关必须留下。
+  await fetch(`${s.base}/mini/mirror/?token=TOKEN-123&diag=1`, { redirect: 'manual' })
+  assert.deepEqual(hit, ['/'], '入口照旧映射到上游首页')
+  assert.equal(opts[0]?.diag, true, '诊断开关要跟着进到镜像里')
+
+  // 不带就一定是关的——正常路径不许被诊断污染。
+  hit.length = 0; opts.length = 0
+  await fetch(`${s.base}/mini/mirror/?token=TOKEN-123`, { redirect: 'manual' })
+  assert.ok(!opts[0]?.diag, '不带 diag=1 时缺省是关的')
+
+  // 不带尾斜杠的入口会 302 一次：**诊断开关要跟着跳过去**，
+  // 否则用户拿到的链接少一个斜杠，真机跑一次就白跑了。
+  const bare = await fetch(`${s.base}/mini/mirror?token=TOKEN-123&diag=1`, { redirect: 'manual' })
+  assert.equal(bare.status, 302)
+  assert.equal(bare.headers.get('location'), '/mini/mirror/?diag=1',
+    '补斜杠时要把诊断开关带上')
+
+  const barePlain = await fetch(`${s.base}/mini/mirror?token=TOKEN-123`, { redirect: 'manual' })
+  assert.equal(barePlain.headers.get('location'), '/mini/mirror/',
+    '不开诊断时那条 302 还是老样子（不许为了带上开关而多写参数）')
+})
+
+test('路由门：我们自己的 diag 参数绝不跟着转发（上游不认它，多一个就 404）', async (t) => {
+  const hit = []
+  const s = await bootServer({ mirror: stubMirror(hit), mirrorEnabled: () => true })
+  t.after(s.close)
+
+  const res = await fetch(`${s.base}/mini/mirror/assets/index-abc.js?rev=1&diag=1&token=TOKEN-123`,
+    { redirect: 'manual' })
+  assert.equal(res.status, 200)
+  assert.deepEqual(hit, ['/assets/index-abc.js?rev=1'],
+    '挂在前缀下面的地址要摘掉 diag=1，其余查询串一个字符都不许动')
+})
+
+test('诊断端点：样本会追加落到 scratch/diag.log（真机上唯一能看到的东西）', async (t) => {
+  const { mkdtemp, readFile } = await import('node:fs/promises')
+  const os = await import('node:os')
+  const path = await import('node:path')
+
+  // 写到临时文件里：真机报上来的那一份不能被测试的样本搅浑
+  // （读日志的人分不清哪条是真机的，这一趟就白跑了）。
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'mini-diag-'))
+  const file = path.join(dir, 'diag.log')
+  process.env.DSH_MINI_DIAG_LOG = file
+  t.after(() => { delete process.env.DSH_MINI_DIAG_LOG })
+
+  const s = await bootServer({ mirror: stubMirror([]), mirrorEnabled: () => true })
+  t.after(s.close)
+
+  const post = (body, suffix = '?token=TOKEN-123') => fetch(`${s.base}/mini/api/mirror-diag${suffix}`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+  })
+
+  // 这道日志里写的会是界面上的东西，所以**要过同一道门**。
+  const no = await fetch(`${s.base}/mini/api/mirror-diag`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"phase":"x"}',
+  })
+  assert.equal(no.status, 401, '没令牌不许往上写')
+
+  const yes = await post({ session: 'abc', phase: 'baseline', label: { textLen: 2, rect: { w: 0 } } })
+  assert.equal(yes.status, 200)
+  assert.deepEqual(await yes.json(), { ok: true })
+
+  const text = await readFile(file, 'utf8')
+  assert.match(text, /baseline/, '样本要真的落到文件里')
+  assert.match(text, /textLen/, '内容要整份留着——诊断就是靠这些字段')
+
+  // **追加**，不是覆盖：一次打开要对照好几批（点击前 / 点击后），
+  // 只留最后一批等于把对照数据丢了一半。
+  await post({ session: 'abc', phase: 'after-click-3000' })
+  const both = await readFile(file, 'utf8')
+  assert.match(both, /baseline/, '前一批还在')
+  assert.match(both, /after-click-3000/, '后一批也写进去了')
+
+  // 默认落在插件根目录的 `scratch/diag.log`：**scratch/ 是 gitignore 的**，
+  // 日志不会入库，也不会混进发布件。
+  const src = await readFile(new URL('../lib/server.js', import.meta.url), 'utf8')
+  assert.match(src, /'\.\.\/scratch\/diag\.log'/, '默认路径要从 lib/ 往上一层到 scratch/diag.log')
+})
+
