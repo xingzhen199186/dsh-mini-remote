@@ -23,12 +23,22 @@ import { createMiniServer } from '../lib/server.js'
 /** 起一个服务器并等它真的在听，返回 { server, port, close }。 */
 async function listen(handler) {
   const server = createServer(handler)
+  // 升级过的连接**不算普通连接**，`server.close()` 会一直等它——不记下来就会挂住测试。
+  const upgraded = new Set()
+  server.on('upgrade', (req, socket) => {
+    upgraded.add(socket)
+    socket.on('close', () => upgraded.delete(socket))
+  })
   server.listen(0, '127.0.0.1')
   await once(server, 'listening')
   return {
     server,
     port: server.address().port,
-    close: () => new Promise((r) => server.close(r)),
+    close: () => new Promise((r) => {
+      for (const s of upgraded) s.destroy()
+      server.closeAllConnections?.()
+      server.close(r)
+    }),
   }
 }
 
@@ -99,6 +109,20 @@ async function fakeApp() {
     res.writeHead(200, { 'content-type': 'text/plain', 'x-upstream': 'yes' })
     res.end('上游内容 ' + url.pathname)
   })
+  // 同一个假上游也接 WebSocket 握手（真上游是同一个进程，当然两样都接）。
+  // 回一句最小可用的 101，然后把收到的字节原样弹回去——够验「握手转没转、字节通不通」了。
+  app.server.on('upgrade', (req, socket, head) => {
+    seen.push({
+      url: req.url,
+      host: req.headers.host,
+      cookie: req.headers.cookie ?? null,
+      upgrade: req.headers.upgrade ?? null,
+      method: req.method,
+    })
+    socket.write('HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n')
+    if (head && head.length) socket.write(head)
+    socket.on('data', (chunk) => socket.write(chunk))
+  })
   return {
     ...app,
     seen,
@@ -110,6 +134,12 @@ async function fakeApp() {
 /** 在镜像前面再套一个真服务器，这样可以用 fetch 打它（更接近真机）。 */
 async function front(mirror) {
   const s = await listen((req, res) => { mirror.handle(req, res) })
+  // 也要收 upgrade——真机上的路由口径见 lib/server.js（我们自己的地盘不转）。
+  s.server.on('upgrade', (req, socket, head) => {
+    const p = String(req.url ?? '/').split('?')[0]
+    if (p === '/mini' || p === '/mini/' || p.startsWith('/mini/')) { socket.destroy(); return }
+    mirror.upgrade(req, socket, head)
+  })
   return s
 }
 
@@ -340,6 +370,7 @@ async function bootServer({ mirror = null, mirrorEnabled = () => true } = {}) {
   })
   return {
     base: `http://127.0.0.1:${instance.port}`,
+    port: instance.port,
     close: () => instance.close(),
   }
 }
@@ -352,8 +383,57 @@ function stubMirror(log) {
       res.writeHead(200, { 'content-type': 'text/html' })
       res.end('<html>mirror</html>')
     },
+    upgrade: (req, socket) => {
+      log.push('upgrade ' + req.url)
+      socket.destroy()
+    },
   }
 }
+
+/**
+ * 升级请求的接线（2026-10-06 补）。
+ *
+ * WebSocket **不走 onRequest**——它是一条 `Upgrade` 握手，Node 单独发 `upgrade` 事件。
+ * 所以上面那些「路由门」的测试**一条都没覆盖到它**：写漏了那个监听，HTTP 全绿、
+ * 界面上却一直「正在重新连接」。这条专门盯接线本身，口径和 HTTP 那边一致：
+ * **我们自己的地盘不转、开关关着一个都不接。**
+ */
+test('路由门：升级请求也要接线，而且口径和 HTTP 一致', async (t) => {
+  const hit = []
+  const on = { value: true }
+  const s = await bootServer({ mirror: stubMirror(hit), mirrorEnabled: () => on.value })
+  t.after(s.close)
+
+  const { connect } = await import('node:net')
+  const attempt = async (pathAndQuery) => {
+    const sock = connect(s.port, '127.0.0.1')
+    await once(sock, 'connect')
+    sock.write(`GET ${pathAndQuery} HTTP/1.1\r\nHost: phone\r\nUpgrade: websocket\r\n`
+      + 'Connection: Upgrade\r\nSec-WebSocket-Key: abc\r\nSec-WebSocket-Version: 13\r\n\r\n')
+    await new Promise((r) => setTimeout(r, 250))
+    sock.destroy()
+  }
+
+  await attempt('/mini/mirror/api/remote.mux')
+  assert.deepEqual(hit, ['upgrade /api/remote.mux'],
+    '**这条才是真机上真正会发生的**：官方那条连接按页面的 base（`/mini/mirror/`）解析，'
+    + '请求落在 `/mini/mirror/api/remote.mux` 上——它必须被转，而且前缀要剥掉。'
+    + '（第一版把它当「我们自己的地盘」拒掉了，界面就永远在重连。）')
+
+  hit.length = 0
+  await attempt('/api/remote.mux?token=TOKEN-123')
+  assert.deepEqual(hit, ['upgrade /api/remote.mux'],
+    '绝对路径形态也要转：我们自己的 token 参数要摘掉，其余原样')
+
+  hit.length = 0
+  await attempt('/mini/something')
+  assert.deepEqual(hit, [], '我们自己的地盘（不在镜像前缀下面的）不转给上游')
+
+  hit.length = 0
+  on.value = false
+  await attempt('/mini/mirror/api/remote.mux')
+  assert.deepEqual(hit, [], '开关关着时一个都不接——不给一条绕过开关的通道')
+})
 
 test('路由门：开关关着时，那条代理路由**根本不存在**（不是前端藏起来）', async (t) => {
   const hit = []
@@ -472,4 +552,78 @@ test('路由门：开关是每请求现读的（开了立刻生效，不用重�
   on = false
   const back = await fetch(`${s.base}/api/x?token=TOKEN-123`, { redirect: 'manual' })
   assert.equal(back.status, 404, '关回去 → 立刻又不通')
+})
+
+/**
+ * WebSocket 转发（2026-10-06 真机报「一直正在重新连接」之后补的）。
+ *
+ * 手机和宿主之间那条**常驻连接**就是 WebSocket（官方客户端里写着
+ * `url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'`，路径 `/api/remote.mux`）。
+ * 它建不起来，界面上会冒出一堆**看起来不相干的显示毛病**：插件那一列只剩图标没有文字、
+ * 权限那栏写「permission catalog has no active Host connection」。
+ *
+ * 这里不用真的 WebSocket 库——握手就是一段 HTTP 文本，握手之后是裸字节，
+ * **用裸 TCP 两头夹着测，反而把「我们到底原样转了什么」看得更清楚。**
+ */
+async function fakeWsUpstream() {
+  return fakeApp()
+}
+/** 拿裸 TCP 当客户端：发一段握手，等回应，再试一次往返。 */
+async function wsProbe(port, pathAndQuery) {
+  const { connect } = await import('node:net')
+  const sock = connect(port, '127.0.0.1')
+  await once(sock, 'connect')
+  sock.write(`GET ${pathAndQuery} HTTP/1.1\r\nHost: phone\r\nUpgrade: websocket\r\n`
+    + 'Connection: Upgrade\r\nSec-WebSocket-Key: abc\r\nSec-WebSocket-Version: 13\r\n\r\n')
+  let buf = ''
+  sock.on('data', (c) => { buf += c.toString('utf8') })
+  // 等握手回来
+  for (let i = 0; i < 60 && !buf.includes('\r\n\r\n'); i += 1) await new Promise((r) => setTimeout(r, 25))
+  const handshake = buf
+  // 握手之后是裸字节，验一次往返
+  sock.write('PING-PAYLOAD')
+  for (let i = 0; i < 60 && !buf.includes('PING-PAYLOAD'); i += 1) await new Promise((r) => setTimeout(r, 25))
+  const echoed = buf.includes('PING-PAYLOAD')
+  sock.destroy()
+  return { handshake, echoed }
+}
+
+test('镜像：WebSocket 也要转（不然界面一直「正在重新连接」）', async (t) => {
+  const app = await fakeApp()
+  const mirror = createMirror({
+    upstream: `http://127.0.0.1:${app.port}`,
+    tokenUrl: () => `http://127.0.0.1:${app.port}/?token=LAUNCH-TOKEN`,
+  })
+  const f = await front(mirror)
+  t.after(async () => { await f.close(); await app.close() })
+
+  const r = await wsProbe(f.port, '/remote/api/remote.mux?x=1')
+  assert.match(r.handshake, /101 Switching Protocols/, '握手要真的通（101）')
+  assert.ok(r.echoed, '握手之后要能双向裸转字节——只转握手不算转')
+
+  const hit = app.seen.filter((s) => s.upgrade).pop()
+  assert.ok(hit, '上游应当收到这次握手')
+  assert.equal(hit.url, '/api/remote.mux?x=1',
+    '`/remote/api/remote.mux` → `/api/remote.mux`：那条门控通道的前缀同样要剥掉')
+  assert.equal(hit.host, `127.0.0.1:${app.port}`,
+    'Host 照样固定成上游自己（官方 cookie 按 Host 签）')
+  assert.equal(hit.upgrade, 'websocket',
+    '**`Upgrade` 头必须原样留着**——它是握手本身，不是「逐跳杂音」；'
+    + '按普通转发那样摘掉，握手就废了')
+  assert.match(String(hit.cookie), /dsh-auth-/,
+    '握手时也要替手机带上官方 cookie；不带的话上游会拒掉这条连接')
+})
+
+test('镜像：我们自己的地盘不转 WebSocket（`/mini/...` 不是上游的）', async (t) => {
+  const app = await fakeApp()
+  const mirror = createMirror({
+    upstream: `http://127.0.0.1:${app.port}`,
+    tokenUrl: () => `http://127.0.0.1:${app.port}/?token=LAUNCH-TOKEN`,
+  })
+  const f = await front(mirror)
+  t.after(async () => { await f.close(); await app.close() })
+
+  const r = await wsProbe(f.port, '/mini/something')
+  assert.ok(!/101/.test(r.handshake), '我们自己的路径不该被转给上游')
+  assert.equal(app.seen.filter((s) => s.upgrade).length, 0, '上游不该收到它')
 })
