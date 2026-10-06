@@ -350,6 +350,33 @@ test('镜像：上游地址解析不出来时说自己不可用，而且如实�
   assert.match(await res.text(), /找不到可用的电脑端界面地址/)
 })
 
+/**
+ * **宿主刚起来那一小段里要等，不能立刻回 502。**
+ *
+ * 2026-10-06 真机（用户报「又一直在转进不去」）：重启完立刻打开镜像，我们问不到界面
+ * 地址就回 502；而那个界面外壳**拿到 502 不会重试**，于是永远卡在「Loading plugins…」，
+ * 等宿主起来了也不会自己好——必须手动重开一次。这就是「重开一下就好了」的来历。
+ */
+test('镜像：上游还没就绪时要等一等，不要立刻回 502', async (t) => {
+  const app = await fakeApp()
+  let tries = 0
+  const mirror = createMirror({
+    // 头几次问不到（宿主还在起），第四次才有——真机上就是这个形状。
+    upstream: () => {
+      tries += 1
+      return tries < 4 ? null : `http://127.0.0.1:${app.port}`
+    },
+    tokenUrl: () => `http://127.0.0.1:${app.port}/?token=LAUNCH-TOKEN`,
+  })
+  const f = await front(mirror)
+  t.after(async () => { await f.close(); await app.close() })
+
+  const res = await fetch(`http://127.0.0.1:${f.port}/api/whatever`)
+  assert.equal(res.status, 200,
+    '要等上游就绪再转发。立刻回 502 的话，界面外壳不会重试，就永远卡在「Loading plugins…」')
+  assert.ok(tries >= 4, '确实等了几轮才拿到地址')
+})
+
 test('镜像：拿不到「带令牌的地址」时如实报错，不假装能转发', async (t) => {
   const app = await fakeApp()
   const mirror = createMirror({
