@@ -524,6 +524,45 @@ test('镜像：导航名字要「按内容取宽 + 一定可见」（真根因�
 })
 
 /**
+ * **内容区的高度链要接上：`_content` 必须有 `min-height:0`**（2026-10-07 真面板量出来的）。
+ *
+ * 用户报「点击图标出现的页面没有滚动条，也没法滚动往下拉」。第一眼像滚动坏了，
+ * **其实是高度链断在 `_content` 这一层**：官方只写了
+ * `.xxx_content{flex:1 1 0%; min-width:0}`，**没有 `min-height:0`**。
+ * 桌面横排时它恰好等于面板高（1500px 视口实测 panel 800 / content 800），看不出问题；
+ * 我们一改竖排，导航在上面占 55px，这一层的「自动最小高度」（`min-height:auto` = 内容高）
+ * 就顶穿了面板——实测 panel 高 796（`overflow:hidden`）、content 高 **1425**、
+ * options 高 **1371**，而 `_options` 的 scrollHeight 也是 1371，**能滚多少 = 0**。
+ *
+ * 补 `min-height:0` 之后（同一次实测）content 1425 → **741**、options 1371 → **687**、
+ * **能滚 684px**，跟 `_options` 本来就写着的 `min-height:0` 对上了。
+ *
+ * 所以这条测试守的是两件事：**这一格要在**，而且**要钉在 `_content` 上**——
+ * 写错成 `_options` 是没用的（它本来就有），写漏了用户就滚不动。
+ */
+test('镜像：设置面板的内容区要有 `min-height:0`（不然滚不动，只有 0px 可滚）', async (t) => {
+  const app = await fakeApp()
+  const mirror = createMirror({
+    upstream: `http://127.0.0.1:${app.port}`,
+    tokenUrl: () => `http://127.0.0.1:${app.port}/?token=LAUNCH-TOKEN`,
+  })
+  const f = await front(mirror)
+  t.after(async () => { await f.close(); await app.close() })
+
+  const body = await (await fetch(`http://127.0.0.1:${f.port}/blocked`)).text()
+  // 面板竖排（导航在上、内容在下）仍然要在——这是「内容区拿到整屏高度」的前提
+  assert.match(body, /\[data-shortcut-modal="settings"\]\{flex-direction:column !important\}/,
+    '面板还是竖排：导航在上、内容在下')
+  // 这一条是本轮新加的：竖排之后 `_content` 必须能被压到面板剩下的高度，否则滚不动
+  assert.match(body, /\[data-shortcut-modal="settings"\] \[class\*="_content"\]\{min-height:0 !important\}/,
+    '内容区要 `min-height:0 !important`——官方的 `_content` 漏了这一格，竖排之后它会被内容顶穿，'
+    + '`_options` 因此拿到和内容一样高的高度，可滚距离变成 0')
+  // 我们**没有**去动官方那层真正滚动的容器：它的 overflow-y:auto 与 min-height:0 都照旧
+  assert.doesNotMatch(body, /\[class\*="_options"\]\{[^}]*overflow-y:hidden/,
+    '真正滚动的那一层（`_options`）不能被我们改成 hidden')
+})
+
+/**
  * **压缩照旧转发**（2026-10-06）。
  *
  * 第一版把 `accept-encoding` 摘掉了，理由是「HTML 保持明文好注入」——**但那只对 HTML
