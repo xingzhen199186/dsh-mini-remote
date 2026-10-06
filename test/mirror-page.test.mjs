@@ -236,6 +236,24 @@ test('进阶设置：点「打开」只显示那一层并设地址——没有�
   assert.equal(h.els.mirrorFrame.src, '/mini/mirror/?token=TK-123', '地址设在里面的框上')
 })
 
+/**
+ * **顺序：先显示那一层，再给框设地址。**
+ *
+ * 2026-10-06 真机报「图标旁边的文字点一下才出来」。查出：**直接打开镜像没有这个毛病**，
+ * 差别就在这两行的先后——反过来写的话，那个界面是**在 `display:none` 里开始加载的**，
+ * 在不可见的上下文里渲染出来的东西要等用户点一下触发重绘才画全。
+ */
+test('进阶设置：要先显示那一层、再给框设地址（反了就是「点一下才出字」）', () => {
+  const A = "$('mirrorView').hidden = false;"
+  const B = "$('mirrorFrame').src = mirrorUrl();"
+  const a = html.indexOf(A)
+  const b = html.indexOf(B)
+  assert.ok(a > 0 && b > 0, '这两句都要在')
+  assert.ok(a < b,
+    '先显示、再设地址。反过来的话界面在 display:none 里开始加载，'
+    + '渲染出来的东西要等用户点一下才画全（真机上就是「点一下才出字」）')
+})
+
 test('进阶设置：点「打开」要先给一句提示（它是诊断，不是装饰）', () => {
   const h = mirrorOpenHarness()
   h.mirror.enabled = true

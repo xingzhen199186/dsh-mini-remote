@@ -278,6 +278,33 @@ test('镜像：那个「你是主机」的标记要插在最前面（启动项�
   assert.match(noHead, /^<script>globalThis\.__DSH_TRANSPORT__/, '没有 head 就插在最前面')
 })
 
+/**
+ * 手机上那两条布局适配（2026-10-06，用户选定「只做布局」）。
+ *
+ * 都是**实测出来的**：
+ * · 侧栏是 `z-index:1100`，设置面板那层浮层是 `1000`——**侧栏高一百**，窄屏下整屏盖住
+ *   面板，点「设置」什么都看不见（真机复现过）。降到 20 就够：它是定位元素，
+ *   比正文（非定位）仍然画在上面，所以侧栏照常能用。
+ * · 底部要让开手势条。
+ */
+test('镜像：手机布局适配（侧栏压在设置面板下面 + 底部安全区）', async (t) => {
+  const app = await fakeApp()
+  const mirror = createMirror({
+    upstream: `http://127.0.0.1:${app.port}`,
+    tokenUrl: () => `http://127.0.0.1:${app.port}/?token=LAUNCH-TOKEN`,
+  })
+  const f = await front(mirror)
+  t.after(async () => { await f.close(); await app.close() })
+
+  const body = await (await fetch(`http://127.0.0.1:${f.port}/blocked`)).text()
+  assert.match(body, /\[class\*="_sidebarCol"\]\{z-index:20/,
+    '侧栏层级要压到设置面板（1000）下面——不然窄屏下点「设置」什么都看不见')
+  assert.match(body, /safe-area-inset-bottom/, '底部要让开手势条（顶部那条由我们自己的横条管）')
+  assert.ok(body.includes('_sidebarCol'),
+    '**按后缀命中**：它的类名是「哈希_名字」，哈希每次构建都变，只有后半段稳')
+  assert.ok(body.indexOf('mini-mirror-adapt') < body.indexOf('</head>'), '这段样式要在 head 里')
+})
+
 test('镜像：不是 HTML 的一律不碰（那条常驻连接绝不能因为注入而被缓冲）', async (t) => {
   const app = await fakeApp()
   const mirror = createMirror({
