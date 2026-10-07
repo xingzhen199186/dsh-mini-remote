@@ -315,6 +315,26 @@ test('进阶设置：display:flex 的那一层必须补 [hidden]（作者样式�
     + '否则 hidden 压不住它（和 .sheet .version[hidden] 同一个坑）')
 })
 
+/**
+ * 框底那条让位**必须写在元素所在的这份文档里**（2026-10-07 修的）。
+ *
+ * 它原先写在 lib/mirror.js 的 `ADAPT_CSS` 里，而那段样式是注进**被镜像的那份 HTML**
+ * （框里那份文档）的；`#mirrorFrame` 是本文件（外层）的元素——两个文档，
+ * 那条规则一个像素都没生效。活服务上量过：框自己的 `padding-bottom` 是 `0px`，
+ * 被镜像的那份 HTML 里倒躺着一份官方界面根本没有的 `#mirrorFrame` 规则。
+ *
+ * 这条测试钉的是「规则在哪份文档里」，不是「规则写没写」——写错地方的那种坏法，
+ * 光看代码是看不出来的。
+ */
+test('进阶设置：框的底部让位写在外层页上（它以前写错了文档）', () => {
+  const rule = html.match(/#mirrorFrame\s*\{[^}]*\}/)
+  assert.ok(rule, '找不到 #mirrorFrame 的样式')
+  assert.match(rule[0], /padding-bottom:\s*env\(safe-area-inset-bottom,\s*0px\)/,
+    '框底要按机型让开手势条：这条规则只能落在**元素所在的这份文档**里')
+  assert.match(rule[0], /box-sizing:\s*border-box/,
+    '要让开的那一条从框自己的高度里扣，不是把框整体顶出去')
+})
+
 test('进阶设置：设置抽屉每次打开都要重读一次（电脑端能把它关掉）', () => {
   const A = "$('btnSettings').addEventListener('click'"
   const B = "$('btnClose').addEventListener('click'"

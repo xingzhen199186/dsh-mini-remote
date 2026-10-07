@@ -301,7 +301,7 @@ test('镜像：那个「你是主机」的标记要插在最前面（启动项�
  *   盖住侧栏，用户看到侧栏发暗、**点击落在遮罩上**——遮罩一收侧栏就消失，设置页也进不去。
  *   **所以要把面板抬上去（1200），不能把侧栏压下去。**
  */
-test('镜像：手机布局适配（把设置面板抬到侧栏上面 + 底部安全区）', async (t) => {
+test('镜像：手机布局适配（把设置面板抬到侧栏上面，而且只抬那一层）', async (t) => {
   const app = await fakeApp()
   const mirror = createMirror({
     upstream: `http://127.0.0.1:${app.port}`,
@@ -311,12 +311,27 @@ test('镜像：手机布局适配（把设置面板抬到侧栏上面 + 底部�
   t.after(async () => { await f.close(); await app.close() })
 
   const body = await (await fetch(`http://127.0.0.1:${f.port}/blocked`)).text()
-  assert.match(body, /\[class\*="_overlay"\]\{z-index:1200/,
-    '要把设置面板那层浮层抬到侧栏（1100）上面')
+  // 抬起来的**只许是设置面板那一层**（2026-10-07 收窄）：官方结构是
+  // `wCInkW_overlay > wCInkW_mask + wCInkW_panel[data-shortcut-modal=settings]`，
+  // 用 `:has(> …)` 钉住它。**新旧两条不许都在**——都留着等于没收窄。
+  assert.match(body, /\[class\*="_overlay"\]:has\(> \[data-shortcut-modal="settings"\]\)\{z-index:1200/,
+    '要把设置面板那层浮层抬到侧栏（1100）上面，而且只抬这一层')
+  assert.ok(!/\[class\*="_overlay"\]\{z-index:1200/.test(body),
+    '一把抓的旧写法必须删掉：它连官方的浮层容器（原生 z-index:20）和账号那一层'
+    + '（z-index:1001）一起抬到 1200，实测过')
   assert.ok(!/_sidebarCol"\]\{z-index/.test(body),
     '**不许把侧栏压下去**——第一版就是这么写的：遮罩反过来盖住侧栏、点击落在遮罩上，'
     + '真机上「一点侧栏就消失、还进不去设置」')
-  assert.match(body, /safe-area-inset-bottom/, '底部要让开手势条（顶部那条由我们自己的横条管）')
+  // 底部安全区那一条**不在这一页里**（2026-10-07 搬去外层页）：`#mirrorFrame` 是外层页的
+  // 元素，注进被镜像文档的规则一个像素都管不着它——所以这里连提都不该提。
+  assert.ok(!/mirrorFrame/.test(body),
+    '`#mirrorFrame` 的样式要写在外层页 lib/page.html 里，不许再注进被镜像的这份文档')
+  // 面板高度也不许按 `dvh` 收（2026-10-07 量过之后没写）：镜像页跑在 iframe 里，
+  // **嵌套视口的 dvh 等于框自己的高**（无头 Edge 实测：400px 的框里 vh=dvh=svh=lvh=400，
+  // 1200px 的框里四个都是 1200），到这儿它退化成 `100vh - 32px`，
+  // 而官方面板本来就比它矮 16px（`min(800px, calc(100vh - 48px))`）——永远轮不到生效。
+  assert.ok(!/dvh/.test(body),
+    '镜像页里不许用 dvh 收高度：iframe 里的 dvh 看不见地址栏，这条会是一条死规则')
   assert.ok(body.indexOf('mini-mirror-adapt') < body.indexOf('</head>'), '这段样式要在 head 里')
 })
 

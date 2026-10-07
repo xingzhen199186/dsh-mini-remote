@@ -1240,6 +1240,15 @@
      （和 `.sheet .version[hidden]` 同一个道理，见上面那段注释）。 */
   #mirrorView {
     position: fixed; inset: 0; z-index: 80;
+    /* 高度跟「看得见的那块」走，而不是跟「地址栏收起时的那块」走（2026-10-07）。
+       `inset:0` 的高度是按**大视口**算的（地址栏收起时的高度），而手机地址栏拉出来之后，
+       真正看得见的只有下面那一截——于是框比可视区高，里面那份界面在框里**垂直居中**，
+       底边就落到屏幕外面去了（用户报过「面板底边被切掉」）。
+       `100dvh` 跟可视区走。**这条是「从参考插件学来、但落点要换」的典型**：它给官方面板补
+       `max-height:calc(100dvh - 32px)`，可那个 `dvh` 是**框里面**的，框里的可视区单位等于
+       框自己的高，等于白写；要治这个病只能写在**外层**这一页——这里 `dvh` 才是真的。
+       老浏览器不认 `dvh` 会丢掉这一条，退回现在的行为，不会崩。 */
+    height: 100dvh;
     display: flex; flex-direction: column;
     background: var(--bg);
   }
@@ -1254,6 +1263,13 @@
   .mv-title { flex: 1 1 auto; font-size: 14px; color: var(--fg); }
   #mirrorFrame {
     flex: 1 1 auto; width: 100%; border: 0; background: var(--bg);
+    /* 底部让开手势条（2026-10-07 从「被镜像的那份页面」搬回来的）。
+       这条原先是写在 lib/mirror.js 的 ADAPT_CSS 里，而那段样式是**注进框里那份文档**的
+       ——`#mirrorFrame` 是本文件（外层）的元素，两个不同的文档，所以那条规则一个像素
+       都没生效：活服务上量过，框的 `padding-bottom` 是 0px，被镜像的那份 HTML 里反倒
+       躺着一份没人用的 `#mirrorFrame` 规则（官方界面里根本没有这个 id）。
+       顶部那条不归这里管：外层横条 .mv-bar 自己写了 padding-top。 */
+    padding-bottom: env(safe-area-inset-bottom, 0px); box-sizing: border-box;
   }
 
   /* ---------- 统一操作面板（输入框旁边那一个入口点开的东西） ----------
