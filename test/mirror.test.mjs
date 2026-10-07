@@ -912,6 +912,89 @@ test('镜像：侧栏那一列要能纵向滚（不然最底下的「设置」�
 })
 
 /**
+ * **侧栏中间那块 `_regionArea` 不许被压扁——「工作区 / 历史会话」要整条排出来**（2026-10-08 量的）。
+ *
+ * 用户报：「电脑端界面的导航栏，现在看不到历史会话了」，截图里「记忆系统」下面是一整块空白。
+ * 活页面上量出来的实况（390×660 外层视口、框内 **599**、侧栏展开）：
+ *
+ *   · `_regionArea` 是那一列里**唯一**的 `flex:1 1 0%`（logoRow 60 / newSession 38 /
+ *     panelList 156 / footArea 412 都是 `flex:0 0 auto`），列里一没富余它先缩到 0 →
+ *     实测 rect `[8,284,272,0]`、`scrollHeight 58 / clientHeight 0`、`overflow:hidden`；
+ *   · 它里面装的是「工作区」那一整节，**一样没少**：`_sectionHeader` 36px（「工作区」标签 +
+ *     搜索按钮 + 两个图标按钮）＋ 会话列表本体 `_list`（`overflow-y:auto`、`scrollHeight 1722`、
+ *     7 条 `sessionRow`（每条 32px）＋「展开其余 2 个会话」＋渐隐条）——只是整块高 0 被裁干净；
+ *   · 于是**同一份内容被裁了两次**：外面那层高 0、里面那个列表窗口只有 16px，
+ *     实测「列视口内 **0 条**会话」。
+ *
+ * **用户点名要的是「不参与压缩」这一路**（`flex:0 0 auto`）：整条列表铺开、列表不再自己滚、
+ * 往下滑交给 ⑱ 已经放开的整条侧栏。实测逐层：`_regionArea` 0 → **1764**、
+ * `_listArea` 0 → **1722**、`_treeBody` 0 → **1722**、`_list` 窗口 16 → **1722**
+ * （＝它自己的 `scrollHeight`，**能滚量 0**）；整条列 `scrollHeight 696 → 2460`、
+ * 一眼看得见 **0 → 6 条**会话（共 7 条）。代价：够着最底下的「设置」要滚 **1861px**
+ * （改前 97、甲 297）——用户已知并选它。
+ *
+ * 候选写法量到的数字**一字不差**（`regionArea` / `_list` 窗口 / 列能滚）：
+ * `flex:0 0 auto`（取它）、再加 `min-height:0`、再加 `height:auto`、以及 `flex:1 0 auto`
+ * 全都是 1764 / 1722 / 1861——所以取最短的那条。
+ *
+ * 这条测试守五件事：**规则是「不参与压缩」**、**甲那条下限一条都不留**（两套写法打架最难查）、
+ * **只动这一层**（实测再动 `_listArea`、或关掉列表自己的 `overflow-y`，四个数字一个都没变）、
+ * **钉在窄屏那个媒体查询里**（宽屏下官方布局本来就是对的，不该动）、
+ * **按后缀命中类名**（`_regionArea` 的前半段哈希每次构建都变）。
+ */
+test('镜像：侧栏中间那块 `_regionArea` 不参与压缩（「工作区/历史会话」要整条排出来）', async (t) => {
+  const app = await fakeApp()
+  const mirror = createMirror({
+    upstream: `http://127.0.0.1:${app.port}`,
+    tokenUrl: () => `http://127.0.0.1:${app.port}/?token=LAUNCH-TOKEN`,
+  })
+  const f = await front(mirror)
+  t.after(async () => { await f.close(); await app.close() })
+
+  const body = await (await fetch(`http://127.0.0.1:${f.port}/blocked`)).text()
+  assert.match(body, /\[class\*="_regionArea"\]\{flex:0 0 auto !important\}/,
+    '中间那块要「不参与压缩」：它是那一列里唯一的 flex:1 1 0%，列里没富余就先缩到 0，'
+    + '而「工作区 / 历史会话」整节就装在它里面')
+
+  // 只许有一条：多一条就是多改了别的东西，得有人解释。
+  const rules = [...body.matchAll(/\[class\*="_regionArea"\]\{[^}]*\}/g)].map((m) => m[0])
+  assert.equal(rules.length, 1, '动 `_regionArea` 的规则只许有一条')
+  assert.equal(rules[0], '[class*="_regionArea"]{flex:0 0 auto !important}',
+    '这一条只写「不参与压缩」——多写的每一句都要有实测数字撑着')
+
+  // **甲那条下限的残留一条都不许有**：它只让这一层「露一点头」（列表窗口 158、
+  // 能滚量 1564、只看得到 3 条），和「整条排出来」是两条路，两条一起写就是两套写法打架。
+  assert.doesNotMatch(body, /\[class\*="_regionArea"\]\{[^}]*min-height/,
+    '不许留 `min-height`（甲那条：列表照样自己滚、只看得到 3 条）')
+  assert.doesNotMatch(body, /\[class\*="_regionArea"\]\{[^}]*height:/,
+    '不许写固定 `height`：这一层的高度该由内容决定')
+
+  // **只动这一层**：实测再给 `_listArea` 加 `flex:0 0 auto`、或把 `_list` 自己的
+  // `overflow-y` 关掉，「regionArea 1764 / 列表 1722 / 列 2460 / 设置可点」四个数一个都没变。
+  assert.doesNotMatch(body, /_listArea/, '不许动 `_listArea`（实测是死规则）')
+  assert.doesNotMatch(body, /_treeBody/, '不许动 `_treeBody`（实测是死规则）')
+
+  // **钉在窄屏那个媒体查询里**：宽屏窗口官方布局本来就是对的（regionArea 有富余自然就长），
+  // 我们这条改动只该在手机那一档生效。
+  const cssAt = body.indexOf('<style id="mini-mirror-adapt">')
+  const css = body.slice(cssAt, body.indexOf('</style>', cssAt))
+  const mqAt = css.indexOf('@media (max-width: 640px){')
+  assert.ok(mqAt >= 0, '窄屏那段媒体查询要在')
+  assert.ok(css.indexOf('[class*="_regionArea"]') > mqAt,
+    '这一条要写在 `@media (max-width:640px)` 里面（宽屏不该被它动）')
+
+  // 不许按类名哈希点它：`_2H3hWW_regionArea` 那半段每次构建都变，只有 `_regionArea` 稳。
+  assert.doesNotMatch(css, /\._2H3hWW_regionArea/,
+    '不许按类名哈希点这一层——要用后缀 `[class*="_regionArea"]`')
+
+  // 同一份注入里，前面几轮的战果一个都不许掉（这条改动和它们不相干，钉在一起防回退）。
+  assert.match(body, /\[data-pane="sidebar"\]\{overflow-y:auto !important;overflow-x:hidden !important\}/,
+    '侧栏那一列的纵向滚动还在（够不着「设置」那一轮的战果）')
+  assert.match(body, /\[data-shortcut-modal="settings"\] \[class\*="_content"\]\{min-height:0 !important\}/,
+    '设置面板内容区的 min-height:0 还在')
+})
+
+/**
  * **压缩照旧转发**（2026-10-06）。
  *
  * 第一版把 `accept-encoding` 摘掉了，理由是「HTML 保持明文好注入」——**但那只对 HTML
