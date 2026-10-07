@@ -733,7 +733,7 @@ test('镜像：插件市场那块列表窗口——撑高、收留白、只藏�
   // 凡是我们写的隐藏规则，选择器里**不许**出现这些有用的东西。
   const hides = [...body.matchAll(/[^{}]*\{[^}]*display:none !important[^}]*\}/g)].map((m) => m[0])
   const useful = ['_banner', '_tabs', '_tab\\b', '_search', '_cats', '_button', '_pager',
-    '_repoLink', '_version']
+    '_exportLogBtn', '_repoLink', '_version']
   // `_repoLink` / `_version` 是**该藏的**（重复信息），单独拿出来对照，剩下的都不许出现。
   const mustKeep = useful.filter((k) => k !== '_repoLink' && k !== '_version')
   for (const rule of hides) {
@@ -746,6 +746,73 @@ test('镜像：插件市场那块列表窗口——撑高、收留白、只藏�
   // 那三样重复信息**确实**被藏了（跟上面那条反向断言配成一对）。
   assert.ok(hides.some((r) => r.includes('_repoLink') && r.includes('_version')),
     '仓库名和版本号这两样重复信息要真的被藏掉')
+})
+
+/**
+ * **「插件市场」那一格的社区介绍只藏前两样、「导出日志」留着**（2026-10-07 用户挑的）。
+ *
+ * 真面板上把那一格拆开量过（390×844，`[data-dsh-market-root] > _head > _sub`，整格 **56px**）：
+ *   ① 介绍文字 `span`——**一个 class 都没有**，188×36（两行 18px）——**整格的高度是它撑起来的**；
+ *   ② 「申请收录插件 ↗」`a._submitLink`——188×18，**给插件作者用的入口**；
+ *   ③ `span._grow`——空占位，这一档宽度下它自己就是 `display:none`，不占高；
+ *   ④ 「导出日志」`button._exportLogBtn`——90×28，**排查问题时用的按钮**。
+ *
+ * 用户原话是「藏掉那格社区介绍」——**没有点名导出日志**。这里**主动偏离**成「只藏前两样」：
+ * 导出日志是这一节里唯一一个能拿到诊断信息的按钮，把它一起藏掉等于
+ * **悄悄拿掉一个诊断工具**，比藏装饰性文字严重。
+ * 代价量清楚了（同一块面板）：只藏前两样 **列表窗口 498 → 526px**、看卡片 378 → 406px；
+ * 整格都藏 498 → 560px、看卡片 378 → 440px——**差的 34px = 按钮 28px + 头部那道 6px 间隔**。
+ *
+ * 这条测试守两件事：**该藏的真的藏了**、**「导出日志」一件都没被写进隐藏名单**。
+ */
+test('镜像：插件市场的社区介绍只藏前两样，导出日志留着', async (t) => {
+  const app = await fakeApp()
+  const mirror = createMirror({
+    upstream: `http://127.0.0.1:${app.port}`,
+    tokenUrl: () => `http://127.0.0.1:${app.port}/?token=LAUNCH-TOKEN`,
+  })
+  const f = await front(mirror)
+  t.after(async () => { await f.close(); await app.close() })
+
+  const body = await (await fetch(`http://127.0.0.1:${f.port}/blocked`)).text()
+  const P = '\\[data-shortcut-modal="settings"\\]'
+
+  // ⑯ 规则本体：藏「这一格里没有 class 的介绍文字」+「申请收录那个链接」，
+  //    两件都按「市场根 > `_head` > `_sub`」的**直接子元素**链来点。
+  assert.match(body,
+    new RegExp(`${P} \\[data-dsh-market-root\\] > \\[class\\*="_head"\\] > \\[class\\*="_sub"\\]`
+      + ':has\\(> \\[class\\*="_submitLink"\\]\\) > span:first-child,'
+      + `${P} \\[data-dsh-market-root\\] > \\[class\\*="_head"\\] > \\[class\\*="_sub"\\]`
+      + ' > \\[class\\*="_submitLink"\\]\\{display:none !important\\}'),
+    '社区介绍那两件（介绍文字 + 申请收录插件）要藏掉：介绍文字 36px 两行撑起整格 56px，'
+    + '申请收录插件是给作者用的入口——两件对使用者都没有用')
+
+  // 这一条**必须锁在市场根里**（`_sub` 这种子串在别的插件里一样可能出现），
+  // 而且**只许有这一条**（多一条就是多藏了一样东西，得有人解释）。
+  const hides = [...body.matchAll(/[^{}]*\{[^}]*display:none !important[^}]*\}/g)].map((m) => m[0])
+  const subHides = hides.filter((r) => r.includes('_sub'))
+  assert.equal(subHides.length, 1, '藏 `_sub` 那一格的规则只许有一条')
+  assert.ok(subHides[0].includes('[data-dsh-market-root]'),
+    '这一条必须带 [data-dsh-market-root] 限定——不带就会碰别的插件、别的节')
+  assert.ok(subHides[0].includes('> [class*="_head"]'),
+    '`_head` 必须按「市场根的直接子元素」点：`[class*="_head"]` 还会命中官方面板那条 `_header`（⑫ 栽过）')
+  assert.ok(subHides[0].includes(':has(> [class*="_submitLink"])'),
+    '要用 `:has(> _submitLink)` 要求「这一格确实是我们量过的形状」——'
+    + '将来市场改结构时**失配**（什么都不藏）比**误伤**（藏了别人）好')
+
+  // **反向断言（这条测试的正题）**：「导出日志」不许出现在**任何**隐藏规则里。
+  // 真面板上量到它是 90×28 的按钮，就在这一格里，是排查故障时唯一的自救入口。
+  for (const rule of hides) {
+    assert.ok(!rule.includes('_exportLogBtn'),
+      '隐藏规则里不许出现 _exportLogBtn——它是排查问题时要用的按钮，'
+      + `用户只说藏「社区介绍」，没有点名它。规则：${rule.slice(0, 200)}`)
+  }
+  // 而且我们**没有**去藏整格 `_sub`（那是省 62px 的那一版，代价是那个按钮）。
+  // `display:none` 的规则里不许出现不带子元素限定、直接点 `_sub` 本身的写法。
+  for (const rule of subHides) {
+    assert.ok(!/\[class\*="_sub"\]\s*(?:,|\{)/.test(rule.replace(/:has\([^)]*\)/g, '')),
+      '不许直接藏整格 `_sub`——那会把「导出日志」一起藏掉')
+  }
 })
 
 /**
