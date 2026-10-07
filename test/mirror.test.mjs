@@ -731,9 +731,11 @@ test('镜像：插件市场那块列表窗口——撑高、收留白、只藏�
 
   // **「别把有用的东西藏掉」那一条，用反向断言把住**：
   // 凡是我们写的隐藏规则，选择器里**不许**出现这些有用的东西。
+  // `_close`（面板的 ✕）在这份名单里是**硬要求**：它是用户唯一能退出面板的出口，
+  // 任何一条隐藏规则都不许点到它。
   const hides = [...body.matchAll(/[^{}]*\{[^}]*display:none !important[^}]*\}/g)].map((m) => m[0])
   const useful = ['_banner', '_tabs', '_tab\\b', '_search', '_cats', '_button', '_pager',
-    '_exportLogBtn', '_repoLink', '_version']
+    '_close', '_repoLink', '_version']
   // `_repoLink` / `_version` 是**该藏的**（重复信息），单独拿出来对照，剩下的都不许出现。
   const mustKeep = useful.filter((k) => k !== '_repoLink' && k !== '_version')
   for (const rule of hides) {
@@ -749,7 +751,7 @@ test('镜像：插件市场那块列表窗口——撑高、收留白、只藏�
 })
 
 /**
- * **「插件市场」那一格的社区介绍只藏前两样、「导出日志」留着**（2026-10-07 用户挑的）。
+ * **「插件市场」那一格的社区介绍——整格藏掉（含「导出日志」）**（2026-10-07 用户第二次点名）。
  *
  * 真面板上把那一格拆开量过（390×844，`[data-dsh-market-root] > _head > _sub`，整格 **56px**）：
  *   ① 介绍文字 `span`——**一个 class 都没有**，188×36（两行 18px）——**整格的高度是它撑起来的**；
@@ -757,15 +759,16 @@ test('镜像：插件市场那块列表窗口——撑高、收留白、只藏�
  *   ③ `span._grow`——空占位，这一档宽度下它自己就是 `display:none`，不占高；
  *   ④ 「导出日志」`button._exportLogBtn`——90×28，**排查问题时用的按钮**。
  *
- * 用户原话是「藏掉那格社区介绍」——**没有点名导出日志**。这里**主动偏离**成「只藏前两样」：
- * 导出日志是这一节里唯一一个能拿到诊断信息的按钮，把它一起藏掉等于
- * **悄悄拿掉一个诊断工具**，比藏装饰性文字严重。
- * 代价量清楚了（同一块面板）：只藏前两样 **列表窗口 498 → 526px**、看卡片 378 → 406px；
- * 整格都藏 498 → 560px、看卡片 378 → 440px——**差的 34px = 按钮 28px + 头部那道 6px 间隔**。
+ * 上一轮用户说的是「藏掉那格社区介绍」、**没有点名导出日志**，所以当时**主动偏离**成
+ * 「只藏前两样、把导出日志留着」（它是这一节里唯一能拿到诊断信息的按钮）。
+ * **这一轮用户点名「导出日志也可以隐藏」**，于是四件一起走、**整格藏**。
+ * 代价量清楚了（同一块面板）：上一轮只藏前两件 **列表窗口 526px**、看卡片 406px；
+ * 整格藏 **列表窗口 560px**、看卡片 440px——**+34 = 按钮 28px + `_head` 那道 6px 间隔**。
+ * （这也是为什么藏整格比「只把按钮加进隐藏名单」多赚 6px：格子留着，flex 的 gap 照样占一道。）
  *
- * 这条测试守两件事：**该藏的真的藏了**、**「导出日志」一件都没被写进隐藏名单**。
+ * 这条测试守两件事：**该藏的真的整格藏了**、**那道形状闸一个都不许松**。
  */
-test('镜像：插件市场的社区介绍只藏前两样，导出日志留着', async (t) => {
+test('镜像：插件市场的社区介绍整格藏掉（含导出日志）', async (t) => {
   const app = await fakeApp()
   const mirror = createMirror({
     upstream: `http://127.0.0.1:${app.port}`,
@@ -777,15 +780,12 @@ test('镜像：插件市场的社区介绍只藏前两样，导出日志留着',
   const body = await (await fetch(`http://127.0.0.1:${f.port}/blocked`)).text()
   const P = '\\[data-shortcut-modal="settings"\\]'
 
-  // ⑯ 规则本体：藏「这一格里没有 class 的介绍文字」+「申请收录那个链接」，
-  //    两件都按「市场根 > `_head` > `_sub`」的**直接子元素**链来点。
+  // ⑯ 规则本体：**整格** `_sub` 藏掉，按「市场根 > `_head` > `_sub`」的**直接子元素**链来点。
   assert.match(body,
     new RegExp(`${P} \\[data-dsh-market-root\\] > \\[class\\*="_head"\\] > \\[class\\*="_sub"\\]`
-      + ':has\\(> \\[class\\*="_submitLink"\\]\\) > span:first-child,'
-      + `${P} \\[data-dsh-market-root\\] > \\[class\\*="_head"\\] > \\[class\\*="_sub"\\]`
-      + ' > \\[class\\*="_submitLink"\\]\\{display:none !important\\}'),
-    '社区介绍那两件（介绍文字 + 申请收录插件）要藏掉：介绍文字 36px 两行撑起整格 56px，'
-    + '申请收录插件是给作者用的入口——两件对使用者都没有用')
+      + ':has\\(> \\[class\\*="_submitLink"\\]\\)\\{display:none !important\\}'),
+    '社区介绍那一整格要藏掉：整格 56px 里四件（介绍文字 36px 撑起整格 / 申请收录插件 / '
+    + '空占位 / 导出日志 90×28）——用户两次点名，这一轮把导出日志也一起走，实测列表窗口 526 → 560px')
 
   // 这一条**必须锁在市场根里**（`_sub` 这种子串在别的插件里一样可能出现），
   // 而且**只许有这一条**（多一条就是多藏了一样东西，得有人解释）。
@@ -798,20 +798,75 @@ test('镜像：插件市场的社区介绍只藏前两样，导出日志留着',
     '`_head` 必须按「市场根的直接子元素」点：`[class*="_head"]` 还会命中官方面板那条 `_header`（⑫ 栽过）')
   assert.ok(subHides[0].includes(':has(> [class*="_submitLink"])'),
     '要用 `:has(> _submitLink)` 要求「这一格确实是我们量过的形状」——'
+    + '整格藏比只藏两个子元素下手更重，更该有这道闸：'
     + '将来市场改结构时**失配**（什么都不藏）比**误伤**（藏了别人）好')
+  // 这一轮藏的是**整格**，不是「这一格里的某两个子元素」——上一版那个 `> span:first-child` 写法要真没了。
+  assert.ok(!subHides[0].includes(':first-child'),
+    '藏的是整格 `_sub`，不该再留着「只藏这一格里某两个子元素」的写法（`> span:first-child` 那半句）')
+})
 
-  // **反向断言（这条测试的正题）**：「导出日志」不许出现在**任何**隐藏规则里。
-  // 真面板上量到它是 90×28 的按钮，就在这一格里，是排查故障时唯一的自救入口。
+/**
+ * **共用那条「内容区头」里的动作区藏掉**（2026-10-07 用户点名：「打开配置文件也可以隐藏」）。
+ *
+ * **这一条和前一条不是一回事，测试也就得分开守**：
+ *   ⑯ 锁在 `[data-dsh-market-root]` 里，只碰「插件市场」那一节；
+ *   ⑰ 是**共用层**的规则——那条头属于面板自己（`_content > _header`），
+ *      **16 个设置节实测长得一模一样**：`_actions`（94×28，里面只有「打开配置文件」一个按钮，
+ *      逐节点名数过）+ `wCInkW_close`（28×28）。所以它**影响每一个设置节**，
+ *      和「只给插件市场腾高度」不是一回事，**不能假装它只在市场里**。
+ *
+ * **它一分高度都省不下**（真面板实测，账见 `scratch/mkt-hide2.txt` / `mkt-hide3.txt`）：
+ * 市场那一节 40px、别的节 54px（官方写死的 `height:54px`），这两条本来就由 ✕ 那一行撑着；
+ * 藏掉动作区之后**头高、内容区高、能滚的像素三个数一个都没变**（16 个节逐个量过）。
+ *
+ * **连带补的右对齐**：官方那条头是 `space-between`，动作区被顶在右边；它一藏，
+ * ✕ 就从右边 x=324 跳到左边 x=34。✕ 是用户唯一能退出面板的出口，不该换边——
+ * 固定右对齐之后实测 ✕ 回到 **x=324**（与改前一致），28×28 原位、真指针点得中、点了面板就关。
+ *
+ * 这条测试守三件事：**规则在**、**它写在共用层**（不许带市场限定）、**✕ 一个字母都不许被藏**。
+ */
+test('镜像：共用内容区头里的动作区藏掉——写在共用层，✕ 不许被藏', async (t) => {
+  const app = await fakeApp()
+  const mirror = createMirror({
+    upstream: `http://127.0.0.1:${app.port}`,
+    tokenUrl: () => `http://127.0.0.1:${app.port}/?token=LAUNCH-TOKEN`,
+  })
+  const f = await front(mirror)
+  t.after(async () => { await f.close(); await app.close() })
+
+  const body = await (await fetch(`http://127.0.0.1:${f.port}/blocked`)).text()
+  const P = '\\[data-shortcut-modal="settings"\\]'
+
+  // ⑰ 规则本体：按「内容区的直接子元素」把 `_header` 钉住，再点它的直接子 `_actions`。
+  assert.match(body,
+    new RegExp(`${P} \\[class\\*="_content"\\] > \\[class\\*="_header"\\]`
+      + ' > \\[class\\*="_actions"\\]\\{display:none !important\\}'),
+    '「打开配置文件」那个动作区要藏掉。`_action` 这个子串在别的插件里也可能出现，'
+    + '所以 `_header` 按「内容区的直接子元素」、`_actions` 按「头的直接子元素」链全写出来')
+  // 右对齐（给上面那条规则自己的副作用收尾：✕ 会从右边跳到左边）。
+  assert.match(body,
+    new RegExp(`${P} \\[class\\*="_content"\\] > \\[class\\*="_header"\\]`
+      + '\\{justify-content:flex-end !important\\}'),
+    '头固定成右对齐：官方是 `space-between`，动作区一藏 ✕ 就跳到左边（x=324 → 34）；'
+    + '加这条之后实测 ✕ 回到 x=324（与改前一致）')
+
+  const hides = [...body.matchAll(/[^{}]*\{[^}]*display:none !important[^}]*\}/g)].map((m) => m[0])
+  const actHides = hides.filter((r) => r.includes('_actions'))
+  assert.equal(actHides.length, 1, '藏动作区的规则只许有一条')
+  // **这条必须是共用层规则**：带了市场限定就等于「只给插件市场腾高度」，
+  // 那是另一种决定，不是用户这一轮点的这一条。
+  assert.ok(!actHides[0].includes('data-dsh-market-root'),
+    '这一条**故意不带市场限定**：那条头 16 个设置节共用，写在共用层才如实——'
+    + '不许假装它只在「插件市场」里生效')
+  assert.ok(!actHides[0].includes(':has('),
+    '别再给它套条件：套上市场条件就和「每个节都藏」的事实不符了')
+
+  // **硬要求**：✕ 不许出现在任何隐藏规则里。它是用户唯一能退出面板的出口。
+  // （「别把有用的东西藏掉」那份反向名单里也有 `_close`，这里再按这条具体的要求写一遍。）
   for (const rule of hides) {
-    assert.ok(!rule.includes('_exportLogBtn'),
-      '隐藏规则里不许出现 _exportLogBtn——它是排查问题时要用的按钮，'
-      + `用户只说藏「社区介绍」，没有点名它。规则：${rule.slice(0, 200)}`)
-  }
-  // 而且我们**没有**去藏整格 `_sub`（那是省 62px 的那一版，代价是那个按钮）。
-  // `display:none` 的规则里不许出现不带子元素限定、直接点 `_sub` 本身的写法。
-  for (const rule of subHides) {
-    assert.ok(!/\[class\*="_sub"\]\s*(?:,|\{)/.test(rule.replace(/:has\([^)]*\)/g, '')),
-      '不许直接藏整格 `_sub`——那会把「导出日志」一起藏掉')
+    assert.ok(!rule.includes('_close'),
+      '隐藏规则里不许出现 _close——✕ 是用户唯一能退出面板的出口。'
+      + `规则：${rule.slice(0, 200)}`)
   }
 })
 
