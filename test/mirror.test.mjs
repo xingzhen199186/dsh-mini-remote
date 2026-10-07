@@ -412,8 +412,8 @@ test('镜像：把别的插件的移动端适配挡在门外（这一页的适�
     '摘的是那个标记本身：它的规则和它的点击监听都只在有标记时才动手，摘掉两边一起失效')
   assert.match(stripper, /subtree:\s*true/,
     '那个标记挂在面板上（body 深处的节点），所以这一条观察必须管到子树')
-  assert.match(stripper, /attributeFilter:\s*\[SETTINGS_MOBILE_ATTR\]/,
-    '范围只钉在这一个属性名上——别的属性怎么变都不叫醒它，重页面上不能白烧性能')
+  assert.match(stripper, /attributeFilter:\s*\[SETTINGS_MOBILE_ATTR,\s*HTML_MOBILE_ATTR\]/,
+    '范围只钉在那两个属性名上——别的属性怎么变都不叫醒它，重页面上不能白烧性能')
   assert.match(stripper, /moSettings/,
     '单独开一个观察者：合成一条就得把 class 也放进 subtree 范围里（同一节点再 observe 是替换，'
     + '不是叠加），那才是真的会烧性能')
@@ -422,6 +422,26 @@ test('镜像：把别的插件的移动端适配挡在门外（这一页的适�
     + '只按 data-plugin-css 找等于把这类整份漏掉')
   assert.match(stripper, /getAttribute\("data-plugin"\)/,
     '两个属性里的名字都要能取到，名单和通用层才都看得到它')
+
+  // **第四样：`<html>` 上那个「卷起」标记**（2026-10-07 真机触摸下主页面整片空白）。
+  //
+  // 同一个插件在触摸设备上往 `<html>` 再贴一个 `data-meow-smooth-furled`，它那条窄屏规则
+  //   `@media (max-width:1023px) html[…furled] [data-slot="root"] > [data-sidebar-collapsed]
+  //    { grid-template-columns: 0px minmax(0px,1fr) 0px !important }`
+  // 把主框架的网格从一列改成三列，而这一页里官方的侧栏在窄屏是 `position:absolute`（脱流），
+  // 于是**主栏成了第一个在流里的子元素、被塞进第 1 列那 0 个像素**：
+  // 活页面上量到主栏 **0px** 宽、欢迎语被压成 26×192 的竖排字——屏幕上只剩背景色。
+  // 摘掉标记之后主栏回到 **390px**、内容全出来（前后面板数字一个都没变）。
+  assert.match(stripper, /var HTML_MOBILE_ATTR = "data-meow-smooth-furled"/,
+    '要在同一个地方点名那个标记：它那一整套「卷起态」规则全部以它为前缀')
+  assert.match(stripper, /docEl\.removeAttribute\(HTML_MOBILE_ATTR\)/,
+    '摘的是 `<html>` 上那个标记本身——它一摘，整套卷起态规则同时失效')
+  assert.match(stripper, /docEl\.hasAttribute\(HTML_MOBILE_ATTR\)/,
+    '摘之前先看有没有，省掉没必要的写操作')
+  assert.match(stripper, /moHtml/,
+    '**`<html>` 不在 body 里面**，subtree 观察器够不着它，必须单独盯一个节点')
+  assert.match(stripper, /observe\(document\.documentElement,\s*\{\s*attributes:\s*true,\s*attributeFilter:\s*\[HTML_MOBILE_ATTR\]/,
+    '盯 html 那一条**不带 subtree**、只有一个属性名——它随时可能重新贴回来，但范围仍然钉死')
 })
 
 /**
