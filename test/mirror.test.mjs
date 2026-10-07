@@ -578,6 +578,65 @@ test('镜像：设置面板的内容区要有 `min-height:0`（不然滚不动�
 })
 
 /**
+ * **「插件市场」这一节不能被挤成竖排、导航不能被它藏掉**（2026-10-07 真面板量出来的）。
+ *
+ * 用户报：「其他都 ok 了，只有这个页面……滚动页面的高度太窄了」，截图里那一节整个是竖的。
+ * 逐张样式表 `matches()` 量下来，**跟我们摘掉的那些样式无关**：
+ * 那一节自己的 `dshmarket/Market.module.css` 一直躺在页面里（它 571 条顶层规则里只有 5 条是
+ * 媒体查询，通用层判不成「整份只在窄屏」）。真正做事的是它自己的三条：
+ *
+ *   · `.xxx_titleRow{display:flex;align-items:center;gap:10px}`——**没写 flex-wrap**，
+ *     7 件东西（图标 22 + 标题 + 仓库名 66 + 版本 44 + 三个按钮）最小宽度加起来 ≈308px
+ *     （gap 10×6 占掉 60），而手机上只给得出 286px → 中文按字断行，标题被压成 **16×96**、
+ *     按钮被压成 32/36/32 宽，最后一个按钮右缘 **359** 超出市场区右缘 **342**（被裁掉）；
+ *   · `@media (max-width:560px){ [role="dialog"]:has([data-dsh-market-root]) > nav{display:none} }`
+ *     ——进了这一节整条导航被藏（实测 0×0），**而且没有导航就切不回别的节**；
+ *   · `.tabs{display:flex;gap:2px}`——7 个页签总宽 **427px** 挤 **286px**、自己不滚也不折行，
+ *     右边三个页签被裁掉（最右右缘 **479** > 342）。
+ *
+ * 三条都在我们自己的 `ADAPT_CSS` 里盖过去（用户定的方向：这一页的适配由我们定），
+ * 而且**必须锁在 `[data-dsh-market-root]` 里面**——只碰它这一节，不许波及别的插件和别的节。
+ */
+test('镜像：插件市场那一节——标题行折行、导航要回来、页签条可滑', async (t) => {
+  const app = await fakeApp()
+  const mirror = createMirror({
+    upstream: `http://127.0.0.1:${app.port}`,
+    tokenUrl: () => `http://127.0.0.1:${app.port}/?token=LAUNCH-TOKEN`,
+  })
+  const f = await front(mirror)
+  t.after(async () => { await f.close(); await app.close() })
+
+  const body = await (await fetch(`http://127.0.0.1:${f.port}/blocked`)).text()
+
+  // ⑤ 标题行折行：不加这条，7 件东西在 nowrap 里把中文挤成一字一行。
+  assert.match(body,
+    /\[data-shortcut-modal="settings"\] \[data-dsh-market-root\] \[class\*="_titleRow"\]\{flex-wrap:wrap !important\}/,
+    '市场那一节的标题行要能折行——实测它是 nowrap，286px 里挤 308px 的最小宽度，'
+    + '标题被压成 16px 宽（竖排）、最后一个按钮被裁掉')
+  // ⑥ 导航要回来：它自己那条窄屏规则把 nav 藏了，特异性 (0,2,1)，
+  //    所以我们必须写得更具体（(0,3,2)）并且带 !important，否则压不住。
+  assert.match(body,
+    /\[data-shortcut-modal="settings"\]\[role="dialog"\]:has\(\[data-dsh-market-root\]\) > nav\{display:flex !important\}/,
+    '进了市场那一节，被它藏掉的导航要按更高的特异性要回来——'
+    + '它那条是 @media (max-width:560px){[role="dialog"]:has([data-dsh-market-root]) > nav{display:none}}')
+  // ⑦ 页签条可滑：它自己不滚也不折行，右边三个页签被裁掉。
+  assert.match(body,
+    /\[data-shortcut-modal="settings"\] \[data-dsh-market-root\] \[class\*="_tabs"\]\{overflow-x:auto !important/,
+    '那排页签要能横向划——实测 7 个页签 427px 挤 286px，右边三个被裁掉')
+  // 三条都要限定在市场根里（下面这条正则连 :has 那条导航规则一起查）。
+  assert.equal([...body.matchAll(/\[class\*="_titleRow"\]|\[class\*="_tabs"\]/g)].length, 2,
+    '标题行和页签条各只许出现一次')
+
+  // **三条都必须锁在市场根里面**：只碰它这一节，别的插件/别的节一条都不许动。
+  const marketRules = [...body.matchAll(/\[data-shortcut-modal="settings"\][^{}]*_titleRow[^{}]*\{[^}]*\}/g)]
+  assert.equal(marketRules.length, 1, '标题行只许有一条规则')
+  assert.ok(marketRules.every((m) => m[0].includes('[data-dsh-market-root]')),
+    '三条都要带 [data-dsh-market-root] 限定——不带就等于全局面板通用规则，会碰到别人')
+  assert.doesNotMatch(body, /\[data-shortcut-modal="settings"\]\[role="dialog"\] > nav\{display:flex/,
+    '要导航那条也必须带 :has([data-dsh-market-root]) 限定，不许变成「所有节的导航」通用规则')
+})
+
+/**
  * **压缩照旧转发**（2026-10-06）。
  *
  * 第一版把 `accept-encoding` 摘掉了，理由是「HTML 保持明文好注入」——**但那只对 HTML
