@@ -891,6 +891,65 @@ test('镜像：共用内容区头里的动作区藏掉——写在共用层，�
 })
 
 /**
+ * **侧栏那一列要能纵向滚——不然最底下的「设置」永远够不着**（2026-10-07 在活页面上量出来的）。
+ *
+ * 用户报：「导航栏其实没显示全，设置按钮是看不到的，能否搞个滚动条」。在活的镜像页上
+ * 逐层量（390×660 的外层视口、框内 **599**、侧栏展开）：
+ *
+ *   · 侧栏那一列 `[data-pane="sidebar"]`（官方的 `_sidebarCol`，`position:absolute`）：
+ *     321×599、`overflow-y:hidden`，而 **scrollHeight 696 / clientHeight 599 —— 97px 被裁掉**；
+ *   · 里面那层 `_2H3hWW_root`（`height:100%` 的竖排 flex）：`overflow-y:visible`，
+ *     它自己的 scrollHeight 也是 696 —— **内容确实比框高，两层却都不滚**；
+ *   · 那 696px 是三块 `flex:0 0 auto` 的固定高度加起来的
+ *     （logoRow 60 + newSession 38 + panelList 156 + footArea 412），
+ *     中间那块 `_regionArea`（`flex:1 1 0%`）**早就被压到 0 了**——它已经让完了；
+ *   · 最底下的 `_settingsArea` 在 646..696，**「设置」两个字在 660..682，整条都在 599 下面**
+ *     （改前实测 rect `[42,660,28,22]`，按钮 `[10,650,144,42]`，两者都掉出视口）。
+ *
+ * 所以这**不是**上面那条「`_content` 缺 `min-height:0`」的同类病：这里每一层的高度都对，
+ * **缺的是一个滚动容器**。官方侧栏是按桌面窗口设计的（它自己在 root 上写了
+ * `--dsh-scrollbar-thumb` 那套变量），窗口高 ≥ 696 时看不出问题，手机框内只有 ~600 就露馅。
+ *
+ * 这条测试守三件事：**规则在**、**钉在官方那个固定标记上**（`[data-pane="sidebar"]`，
+ * 全文档实测只有 1 个；不按类名哈希猜）、**横向必须一起钉成 hidden**
+ * （侧栏收起成图标条时那一列只有 52px 宽、里面的 root 仍是 280px，横向本来就是靠裁的，
+ * 放开成 auto 会平白多出一条横向滚动）。
+ */
+test('镜像：侧栏那一列要能纵向滚（不然最底下的「设置」够不着）', async (t) => {
+  const app = await fakeApp()
+  const mirror = createMirror({
+    upstream: `http://127.0.0.1:${app.port}`,
+    tokenUrl: () => `http://127.0.0.1:${app.port}/?token=LAUNCH-TOKEN`,
+  })
+  const f = await front(mirror)
+  t.after(async () => { await f.close(); await app.close() })
+
+  const body = await (await fetch(`http://127.0.0.1:${f.port}/blocked`)).text()
+  assert.match(body, /\[data-pane="sidebar"\]\{overflow-y:auto !important;overflow-x:hidden !important\}/,
+    '侧栏那一列要放开纵向滚动：它是那个 scrollHeight(696) 大于 clientHeight(599) 的层，'
+    + '也正是那个写着 overflow:hidden 的层——不改它，「设置」那 97px 永远拉不回来')
+  // **横向那半句不能少**：收起态那一列 52px 宽、里面的 root 280px，横向靠裁；
+  // 只写 overflow-y:auto 的话另一轴会被算成 auto，平白多一条横向滚动。
+  assert.match(body, /\[data-pane="sidebar"\]\{[^}]*overflow-x:hidden !important\}/,
+    '横向要一起钉成 hidden（收起成图标条时靠它裁）')
+  // 不许按类名哈希点它：`_sidebarCol` / `_root` 那两半的哈希每次构建都变。
+  assert.doesNotMatch(body, /\[class\*="_sidebarCol"\]\{[^}]*overflow-y:auto/,
+    '不许按类名哈希点侧栏——要用官方那个固定标记 `[data-pane="sidebar"]`')
+  // 动侧栏那一列的规则**只许有一条**（多一条就是多改了别的东西，得有人解释）。
+  const sideRules = [...body.matchAll(/\[data-pane="sidebar"\][^{}]*\{[^}]*\}/g)].map((m) => m[0])
+  assert.equal(sideRules.length, 1, '动侧栏那一列的规则只许有一条')
+
+  // 同一次注入里，**设置面板那几轮的战果一个都不许掉**（这条改动和它们不相干，钉在一起防回退）。
+  assert.match(body, /\[data-shortcut-modal="settings"\] \[class\*="_content"\]\{min-height:0 !important\}/,
+    '设置面板内容区的 `min-height:0` 还在（滚不动那一轮的战果）')
+  assert.match(body,
+    /\[data-dsh-market-root\] > \[class\*="_head"\] > \[class\*="_sub"\]:has\(> \[class\*="_submitLink"\]\)\{display:none !important\}/,
+    '插件市场「社区介绍」整格藏掉那条还在（列表窗口高度那一轮的战果）')
+  assert.match(body, /\[data-shortcut-modal="settings"\] nav\[class\*="_nav"\]\{[^}]*overflow-x:auto !important/,
+    '设置面板导航那条横向滑动还在')
+})
+
+/**
  * **压缩照旧转发**（2026-10-06）。
  *
  * 第一版把 `accept-encoding` 摘掉了，理由是「HTML 保持明文好注入」——**但那只对 HTML
