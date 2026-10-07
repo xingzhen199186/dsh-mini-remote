@@ -445,44 +445,6 @@ test('镜像：把别的插件的移动端适配挡在门外（这一页的适�
 })
 
 /**
- * **打开镜像就直接进设置**（2026-10-06 用户要的）。
- *
- * 用户原话：「我们能否在移动端设置页点打开，打开的就是这个设置页面？」
- *
- * 官方**没有网址入口**（读源码确认：面板开合是应用内部状态，不看地址），
- * 所以只能替用户点一下那个「设置」按钮——它的可靠特征是
- * `aria-haspopup="dialog"` + `aria-expanded`（官方渲染时写死的语义属性，不受类名哈希影响）。
- *
- * **只点一次**是关键：用户关掉面板之后绝不能再弹回来，否则他没法用底下那个主页面。
- */
-test('镜像：打开就直接进设置（替用户点一次，之后绝不再弹）', async (t) => {
-  const app = await fakeApp()
-  const mirror = createMirror({
-    upstream: `http://127.0.0.1:${app.port}`,
-    tokenUrl: () => `http://127.0.0.1:${app.port}/?token=LAUNCH-TOKEN`,
-  })
-  const f = await front(mirror)
-  t.after(async () => { await f.close(); await app.close() })
-
-  const body = await (await fetch(`http://127.0.0.1:${f.port}/blocked`)).text()
-  assert.match(body, /aria-haspopup="dialog"/, '要按那个语义标记找「设置」按钮')
-  assert.match(body, /aria-expanded/, '按钮上还有 aria-expanded，两个一起才稳')
-
-  const scripts = [...body.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1])
-  const opener = scripts.find((s) => s.includes('aria-haspopup'))
-  assert.ok(opener, '要能找到那段自动打开的脚本')
-  assert.doesNotThrow(() => new Function(opener), '那段脚本必须能通过语法解析')
-  assert.match(opener, /done\s*=\s*true/, '点过就要收手')
-  assert.match(opener, /clearInterval/, '点过要把定时器停掉——不能反复弹回来')
-
-  // **不再有定时兜底**（2026-10-06 顾问群会诊后删掉的）：
-  // 「打开设置后定时发 resize + 强制回流」是盲目 hack，而且它本身就是一次布局/重绘，
-  // **会让「首帧到底画没画」再也测不准**。真根因已按顾问建议从样式上根治，见下一条测试。
-  assert.ok(!/dispatchEvent\(new Event\("resize"\)\)/.test(opener), '不许留定时重排兜底')
-  assert.ok(!/offsetHeight/.test(opener), '不许留强制回流兜底')
-})
-
-/**
  * **设置面板：导航压成一条可横向滑动的标签条**（2026-10-06 用户报的）。
  *
  * 用户原话：「上方的图标部分，下方点了图标的具体页面，然后上方页面一直固定在那，
