@@ -623,17 +623,129 @@ test('镜像：插件市场那一节——标题行折行、导航要回来、�
   assert.match(body,
     /\[data-shortcut-modal="settings"\] \[data-dsh-market-root\] \[class\*="_tabs"\]\{overflow-x:auto !important/,
     '那排页签要能横向划——实测 7 个页签 427px 挤 286px，右边三个被裁掉')
-  // 三条都要限定在市场根里（下面这条正则连 :has 那条导航规则一起查）。
-  assert.equal([...body.matchAll(/\[class\*="_titleRow"\]|\[class\*="_tabs"\]/g)].length, 2,
-    '标题行和页签条各只许出现一次')
+  // 这两样**各只许有「一条规则」**，而且规则数要写死——
+  // 2026-10-07 加了 ⑪（藏标题行里的重复信息），`_titleRow` 于是合理地有了**两条**规则
+  // （⑤ 折行一条、⑪ 藏重复信息一条）。所以这里**按规则数**查，不按「字符串出现次数」查：
+  // 按出现次数查的话，`_titleRow` 在 ⑪ 的选择器列表里写一次就会被判成「重复」。
+  const rulesOf = (name) => [...body.matchAll(new RegExp(
+    `\\[data-shortcut-modal="settings"\\][^{}]*\\[class\\*="${name}"\\][^{}]*\\{[^}]*\\}`, 'g'))]
+  assert.equal(rulesOf('_titleRow').length, 2, '标题行两条规则：⑤ 折行、⑪ 藏重复信息')
+  assert.equal(rulesOf('_tabs').length, 1, '页签条一条规则：⑦ 横向滚动')
 
-  // **三条都必须锁在市场根里面**：只碰它这一节，别的插件/别的节一条都不许动。
+  // **每一条都必须锁在市场根里面**：只碰它这一节，别的插件/别的节一条都不许动。
   const marketRules = [...body.matchAll(/\[data-shortcut-modal="settings"\][^{}]*_titleRow[^{}]*\{[^}]*\}/g)]
-  assert.equal(marketRules.length, 1, '标题行只许有一条规则')
+  assert.equal(marketRules.length, 2, '标题行两条规则（⑤、⑪）')
   assert.ok(marketRules.every((m) => m[0].includes('[data-dsh-market-root]')),
-    '三条都要带 [data-dsh-market-root] 限定——不带就等于全局面板通用规则，会碰到别人')
+    '每一条都要带 [data-dsh-market-root] 限定——不带就等于全局面板通用规则，会碰到别人')
   assert.doesNotMatch(body, /\[data-shortcut-modal="settings"\]\[role="dialog"\] > nav\{display:flex/,
     '要导航那条也必须带 :has([data-dsh-market-root]) 限定，不许变成「所有节的导航」通用规则')
+})
+
+/**
+ * **「插件市场」那块能滚的列表窗口要尽量大**（2026-10-07 用户第二次报「窗口高度还是太矮」）。
+ *
+ * 逐项在活页面的真面板上量过之后定的七条（⑧–⑭），加我们那排导航压矮（⑮）：
+ *   ⑧ 面板撑高（官方 `min(800px, calc(100vh - 48px))` 再居中，手机上白留上下各 23px）  +38px
+ *   ⑨ 内容区那条头的上内边距 20px → 6px（那里**没有任何元素**，也不是拖拽把手）        +14px
+ *   ⑩ `_options` 的下内边距 24px（市场根是 height:100%，这 24px 谁也用不到）           +24px
+ *   ⑪ 标题行里重复的信息（图标 / 仓库名 / 版本号）藏掉，那一行从三行收到两行            +34px
+ *   ⑫ 市场头部的 gap 12→6、padding 4/4/6→4/4/2                                        +22px
+ *   ⑬ 吸附头（搜索 + 分类）的留白收掉（它钉在顶上，每 1px 都是**一直**少 1px 卡片）     +14px*
+ *   ⑭ 列表滚动区自己的上下留白 12/24 → 6/12                                            +18px*
+ *   ⑮ 我们那排导航：格子 34→30、上下内边距 8→5                                          +10px
+ * 合起来**列表窗口 356 → 498px**、**看卡片的地方 204 → 378px**（* 两条只进「看卡片的地方」）。
+ *
+ * **这一条测试守的是「别把有用的东西省掉」**：用户划的线是「该省的只有重复的信息」——
+ * 那三个按钮、搜索框、分类筛选、提示条、页签、导出日志**一个都不许被藏**。
+ * 所以下面既查「该省的在」，也查「不该省的**不在**我们的隐藏名单里」。
+ */
+test('镜像：插件市场那块列表窗口——撑高、收留白、只藏重复信息', async (t) => {
+  const app = await fakeApp()
+  const mirror = createMirror({
+    upstream: `http://127.0.0.1:${app.port}`,
+    tokenUrl: () => `http://127.0.0.1:${app.port}/?token=LAUNCH-TOKEN`,
+  })
+  const f = await front(mirror)
+  t.after(async () => { await f.close(); await app.close() })
+
+  const body = await (await fetch(`http://127.0.0.1:${f.port}/blocked`)).text()
+  const P = '\\[data-shortcut-modal="settings"\\]'
+
+  // ⑧ 面板撑高。**必须带 :has([data-dsh-market-root])**——不带就是所有设置节的面板一起变高。
+  assert.match(body,
+    new RegExp(`${P}:has\\(\\[data-dsh-market-root\\]\\)\\{height:calc\\(100% - 10px\\) !important`),
+    '市场那一节的面板要撑到框满（官方高度是 min(800px, 100vh-48px) 再居中，'
+    + '手机上白留上下各 23px；面板父级是 position:fixed; inset:0 的浮层，实测 844 高，'
+    + '所以 calc(100% - 10px) 有确定参照，实测 798 → 836）')
+  // ⑨ 内容区那条头的上内边距。**`height:auto` 必须一起写**：官方那条头是
+  //    `box-sizing:border-box; height:54px`——高度写死了，光改内边距它一点不动（第一版就是这么哑掉的）。
+  assert.match(body,
+    new RegExp(`${P}:has\\(\\[data-dsh-market-root\\]\\) \\[class\\*="_content"\\] > \\[class\\*="_header"\\]`
+      + '\\{padding:6px 14px 6px 10px !important;height:auto !important\\}'),
+    '那条头（打开配置文件 + X）的上内边距 20px → 6px，**而且要把写死的 height 交还给内容**——'
+    + '官方是 `box-sizing:border-box; height:54px`，只改内边距量出来纹丝不动；'
+    + '量过 nav 底到按钮顶之间**没有任何元素**、也没有伪元素和拖拽把手，那 20px 只是留白')
+  // ⑩ `_options` 的下内边距：只去掉下边那一条，左右那 24px 留着；
+  //    而且按「内容区的**直接子元素**」点它（`_options` 这个子串在整棵面板里未必只有一个）。
+  assert.match(body,
+    new RegExp(`${P}:has\\(\\[data-dsh-market-root\\]\\) \\[class\\*="_content"\\] > \\[class\\*="_options"\\]`
+      + '\\{padding-bottom:0 !important\\}'),
+    '`_options` 的下内边距 24px 在市场节是白留的（市场根 height:100%，正好差这 24px）')
+  // ⑪ 藏掉的三样：前图标、仓库名、版本号。**一样都不许多藏**。
+  //    三样都限定在 `_titleRow` 里——`[class*="…"]` 是子串匹配，不限定的话将来市场给卡片里的
+  //    版本号起个 `xxx_version` 的类名就会被连卡片一起藏掉。
+  assert.match(body,
+    new RegExp(`${P} \\[data-dsh-market-root\\] \\[class\\*="_titleRow"\\] > svg,`
+      + `${P} \\[data-dsh-market-root\\] \\[class\\*="_titleRow"\\] \\[class\\*="_repoLink"\\],`
+      + `${P} \\[data-dsh-market-root\\] \\[class\\*="_titleRow"\\] \\[class\\*="_version"\\]\\{display:none !important\\}`),
+    '标题行里重复的三样（前图标 / 仓库名 dsh-market / 版本号 v1.66.6）藏掉，'
+    + '那一行从三行 100px 收到两行 66px，两个更新按钮回到标题同一行')
+  // ⑫⑬⑭ 三处留白。**都用「直接子元素」**——⑬ 第一版写成 `[class*="_cats"]`，
+  //    子串匹配把 `_catsRow` / `_catsWrap` 也一起命中，量出来反而高了 8px（72 → 80）。
+  assert.match(body,
+    new RegExp(`${P} \\[data-dsh-market-root\\] > \\[class\\*="_head"\\]`
+      + '\\{gap:6px !important;padding:4px 4px 2px !important\\}'),
+    '市场头部的留白：四块之间的三道 12px 空档收成 6px；`_head` 按「市场根的直接子元素」点，'
+    + '免得 `[class*="_head"]` 连官方面板那条 `_header` 一起命中')
+  assert.match(body,
+    new RegExp(`${P} \\[data-dsh-market-root\\] \\[class\\*="_stickyHead"\\] > \\[class\\*="_tabSearchRow"\\]`
+      + '\\{padding-bottom:6px !important\\}'),
+    '吸附头搜索那一行的下留白 12px → 6px（它钉在顶上，每 1px 都是**一直**少 1px 卡片）')
+  assert.match(body,
+    new RegExp(`${P} \\[data-dsh-market-root\\] \\[class\\*="_stickyHead"\\] > \\[class\\*="_cats"\\]`
+      + '\\{padding:6px 4px 2px !important\\}'),
+    '吸附头分类那一行的留白 12/4 → 6/2（同上）。**必须限定成吸附头的直接子元素**：'
+    + '写成 `[class*="_cats"]` 会连 `_catsRow`（56→72）和 `_catsWrap`（56→64）一起命中，'
+    + '实测反而高了 8px')
+  assert.match(body,
+    new RegExp(`${P} \\[data-dsh-market-root\\] > \\[class\\*="_body"\\]`
+      + '\\{padding-top:6px !important;padding-bottom:12px !important\\}'),
+    '列表滚动区自己的上下留白 12/24 → 6/12——它不改变滚动窗口的高度，改的是窗口里能看见卡片的净高')
+
+  // ⑮ 我们那排导航（**我们自己的东西**，所以不带市场限定；它属于我们自己的适配）。
+  assert.match(body, /\[class\*="_navCell"\]\{flex:none !important;height:30px !important/,
+    '我们那排导航的格子 34px → 30px——它每高 1px，每个节的内容区就少 1px，'
+    + '市场那一节实测列表窗口 +10px；只压高度、字号 13px 不动')
+  assert.match(body, /nav\[class\*="_nav"\]\{[^}]*padding:5px 10px !important/,
+    '我们那排导航的上下内边距 8px → 5px')
+
+  // **「别把有用的东西藏掉」那一条，用反向断言把住**：
+  // 凡是我们写的隐藏规则，选择器里**不许**出现这些有用的东西。
+  const hides = [...body.matchAll(/[^{}]*\{[^}]*display:none !important[^}]*\}/g)].map((m) => m[0])
+  const useful = ['_banner', '_tabs', '_tab\\b', '_search', '_cats', '_button', '_pager',
+    '_repoLink', '_version']
+  // `_repoLink` / `_version` 是**该藏的**（重复信息），单独拿出来对照，剩下的都不许出现。
+  const mustKeep = useful.filter((k) => k !== '_repoLink' && k !== '_version')
+  for (const rule of hides) {
+    for (const k of mustKeep) {
+      assert.ok(!new RegExp(k).test(rule),
+        `隐藏规则里不许出现 ${k}——用户划的线是「该省的只有重复的信息」，`
+        + `提示条 / 页签 / 搜索 / 分类 / 按钮 / 分页 都要留着。规则：${rule.slice(0, 160)}`)
+    }
+  }
+  // 那三样重复信息**确实**被藏了（跟上面那条反向断言配成一对）。
+  assert.ok(hides.some((r) => r.includes('_repoLink') && r.includes('_version')),
+    '仓库名和版本号这两样重复信息要真的被藏掉')
 })
 
 /**
