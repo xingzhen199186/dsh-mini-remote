@@ -5747,3 +5747,47 @@ test('回到底部浮标：箭头是矢量图形，不是字形、不是 emoji',
   assert.ok(!/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/u.test(block), '不许用 emoji')
 })
 
+/**
+ * 单帧模式下浮标**不许出现**（2026-10-08 用户要求）。
+ *
+ * 单帧那一模式整屏只留最新一条回答，回答落定的那一刻页面**故意**把它的开头
+ * 对齐到顶部（renderMinimal 里 scrolledReplyAt 那一段，scrollTop = 0）。那时
+ * 「不在底部」是设计如此，**不是用户翻上去了**——浮标挂在那儿等于劝用户把刚对齐
+ * 好的开头再滚掉，正好把这个模式唯一要做的事抵消掉。
+ *
+ * 这里抠的是**真那个函数**来跑，不是照着源码再写一遍判据：替身只给
+ * $ / atBottom / state 三样，判据里多一条少一条都跑不过去。
+ *
+ * 反面必须一起钉住：多帧（聊天 / 完整）往上翻时**照旧出现**。不然以后有人图省事
+ * 把浮标整个关掉，那几条会跟着一起变绿，谁都发现不了。
+ */
+test('回到底部浮标：单帧模式下不出现，多帧往上翻照旧出现', () => {
+  const i = html.indexOf('function paintToBottom')
+  const close = html.indexOf('\n  }', i)
+  assert.ok(i > 0 && close > i, '找不到 paintToBottom')
+  // eslint-disable-next-line no-new-func
+  const build = new Function('$', 'atBottom', 'state',
+    `${html.slice(i, close + 4)}\nreturn paintToBottom;`)
+  const run = ({ mode, atBottomNow, withEl = true }) => {
+    const btn = { hidden: false }
+    const $ = (id) => (id === 'toBottom' && withEl ? btn : null)
+    build($, () => atBottomNow, { mode })()
+    return btn.hidden
+  }
+
+  // ① 单帧：页面被设计对齐到顶部（不在底部）→ 收着
+  assert.equal(run({ mode: 'minimal', atBottomNow: false }), true,
+    '单帧模式下浮标必须收着：那里的「不在底部」是页面故意把回答开头对齐到顶部，不是用户往上翻')
+  // ② 反面：多帧往上翻 → 必须出现
+  assert.equal(run({ mode: 'chat', atBottomNow: false }), false,
+    '聊天（多帧）往上翻时必须照旧出现——这条就是那个反例，防「一刀关掉」')
+  assert.equal(run({ mode: 'full', atBottomNow: false }), false,
+    '完整模式画的也是那串多帧记录，同样要出现')
+  // ③ 在底部时三种模式都收着：原来那条黏底判据不许被新条件挤掉
+  for (const mode of ['minimal', 'chat', 'full']) {
+    assert.equal(run({ mode, atBottomNow: true }), true, mode + '：在底部就该收着')
+  }
+  // ④ 取不到那颗按钮时静静退出（渲染那一段是拿替身跑的，$ 不一定认得这个 id）
+  assert.doesNotThrow(() => run({ mode: 'minimal', atBottomNow: false, withEl: false }))
+})
+
