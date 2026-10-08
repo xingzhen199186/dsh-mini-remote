@@ -59,8 +59,11 @@ function mirrorHarness({ apiImpl } = {}) {
   }
 
   const src = `${html.slice(a, b)}; return { mirror, paintMirror, loadMirror, tapMirror };`
-  const out = new Function('$', 'state', 'api', 'toast', src)(
+  // `window` / `location` 照真实环境给上：这一段里挂着一条 message 监听
+  // （框里那一页发「返回手机页」时收屏，见 page.html 里那段说明）。
+  const out = new Function('$', 'state', 'api', 'toast', 'window', 'location', src)(
     el, { token: 'TK-123' }, api, (m) => toasts.push(m),
+    { addEventListener() {} }, { origin: 'http://phone' },
   )
   return { ...out, els: table, calls, toasts, on, off }
 }
@@ -276,12 +279,19 @@ function mirrorOpenHarness() {
   for (const k of ['rowMirror', 'rowMirrorOpen', 'mirrorHint', 'segMirror', 'btnMirrorOpen', 'mirrorView', 'mirrorFrame', 'mirrorClose']) {
     table[k] = el(k)
   }
-  const src = `${html.slice(a, b)}; return { mirror, mirrorUrl, openMirror, closeMirror };`
+  const src = `${html.slice(a, b)}; return { mirror, mirrorUrl, openMirror, closeMirror, win: window };`
   const toasts = []
-  const out = new Function('$', 'state', 'api', 'toast', src)(
+  // `window` / `location` 也照真实环境给上：这一段里挂着一条 message 监听
+  // （框里那一页发「返回手机页」时收屏，见 page.html 里那段说明）。
+  const win = {
+    listeners: {},
+    addEventListener(type, fn) { (this.listeners[type] = this.listeners[type] || []).push(fn) },
+  }
+  const out = new Function('$', 'state', 'api', 'toast', 'window', 'location', src)(
     (k) => table[k], { token: 'TK-123' }, () => Promise.resolve({ ok: true }), (m) => toasts.push(m),
+    win, { origin: 'http://phone' },
   )
-  return { ...out, els: table, toasts }
+  return { ...out, els: table, toasts, win }
 }
 
 test('进阶设置：地址要带令牌和尾斜杠（框里那些请求不一定都带得上 cookie）', () => {
@@ -344,6 +354,28 @@ test('进阶设置：关掉那一层要把框的地址清掉（里面是个还�
   assert.equal(h.els.mirrorView.hidden, true)
   assert.equal(h.els.mirrorFrame.src, 'about:blank',
     '要真停掉：那一屏里是完整应用，还在跑、还连着，留着会继续占内存和连接')
+})
+
+/**
+ * 框里那一页**打不开的时候**是我们自己发的一页提示（lib/server.js 的
+ * `sendMirrorUnavailable`），那一页里除了浏览器自己的返回没有别的出口——
+ * 所以它的「返回手机页」按钮往这里发一条消息，这一屏要收起来。
+ * 2026-10-08 真机：用户卡在一个 `{"error":"not found"}` 的框里，出不来。
+ */
+test('进阶设置：框里那一页发「返回」时，这一屏要收起来（且只认同源那一条）', () => {
+  const h = mirrorOpenHarness()
+  h.mirror.enabled = true
+  h.openMirror()
+  const fire = (origin, data) => {
+    for (const fn of h.win.listeners.message ?? []) fn({ origin, data })
+  }
+  fire('http://evil', 'mini-mirror-close')
+  assert.equal(h.els.mirrorView.hidden, false, '不是同源的一律不理')
+  fire('http://phone', '别的消息')
+  assert.equal(h.els.mirrorView.hidden, false, '只认那一条字符串')
+  fire('http://phone', 'mini-mirror-close')
+  assert.equal(h.els.mirrorView.hidden, true, '同源 + 那一条字符串 → 收屏')
+  assert.equal(h.els.mirrorFrame.src, 'about:blank', '顺带把框停掉，别留在后台跑')
 })
 
 test('进阶设置：整页不许再出现 window.open / target（三次都栽在跳转上）', () => {

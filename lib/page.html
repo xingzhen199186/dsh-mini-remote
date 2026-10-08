@@ -6532,6 +6532,20 @@
   });
   $('mirrorClose').addEventListener('click', closeMirror);
 
+  /**
+   * 框里那一页自己发的「返回手机页」。
+   *
+   * **为什么需要**：镜像那一屏里，框中的文档正常情况下是电脑端界面（它有自己的退出方式），
+   * 但**打不开的时候**它是我们自己发的一页提示（见 lib/server.js 的 sendMirrorUnavailable）
+   * ——那一页里除了浏览器自己的返回，没有别的出口，用户会卡在一个提示页上。
+   * 所以那一页的「返回」按钮往这里发一条消息，我们把这整屏收起来。
+   *
+   * 只认这一条字符串，且只认同源：这个监听**只做「收屏」这一件事**，别的消息一概不理。
+   */
+  window.addEventListener('message', function (e) {
+    if (e.origin === location.origin && e.data === 'mini-mirror-close') closeMirror();
+  });
+
   function loadMirror() {
     api('/mini/api/mirror').then(function (r) {
       if (!r || !r.ok || !r.available) {

@@ -1311,6 +1311,78 @@ test('路由门：开着但没带令牌 → 401；带了才转发', async (t) =>
     '认出来了就原样转发（路径不带我们的前缀）；我们自己的 token 参数要摘掉')
 })
 
+/**
+ * 2026-10-08 用户真机报的：打开「电脑端界面」**有的时候**框里是
+ * `{"error":"not found"}`（华为浏览器还给它套了个 JSON 查看器）。
+ *
+ * 根因不在代理，在**路由门**：整块镜像路由挂在开关上（`mirrorEnabled()` 同时看
+ * 「开关」和「上游地址解没解析出来」），门一关，`/mini/mirror/…` 就掉进兜底 404，
+ * 回的是给程序看的 JSON——而手机那边把镜像**嵌在 iframe 里**，这个 JSON 就成了框里的
+ * **文档**，被当页面渲染出来。所以那几条路径要改回一页人话。
+ */
+test('路由门：镜像关着时，那几条路径回的是「一页人话」，不是 JSON 裸奔', async (t) => {
+  const hit = []
+  const s = await bootServer({ mirror: stubMirror(hit), mirrorEnabled: () => false })
+  t.after(s.close)
+
+  for (const p of ['/mini/mirror', '/mini/mirror/', '/mini/mirror/?token=TOKEN-123']) {
+    const res = await fetch(`${s.base}${p}`, { redirect: 'manual' })
+    assert.equal(res.status, 404, `${p} 此刻确实不存在，状态码不变`)
+    assert.match(res.headers.get('content-type') ?? '', /text\/html/,
+      `${p} 必须是给人看的页面——框会把它当文档渲染`)
+    const body = await res.text()
+    assert.match(body, /电脑端界面现在打不开/, '正文得说人话')
+    assert.match(body, /返回手机页/, '框里没有别的出口，得给一个')
+    assert.ok(!body.includes('"error"'),
+      '**这一条是这次真机报的病灶本身**：不许再出现那个给程序看的 JSON')
+  }
+  assert.deepEqual(hit, [], '关着的时候一次都不该转发出去')
+})
+
+test('路由门：别的没匹配上的 /mini 路径，仍然回 JSON 404（没有顺手改宽）', async (t) => {
+  const s = await bootServer({ mirror: stubMirror([]), mirrorEnabled: () => false })
+  t.after(s.close)
+
+  for (const p of ['/mini/nope-xyz', '/mini/favicon.ico']) {
+    const res = await fetch(`${s.base}${p}`)
+    assert.equal(res.status, 404)
+    assert.match(res.headers.get('content-type') ?? '', /application\/json/)
+    assert.deepEqual(await res.json(), { error: 'not found' })
+  }
+})
+
+/**
+ * 我们自己的客户端插件**在镜像里也在跑**，它按同源取 `/mini-remote/*`——
+ * 那几条是宿主那边的路由（lib/index.js 注册的）。它们以 `/mini` 开头，会被
+ * 「凡不是我们自己的地盘就转上游」判成我们的地盘，于是镜像里的「手机遥控」那一节
+ * 永远读不到状态（活服务上量到：宿主那边 200，我们这边 `{"error":"not found"}`）。
+ */
+test('路由门：/mini-remote/* 是宿主的接口，镜像开着时要转上游', async (t) => {
+  const hit = []
+  const s = await bootServer({ mirror: stubMirror(hit), mirrorEnabled: () => true })
+  t.after(s.close)
+
+  const res = await fetch(`${s.base}/mini-remote/pairing?token=TOKEN-123`)
+  assert.equal(res.status, 200, '认过令牌之后要转出去，不能回我们自己的 404')
+  assert.deepEqual(hit, ['/mini-remote/pairing'],
+    '原样转发（我们自己的 token 参数摘掉）')
+
+  hit.length = 0
+  const no = await fetch(`${s.base}/mini-remote/pairing`)
+  assert.equal(no.status, 401, '没带令牌一律 401——这几条也走同一道门')
+  assert.deepEqual(hit, [], '没认出来就不许转发')
+})
+
+test('路由门：开关关着时 /mini-remote/* 一个都不接', async (t) => {
+  const hit = []
+  const s = await bootServer({ mirror: stubMirror(hit), mirrorEnabled: () => false })
+  t.after(s.close)
+
+  const res = await fetch(`${s.base}/mini-remote/pairing?token=TOKEN-123`)
+  assert.equal(res.status, 404, '开关关着时这条路根本不存在')
+  assert.deepEqual(hit, [], '不给一条绕过开关的通道')
+})
+
 test('路由门：入口那一下写成 cookie，并且补上尾斜杠', async (t) => {
   const hit = []
   const s = await bootServer({ mirror: stubMirror(hit), mirrorEnabled: () => true })
