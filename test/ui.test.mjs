@@ -428,9 +428,9 @@ test('回到底部浮标：不新造令牌、不放强调色、圆角走 999px �
   assert.match(block, /\.to-bottom-slot\s*\{[^}]*pointer-events:\s*none/,
     '槽是通栏的，不设 none 会在底边上拦掉底下内容的点击')
   assert.match(block, /\.to-bottom\s*\{[^}]*pointer-events:\s*auto/, '按钮自己要把点击收回来')
-  // -38 是**看得见的圆**的高度：负的 margin-top 等于自身高度，按钮的下沿才正好落在
-  // 槽那条线上。圆从 42 缩到 38（第二轮），这个数就得跟着走——留 42 会让它整圈下移。
-  assert.match(block, /\.to-bottom\s*\{[^}]*margin-top:\s*-38px/, '按钮挂在槽的线上方（和电脑端同一个做法）')
+  // -27 是**看得见的圆**的高度：负的 margin-top 等于自身高度，按钮的下沿才正好落在
+  // 槽那条线上。圆从 42 缩到 38（第二轮）、又缩到 27（第四轮），这个数就得跟着走。
+  assert.match(block, /\.to-bottom\s*\{[^}]*margin-top:\s*-27px/, '按钮挂在槽的线上方（和电脑端同一个做法）')
 })
 
 /**
@@ -445,7 +445,7 @@ test('回到底部浮标：不新造令牌、不放强调色、圆角走 999px �
  * `0 0 0 .5px` 这道环不是自创：电脑端的高度系统（elevation-stroke）就是这一条，
  * 官方那颗浮标挂的 elevation-panel 第一位正是它。
  */
-test('回到底部浮标：边界走 0.5px 的环、投影浅一档（深色不叠）、看的 38 点的 46', () => {
+test('回到底部浮标：边界走 0.5px 的环、投影浅一档（深色不叠）、看得见的圆 27 点得到的圈 45', () => {
   const from = css.indexOf('/* ---------- 「回到底部」浮标')
   assert.ok(from > 0, '找不到回到底部浮标那段样式，锚点变了先修测试')
   const block = css.slice(from)
@@ -474,11 +474,11 @@ test('回到底部浮标：边界走 0.5px 的环、投影浅一档（深色不�
     /box-shadow:\s*0 0 0 \.5px color-mix\(in srgb, var\(--line\) 90%, var\(--fg\)\),\s*var\(--sh-1\)/,
     '浅色的第二层要是 --sh-1：同一个蓝调，比 --sh-2 更小更柔；第一层要比 --line 深一档')
 
-  // ③ 看得见的圆 38~40；点得到的圈由 ::before 撑（≥44）
+  // ③ 看得见的圆 27（第四轮「面积减半」）；点得到的圈由 ::before 撑（≥44）
   const w = Number(btn.match(/width:\s*(\d+(?:\.\d+)?)px/)[1])
   const h = Number(btn.match(/height:\s*(\d+(?:\.\d+)?)px/)[1])
   const margin = Number(btn.match(/margin-top:\s*-(\d+(?:\.\d+)?)px/)[1])
-  assert.ok(w >= 38 && w <= 40, `看得见的圆要在 38~40：现在是 ${w}`)
+  assert.equal(w, 27, `看得见的圆是 27（38 × √2 的一半 = 26.87 → 27）：现在是 ${w}`)
   assert.equal(h, w, '圆要正圆：宽高相等')
   assert.equal(margin, w, '负 margin 得等于圆的高度，下沿才落在槽那条线上')
   const before = rule('.to-bottom::before')
@@ -486,8 +486,62 @@ test('回到底部浮标：边界走 0.5px 的环、投影浅一档（深色不�
   assert.match(before, /position:\s*absolute/, '热区绝对定位：不占版式、不推动任何东西')
   const inset = Number(before.match(/inset:\s*-(\d+(?:\.\d+)?)px/)[1])
   assert.ok(w + inset * 2 >= 44, `点得到的圈要 ≥44：现在是 ${w + inset * 2}`)
-  assert.match(block, /\.to-bottom svg\s*\{\s*width:\s*14\.5px;\s*height:\s*14\.5px/,
-    '图标等比缩：16 × 38/42 = 14.5，箭头在圆里占的比例不变')
+  assert.match(block, /\.to-bottom svg\s*\{\s*width:\s*10\.3px;\s*height:\s*10\.3px/,
+    '图标等比缩：16 × 27/38 = 10.3，箭头在圆里占的比例不变')
+})
+
+/**
+ * 「回到底部」浮标第四轮之二（2026-10-08 用户说「旁边滚动条一显示，点不下去」）。
+ *
+ * 现象成立的原因全在数字上：手机仿真（= 手机上的实际形态）里 main 的
+ * `offsetWidth - clientWidth = 0`，滚动条是**覆盖式**的，内容区照样通到最右边，
+ * 所以按钮右沿停在 390 − 14（main 的 padding-right）= **376**，右边只剩 14px——
+ * 滚动条一冒出来正好压在那一条上。
+ *
+ * 那条带子在活页面上量过：换成**经典式**（占宽度）的形态，滚动条占的正是最右边那条
+ * **15px**（x 375..390：盒模型 offsetWidth−clientWidth = 15，截图逐列也是这 15 列）。
+ * 覆盖式量不到宽度（它一个像素都不占版面），所以按这条**最宽**的带留余量。
+ *
+ * 断言钉的是「别再把它挪回右边去」：
+ *   ① 让开的量必须真的盖住那条带 + 余量，而不是随手写个好看的数；
+ *   ② 热区右沿要落在带子左边——圆的右沿能压上去是因为它不吃事件，
+ *      热区压上去就等于「右边缘那 9px 点不动」，正是用户报的那个毛病；
+ *   ③ 让开只许用按钮自己的外边距，不许去动槽的 sticky / main 的布局 / 滚动条样式。
+ */
+test('回到底部浮标：往左让开右边那条滚动条（按实测的 15px 带算），且只用按钮自己的外边距', () => {
+  const from = css.indexOf('/* ---------- 「回到底部」浮标')
+  assert.ok(from > 0, '找不到回到底部浮标那段样式，锚点变了先修测试')
+  const block = css.slice(from)
+  const btn = block.match(/\.to-bottom\s*\{([^}]*)\}/)[1]
+  const before = block.match(/\.to-bottom::before\s*\{([^}]*)\}/)[1]
+
+  const w = Number(btn.match(/width:\s*(\d+(?:\.\d+)?)px/)[1])
+  const inset = Number(before.match(/inset:\s*-(\d+(?:\.\d+)?)px/)[1])
+  const mr = btn.match(/margin-right:\s*(\d+(?:\.\d+)?)px/)
+  assert.ok(mr, '往左让开要靠按钮自己的 margin-right：槽是 flex-end，给它右外边距就等于往里推')
+  assert.equal(Number(mr[1]), 13,
+    '13 = 滚动条带 15px（实测）＋ 余量 3px（热区右沿退到 375−3=372）'
+    + ' − main 的 padding-right 14px − 热区比圆多出的 9px 反算出来的圆右沿 363，'
+    + '而圆右沿本来是 376 → 正好挪 13')
+
+  // 从**视口右沿**往里算：右边距 = main 的 padding-right + 按钮的 margin-right；
+  // 热区右沿离视口右沿的距离 = 右边距 − 热区溢出的 9px。
+  const padRight = Number(css.match(/\n\s*main\s*\{[^}]*padding:\s*16px\s+(\d+(?:\.\d+)?)px/)[1])
+  const BAND = 15 // 实测：经典式滚动条占最右边 15px（x 375..390）
+  const CLEAR = 3 // 留一点余量，免得 2 倍屏取整把它蹭回带子里
+  const hotRightGap = padRight + Number(mr[1]) - inset
+  assert.ok(hotRightGap >= BAND + CLEAR,
+    `热区右沿要退到滚动条带左边 ${CLEAR}px 以上：现在是离视口右沿 ${hotRightGap}px，`
+    + `带子有 ${BAND}px 宽（带子的左沿在离右沿 ${BAND}px 处）`)
+  // ② 圆的右沿可以压得比热区靠右，但热区那一圈才是手指真正点得到的地方
+  assert.ok(padRight + Number(mr[1]) - inset > 0, '热区不能被推到视口外面去')
+  assert.ok(w + inset * 2 >= 44, `让开的同时热区不许缩到 44 以下：现在是 ${w + inset * 2}`)
+  // ③ 只许动按钮自己的外边距：槽那三条一个字都不许变（sticky / 高度 0 / 不吃事件）
+  assert.match(block, /\.to-bottom-slot\s*\{[^}]*position:\s*sticky/, '槽还是 sticky，机制不许换')
+  assert.match(block, /\.to-bottom-slot\s*\{[^}]*bottom:\s*16px/, '槽还是贴滚动口下沿往上 16px')
+  assert.match(block, /\.to-bottom-slot\s*\{[^}]*height:\s*0/, '槽高度还是 0')
+  assert.match(block, /\.to-bottom-slot\s*\{[^}]*pointer-events:\s*none/, '槽还是不吃事件')
+  assert.ok(!/scrollbar/.test(block), '滚动条的样式一个字都不许碰')
 })
 
 /**
