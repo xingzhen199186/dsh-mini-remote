@@ -395,3 +395,38 @@ test('统一操作面板：指令行沿用菜单那一套，名字说明不溢�
   assert.match(rows, /\.ops-cmds \.cmd-flag[^{]*\{[^}]*flex:\s*none/,
     '小旗固定宽度，让说明去省略')
 })
+
+/**
+ * 「回到底部」浮标（2026-10-08 用户要求）。
+ *
+ * 它是全页唯一一个**圆形**控件（规格里圆角只有 2px / 999px / 50% 三档，
+ * 它走 999px 那一档，和状态点同一个写法——所以并没有新开档位）。
+ *
+ * 这里钉的是它在**视觉规格**上的边界：不新造颜色令牌（造了就得在浅色主题里再写一份，
+ * 漏一边就有元素在那个主题下隐身）、不碰那两个稀缺的强调色、圆角只用现成那一档、
+ * 不加动效（全页的关键帧白名单也管着）。位置交给 CSS 的 sticky——脚本一个像素都不碰。
+ */
+test('回到底部浮标：不新造令牌、不放强调色、圆角走 999px 那一档、不加动效', () => {
+  const from = css.indexOf('/* ---------- 「回到底部」浮标')
+  assert.ok(from > 0, '找不到回到底部浮标那段样式，锚点变了先修测试')
+  const block = css.slice(from)
+
+  const declared = [...block.matchAll(/(--[a-z0-9-]+)\s*:/g)].map((m) => m[1])
+  assert.deepEqual(declared, [], `浮标不该声明新令牌：${JSON.stringify(declared)}`)
+  assert.ok(!block.includes('var(--act)') && !block.includes('var(--gold)'),
+    '浮标不放强调色（一屏最多两处：发送键和刻度上那一步）')
+  for (const m of block.matchAll(/border-radius:\s*([^;]+);/g)) {
+    assert.equal(m[1].trim(), '999px', `浮标只许用 999px 那一档（圆形）：${m[1].trim()}`)
+  }
+  assert.ok(!/@keyframes|animation:/.test(block), '浮标不许带动效（它是一颗按钮，不是一段表演）')
+
+  // 位置全靠 sticky 贴着滚动口的下沿：这样 main 的下沿（= 输入区那一摞的上沿）
+  // 一变，它自己跟着让位，不需要脚本去算输入框有多高。
+  assert.match(block, /\.to-bottom-slot\s*\{[^}]*position:\s*sticky/, '槽要 sticky')
+  assert.match(block, /\.to-bottom-slot\s*\{[^}]*bottom:\s*16px/, '贴在滚动口下沿往上 16px')
+  assert.match(block, /\.to-bottom-slot\s*\{[^}]*height:\s*0/, '槽高度为 0：它只定位，不占版面')
+  assert.match(block, /\.to-bottom-slot\s*\{[^}]*pointer-events:\s*none/,
+    '槽是通栏的，不设 none 会在底边上拦掉底下内容的点击')
+  assert.match(block, /\.to-bottom\s*\{[^}]*pointer-events:\s*auto/, '按钮自己要把点击收回来')
+  assert.match(block, /\.to-bottom\s*\{[^}]*margin-top:\s*-42px/, '按钮挂在槽的线上方（和电脑端同一个做法）')
+})

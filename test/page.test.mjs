@@ -5674,3 +5674,76 @@ test('轨迹条目行里的「进行中/出错」字样不许被压扁折行', (
   assert.match(detail[0], /text-overflow:\s*ellipsis/, '.traj-detail 要打省略号')
 })
 
+// ---------------------------------------------------------------------------
+// 「回到底部」浮标（2026-10-08 用户要求：移动端聊天界面加一颗瞬间回到底部的按钮，
+// 圆形 + 简约下箭头，参考电脑端 DSH 那颗）
+//
+// 这里钉的都是「光看代码很像是对的、真机上才露馅」的那几处：
+//   · 它得在 #reply **外面**（否则每次状态广播重绘都会把它重建一次）；
+//   · 它得在 main **里面**（否则 CSS 的 sticky 贴不住滚动口，位置就没法交给 CSS）；
+//   · hidden 得真的管用（作者样式表里的 display:flex 会顶掉 hidden 自带的 none）；
+//   · 露 / 收要用页面自己那条黏底判据，不另设一个数（两处容差不一致就会自相矛盾）。
+// ---------------------------------------------------------------------------
+
+test('回到底部浮标：在 #reply 外面、在 main 里面', () => {
+  const main = html.slice(html.indexOf('<main id="main">'), html.indexOf('</main>'))
+  const replyAt = main.indexOf('id="reply"')
+  const btnAt = main.indexOf('id="toBottom"')
+  assert.ok(btnAt > 0, 'main 里找不到回到底部那颗浮标')
+  assert.ok(btnAt > replyAt,
+    '浮标要排在 #reply 后面：它是常驻元素，拼进重绘里会被每次状态广播重建一次（和 #work 同一个道理）')
+  assert.ok(btnAt < main.length, '浮标必须在 main 里面——只有作为滚动口的孩子，sticky 才贴得住')
+})
+
+test('回到底部浮标：默认藏着，而且 hidden 真的管用（flex 会顶掉它）', () => {
+  const at = html.indexOf('id="toBottom"')
+  const tag = html.slice(at, html.indexOf('>', at))
+  assert.match(tag, /\shidden/, '默认要藏着——首屏还没滚动时不该出现')
+  assert.match(html, /\.to-bottom\[hidden\]\s*\{\s*display:\s*none/,
+    '作者样式表里的 display:flex 会顶掉 hidden 自带的 display:none，'
+    + '少了这一句，藏起来的那颗照样显示（和 .attach-bar[hidden] 同一个坑）')
+})
+
+test('回到底部浮标：露 / 收用页面自己那条黏底判据，不另设一个数', () => {
+  const i = html.indexOf('function paintToBottom')
+  assert.ok(i > 0, '找不到 paintToBottom')
+  const body = html.slice(i, html.indexOf('\n  }', i))
+  assert.match(body, /atBottom\(\)/,
+    '判据要用 atBottom()：浮标出现的那一刻应当正好是页面停止跟随的那一刻，'
+    + '两处各用各的容差就会出现「浮标说没到底、页面却自己在滚」这种自相矛盾')
+  assert.match(body, /\.hidden\s*=/, '只改 hidden')
+  assert.ok(!/(top|left|right|bottom|width|height|margin|padding|transform)\s*:/.test(body),
+    '脚本一个像素都不许碰：位置全交给 CSS 的 sticky')
+})
+
+test('回到底部浮标：挂在滚动线上，而且是单独一条', () => {
+  assert.match(html, /mainEl\.addEventListener\('scroll', paintToBottom\)/,
+    '不挂滚动线，往上滚它不会出现——逻辑写得再对，没挂上去就是「一点反应都没有」')
+  // onMainScroll 被 chatPager 那个替身整块抠出来跑，替身里只给了 state / replyEl /
+  // mainEl / timeLabel，**没有 $**。把浮标并进去，那几个测试当场 ReferenceError。
+  const i = html.indexOf('function onMainScroll')
+  const body = html.slice(i, html.indexOf('\n  }', i))
+  assert.ok(!/paintToBottom/.test(body), 'onMainScroll 里不许调用 paintToBottom')
+  assert.match(html, /mainEl\.addEventListener\('scroll', onMainScroll\)/, '原来那条照旧要在')
+})
+
+test('回到底部浮标：点了是瞬时到底，不做平滑滚动', () => {
+  const i = html.indexOf("$('toBottom').addEventListener('click'")
+  assert.ok(i > 0, '浮标的点击没接上')
+  const body = html.slice(i, html.indexOf('});', i))
+  assert.match(body, /mainEl\.scrollTop\s*=\s*mainEl\.scrollHeight/,
+    '直接赋值（瞬时）——和「按发送回底部」是同一套动作，'
+    + '同一件事用两种脾气（有时滑、有时跳）比哪一种都糟')
+  assert.ok(!/smooth|scrollTo\(/.test(body), '用户原话是「瞬间」，不许做成长动画')
+})
+
+test('回到底部浮标：箭头是矢量图形，不是字形、不是 emoji', () => {
+  const i = html.indexOf('id="toBottom"')
+  const block = html.slice(i, html.indexOf('</button>', i))
+  assert.match(block, /<svg[^>]*viewBox="0 0 16 16"/, '箭头要用 svg：字体换个机型可能变成豆腐块')
+  assert.match(block, /M4 6L7\.29289 9\.29289/,
+    '路径照抄电脑端那颗 IconChevronDownOutline（dsh-client-ui-primitives），不自己重画')
+  assert.match(block, /stroke="currentColor"/, '描边走 currentColor，深浅两套主题各自适配')
+  assert.ok(!/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/u.test(block), '不许用 emoji')
+})
+

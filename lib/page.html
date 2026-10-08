@@ -1391,6 +1391,43 @@
     width: 18px; height: 18px; fill: none; stroke: currentColor;
     stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round;
   }
+
+  /* ---------- 「回到底部」浮标（2026-10-08） ----------
+     用户要的是「瞬间回到底部的按钮，圈子里一个简约的往下箭头」，参考电脑端 DSH 那颗。
+
+     形状照电脑端那颗抄：圆底 + 一根下折线（矢量 svg，不是字形、不是 emoji——
+     字形换个机型就可能变成豆腐块）。尺寸不一样：电脑端是 34×34，这里是 42×42，
+     和底栏那三个控件（.attach / .send / #input 都是 42 高）对齐，也稳在手指点得准的
+     下限之上。圆角走 999px 那一档（和状态点同一个写法），不新造档位。
+
+     颜色**一个令牌都不新造**，全用主屏现成的那几个：底 --panel、线 --line、
+     图标 --fg、按下 --panel-2、投影 --sh-2。两套主题各自成对，浅色下自动跟着变。
+
+     位置的关键在 .to-bottom-slot：它是 main 的最后一个孩子，靠 `position: sticky`
+     贴在**滚动口下沿往上 16px** 的地方。这一手的好处是位置不用脚本算——
+     main 的下沿天生就是输入区那一摞（附件条 / 指令菜单 / 底栏）的上沿，
+     所以输入框长高、附件条冒出来、指令菜单弹开，它都跟着一起让位，永远不会盖住
+     输入框和发送键；底部那条手势条也由 footer 自己的 safe-area 内边距让开了，
+     它比输入区还高一截，离手势条更远。 */
+  .to-bottom-slot {
+    position: sticky; bottom: 16px; z-index: 5;
+    height: 0; display: flex; justify-content: flex-end;
+    /* 这一条不能省：槽是通栏的，不设 none 就会在底边上拦掉底下内容的点击。
+       按钮自己再打开 auto，所以只有那一个圆圈可点。 */
+    pointer-events: none;
+  }
+  .to-bottom {
+    width: 42px; height: 42px; margin-top: -42px; padding: 0;
+    border: 1px solid var(--line); border-radius: 999px;
+    background: var(--panel); color: var(--fg);
+    box-shadow: var(--sh-2); cursor: pointer; pointer-events: auto;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .to-bottom:active { background: var(--panel-2); }
+  /* flex 会顶掉 hidden 自带的 display:none——少了这一句，藏起来的那颗还会占位显示。
+     和 .attach-bar[hidden] / .cmd-menu[hidden] 是同一个坑。 */
+  .to-bottom[hidden] { display: none; }
+  .to-bottom svg { width: 16px; height: 16px; }
 </style>
 <script>
   // 主题必须在**首屏画出来之前**定下来，否则浅色手机打开会先闪一下深色底。
@@ -1487,6 +1524,22 @@
        排队和鲸鱼娘是两件事——前者是「还有几条在等」，后者是「她正在忙」，
        别因为后者要藏就把前者一起藏了。 -->
   <div class="queue" id="queue" hidden></div>
+
+  <!-- 「回到底部」浮标（2026-10-08 用户要求）。样子参考电脑端 DSH 那颗
+       （ChatView.module.css 的 .xz4KEq_toBottom：34×34 圆底 + 一根 14×14 的下折线 svg），
+       位置、尺寸和配色按手机这页的规格重做，见样式表里那一段。
+
+       **它必须留在 #reply 外面**：跟 #work 同一个道理——拼进重绘里的话，每次状态广播
+       都会把它重建一次，用户正按着它就没了。也**必须在 main 里面**：只有作为滚动口的孩子，
+       CSS 的 sticky 才贴得住（位置由 CSS 算，脚本一个像素都不碰）。
+
+       箭头路径原样抄自电脑端那颗图标（dsh-client-ui-primitives 的 IconChevronDownOutline），
+       没有自己重画：viewBox 0 0 16 16、1px 描边、fill:none、颜色走 currentColor。 -->
+  <div class="to-bottom-slot" id="toBottomSlot">
+    <button class="to-bottom" id="toBottom" type="button" aria-label="回到底部" hidden>
+      <svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1"><path d="M4 6L7.29289 9.29289C7.68342 9.68342 8.31658 9.68342 8.70711 9.29289L12 6"/></svg>
+    </button>
+  </div>
 </main>
 
 <div class="attach-bar" id="attachBar" hidden></div>
@@ -4056,6 +4109,25 @@
     if (head) toggleTrajGroup(head.getAttribute('data-traj-group'));
   }
 
+  /**
+   * 「回到底部」那颗浮标的露 / 收。
+   *
+   * 判据直接用 atBottom()，不另设一个数。这样有个好处：**浮标出现的那一刻，正好
+   * 就是页面停止自动跟随的那一刻**——两处要是各用各的容差（比如浮标 25px、跟随 48px），
+   * 中间那段就会出现「浮标说没到底、页面却自己在往下滚」这种自相矛盾的样子。
+   * 电脑端那颗用的是它自己的 25px 容差（useChatReading 里的 useScrollFollow(_, 25)），
+   * 这里跟的是本页既有的 48px，因为本页的黏底判据就是它。
+   *
+   * 只改 hidden，**不碰任何位置和尺寸**：位置全在 CSS 的 sticky 里算好了（见样式表）。
+   * 每次现取元素、取不到就静静退出——页面测试会把 render 那一段单独抠出来跑，
+   * 那里给的 $ 是替身，不能假设它一定认得这个 id。
+   */
+  function paintToBottom() {
+    var el = $('toBottom');
+    if (!el) return;
+    el.hidden = atBottom();
+  }
+
   function render() {
     $('hintMode').textContent = modeHint();
       if (state.mode === 'full') renderFull(); else if (state.mode === 'chat') renderChat(); else renderMinimal();
@@ -4063,6 +4135,9 @@
     // 进度条由 CSS 藏掉，只留「已 N 秒 / 停止」。#work 不跟着 #reply 重画，
     // 所以这一下挂在总分发这里，切模式时各归各位。
     $('work').className = 'work' + (state.mode === 'full' ? ' bare' : '');
+    // 重画之后滚动位置可能被浏览器夹回来（内容变短）——那种情况不一定发 scroll 事件，
+    // 所以浮标的状态也在这里跟一次。放在最后：上面几句可能刚动过 scrollTop。
+    paintToBottom();
   }
 
   function applySnapshot(snap) {
@@ -6823,6 +6898,30 @@
   // 位置也有讲究：绑在这里，不绑在 atBottom 那片函数旁边——页面测试会把那一段
   // 整块抠出来求值，测试里的假 mainEl 没有 addEventListener，写在那边好几个测试当场报错。
   mainEl.addEventListener('scroll', onMainScroll);
+
+  // 「回到底部」浮标（2026-10-08）也挂在这一根滚动线上，但**另起一条监听**：
+  // onMainScroll 被页面测试整块抠出来跑（chatPager 那个替身只给了 state / replyEl /
+  // mainEl / timeLabel，没有 $），把浮标并进去会让那几个测试当场报 ReferenceError。
+  mainEl.addEventListener('scroll', paintToBottom);
+  // 首屏先定一次：刚进来是空页，按判据算「在底部」，浮标该是收着的。
+  paintToBottom();
+
+  // 点它：**瞬时**到底，不做平滑滚动。
+  //
+  // 两条理由，都是「跟现成的东西保持一致」而不是我挑的：
+  //   · 用户原话就是「瞬间」；
+  //   · 电脑端那颗也是瞬时的（ChatView 里 reading.followTail → viewport.scrollToBottom
+  //     → follow.toBottom(..., 'instant')）；
+  //   · 本页「按发送回底部」本来就是直接赋值（见 send 里那句
+  //     mainEl.scrollTop = mainEl.scrollHeight），同一件事用同一套动作，
+  //     用户不会看到「有时滑一下、有时直接跳」两种脾气。
+  //
+  // 赋值本身会发一次 scroll 事件，浮标自己就收了；这里再补一次是防「本来就在最底、
+  // 位置没变所以不发事件」那一种——补一下，状态就是确定的。
+  $('toBottom').addEventListener('click', function () {
+    mainEl.scrollTop = mainEl.scrollHeight;
+    paintToBottom();
+  });
 
   // ---------------- 启动 ----------------
   syncSeg();
