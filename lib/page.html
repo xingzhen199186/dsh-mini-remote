@@ -44,6 +44,12 @@
     --run: #a9c8e8;
     --shimmer: #eaf4ff;   /* 跑着的行那道扫光的亮色（照 PC 的 label-shimmer，2026-10-04） */
     --err: #d4614f;
+    /* 「等你在手机上动手」那一类状态（待审批 / 计划待审 / 待回答）。
+       和 --ok/--run/--err 同一档：**状态点的语义色**，占的是一个小点/一截短字，
+       不算强调色，不参与"一屏最多两处暖金"那条规矩。
+       照 PC 侧栏的说法，那一类用的是共享的 warning 橙点——我们这边补一个对应的令牌，
+       PC 上的原话是「待处理交互的优先级高于共享 ongoing loading」。 */
+    --warn: #e0904a;
     --r: 2px;
     --sh-1: 0 1px 2px rgba(0, 0, 0, .28);
     --sh-2: 0 2px 6px rgba(0, 0, 0, .34);
@@ -76,6 +82,7 @@
     --run: #3b6fc4;
     --shimmer: #7ea6e6;   /* 浅色下的扫光要比 --run 亮、又不能白到看不见 */
     --err: #c0392b;
+    --warn: #b56a17;      /* 白底上的警示橙：比深色那档压深，才读得清 */
     --sh-1: 0 1px 2px rgba(28, 60, 110, .07);
     --sh-2: 0 2px 8px rgba(28, 60, 110, .12);
     --glass: rgba(255, 255, 255, .74);
@@ -880,6 +887,104 @@
     flex: 0 0 auto; width: 6px; height: 6px; border-radius: 50%;
     background: var(--run);
   }
+  /* ---------- 会话条目上的执行动作（2026-10-09） ----------
+     电脑端是"悬停时行尾冒出按钮"，手机没有悬停——所以这里改成**常驻**一个小入口（⋯）。
+     选常驻不选长按：长按是看不见的隐藏手势，还和系统的选字/链接预览打架；
+     而这份列表里一半条目没名字，最需要的恰恰是一个看得见的入口。
+     动作本身不弹菜单，在那一行下面**行内展开**（照「新建文件夹」「模式清单」已有的先例）。 */
+  /* 一行会话 = 一个"打开它"的按钮 + 一个常驻的 ⋯。
+     两者是**兄弟**而不是父子：塞进去就成了"按钮里套按钮"（无效结构），
+     点 ⋯ 也会先把会话打开。所以多包一层，让它们并排。 */
+  .sess-line { display: flex; align-items: center; }
+  .sess-line .sess { flex: 1 1 auto; min-width: 0; padding-right: 4px; }
+  .s-more {
+    flex: 0 0 auto; width: 26px; height: 26px; padding: 0; margin-right: 8px;
+    display: flex; align-items: center; justify-content: center;
+    background: none; border: none; color: var(--muted);
+    font: inherit; font-size: 15px; line-height: 1; cursor: pointer;
+    border-radius: var(--r);
+  }
+  .s-more:active { background: var(--line); color: var(--fg); }
+  .sess.acting, .sess.renaming { background: var(--panel-2); }
+  /* 待处理那一类（待审批 / 计划待审 / 待回答）：占的是行尾更新时间的位置——
+     和电脑端同一条规矩（"以待批准、计划待审或待回答替换尾部更新时间"）。 */
+  .sess .s-flag.pending { color: var(--warn); }
+  .sess .s-dot.pending { background: var(--warn); }
+  /* 已归档：整行置灰，并在行尾标出来。**不去掉这一行**——用户要看的是"它还在，
+     只是收起来了"，凭空消失只会让人以为会话被删了（官方：会话可以归档但绝不会被删除）。 */
+  .sess.archived { color: var(--muted); }
+  .sess .s-flag { flex: 0 0 auto; font-size: 11.5px; color: var(--muted); white-space: nowrap; }
+
+  .sess-acts { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 14px 9px 30px; }
+  .sess-acts button {
+    flex: 1 1 auto; min-width: 0; padding: 8px 10px; font: inherit; font-size: 13px;
+    background: var(--panel-2); border: 1px solid var(--line);
+    border-radius: var(--r); color: var(--fg); cursor: pointer;
+  }
+  .sess-acts button:active { background: var(--line); }
+  .sess-acts button.danger { color: var(--err); }
+
+  /* 改名字那一行。形状照抄下面的「新建文件夹」：同样是内联输入，不用 window.prompt
+     （prompt 在微信这类内嵌浏览器里会被直接屏蔽，点了什么都不发生、也没提示）。 */
+  .sess-rename { display: flex; gap: 6px; padding: 0 14px 9px 30px; align-items: center; }
+  .sess-rename input {
+    flex: 1 1 auto; min-width: 0; padding: 9px 10px; font: inherit; font-size: 14px;
+    background: var(--panel-2); border: 1px solid var(--line);
+    border-radius: var(--r); color: var(--fg);
+  }
+  .sess-rename button {
+    flex: 0 0 auto; padding: 9px 12px; font: inherit; font-size: 13px; cursor: pointer;
+    background: var(--panel-2); border: 1px solid var(--line);
+    border-radius: var(--r); color: var(--fg);
+  }
+  .sess-rename button:active { background: var(--line); }
+
+  /* 「展开其余 N 个 / 收起」。官方口径：默认只显示 5 条空闲会话，每点一次多 5 条。
+     它是一个动作，所以用强调**字色**（--ice），不是强调底色——底那一档一屏只有一个。 */
+  .sess-more {
+    display: block; width: 100%; padding: 10px 14px 10px 30px;
+    background: none; border: none; color: var(--ice);
+    font: inherit; font-size: 13px; text-align: left; cursor: pointer;
+  }
+  .sess-more:active { background: var(--panel-2); }
+
+  /* 抽屉顶部的「显示已归档」。默认关——官方的默认项就是"隐藏已归档"。
+     关着的时候是一句普通灰字，开着的时候用 --ice 亮起来，一眼看得出当前在哪一档。 */
+  .nav-filter {
+    display: flex; align-items: center; gap: 6px; width: 100%;
+    padding: 9px 14px; background: none; border: none; border-bottom: 1px solid var(--line);
+    color: var(--muted); font: inherit; font-size: 13px; text-align: left; cursor: pointer;
+  }
+  .nav-filter.on { color: var(--ice); }
+  .nav-filter:active { background: var(--panel-2); }
+
+  /* 归档确认（"停止并归档此会话？"）。**这一处是真弹的**——官方原话是
+     "仍有工作在跑的 Session 是唯一会先询问的情形……侧栏随即打开『停止并归档』对话框"，
+     而这件事会停掉正在跑的工作，不能做成一行不显眼的文字。 */
+  #navConfirm {
+    position: fixed; inset: 0; z-index: 120; display: none;
+    background: var(--scrim); padding: 24px 18px calc(24px + env(safe-area-inset-bottom));
+    align-items: center; justify-content: center;
+  }
+  #navConfirm.on { display: flex; }
+  #navConfirm .nc-panel {
+    width: 100%; max-width: 340px; max-height: 100%; overflow-y: auto;
+    background: var(--pop); border: 1px solid var(--line); border-radius: var(--r);
+    box-shadow: var(--sh-2); padding: 16px;
+  }
+  #navConfirm h3 { margin: 0 0 10px; font-size: 15.5px; font-weight: 650; }
+  #navConfirm p { margin: 0 0 10px; font-size: 13.5px; line-height: 1.7; color: var(--muted); }
+  #navConfirm ul { margin: 0 0 14px; padding-left: 18px; font-size: 13.5px; line-height: 1.8; }
+  #navConfirm li b { font-weight: 650; }
+  #navConfirm .nc-foot { display: flex; gap: 8px; }
+  #navConfirm .nc-foot button {
+    flex: 1 1 0; padding: 11px; font: inherit; font-size: 14px; cursor: pointer;
+    background: var(--panel-2); border: 1px solid var(--line);
+    border-radius: var(--r); color: var(--fg);
+  }
+  #navConfirm .nc-foot button:active { background: var(--line); }
+  #navConfirm .nc-foot button.danger { color: var(--err); border-color: var(--err); }
+  #navConfirm .nc-foot button[disabled] { color: var(--muted); cursor: default; }
   /* 「新建会话」那一行。跟会话条目同宽、同缩进，但用强调色——
      它不是一个会话，是一个动作。长得跟会话一样会让人以为点进去就是那条会话。 */
   .ws-new {
@@ -1338,6 +1443,17 @@
     transition: opacity .2s, transform .2s; z-index: 200; max-width: 86vw; text-align: center;
   }
   #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  /* 带「撤销」那一版的提示：只有它需要点得动，所以只有它开 pointer-events。
+     普通提示还是原来那样——纯字、点不中，不给用户一个按了没反应的假按钮。 */
+  #toast.with-act {
+    pointer-events: auto; display: flex; align-items: center; gap: 12px; text-align: left;
+  }
+  #toast .toast-act {
+    flex: 0 0 auto; padding: 4px 8px; background: none; border: none;
+    color: var(--ice); font: inherit; font-size: 13.5px; font-weight: 650;
+    cursor: pointer; border-radius: var(--r);
+  }
+  #toast .toast-act:active { background: var(--panel-2); }
 
   /* ——— 回答电脑提问的卡片 ———
      整屏遮住聊天区：手机上一次只专心答一题，答完自动消失。
@@ -1737,6 +1853,21 @@
     </div>
     <div class="nav-body" id="navBody"></div>
   </aside>
+</div>
+
+<!-- 归档确认。**独立于抽屉之外**：抽屉能被关掉，而这一问必须挡住整屏——
+     它要停下来的是正在电脑上跑的工作，不该因为用户顺手关了抽屉就悄悄消失。
+     里面的内容（会停掉哪几族工作）由 renderNavConfirm 现填。 -->
+<div id="navConfirm" role="dialog" aria-modal="true" aria-labelledby="navConfirmTitle">
+  <div class="nc-panel">
+    <h3 id="navConfirmTitle">停止并归档此会话？</h3>
+    <p id="navConfirmDesc"></p>
+    <ul id="navConfirmList"></ul>
+    <div class="nc-foot">
+      <button type="button" data-nc-cancel="1">取消</button>
+      <button type="button" class="danger" data-nc-ok="1">停止并归档</button>
+    </div>
+  </div>
 </div>
 
 <div id="settings">
@@ -2612,9 +2743,49 @@
   function toast(msg) {
     var el = $('toast');
     el.textContent = msg;
+    // 普通提示**一定是纯字**：上一版如果带着「撤销」那颗按钮，这里要把它连同
+    // with-act 一起收掉，否则会留下一个按了没反应的按钮（它的回调早就过期了）。
+    el.classList.remove('with-act');
     el.classList.add('show');
     clearTimeout(toastTimer);
     toastTimer = setTimeout(function () { el.classList.remove('show'); }, 1800);
+  }
+
+  /**
+   * 带一个动作的提示。目前只有一处用：归档成功后的「撤销」。
+   *
+   * 为什么单独一个函数、而不是给 toast 加参数：普通提示是**纯字、点不中**的
+   * （见 #toast 的 pointer-events），带动作就得反过来——两种形状差别够大，
+   * 混在一个函数里迟早会让某一条普通提示也莫名其妙能点。
+   *
+   * 停留 6 秒：短于这个数，用户看到"归档了"再去找按钮就已经没了；长于这个数，
+   * 它会一直压着输入区上方那块地方。
+   */
+  function toastAction(msg, label, onTap) {
+    var el = $('toast');
+    el.textContent = '';
+    var text = document.createElement('span');
+    text.textContent = msg;
+    el.appendChild(text);
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'toast-act';
+    btn.textContent = label;
+    btn.addEventListener('click', function () {
+      el.classList.remove('show');
+      el.classList.remove('with-act');
+      clearTimeout(toastTimer);
+      onTap();
+    });
+    el.appendChild(btn);
+    el.classList.add('with-act');
+    el.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () {
+      el.classList.remove('show');
+      // 收掉的时候把 with-act 一起收：光藏起来的话，那层透明的提示仍然接着点击。
+      setTimeout(function () { el.classList.remove('with-act'); }, 220);
+    }, 6000);
   }
   function authHeaders(isJson) {
     return isJson === false
@@ -2635,6 +2806,9 @@
           // 状态码挂在错上带出去：调用方要区分「服务端说这题已经结束了」（409）和
           // 「压根没连上」（fetch 直接抛）——靠中文字面去猜太脆。
           err.status = r.status;
+          // 整个响应体也挂上。归档那条要**读里面的 activity**（会停掉哪些工作）才能
+          // 弹确认框——只靠状态码看不出"还有工作在跑"和"工作区服务拿不到"的区别。
+          err.body = body;
           throw err;
         }
         return body;
@@ -4408,6 +4582,22 @@
   var navPresets = null;   // Agent 模式清单（2026-10-04：新建会话时手机上也要能选模式）
   var navPresetsLoaded = false;
   var navPickerWs = '';    // 正在挑模式的那个工作区（清单行内展开在它的「新建会话」下）
+  // —— 会话条目的执行功能（2026-10-09）——
+  var navShowArchived = false; // 筛选：默认**隐藏已归档**（官方默认项就是这个）
+  var navActing = '';      // 正在行内展开动作条的那条会话 id
+  var navRenaming = '';    // 正在改名字的那条会话 id
+  var navConfirm = null;   // 归档确认：{ sessionId, title, activity }；非空就是弹着
+  var navExtra = {};       // workspaceId -> 已经点了几次「展开其余」
+  var navLimit = {};       // workspaceId -> 这次向服务端要了多少条（要更多时递增）
+
+  /**
+   * 「展开其余」一次多几条。**这个 5 是官方口径**，不是我们挑的：
+   * PC 侧栏的文档原话是「默认只显示 5 条空闲 Session……每次点击『展开其余』最多再显示五条」。
+   * 正在跑的会话不占这 5 条配额，始终显示——同一个来源。
+   */
+  var NAV_IDLE_QUOTA = 5;
+  /** 一次向服务端要多少条。要少了「展开其余」很快就没得展开；要多了标题那一步很贵。 */
+  var NAV_PAGE = 20;
 
   function openNav() {
     $('nav').classList.add('open');
@@ -4503,12 +4693,19 @@
     // 「新建工作区」常驻在最上面：它是这一屏的入口，不该等有了会话才出现——
     // 一个工作区都还没有的人，恰恰最需要它。
     var cta = '<button class="nav-cta" type="button" data-new-ws="1">＋ 新建工作区</button>';
+    // 「显示已归档」是**整屏一个**的口径，所以放在 CTA 下面、工作区上面：
+    // 它管的不是某一个工作区，是所有工作区里"已归档的那些要不要出现"。
+    // 默认关（官方的默认项就是"隐藏已归档"）。
+    var filter = '<button class="nav-filter' + (navShowArchived ? ' on' : '')
+      + '" type="button" data-archived-toggle="1" aria-pressed="' + (navShowArchived ? 'true' : 'false')
+      + '">' + (navShowArchived ? '✓ ' : '')
+      + (navShowArchived ? '显示已归档（点一下收起来）' : '显示已归档') + '</button>';
     if (!list.length) {
-      $('navBody').innerHTML = cta + '<div class="placeholder">电脑上还没有可以切换的会话。<br>'
+      $('navBody').innerHTML = cta + filter + '<div class="placeholder">电脑上还没有可以切换的会话。<br>'
         + '在电脑上开一个，这里就会出现了。</div>';
       return;
     }
-    $('navBody').innerHTML = cta + list.map(function (ws) {
+    $('navBody').innerHTML = cta + filter + list.map(function (ws) {
       var open = Boolean(navExpanded[ws.id]);
       return '<div class="ws' + (open ? ' open' : '') + '" data-ws="' + escapeHtml(ws.id) + '">'
         + '<button class="ws-head" type="button">'
@@ -4522,6 +4719,62 @@
         + '<div class="ws-body">' + (open ? sessionsHtml(ws.id) : '') + '</div>'
         + '</div>';
     }).join('');
+  }
+
+  /** 这个工作区现在到底该摆出哪几条。**口径都在这里，一处说了算。** */
+  function navVisible(wsId, got) {
+    var ex = navExtra[wsId] || 0;
+    var quota = NAV_IDLE_QUOTA * (ex + 1);
+    var rows = [];
+    var idleShown = 0;
+    var idleTotal = 0;
+    (got.sessions || []).forEach(function (s) {
+      if (s.running === true) { rows.push(s); return; }
+      idleTotal += 1;
+      if (idleShown < quota) { rows.push(s); idleShown += 1; }
+    });
+    var remaining = Math.max(0, idleTotal - idleShown);
+    return {
+      rows: rows,
+      quota: quota,
+      // 页里还有没摆出来的，或者服务端说这个工作区还有没取回来的——两种都算"还有"
+      more: remaining > 0 || got.truncated === true,
+      remaining: remaining,
+      expandable: remaining > 0 || got.truncated === true,
+      // 按钮上那个数：官方口径是"每次最多再显示五条"，所以最多写 5。
+      step: remaining > 0 ? Math.min(NAV_IDLE_QUOTA, remaining) : NAV_IDLE_QUOTA,
+      collapsed: ex > 0 && !(remaining > 0 || got.truncated === true),
+    };
+  }
+
+  /** 一条会话在行尾该显示什么。**一行只显示一个**：尾部那块地方只够一样。 */
+  function navTail(s) {
+    if (s.pending === 'approval') return '<span class="s-flag pending">待审批</span>';
+    if (s.pending === 'plan') return '<span class="s-flag pending">计划待审</span>';
+    if (s.pending === 'question') return '<span class="s-flag pending">待回答</span>';
+    var badge = '';
+    if (s.archived) badge = '<span class="s-flag">已归档</span>';
+    else if (s.pinned) badge = '<span class="s-flag">已置顶</span>';
+    return badge + '<span class="s-meta">' + dayLabel(s.createdAt) + '</span>';
+  }
+
+  /**
+   * 动作条。**归档行不给置顶**——官方规定归档与置顶互斥（归档会把置顶一并丢掉），
+   * 摆一个按了会被拒的按钮，比不摆更糟。
+   */
+  function navActs(s) {
+    var id = escapeHtml(s.id);
+    var pin = s.archived
+      ? ''
+      : '<button type="button" data-act="pin" data-act-id="' + id + '" data-act-on="'
+        + (s.pinned ? '1' : '0') + '">' + (s.pinned ? '取消置顶' : '置顶会话') + '</button>';
+    var arc = s.archived
+      ? '<button type="button" data-act="unarchive" data-act-id="' + id + '">取消归档</button>'
+      : '<button type="button" class="danger" data-act="archive" data-act-id="' + id + '">归档会话</button>';
+    return '<div class="sess-acts">'
+      + '<button type="button" data-act="rename" data-act-id="' + id + '">重命名</button>'
+      + pin + arc
+      + '</div>';
   }
 
   function sessionsHtml(wsId) {
@@ -4547,23 +4800,294 @@
     }
     var got = navSessions[wsId];
     if (!got) return html + '<div class="placeholder">正在读取…</div>';
-    if (!got.sessions.length) return html + '<div class="placeholder">这个工作区还没有会话。</div>';
+    if (!got.sessions.length) {
+      // 「一条都没有」和「都被筛掉了」是两件事，得分开说——不然用户会以为
+      // 自己的会话不见了（就在刚才，那还是他亲手归档的）。
+      var hid = (got.hiddenArchived || 0) + (got.hiddenBlank || 0);
+      if (hid > 0) {
+        return html + '<div class="placeholder">这个工作区里没有能列出来的会话。<br>'
+          + '另有 ' + (got.hiddenArchived || 0) + ' 条已归档、'
+          + (got.hiddenBlank || 0) + ' 条还是空白的新会话。</div>';
+      }
+      return html + '<div class="placeholder">这个工作区还没有会话。</div>';
+    }
     var cur = state.boundSessionId;
-    html += got.sessions.map(function (s) {
-      // 没有标题就用日期——原来退到取 id 的前 8 位当名字，而本机真有一个会话的 id
-      // 以「session-」开头，于是整列都显示成一样的「session-」，等于没有名字。
-      return '<button class="sess' + (s.id === cur ? ' cur' : '') + '" type="button"'
+    var view = navVisible(wsId, got);
+    html += view.rows.map(function (s) {
+      var cls = 'sess';
+      if (s.id === cur) cls += ' cur';
+      // 已归档的行置灰，而且**点不开**——官方原话是「已归档对话暂时无法查看，
+      // 请取消归档后查看」。留着可点会是更坏的结果：点进去是一个空会话。
+      if (s.archived) cls += ' archived';
+      if (navActing === s.id) cls += ' acting';
+      if (navRenaming === s.id) cls += ' renaming';
+      // 行首那颗点：**有等着的就显示等着的**（照 PC：「待处理交互的优先级高于
+      // 共享 ongoing loading」）；没有等着才轮到"正在跑"。
+      var dot = s.pending
+        ? '<span class="s-dot pending"></span>'
+        : (s.running ? '<span class="s-dot"></span>' : '');
+      var row = '<div class="sess-line">'
+        + '<button class="' + cls + '" type="button"'
         + ' data-sess="' + escapeHtml(s.id) + '">'
-        + (s.running ? '<span class="s-dot"></span>' : '')
+        + dot
+        // 没有标题就用日期——原来退到取 id 的前 8 位当名字，而本机真有一个会话的 id
+        // 以「session-」开头，于是整列都显示成一样的「session-」，等于没有名字。
         + '<span class="s-title">' + escapeHtml(s.title || '未命名会话') + '</span>'
-        + '<span class="s-meta">' + dayLabel(s.createdAt) + '</span>'
-        + '</button>';
+        + navTail(s)
+        + '</button>'
+        // ⋯ 是**兄弟**不是子节点：塞进那个 button 里就成了"按钮里套按钮"，
+        // 点它会同时触发"打开会话"，而且那种结构本身是无效的。
+        + '<button class="s-more" type="button" aria-label="会话操作"'
+        + ' data-more-menu="' + escapeHtml(s.id) + '">⋯</button>'
+        + '</div>';
+      if (navActing === s.id) row += navActs(s);
+      if (navRenaming === s.id) {
+        row += '<div class="sess-rename">'
+          // 预填的是**真实标题**（没有就是空的），绝不是「未命名会话」那个显示占位——
+          // 把占位当标题提交，就等于凭空把"未命名"三个字钉成一个真标题。
+          + '<input id="renameInput" type="text" value="' + escapeHtml(s.title || '')
+          + '" placeholder="给这个会话起个名字" aria-label="会话标题">'
+          + '<button type="button" data-rename-cancel="1">取消</button>'
+          + '<button type="button" data-rename-ok="1">确定</button>'
+          + '</div>';
+      }
+      return row;
     }).join('');
-    if (got.truncated) {
-      html += '<div class="nav-note">只列了最近 ' + got.sessions.length + ' 条，共 '
-        + got.total + ' 条。</div>';
+    // 「展开其余 N 个 / 收起」。**这里原来是一句死话**（「只列了最近 N 条，共 M 条」），
+    // 展不开也搜不了，用户只能去电脑上找。现在按官方口径真的展开。
+    if (view.expandable) {
+      html += '<button class="sess-more" type="button" data-more="' + escapeHtml(wsId) + '">'
+        + '展开其余 ' + view.step + ' 个</button>';
+    } else if (view.collapsed) {
+      html += '<button class="sess-more" type="button" data-less="' + escapeHtml(wsId) + '">收起</button>';
     }
     return html;
+  }
+
+  /**
+   * 会话列表里的一条（拿真实数据用，比如"当前标题是什么"）。
+   * 找不到返回 null——调用方据此如实说"刷新一下再看看"，而不是凭空造一个。
+   */
+  function navSessionById(id) {
+    var keys = Object.keys(navSessions);
+    for (var i = 0; i < keys.length; i++) {
+      var got = navSessions[keys[i]];
+      var list = (got && got.sessions) || [];
+      for (var j = 0; j < list.length; j++) {
+        if (list[j].id === id) return { wsId: keys[i], row: list[j], got: got };
+      }
+    }
+    return null;
+  }
+
+  function toggleActs(id) {
+    navRenaming = '';
+    navActing = navActing === id ? '' : id;
+    renderNav();
+  }
+
+  function startRename(id) {
+    navActing = '';
+    navRenaming = id;
+    renderNav();
+    // 光标落在末尾：用户多半是想改几个字，不是想全部重打。
+    var input = $('renameInput');
+    if (input && input.focus) {
+      try { input.focus(); input.setSelectionRange(input.value.length, input.value.length); } catch (e) {}
+    }
+  }
+
+  /**
+   * 提交改名。
+   *
+   * **这一步就是"不误钉"的全部**：官方 `SessionTitleService.rename` 的原文是
+   * 「Appends a `session/title` event with the `user` source, which **pins** the title:
+   * in-flight automatic generation is superseded and later user messages schedule none」
+   * ——也就是说**传什么都会钉住**，哪怕跟当前那条自动标题一字不差。
+   * 所以"没改"就**根本不发这一趟**（用户双击进来又原样退出的情形很常见）。
+   */
+  function renameSubmit() {
+    var id = navRenaming;
+    var found = navSessionById(id);
+    if (!found) { navRenaming = ''; renderNav(); toast('这个会话不在了，刷新一下再看看'); return; }
+    var input = $('renameInput');
+    var next = input ? input.value : '';
+    var current = typeof found.row.title === 'string' ? found.row.title : '';
+    // 只比"归一化之后"的那一份（去空白）。官方那边也会 trim，比原始串会把
+    // "结尾多了一个空格"当成真改动，那正是要避开的误钉。
+    if (next.trim() === current.trim()) {
+      navRenaming = '';
+      renderNav();
+      return;
+    }
+    if (!next.trim()) { toast('标题不能为空'); return; }
+    return api('/mini/api/session/rename', {
+      method: 'POST',
+      body: JSON.stringify({ sessionId: id, title: next }),
+    }).then(function (res) {
+      navRenaming = '';
+      // 用**服务端接受的那一份**改本地这一行：官方会归一化（去控制字符、按字节截断），
+      // 界面要显示的是它认下来的那个标题，不是我们递过去的那串。
+      found.row.title = res && typeof res.title === 'string' ? res.title : next;
+      renderNav();
+      toast('已改名');
+    }).catch(function (err) { toast(err.message); });
+  }
+
+  /** 置顶 / 取消置顶。*/
+  function pinAct(id, on) {
+    return api('/mini/api/session/pin', {
+      method: 'POST',
+      body: JSON.stringify({ sessionId: id, pinned: on }),
+    }).then(function () {
+      var found = navSessionById(id);
+      if (found) found.row.pinned = on;
+      // 置顶会改整个列表的顺序，所以这次要重新问一遍服务端（别自己在本地排——
+      // 官方的置顶顺序是"最近置顶的在前"，本地排不出那个顺序）。
+      refreshSessions(found ? found.wsId : '');
+      navActing = '';
+      toast(on ? '已置顶' : '已取消置顶');
+    }).catch(function (err) { toast(err.message); });
+  }
+
+  /**
+   * 归档 / 取消归档。
+   *
+   * `stop` 那一次往返是**官方那条两段式流程**：不带它，会话还有工作在跑时服务端会拒绝，
+   * 同时把"会停掉什么"按族带回来（见 lib/index.js 的 archiveSession）。
+   * 拿到那一份就弹确认框问过用户再来一次——**不自己猜会停掉什么**。
+   */
+  function archiveAct(id, stop) {
+    return api('/mini/api/session/archive', {
+      method: 'POST',
+      body: JSON.stringify({ sessionId: id, stop: stop === true }),
+    }).then(function () {
+      // **先把确认框收掉**，再动别的。漏了这一句的后果实测过：那一层是
+      // fixed/inset:0，z-index 120——归档成功之后它仍然盖在整屏上，
+      // 用户接下来点哪儿都是点到它（点哪儿都当成"取消"，什么都没发生）。
+      navConfirm = null;
+      renderNavConfirm();
+      navActing = '';
+      var found = navSessionById(id);
+      if (found) { found.row.archived = true; found.row.pinned = false; }
+      refreshSessions(found ? found.wsId : '');
+      toastAction('会话已归档', '撤销', function () {
+        api('/mini/api/session/unarchive', {
+          method: 'POST', body: JSON.stringify({ sessionId: id }),
+        }).then(function () {
+          var f = navSessionById(id);
+          if (f) f.row.archived = false;
+          refreshSessions(f ? f.wsId : '');
+          toast('已取消归档');
+        }).catch(function (err) { toast(err.message); });
+      });
+    }).catch(function (err) {
+      var body = err && err.body;
+      if (err && err.status === 409 && body && body.reason === 'active') {
+        var found = navSessionById(id);
+        navConfirm = {
+          sessionId: id,
+          title: (found && found.row.title) || '',
+          wsId: found ? found.wsId : '',
+          activity: Array.isArray(body.activity) ? body.activity : [],
+        };
+        renderNavConfirm();
+        return;
+      }
+      toast(err.message);
+    });
+  }
+
+  /** 取消归档。说明里那句"不恢复置顶"是官方的规矩，如实说。 */
+  function unarchiveAct(id) {
+    return api('/mini/api/session/unarchive', {
+      method: 'POST', body: JSON.stringify({ sessionId: id }),
+    }).then(function () {
+      navActing = '';
+      var found = navSessionById(id);
+      if (found) found.row.archived = false;
+      refreshSessions(found ? found.wsId : '');
+      toast('已取消归档');
+    }).catch(function (err) { toast(err.message); });
+  }
+
+  /**
+   * 官方那四族工作的中文说法。**四种一一对应，不多不少**——`kind` 是从
+   * `SessionActivityKindMap`（turn / job / subagent / schedule）来的，认不出的
+   * 如实写它的原名，不硬套一个近义词。
+   */
+  var ACTIVITY_COPY = {
+    turn: '进行中的回合',
+    job: '后台任务',
+    subagent: '运行中的子智能体',
+    schedule: '定时提醒',
+  };
+
+  function renderNavConfirm() {
+    var el = $('navConfirm');
+    if (!el) return;
+    if (!navConfirm) { el.classList.remove('on'); return; }
+    $('navConfirmDesc').textContent = '「' + (navConfirm.title || '这个会话')
+      + '」还有正在进行的工作。归档会先停止这些工作；被停止的工作不会自动继续。'
+      + '之后可以在「显示已归档」里把它找回来。';
+    var items = (navConfirm.activity || []).map(function (fam) {
+      var name = ACTIVITY_COPY[fam.kind] || fam.kind;
+      var labels = (fam.items || []).map(function (it) {
+        return escapeHtml(it.label || it.id || '（没有名字）');
+      });
+      var head = '<b>' + escapeHtml(name) + '</b>：';
+      // 一项一项列出来；带不下就如实说"共 N 项"，不假装只有这几项。
+      var detail = labels.length ? labels.join('、') : '（没有名字）';
+      var more = fam.count > labels.length ? '（共 ' + fam.count + ' 项）' : '';
+      return '<li>' + head + detail + more + '</li>';
+    }).join('');
+    $('navConfirmList').innerHTML = items || '<li>（没能问出具体是哪几项工作）</li>';
+    el.classList.add('on');
+  }
+
+  /** 重新问一遍某个工作区的会话（置顶/归档之后顺序和状态都变了）。 */
+  function refreshSessions(wsId) {
+    if (!wsId) { loadWorkspaces(true); return; }
+    delete navSessions[wsId];
+    delete navWsFetching[wsId];
+    renderNav();
+    loadWsSessions(wsId);
+  }
+
+  /** 「展开其余」：页里还有就只是多摆几条；页里没了就去服务端多要一批。 */
+  function expandMore(wsId) {
+    var got = navSessions[wsId];
+    var view = got ? navVisible(wsId, got) : null;
+    if (view && view.remaining > 0) {
+      navExtra[wsId] = (navExtra[wsId] || 0) + 1;
+      renderNav();
+      return;
+    }
+    // 页里已经摆完了，但服务端说这个工作区还有没取回来的：把这次要的条数翻上去。
+    navExtra[wsId] = (navExtra[wsId] || 0) + 1;
+    navLimit[wsId] = Math.min(100, (navLimit[wsId] || NAV_PAGE) + NAV_PAGE * 2);
+    delete navSessions[wsId];
+    delete navWsFetching[wsId];
+    loadWsSessions(wsId);
+  }
+
+  function collapseMore(wsId) {
+    navExtra[wsId] = 0;
+    renderNav();
+  }
+
+  // 筛选一改，所有工作区那份数据就都不作数了（服务端按筛选给的是不同的列表）。
+  // **展开次数也一起归零**：换了口径还停在"展开了 3 页"，用户会莫名其妙的。
+  function setShowArchived(on) {
+    navShowArchived = on === true;
+    navSessions = {};
+    navExtra = {};
+    navLimit = {};
+    navActing = '';
+    navRenaming = '';
+    Object.keys(navFollowTimers).forEach(function (id) { clearTimeout(navFollowTimers[id]); });
+    navFollowTimers = {};
+    renderNav();
   }
 
   // ---------------- 新建工作区：浏览电脑目录 ----------------
@@ -4797,6 +5321,7 @@
     if (navSessions[wsId] || navWsFetching[wsId]) return;
     navWsFetching[wsId] = true;
     var bail = setTimeout(function () { delete navWsFetching[wsId]; }, 15000);
+    var sessionsUrl = sessionsUrlOf(wsId);
     /**
      * 接着问，直到服务端说「一条都不剩」。
      *
@@ -4812,7 +5337,7 @@
         delete navFollowTimers[wsId];
         // 用户收起了、或者这份数据已经被刷新换掉，就放手：别跟人抢。
         if (navSessions[wsId] !== cur || !navExpanded[wsId]) return;
-        api('/mini/api/workspaces/' + encodeURIComponent(wsId) + '/sessions')
+        api(sessionsUrlOf(wsId))
           .then(function (body) {
             if (navSessions[wsId] !== cur || !navExpanded[wsId]) return;
             navSessions[wsId] = body;
@@ -4824,7 +5349,7 @@
           });
       }, TITLE_FOLLOW_MS);
     }
-    api('/mini/api/workspaces/' + encodeURIComponent(wsId) + '/sessions')
+    api(sessionsUrl)
       .then(function (body) {
         clearTimeout(bail);
         navSessions[wsId] = body;
@@ -4839,6 +5364,20 @@
         renderNav();
         toast(err.message);
       });
+  }
+
+  /**
+   * 取一个工作区会话列表的地址。两个参数都是**这次的口径**：
+   *   · `archived=1` 只在「显示已归档」打开时带——默认那一档是隐藏已归档（官方默认项）。
+   *   · `limit` 只在"要过更多"时才带，平时不带。**不带就还是原来那条地址**：
+   *     多带一个参数会让服务端每次都走一条不一样的路径，也没必要。
+   */
+  function sessionsUrlOf(wsId) {
+    var url = '/mini/api/workspaces/' + encodeURIComponent(wsId) + '/sessions';
+    var parts = [];
+    if (navShowArchived) parts.push('archived=1');
+    if (navLimit[wsId]) parts.push('limit=' + navLimit[wsId]);
+    return parts.length ? url + '?' + parts.join('&') : url;
   }
 
   // 防连点。建会话**不是幂等的**——点两下就在电脑上真建出两个会话来，
@@ -4918,6 +5457,33 @@
     });
   }
 
+  // 归档确认面板。**它自己带两个按钮，不走 navBody 那套委托**：
+  // 它在抽屉之外、是一整屏的浮层，混进列表的事件里只会让人以为它也是列表的一部分。
+  //
+  // 确认后**才**带 stop:true 重发——被停掉的工作不会自动继续，所以这一下必须是人按的。
+  $('navConfirm').addEventListener('click', function (e) {
+    var t = e.target;
+    if (t === $('navConfirm') || (t && t.closest && t.closest('[data-nc-cancel]'))) {
+      navConfirm = null;
+      renderNavConfirm();
+      return;
+    }
+    var ok = t && t.closest ? t.closest('[data-nc-ok]') : null;
+    if (!ok || !navConfirm) return;
+    // 按下去先禁掉：这一趟会在电脑上真停东西，连点两下没有第二件事可做。
+    ok.disabled = true;
+    archiveAct(navConfirm.sessionId, true);
+  });
+  // 改名那一行：手机键盘上是「回车」，桌面上是 Enter。不接这个键的话，
+  // 用户打完字的第一反应（回车）什么都不会发生。
+  $('navBody').addEventListener('keydown', function (e) {
+    if (e.key !== 'Enter') return;
+    var t = e.target;
+    if (!t || t.id !== 'renameInput') return;
+    e.preventDefault();
+    renameSubmit();
+  });
+
   $('btnNav').addEventListener('click', openNav);
   $('btnNavClose').addEventListener('click', closeNav);
   $('btnNavRefresh').addEventListener('click', function () { loadWorkspaces(true); });
@@ -4925,15 +5491,44 @@
 
   $('navBody').addEventListener('click', function (e) {
     var t = e.target;
+    var at = function (sel) { return t && t.closest ? t.closest(sel) : null; };
     var sess = t && t.closest ? t.closest('.sess') : null;
     if (sess) {
       // 目录浏览那一屏里的 .sess 是「进这个目录」，不是「切到这个会话」。
       // 两屏共用同一个条目样式，所以要先看当前在哪一屏。
       if (navView === 'browse') { browseTo(sess.getAttribute('data-browse-to')); return; }
+      // 已归档的**点不开**（官方原话：「已归档对话暂时无法查看，请取消归档后查看」）。
+      // 留着能点更坏：点进去是一个空会话，用户只会以为会话被清空了。
+      var bound = navSessionById(sess.getAttribute('data-sess'));
+      if (bound && bound.row.archived) {
+        toast('已归档的会话打不开，先取消归档');
+        return;
+      }
       bindSession(sess.getAttribute('data-sess'));
       return;
     }
-    var at = function (sel) { return t && t.closest ? t.closest(sel) : null; };
+
+    // —— 会话条目的执行入口（2026-10-09）。都排在下面那些之前，
+    //    因为它们都挂在会话那一行上，和「新建会话 / 展开工作区」不是一类。 ——
+    var menu = at('[data-more-menu]');
+    if (menu) { toggleActs(menu.getAttribute('data-more-menu')); return; }
+    var act = at('[data-act]');
+    if (act) {
+      var actId = act.getAttribute('data-act-id');
+      var which = act.getAttribute('data-act');
+      if (which === 'rename') startRename(actId);
+      else if (which === 'pin') pinAct(actId, act.getAttribute('data-act-on') !== '1');
+      else if (which === 'archive') archiveAct(actId, false);
+      else if (which === 'unarchive') unarchiveAct(actId);
+      return;
+    }
+    if (at('[data-rename-cancel]')) { navRenaming = ''; renderNav(); return; }
+    if (at('[data-rename-ok]')) { renameSubmit(); return; }
+    var more = at('[data-more]');
+    if (more) { expandMore(more.getAttribute('data-more')); return; }
+    var less = at('[data-less]');
+    if (less) { collapseMore(less.getAttribute('data-less')); return; }
+    if (at('[data-archived-toggle]')) { setShowArchived(!navShowArchived); return; }
 
     var newWs = at('[data-new-ws]');
     if (newWs) { openBrowse(); return; }
@@ -5064,6 +5659,23 @@
         delete navFollowTimers[payload.workspaceId];
       }
       if (navExpanded[payload.workspaceId] && navView === 'tree') renderNav();
+    });
+    es.addEventListener('navigation-pending', function (e) {
+      // 谁在等人变了。**只就地换那几行的尾部标记**，不重绘整棵树——
+      // 重绘会把用户正在划的滚动位置弹回顶部（和 paintNavCurrent 同一条理由）。
+      var map;
+      try { map = JSON.parse(e.data); } catch (err) { return; }
+      if (!map || typeof map !== 'object') return;
+      var touched = false;
+      Object.keys(navSessions).forEach(function (wsId) {
+        var got = navSessions[wsId];
+        if (!got || !Array.isArray(got.sessions)) return;
+        got.sessions.forEach(function (s) {
+          var next = typeof map[s.id] === 'string' ? map[s.id] : null;
+          if (s.pending !== next) { s.pending = next; touched = true; }
+        });
+      });
+      if (touched && $('nav').classList.contains('open') && navView === 'tree') renderNav();
     });
     es.addEventListener('subagent-metrics', function (e) {
       var payload;

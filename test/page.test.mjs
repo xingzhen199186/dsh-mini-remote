@@ -353,7 +353,10 @@ test('会话切换只在导航栏里，设置里不再有那一项', () => {
 
 test('导航栏先列工作区、展开才取会话（本机有 452 个会话的工作区）', () => {
   assert.match(html, /\/mini\/api\/workspaces'/, '要有列工作区的接口调用')
-  assert.match(html, /\/sessions'\)/, '展开时才去取该工作区的会话')
+  // 会话那条地址现在由 sessionsUrlOf 拼（它还要按"显示已归档"和"要多少条"带上参数），
+  // 所以这里钉的是**拼出来的那条路径本身**，不是某一处字面量调用点。
+  assert.match(html, /\/mini\/api\/workspaces\/' \+ encodeURIComponent\(wsId\) \+ '\/sessions'/,
+    '展开时才去取该工作区的会话')
 })
 
 test('没有标题的会话用日期兜底，不是 id 前 8 位', () => {
@@ -2264,19 +2267,30 @@ function navHarness({ apiImpl } = {}) {
 
   const calls = []
   const toasts = []
+  const actions = []
   const applied = []
   const navCls = []
   const navBody = { innerHTML: '', querySelectorAll: () => [] }
   const state = { boundSessionId: 's-old' }
+  // 元素按 id 记一份：`startRename` 会去 focus 输入框、`renameSubmit` 会读它的 value，
+  // 每次现造一个的话，测试就没法把"用户打进去的字"放进去。
+  const els = {}
 
   // eslint-disable-next-line no-new-func
   const build = new Function(
-    'state', 'escapeHtml', '$', 'api', 'toast', 'closeNav', 'loadWorkspaces',
+    'state', 'escapeHtml', '$', 'api', 'toast', 'toastAction', 'closeNav', 'loadWorkspaces',
     'applySnapshot', 'render',
     `${html.slice(a, b)}
      return { renderNav, sessionsHtml, createSession, toggleWorkspace,
-              getSessions: () => navSessions,
+              renameSubmit, startRename, toggleActs, expandMore, collapseMore,
+              setShowArchived, pinAct, archiveAct, unarchiveAct, renderNavConfirm,
+              navVisible, navTail, navActs, navSessionById,
+              getState: () => ({
+                showArchived: navShowArchived, extra: navExtra, limit: navLimit,
+                acting: navActing, renaming: navRenaming, confirm: navConfirm,
+              }),
               setSessions: (v) => { navSessions = v },
+              getSessions: () => navSessions,
               setNavPresets: (v) => { navPresets = v },
               setPicker: (w) => { navPickerWs = w } };`,
   )
@@ -2288,7 +2302,20 @@ function navHarness({ apiImpl } = {}) {
       // 'nav' 这个假元素要记下 classList 的增删：closeNav / openNav 都是切片里
       // **真实存在**的函数（我一开始想用桩替换它们，结果被遮住了、桩是死的），
       // 所以「导航栏收起来了没有」只能从它对 classList 的动作上看。
-      return { classList: { add: (c) => navCls.push('+' + c), remove: (c) => navCls.push('-' + c), contains: () => true } }
+      if (id === 'nav') {
+        return { classList: { add: (c) => navCls.push('+' + c), remove: (c) => navCls.push('-' + c), contains: () => true } }
+      }
+      if (!els[id]) {
+        els[id] = {
+          id, textContent: '', value: '', innerHTML: '', disabled: false, style: {},
+          classList: {
+            _set: new Set(),
+            add(c) { this._set.add(c) }, remove(c) { this._set.delete(c) },
+            contains(c) { return this._set.has(c) },
+          },
+        }
+      }
+      return els[id]
     },
     (path, opts) => {
       calls.push({ path, opts })
@@ -2298,6 +2325,7 @@ function navHarness({ apiImpl } = {}) {
       })
     },
     (m) => toasts.push(m),
+    (msg, label, fn) => actions.push({ msg, label, fn }),
     // closeNav / loadWorkspaces 在切片里有真身，这两个参数用不上；留着是为了
     // 万一以后切片范围变了不至于 ReferenceError。
     () => {},
@@ -2306,7 +2334,7 @@ function navHarness({ apiImpl } = {}) {
     () => {},
   )
   return {
-    scope, navBody, calls, toasts, applied, navCls, state,
+    scope, navBody, calls, toasts, actions, applied, navCls, state, els,
     // 只数「建会话」那个请求，不数建成之后刷新列表那一次。
     creates: () => calls.filter((c) => c.path.includes('/sessions')),
   }
@@ -5883,5 +5911,271 @@ test('回到底部浮标：单帧模式下不出现，多帧往上翻照旧出�
   }
   // ④ 取不到那颗按钮时静静退出（渲染那一段是拿替身跑的，$ 不一定认得这个 id）
   assert.doesNotThrow(() => run({ mode: 'minimal', atBottomNow: false, withEl: false }))
+})
+
+// ---------------------------------------------------------------------------
+// 手机导航栏：会话条目的执行功能（2026-10-09）
+//
+// 口径全部照 DSH 0.2.0-rc.2 里 PC 侧栏的原文来，所以断言旁边也把那几句原文抄着：
+//   · 「正在运行的 Session……始终按原顺序显示，不占用这五条配额」
+//   · 「当前选中的空白新会话在首条提示词落地前也作为额外行」
+//   · 「每次点击『展开其余』最多再显示五条空闲 Session」
+//   · 「Rename 操作打开一个以该行显示标题预填的对话框」
+// ---------------------------------------------------------------------------
+
+/** 摆一个工作区出来，省得每个用例都写一遍那七行。 */
+function navWs(h, sessions, extra = {}) {
+  h.scope.setSessions({
+    w1: Object.assign({ total: sessions.length, truncated: false, sessions }, extra),
+  })
+  return h
+}
+
+function sess(id, o = {}) {
+  return Object.assign({ id, title: id, createdAt: 100, running: false }, o)
+}
+
+test('导航栏 ⋯ 入口：常驻在每一行上，而且是那一行的**兄弟**不是子节点', () => {
+  // 手机没有悬停，所以电脑端那种"悬停才冒出来"的按钮在手机上是不可发现的；
+  // 而"按钮里套按钮"是无效结构，点 ⋯ 还会先把会话打开。两件事都钉住。
+  const h = navWs(navHarness(), [sess('s1'), sess('s2')])
+  const out = h.scope.sessionsHtml('w1')
+  assert.equal((out.match(/data-more-menu="/g) || []).length, 2, '每一条会话都要有一个 ⋯')
+  assert.match(out, /class="sess-line"/, '会话那一行要有个并排的容器')
+  // ⋯ 必须落在 .sess 这个按钮**外面**：切出那一段来看，它要在 </button> 之后。
+  const first = out.slice(out.indexOf('class="sess-line"'), out.indexOf('class="sess-line"', out.indexOf('class="sess-line"') + 1))
+  const btnEnd = first.indexOf('</button>')
+  const moreAt = first.indexOf('data-more-menu=')
+  assert.ok(btnEnd > 0 && moreAt > btnEnd,
+    '⋯ 要排在会话按钮的 </button> 之后——塞进去就成了按钮套按钮，点它会连带打开会话')
+})
+
+test('导航栏徽标：三类待处理各说各的，占的是行尾更新时间那个位置', () => {
+  const h = navWs(navHarness(), [
+    sess('a', { pending: 'approval' }),
+    sess('b', { pending: 'plan' }),
+    sess('c', { pending: 'question' }),
+    sess('d'),
+  ])
+  const out = h.scope.sessionsHtml('w1')
+  assert.match(out, /待审批/, '审批那一类')
+  assert.match(out, /计划待审/, '计划审阅那一类')
+  assert.match(out, /待回答/, '普通提问那一类')
+  // 照 PC：「以待批准、计划待审或待回答替换尾部更新时间」。所以待处理那一行不再显示日期。
+  const firstRow = out.slice(0, out.indexOf('data-more-menu='))
+  assert.ok(!firstRow.includes('s-meta'), '待处理的行尾被状态字占掉，不该再挤一个日期')
+  assert.equal((out.match(/s-dot pending/g) || []).length, 3, '三类都要用警示色的那颗点')
+})
+
+test('导航栏徽标：已归档 / 已置顶各自标出来，归档整行置灰', () => {
+  const h = navWs(navHarness(), [sess('a', { archived: true }), sess('b', { pinned: true })])
+  const out = h.scope.sessionsHtml('w1')
+  assert.match(out, /已归档/)
+  assert.match(out, /已置顶/)
+  assert.match(out, /class="sess archived"/, '已归档那一行要带 archived 这个类（整行置灰靠它）')
+  // 归档那行的状态点不渲染（PC 的说法是「归档行该格整体留空」）。
+  const archRow = out.slice(out.indexOf('class="sess archived"'), out.indexOf('data-more-menu='))
+  assert.ok(!archRow.includes('s-dot'), '归档行不摆状态点')
+})
+
+test('导航栏分组：默认只显示 5 条空闲会话，正在跑的不占配额', () => {
+  const rows = [sess('run', { running: true })]
+  for (let i = 0; i < 9; i += 1) rows.push(sess('s' + i, { createdAt: 100 - i }))
+  const h = navWs(navHarness(), rows)
+  const out = h.scope.sessionsHtml('w1')
+  const shown = (out.match(/data-more-menu="/g) || []).length
+  assert.equal(shown, 6, '5 条空闲 + 1 条在跑的（在跑的不占那 5 个名额）')
+  // 这一屏只剩 4 条空闲的没摆，按钮上就写 4——写死 5 会是一个对不上的数。
+  assert.match(out, /展开其余 4 个/, '按钮上要写清这一次会多摆几个')
+})
+
+test('导航栏分组：点一次「展开其余」多 5 条，再点变「收起」', () => {
+  const rows = []
+  for (let i = 0; i < 8; i += 1) rows.push(sess('s' + i, { createdAt: 100 - i }))
+  const h = navWs(navHarness(), rows)
+  assert.equal((h.scope.sessionsHtml('w1').match(/data-more-menu="/g) || []).length, 5)
+
+  h.scope.expandMore('w1')
+  const second = h.scope.sessionsHtml('w1')
+  assert.equal((second.match(/data-more-menu="/g) || []).length, 8,
+    '点一次就从 5 变成 8（这一屏只剩 8 条空闲的，全摆完了）')
+  assert.match(second, /data-less="w1"/, '全摆完之后按钮要变成「收起」')
+  assert.match(second, /收起/)
+
+  h.scope.collapseMore('w1')
+  assert.equal((h.scope.sessionsHtml('w1').match(/data-more-menu="/g) || []).length, 5,
+    '收起要回到初始行数')
+})
+
+test('导航栏分组：页里摆完了但服务端还有，按钮仍在（并且会去要更多）', () => {
+  // 本机最多的一个工作区有 452 条会话，一页要不下——摆完这一页不能就此变成死截断。
+  const h = navWs(navHarness(), [sess('s1'), sess('s2')], { truncated: true, total: 452 })
+  const out = h.scope.sessionsHtml('w1')
+  assert.match(out, /展开其余/, '服务端说还有没取回来的，按钮就得在')
+  h.scope.expandMore('w1')
+  assert.equal(h.scope.getState().limit.w1, 60,
+    '页里没了就去要更多：一次多要两页（20 → 60）')
+})
+
+test('导航栏筛选：默认不带 archived，打开后清掉旧数据并带上 archived=1', () => {
+  const h = navWs(navHarness(), [sess('s1')])
+  h.scope.renderNav()
+  const before = h.calls.filter((c) => c.path.includes('/sessions'))
+  assert.ok(before.every((c) => !c.path.includes('archived=1')), '默认那一档是隐藏已归档')
+
+  h.scope.setShowArchived(true)
+  assert.equal(h.scope.getState().showArchived, true)
+  // 筛选一改，旧的那份数据就不作数了（服务端按筛选给的是不同的列表）。
+  assert.deepEqual(h.scope.getSessions(), {}, '换口径要把旧数据清掉，否则会拿旧口径的列表骗人')
+})
+
+test('导航栏改名字：预填的是**真实标题**，不是「未命名会话」那个显示占位', () => {
+  const h = navWs(navHarness(), [sess('s1', { title: '' })])
+  h.scope.startRename('s1')
+  const out = h.scope.sessionsHtml('w1')
+  assert.match(out, /id="renameInput"/, '要摆出输入框')
+  assert.match(out, /value=""/, '没有标题就预填空——把「未命名会话」当标题提交，等于凭空钉一个假标题')
+  assert.match(out, /placeholder="给这个会话起个名字"/, '提示语走 placeholder，不走 value')
+})
+
+test('导航栏改名字：**没改就不发请求**（这一步就是防误钉）', async () => {
+  // 官方那条规矩：rename 会追加一条 source=user 的 session/title 事件，**钉住标题**，
+  // 哪怕跟当前那条自动标题一字不差。所以"确认未修改的标题"这个手势，
+  // 我们这边必须**什么都不发**——发出去就等于把自动标题钉死了。
+  const h = navWs(navHarness(), [sess('s1', { title: '原来的名字' })])
+  h.scope.startRename('s1')
+  h.els.renameInput.value = '原来的名字'
+  await h.scope.renameSubmit()
+  assert.deepEqual(h.calls.filter((c) => c.path.includes('/session/rename')), [],
+    '标题没变就不该发这一趟')
+
+  // 只在结尾多个空格也算"没改"——官方那边会 trim，比原始串会把空格当成真改动。
+  h.scope.startRename('s1')
+  h.els.renameInput.value = '  原来的名字  '
+  await h.scope.renameSubmit()
+  assert.deepEqual(h.calls.filter((c) => c.path.includes('/session/rename')), [],
+    '只差首尾空白不算改动')
+})
+
+test('导航栏改名字：真改了才发，而且用的是服务端接受的那一份', async () => {
+  const h = navWs(navHarness({
+    apiImpl: (path) => Promise.resolve(
+      path.includes('/session/rename') ? { ok: true, title: '改过的名字' } : { ok: true },
+    ),
+  }), [sess('s1', { title: '原来的名字' })])
+  h.scope.startRename('s1')
+  h.els.renameInput.value = '我要改的名字'
+  await h.scope.renameSubmit()
+  const sent = h.calls.filter((c) => c.path.includes('/session/rename'))
+  assert.equal(sent.length, 1)
+  assert.deepEqual(JSON.parse(sent[0].opts.body), { sessionId: 's1', title: '我要改的名字' })
+  assert.equal(h.scope.getSessions().w1.sessions[0].title, '改过的名字',
+    '本地这一行要用官方接受的那一份（它可能被归一化/截断）')
+})
+
+test('导航栏改名字：空标题当场挡掉，不递下去', async () => {
+  const h = navWs(navHarness(), [sess('s1', { title: '原来的名字' })])
+  h.scope.startRename('s1')
+  h.els.renameInput.value = '   '
+  await h.scope.renameSubmit()
+  assert.deepEqual(h.calls.filter((c) => c.path.includes('/session/rename')), [])
+  assert.ok(h.toasts.includes('标题不能为空'))
+})
+
+test('导航栏归档：静止的会话直接归档，成功后的提示带「撤销」', async () => {
+  const h = navWs(navHarness(), [sess('s1')])
+  await h.scope.archiveAct('s1', false)
+  const sent = h.calls.filter((c) => c.path.includes('/session/archive'))
+  assert.equal(sent.length, 1)
+  assert.deepEqual(JSON.parse(sent[0].opts.body), { sessionId: 's1', stop: false },
+    '第一段不带 stop——不能因为"可能被拒"就先斩后奏')
+  assert.equal(h.actions.length, 1, '归档成功要给一次撤销的机会')
+  assert.equal(h.actions[0].label, '撤销')
+  assert.match(h.actions[0].msg, /已归档/)
+})
+
+test('导航栏归档：还有工作在跑时先弹确认，并按族列出会停掉什么', async () => {
+  const h = navWs(navHarness({
+    apiImpl: (path) => {
+      if (!path.includes('/session/archive')) return Promise.resolve({ ok: true })
+      const err = new Error('这个会话还有工作在跑，归档会先停掉它们。')
+      err.status = 409
+      err.body = {
+        ok: false,
+        reason: 'active',
+        activity: [
+          { kind: 'turn', count: 1, items: [{ id: 't1', label: '正在写手机页' }] },
+          { kind: 'subagent', count: 2, items: [{ id: 'a1', label: '查资料' }] },
+          { kind: 'schedule', count: 1, items: [{ id: 'j1', label: '每天九点' }] },
+        ],
+      }
+      return Promise.reject(err)
+    },
+  }), [sess('s1', { title: '在跑的会话' })])
+
+  await h.scope.archiveAct('s1', false)
+  assert.equal(h.actions.length, 0, '被拒的时候还不能给撤销——什么都还没归档')
+  const st = h.scope.getState()
+  assert.ok(st.confirm, '要弹确认框')
+  assert.equal(st.confirm.sessionId, 's1')
+
+  h.scope.renderNavConfirm()
+  const list = h.els.navConfirmList.innerHTML
+  assert.match(list, /进行中的回合/, '四族的说法照官方那四类的中文名')
+  assert.match(list, /运行中的子智能体/)
+  assert.match(list, /定时提醒/)
+  assert.match(list, /正在写手机页/, '带得出名字的要把名字列出来')
+  assert.match(list, /（共 2 项）/, '只带了一项时如实说这一族总共有几项')
+  assert.match(h.els.navConfirmDesc.textContent, /在跑的会话/, '确认框要说清是对哪一个会话动的手')
+  assert.ok(h.els.navConfirm.classList.contains('on'), '要真的露出来')
+})
+
+test('导航栏归档：确认之后才带 stop:true 再来一次', async () => {
+  const h = navWs(navHarness(), [sess('s1')])
+  await h.scope.archiveAct('s1', true)
+  const sent = h.calls.filter((c) => c.path.includes('/session/archive'))
+  assert.deepEqual(JSON.parse(sent[0].opts.body), { sessionId: 's1', stop: true })
+})
+
+test('导航栏归档：成功之后要**把确认框收掉**', async () => {
+  // 实测逮住的：那一层是 fixed/inset:0、z-index 120，收不掉的话它一直盖在整屏上，
+  // 用户接下来点哪儿都是点到它——而且那一下会被当成"取消"，界面上什么都不发生
+  // （活页面验证里「显示已归档」按了没反应，根因就是它）。
+  let n = 0
+  const h = navWs(navHarness({
+    apiImpl: () => {
+      n += 1
+      if (n === 1) {
+        const err = new Error('这个会话还有工作在跑。')
+        err.status = 409
+        err.body = { ok: false, reason: 'active', activity: [{ kind: 'turn', count: 1, items: [{ id: 't', label: '在跑' }] }] }
+        return Promise.reject(err)
+      }
+      return Promise.resolve({ ok: true })
+    },
+  }), [sess('s1')])
+
+  await h.scope.archiveAct('s1', false) // 第一段：被拒 → 弹确认框
+  h.scope.renderNavConfirm()
+  assert.ok(h.els.navConfirm.classList.contains('on'), '先得真的弹起来')
+
+  await h.scope.archiveAct('s1', true) // 第二段：确认 → 成功
+  assert.ok(!h.els.navConfirm.classList.contains('on'),
+    '归档成功之后确认框必须收掉，否则它盖住整屏、点哪儿都是点它')
+})
+
+test('导航栏：已归档那一行点不开（官方说取消归档后才能看）', () => {
+  // 这条判据在 click 监听里（切片之外），所以这里钉的是源码里那一句守卫——
+  // 留着能点更坏：点进去是一个空会话，用户只会以为会话被清空了。
+  assert.match(html, /已归档的会话打不开，先取消归档/,
+    '已归档的行要挡住"打开"这个动作，并说清怎么办')
+})
+
+test('导航栏：空白会话整条不列时，说明白是被筛掉了、不是没有', () => {
+  // 「一条都没有」和「都被筛掉了」是两件事——用户刚才亲手归档了一条，
+  // 要是看到「这个工作区还没有会话」，只会以为自己的会话不见了。
+  const h = navWs(navHarness(), [], { hiddenArchived: 2, hiddenBlank: 3 })
+  const out = h.scope.sessionsHtml('w1')
+  assert.match(out, /另有 2 条已归档、3 条还是空白的新会话/)
 })
 

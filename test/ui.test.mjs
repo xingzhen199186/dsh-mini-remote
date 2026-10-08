@@ -116,7 +116,7 @@ test('浅色主题覆盖了每一个颜色令牌（缺一个就有元素在那�
 
   const namesIn = (block) => [...block.matchAll(/(--[a-z0-9-]+)\s*:/g)].map((m) => m[1])
   // 只比"颜色"这一类：圆角 --r 是尺寸，两套主题共用一份，不该跟着主题变。
-  const COLOUR = /^--(bg|bg-top|bg-deep|panel|panel-2|line|fg|muted|dim|ice|gold|act|ok|run|shimmer|err|sh-\d|glass|tint|pop|scrim|on-act)$/
+  const COLOUR = /^--(bg|bg-top|bg-deep|panel|panel-2|line|fg|muted|dim|ice|gold|act|ok|run|shimmer|err|warn|sh-\d|glass|tint|pop|scrim|on-act)$/
   const want = namesIn(dark).filter((n) => COLOUR.test(n))
   const have = new Set(namesIn(light))
   assert.ok(want.length >= 21, `颜色令牌只认出 ${want.length} 个，大概正则写歪了`)

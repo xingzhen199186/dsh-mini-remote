@@ -2700,3 +2700,314 @@ test('子智能体完工的通知进聊天记录，是第三种条目', async (t
   // 通知占了那儿，用户会以为模型说了这串英文。
   assert.equal(store.snapshot().latest, null)
 })
+
+// ---------------------------------------------------------------------------
+// 会话条目的执行功能（2026-10-09）：重命名 / 置顶 / 归档 + 列表口径
+// ---------------------------------------------------------------------------
+//
+// 这一块的口径全部照着 DSH 0.2.0-rc.2 里 PC 侧栏的原文来，所以测试里也把那几句
+// 原文抄在断言旁边——将来谁要改这些数，得先回去看官方是不是也改了。
+
+/**
+ * 一个带"执行动作"的假树。
+ *
+ * 五个动作各记一笔到 `calls` 里，**不碰任何真东西**：这一层要验的是
+ * 「服务端把请求翻译成了哪一次调用、又把官方的拒绝翻译成了什么」。
+ */
+function actionNav(options = {}) {
+  const calls = []
+  const sessions = options.sessions ?? [
+    { id: 's-run', title: '在跑的那个', createdAt: 500, running: true },
+    { id: 's-new', title: '比较新的', createdAt: 400, running: false },
+    { id: 's-old', title: '比较旧的', createdAt: 100, running: false },
+  ]
+  return {
+    calls,
+    nav: {
+      listWorkspaces: async () => [{ id: 'w1', title: '甲', count: sessions.length, running: 0 }],
+      listSessionsOf: async () => ({
+        workspaceId: 'w1', total: sessions.length, truncated: options.truncated === true, sessions,
+      }),
+      sessionFlags: () => options.flags ?? { ok: true, archived: [], pinned: [] },
+      sessionSummaries: async () => options.summaries ?? { ok: true, byId: new Map() },
+      pendingInteractions: () => options.pending ?? {},
+      renameSession: async (id, title) => {
+        calls.push(['rename', id, title])
+        return options.renameResult ?? { ok: true, title: String(title).trim() }
+      },
+      pinSession: async (id) => {
+        calls.push(['pin', id])
+        return options.pinResult ?? { ok: true, archived: [], pinned: [id] }
+      },
+      unpinSession: async (id) => {
+        calls.push(['unpin', id])
+        return options.pinResult ?? { ok: true, archived: [], pinned: [] }
+      },
+      archiveSession: async (id, stop) => {
+        calls.push(['archive', id, stop === true])
+        return options.archiveResult ?? { ok: true, archived: [id], pinned: [] }
+      },
+      unarchiveSession: async (id) => {
+        calls.push(['unarchive', id])
+        return options.archiveResult ?? { ok: true, archived: [], pinned: [] }
+      },
+    },
+  }
+}
+
+async function post(base, path, token, body) {
+  return fetch(`${base}${path}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body ?? {}),
+  })
+}
+
+test('列表口径：已归档默认不列，带 archived=1 才列出来（并带上标记）', async (t) => {
+  // 官方默认项就是「隐藏已归档」。改前手机把归档的当普通会话列出来了——
+  // 用户看的是一份"少了/多了几条都说不清"的列表。
+  const { nav } = actionNav({
+    flags: { ok: true, archived: ['s-old'], pinned: [] },
+  })
+  const { server, base, token } = await startTestServer({ tree: nav })
+  t.after(() => server.close())
+
+  const hidden = await (await fetch(`${base}/mini/api/workspaces/w1/sessions?token=${token}`)).json()
+  assert.deepEqual(hidden.sessions.map((s) => s.id), ['s-run', 's-new'], '默认不该有已归档那条')
+  assert.equal(hidden.hiddenArchived, 1, '要如实说筛掉了 1 条已归档')
+
+  const shown = await (await fetch(
+    `${base}/mini/api/workspaces/w1/sessions?token=${token}&archived=1`,
+  )).json()
+  assert.deepEqual(shown.sessions.map((s) => s.id), ['s-run', 's-new', 's-old'])
+  assert.equal(shown.sessions.find((s) => s.id === 's-old').archived, true, '列出来了就要标出来')
+  assert.equal(shown.hiddenArchived, 0)
+})
+
+test('列表口径：空白会话不列，当前绑定的那一个例外', async (t) => {
+  // 官方原话：「当前选中的空白**新会话**在首条提示词落地前也作为额外行」。
+  // 少了这句例外，用户刚在手机上建的那个会话会当场消失。
+  const blank = new Map([['s-new', { sessionId: 's-new', blank: true }]])
+  const { nav } = actionNav({ summaries: { ok: true, byId: blank } })
+  const { server, base, token } = await startTestServer({ tree: nav })
+  t.after(() => server.close())
+
+  const bound = await (await fetch(`${base}/mini/api/workspaces/w1/sessions?token=${token}`)).json()
+  assert.deepEqual(bound.sessions.map((s) => s.id), ['s-run', 's-old'], '空白那条不列')
+  assert.equal(bound.hiddenBlank, 1)
+  assert.equal(bound.blankKnown, true)
+
+  const store = tempStore()
+  store.bind('s-new')
+  const other = await startTestServer({ store, tree: nav })
+  t.after(() => other.server.close())
+  const mine = await (await fetch(
+    `${other.base}/mini/api/workspaces/w1/sessions?token=${other.token}`,
+  )).json()
+  assert.deepEqual(mine.sessions.map((s) => s.id), ['s-run', 's-new', 's-old'],
+    '当前绑定的那条空白会话要留着——哪怕它排在后面')
+})
+
+test('列表口径：空白判据拿不到时一条都不隐藏（不拿猜测当事实）', async (t) => {
+  // 「标题为空」不等于「空白会话」：一条只是标题没读出来的老会话会被当成空白当场消失。
+  // 拿不到官方的 blank 就退回原来的行为，并且如实说不知道。
+  const { nav } = actionNav({ summaries: { ok: false, byId: new Map() } })
+  const { server, base, token } = await startTestServer({ tree: nav })
+  t.after(() => server.close())
+
+  const body = await (await fetch(`${base}/mini/api/workspaces/w1/sessions?token=${token}`)).json()
+  assert.equal(body.sessions.length, 3, '一条都不该被隐藏')
+  assert.equal(body.hiddenBlank, 0)
+  assert.equal(body.blankKnown, false, '要如实说这条判据没拿到')
+})
+
+test('列表口径：打开「显示已归档」时，已归档的**空白**会话也要列出来', async (t) => {
+  // 这条是实测逼出来的：本机 3 条已归档里有 1 条没有标题。要是空白那条判据也压在
+  // 已归档行上，那个开关就等于白按——而归档提示里那句「之后可以在『显示已归档』里
+  // 把它找回来」会变成假话。
+  const blank = new Map([['s-old', { sessionId: 's-old', blank: true }]])
+  const { nav } = actionNav({
+    summaries: { ok: true, byId: blank },
+    flags: { ok: true, archived: ['s-old'], pinned: [] },
+  })
+  const { server, base, token } = await startTestServer({ tree: nav })
+  t.after(() => server.close())
+
+  const res = await fetch(`${base}/mini/api/workspaces/w1/sessions?token=${token}&archived=1`)
+  const body = await res.json()
+  assert.deepEqual(body.sessions.map((s) => s.id), ['s-run', 's-new', 's-old'],
+    '已归档的那条哪怕没有标题也要列出来')
+  assert.equal(body.sessions.find((s) => s.id === 's-old').archived, true)
+  assert.equal(body.hiddenBlank, 0, '它不是被空白那条判据藏起来的')
+})
+
+test('列表口径：置顶排在最前，且按官方的置顶顺序（最近置顶的在前）', async (t) => {  // 官方置顶集合的返回顺序就是「most recently pinned first」，界面照它排。
+  // 自己按创建时间重排，会把用户刚置顶的那一条排到第二位——那是明的错的。
+  const { nav } = actionNav({ flags: { ok: true, archived: [], pinned: ['s-old', 's-run'] } })
+  const { server, base, token } = await startTestServer({ tree: nav })
+  t.after(() => server.close())
+
+  const body = await (await fetch(`${base}/mini/api/workspaces/w1/sessions?token=${token}`)).json()
+  assert.deepEqual(body.sessions.map((s) => s.id), ['s-old', 's-run', 's-new'])
+  assert.deepEqual(body.sessions.filter((s) => s.pinned).map((s) => s.id), ['s-old', 's-run'])
+})
+
+test('列表口径：谁在等人也要带出去（三类各自一样）', async (t) => {
+  const { nav } = actionNav({
+    pending: { 's-run': 'approval', 's-new': 'plan', 's-old': 'question' },
+  })
+  const { server, base, token } = await startTestServer({ tree: nav })
+  t.after(() => server.close())
+
+  const body = await (await fetch(`${base}/mini/api/workspaces/w1/sessions?token=${token}`)).json()
+  const byId = Object.fromEntries(body.sessions.map((s) => [s.id, s.pending]))
+  assert.deepEqual(byId, { 's-run': 'approval', 's-new': 'plan', 's-old': 'question' })
+})
+
+test('重命名：标题原样递下去，服务端接受的那一份带回来', async (t) => {
+  const { nav, calls } = actionNav({ renameResult: { ok: true, title: '改过的名字' } })
+  const { server, base, token } = await startTestServer({ tree: nav })
+  t.after(() => server.close())
+
+  const res = await post(base, '/mini/api/session/rename?token=' + token, token,
+    { sessionId: 's-new', title: '  改过的名字  ' })
+  assert.equal(res.status, 200)
+  const body = await res.json()
+  assert.equal(body.title, '改过的名字', '界面要显示官方接受的那一份')
+  assert.deepEqual(calls, [['rename', 's-new', '  改过的名字  ']],
+    '两端空白由官方那一层归一化，我们不在半路替它 trim')
+})
+
+test('重命名：空标题在服务端就挡掉，不递下去', async (t) => {
+  const { nav, calls } = actionNav()
+  const { server, base, token } = await startTestServer({ tree: nav })
+  t.after(() => server.close())
+
+  const res = await post(base, '/mini/api/session/rename?token=' + token, token,
+    { sessionId: 's-new', title: '   ' })
+  assert.equal(res.status, 400)
+  assert.equal((await res.json()).reason, 'blank')
+  assert.deepEqual(calls, [], '空标题不该走到官方那一层（那边会抛，还白跑一趟）')
+})
+
+test('重命名：拿不到能力时如实说没这个能力（503），不是 500', async (t) => {
+  const { nav } = actionNav({ renameResult: { ok: false, reason: 'no-service' } })
+  const { server, base, token } = await startTestServer({ tree: nav })
+  t.after(() => server.close())
+
+  const res = await post(base, '/mini/api/session/rename?token=' + token, token,
+    { sessionId: 's', title: '名字' })
+  assert.equal(res.status, 503)
+  assert.match((await res.json()).error, /没提供改标题的能力/)
+})
+
+test('置顶 / 取消置顶：走对那一个方法，并把新的集合带回来', async (t) => {
+  const { nav, calls } = actionNav()
+  const { server, base, token } = await startTestServer({ tree: nav })
+  t.after(() => server.close())
+
+  const on = await post(base, '/mini/api/session/pin?token=' + token, token,
+    { sessionId: 's-new', pinned: true })
+  assert.deepEqual((await on.json()).pinnedSessionIds, ['s-new'])
+
+  const off = await post(base, '/mini/api/session/pin?token=' + token, token,
+    { sessionId: 's-new', pinned: false })
+  assert.deepEqual((await off.json()).pinnedSessionIds, [])
+
+  assert.deepEqual(calls, [['pin', 's-new'], ['unpin', 's-new']])
+})
+
+test('置顶：已归档的会被官方拒，翻译成一句人话（409）', async (t) => {
+  const { nav } = actionNav({ pinResult: { ok: false, reason: 'archived' } })
+  const { server, base, token } = await startTestServer({ tree: nav })
+  t.after(() => server.close())
+
+  const res = await post(base, '/mini/api/session/pin?token=' + token, token,
+    { sessionId: 's-new', pinned: true })
+  assert.equal(res.status, 409)
+  assert.match((await res.json()).error, /已归档的会话不能置顶/)
+})
+
+test('归档：还有工作在跑时拒一次，但把「会停掉什么」原样带回来', async (t) => {
+  // 官方原话：「Host 拒绝普通归档并列出这些工作，侧栏随即打开『停止并归档』对话框」。
+  // 所以这一条**不是错误**，是两段式流程的第一段——必须把 activity 交上去。
+  const { nav, calls } = actionNav({
+    archiveResult: {
+      ok: false,
+      reason: 'active',
+      activity: [
+        { kind: 'turn', count: 1, items: [{ id: 't1', label: '正在写手机页' }] },
+        { kind: 'subagent', count: 1, items: [{ id: 'a1', label: '' }] },
+      ],
+    },
+  })
+  const { server, base, token } = await startTestServer({ tree: nav })
+  t.after(() => server.close())
+
+  const res = await post(base, '/mini/api/session/archive?token=' + token, token,
+    { sessionId: 's-run' })
+  assert.equal(res.status, 409)
+  const body = await res.json()
+  assert.equal(body.reason, 'active')
+  assert.equal(body.activity.length, 2)
+  assert.equal(body.activity[0].kind, 'turn')
+  assert.equal(body.activity[0].items[0].label, '正在写手机页')
+  assert.deepEqual(calls, [['archive', 's-run', false]],
+    '第一段不带 stopActivity——不能因为"可能被拒"就先斩后奏')
+})
+
+test('归档：确认之后带 stopActivity 再来一次', async (t) => {
+  const { nav, calls } = actionNav()
+  const { server, base, token } = await startTestServer({ tree: nav })
+  t.after(() => server.close())
+
+  const res = await post(base, '/mini/api/session/archive?token=' + token, token,
+    { sessionId: 's-run', stop: true })
+  assert.equal(res.status, 200)
+  const body = await res.json()
+  assert.equal(body.archived, true)
+  assert.equal(body.stopped, true)
+  assert.deepEqual(body.archivedSessionIds, ['s-run'])
+  assert.deepEqual(calls, [['archive', 's-run', true]])
+})
+
+test('取消归档：把新的归档集合带回来', async (t) => {
+  const { nav, calls } = actionNav({ archiveResult: { ok: true, archived: [], pinned: [] } })
+  const { server, base, token } = await startTestServer({ tree: nav })
+  t.after(() => server.close())
+
+  const res = await post(base, '/mini/api/session/unarchive?token=' + token, token,
+    { sessionId: 's-old' })
+  assert.equal(res.status, 200)
+  assert.deepEqual((await res.json()).archivedSessionIds, [])
+  assert.deepEqual(calls, [['unarchive', 's-old']])
+})
+
+test('会话执行那几条接口一律要 token', async (t) => {
+  const { nav } = actionNav()
+  const { server, base } = await startTestServer({ tree: nav })
+  t.after(() => server.close())
+
+  for (const path of [
+    '/mini/api/session/rename', '/mini/api/session/pin',
+    '/mini/api/session/archive', '/mini/api/session/unarchive',
+  ]) {
+    const res = await post(base, path, 'x', { sessionId: 's' })
+    assert.equal(res.status, 401, `${path} 没挡住`)
+  }
+})
+
+test('没传 tree 时执行类接口如实说「没这个能力」，不是假装成功', async (t) => {
+  const { server, base, token } = await startTestServer()
+  t.after(() => server.close())
+
+  const rename = await post(base, '/mini/api/session/rename?token=' + token, token,
+    { sessionId: 's', title: '名字' })
+  assert.equal(rename.status, 503)
+  assert.match((await rename.json()).error, /没提供改标题的能力/)
+
+  const arc = await post(base, '/mini/api/session/archive?token=' + token, token,
+    { sessionId: 's' })
+  assert.equal(arc.status, 503)
+  assert.match((await arc.json()).error, /没提供工作区服务/)
+})
