@@ -1142,6 +1142,16 @@
     gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--line);
   }
   .row:last-of-type { border-bottom: none; }
+
+  /* **这一句不能省。** `hidden` 只是 UA 样式表里的一条 `display:none`，
+     而上面 `.row` 写了 `display:flex`——作者样式表压得住 UA 那一句（同一个道理
+     见 `#mirrorView[hidden]`、`.sheet .version[hidden]`）。
+     少了它，`.row` 上的 `hidden` 等于没写：元素照样撑开一段高度（2026-10-08 实测
+     358×70，`getComputedStyle` 回来还是 `flex`），于是设置里「电脑端界面」那一行
+     在进阶设置关着时照样露着。**改脚本没用**——脚本一直是对的，它确实把 hidden
+     设上了；漏的是这条兜底样式。 */
+  .row[hidden] { display: none; }
+
   /* 权限档位那一块外面套了一层（#permBlock，服务拿不到时整块要藏起来）。
      它下面**没有分割线**，而别的板块之间都有——2026-10-05 用户截图点名。
      原因：别的板块的分割线都是「那一行自己的下边线」（.row 的 border-bottom），

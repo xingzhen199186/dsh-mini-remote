@@ -175,6 +175,69 @@ test('进阶设置：开关那排按钮要绑上处理（逻辑对、没人喊�
 })
 
 /**
+ * 「那一行看不见」不能只看 `hidden` 这个属性——**还得看样式表认不认它**。
+ *
+ * 2026-10-08 真机验出来的（无头 Edge + CDP 打开手机页）：
+ *   `paintMirror()` 一直是对的，四种状态下 `hidden` 全都设对了；
+ *   可 `.row { display: flex }` 是**作者样式表**，它压得住 UA 那句 `[hidden]{display:none}`
+ *   ——于是「进阶设置」关着的时候，「电脑端界面」那一行照样画出来（实测 358×70，
+ *   `getComputedStyle` 回来还是 `flex`）。脚本量着是 hidden、用户眼睛看着是在，两边都对不上。
+ *
+ * 这条测试守的就是那一句兜底样式：**凡是页面用 `hidden` 藏的 `.row`，
+ * 样式表里必须有一条管得到它的 `[hidden]{display:none}`**。
+ * 光靠上面那些「hidden === true」的用例守不住这个 bug——它们当时全绿。
+ */
+test('页面用 hidden 藏的 .row，样式表必须有 [hidden] 兜底（否则 hidden 等于没写）', () => {
+  const cssStart = html.indexOf('<style>')
+  const cssEnd = html.indexOf('</style>')
+  assert.ok(cssStart > 0 && cssEnd > cssStart, '找不到页面的 <style> 段')
+  const css = html.slice(cssStart, cssEnd).replace(/\/\*[\s\S]*?\*\//g, '')
+
+  /** 页面里那些「带 class="row" 又是元素本身」的行：id → 它的 class 列表。 */
+  const rows = new Map()
+  for (const m of html.matchAll(/<div class="([^"]*)" id="([^"]+)"/g)) {
+    if (m[1].split(/\s+/).includes('row')) rows.set(m[2], m[1].split(/\s+/))
+  }
+  assert.ok(rows.has('rowMirror') && rows.has('rowMirrorOpen'), '两行都该是 .row（改了结构要同步改这里）')
+
+  /** 脚本里用 `$('x').hidden = …` 藏的行。 */
+  const hiddenByScript = new Set()
+  for (const m of html.matchAll(/\$\('([\w-]+)'\)\.hidden\s*=/g)) hiddenByScript.add(m[1])
+
+  const rules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map((m) => ({ sel: m[1].trim(), body: m[2], at: m.index }))
+  /** 一条选择器「管得到」某个元素吗——只看最后那一段（够用：`.sheet .version` 那种管的是后代）。 */
+  const covers = (compound, id, classes) => {
+    const idHit = /#([\w-]+)/.exec(compound)
+    if (idHit && idHit[1] !== id) return false
+    const cls = [...compound.matchAll(/\.([\w-]+)/g)].map((m) => m[1])
+    return cls.every((c) => classes.includes(c))
+  }
+  const spec = (compound) => [/#[\w-]+/g, /[.\[]/g].map((re) => (compound.match(re) || []).length)
+  const cmp = (a, b) => (a[0] - b[0]) || (a[1] - b[1])
+
+  const missing = []
+  for (const [id, classes] of rows) {
+    if (!hiddenByScript.has(id)) continue
+    // 作者样式表里，有没有一条规则给这个元素写了 display（那它就可能压住 UA 的 hidden）
+    let own = null
+    for (const r of rules) {
+      if (!/display\s*:/.test(r.body)) continue
+      if (r.sel.split(',').some((s) => covers(s.trim().split(/\s+/).pop(), id, classes))) own = r
+    }
+    // 兜底那条：给 display:none、选择器带 [hidden]、而且**压得住**上面那条（优先级更高，或排得更后）
+    const guard = rules.find((r) => /display\s*:\s*none/.test(r.body) && r.sel.split(',').some((s) => {
+      const last = s.trim().split(/\s+/).pop()
+      return /\[hidden\]$/.test(last) && covers(last, id, classes)
+        && (cmp(spec(last), own ? spec(own.sel.split(',').pop().trim().split(/\s+/).pop()) : [0, 0, 0]) > 0 || r.at > (own?.at ?? 0))
+    }))
+    if (!guard) missing.push(id + (own ? `（它自己的 display 来自「${own.sel.trim()}」）` : ''))
+  }
+  assert.deepEqual(missing, [],
+    '这些行被 hidden 藏着，可样式表里没有一条 [hidden]{display:none} 压得住它们自己的 display —— '
+    + '真机上就是「脚本说藏了、屏幕上还在」。修法照 `.row[hidden]` 那一句加。')
+})
+
+/**
  * 「打开」**内嵌**那一整屏，不许再走「跳转」。
  *
  * 2026-10-06 用户**三次**实机报「点击打开没反应」，三版都在赌「跳转」这个动作：
