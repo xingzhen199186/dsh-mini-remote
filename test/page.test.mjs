@@ -2728,6 +2728,91 @@ test('聊天模式：他自己翻上去看历史时，回答来了也不动他',
 })
 
 /**
+ * 「完整」模式落定时对齐到哪：**这一轮助手侧内容的第一块**，不是最后那条回答的开头。
+ *
+ * 用户 2026-10-08 报的：完整模式落定后，最终总结的开头被顶到屏幕上沿，于是这一轮的
+ * 执行轨迹（trajInterleave 把组插在**该轮第一个回答之前**，见那里的落点 a）被整个推到
+ * 屏幕上方——要读的那串过程看不见。单帧、聊天那两条是对的，不许跟着动。
+ *
+ * 这里跑的是 scrollChat 那一段（完整模式怎么渲染由 trajHarness 那批测试管），所以
+ * replyEl 的树是手搭的、形状照完整模式渲染出来的样子摆：一轮 = 用户气泡 / 轨迹说明 /
+ * 过程组 / 回答，轮与轮之间由用户气泡划开。替身复刻的只有三样 —— classList.contains、
+ * previousElementSibling、矩形 top —— 「往回退到这一轮的头」这件事只能靠它们量出来。
+ */
+function fullPinRunner({ classes, tops, mode = 'full', scrollTop = 1990, scrollHeight = 2000 }) {
+  const nodes = classes.map((cls, i) => ({
+    cls,
+    classList: { contains: (c) => cls.split(' ').indexOf(c) >= 0 },
+    getBoundingClientRect: () => ({ top: tops[i] }),
+    previousElementSibling: null,
+  }))
+  nodes.forEach((n, i) => { n.previousElementSibling = i > 0 ? nodes[i - 1] : null })
+  const saids = nodes.filter((n) => n.cls === 'said')
+  const replyEl = {
+    innerHTML: '',
+    querySelector: () => null,
+    querySelectorAll: (sel) => (sel === '.said' ? saids : []),
+  }
+  const mainEl = {
+    classList: { remove() {} },
+    scrollTop, scrollHeight, clientHeight: 0,
+    getBoundingClientRect: () => ({ top: 0 }),
+  }
+  const state = {
+    mode, history: [{ role: 'assistant', text: '一段回答', timestamp: 9 }],
+    live: '', latest: { text: '一段回答', timestamp: 9 }, queued: [], boundSessionId: 's1',
+  }
+  const lb = html.indexOf('function liveBlock')
+  assert.ok(lb > 0, '在 page.html 里找不到 liveBlock')
+  // eslint-disable-next-line no-new-func
+  const build = new Function(
+    'state', 'replyEl', 'mainEl', 'timeLabel',
+    `${html.slice(start, end)}\n${html.slice(lb, html.indexOf('function render()'))}\nreturn renderChat;`,
+  )
+  return { render: build(state, replyEl, mainEl, () => '12:00'), state, mainEl, replyEl }
+}
+
+test('完整模式：回答落定时对齐这一轮助手侧的第一块（轨迹起点），不是回答开头', () => {
+  // 这一轮的形状：上一轮的回答 → 用户气泡 → 轨迹说明 → 过程组 → 这一轮的回答。
+  const classes = ['bubble user', 'said', 'bubble user', 'traj-note', 'traj-group', 'said']
+  const tops = [100, 300, 500, 700, 900, 1200]
+
+  const full = fullPinRunner({ classes, tops, mode: 'full' })
+  full.render()
+  assert.equal(full.mainEl.scrollTop, 1990 + 700 - 12,
+    '完整模式要停在轨迹说明 / 过程组的头上：那才是这一轮助手侧的第一块')
+
+  // 同一份记录换聊天模式：仍停在最后那条回答的开头 —— 两套口径不许互相串。
+  const chat = fullPinRunner({ classes, tops, mode: 'chat' })
+  chat.render()
+  assert.equal(chat.mainEl.scrollTop, 1990 + 1200 - 12, '聊天模式一个字都不许动')
+})
+
+test('完整模式：这一轮没有过程时退化成和聊天一样，不往上一轮跑', () => {
+  const classes = ['bubble user', 'said', 'bubble user', 'said']
+  const tops = [100, 300, 500, 900]
+  const full = fullPinRunner({ classes, tops, mode: 'full' })
+  full.render()
+  assert.equal(full.mainEl.scrollTop, 1990 + 900 - 12,
+    '没有过程组可退，就落回最后那条回答的开头（和聊天一模一样）')
+})
+
+test('完整模式：翻上去看历史时不动他；同一条回答只对齐一次', () => {
+  const classes = ['bubble user', 'traj-group', 'said']
+  const tops = [100, 700, 1200]
+  const away = fullPinRunner({ classes, tops, mode: 'full', scrollTop: 100 })
+  away.render()
+  assert.equal(away.mainEl.scrollTop, 100, '他自己翻上去看历史时，落定也不该把他拽到轨迹开头')
+
+  const at = fullPinRunner({ classes, tops, mode: 'full' })
+  at.render()
+  assert.equal(at.mainEl.scrollTop, 1990 + 700 - 12, '在底部跟着看：落定那一下对齐到轨迹开始')
+  at.mainEl.scrollTop = 120
+  at.render()
+  assert.equal(at.mainEl.scrollTop, 120, '同一条回答只对齐一次，别反复弹回开头')
+})
+
+/**
  * 聊天记录是**一屏一屏铺**的（2026-09-30 改的，原委见 page.html 里 CHAT_PAGE 那段）。
  *
  * 这里要验的三件事，都得让假 DOM 有一点「高度」才验得出来：

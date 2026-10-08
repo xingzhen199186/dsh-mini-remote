@@ -3675,6 +3675,33 @@
   var pinnedAnswerKey = '';
 
   /**
+   * 这一轮**助手侧内容的第一块**：从最后那条回答往回退，只跨紧挨着它的过程组
+   * 与轨迹说明（trajInterleave 把组插在**该轮第一个回答之前**，见那里的落点 a），
+   * 退不动就停在哪儿。
+   *
+   * 为什么「完整」模式要多退这一步：用户 2026-10-08 报的——单帧和聊天停在回答的开头
+   * 是对的，完整模式照做就错了。回答前面还有这一轮的执行轨迹，把回答的开头顶到屏幕
+   * 最上沿，等于把那串过程整个推到屏幕上方：他落定那一刻看到的不是这一轮的开头，
+   * 而是轨迹的尾巴接着正文。停在这一轮的头上，才是从他要读的地方读起。
+   *
+   * **用户自己发的那条指令不算**：他刚敲过，不用再读一遍；要读的是助手这一侧。
+   * 所以往回走只认过程组和那句「这份轨迹不是全部」的说明，碰到别的节点
+   * （`.bubble.user`、`.cmd`、子智能体卡片、页面上那几条说明）就停——一轮的边界
+   * 本来就在那儿。这也顺带保证了**这一轮没有过程**时原样返回那条回答：完整模式
+   * 退化成聊天模式的样子，不会跑到上一轮的轨迹上去。
+   */
+  function trajRunHead(saidEl) {
+    var node = saidEl;
+    for (;;) {
+      var prev = node.previousElementSibling;
+      if (!prev || !prev.classList) break;
+      if (!prev.classList.contains('traj-group') && !prev.classList.contains('traj-note')) break;
+      node = prev;
+    }
+    return node;
+  }
+
+  /**
    * 聊天模式的滚动：**回答的开头才是要读的地方，不是末尾。**
    *
    * 用户 2026-09-24 提的：「聊天模式下，回答出现时，页面也应该停留在回答的开头
@@ -3690,7 +3717,8 @@
    *     就被拽回末尾，等于没改。
    *
    *   · **落定**（timestamp 变了）——对齐最后那条 `.said` 的开头，
-   *     让最终版从第一行开始读。
+   *     让最终版从第一行开始读。（**完整**模式再往前退到这一轮的头上，
+   *     理由见 trajRunHead：那一轮的过程组就排在回答前面。）
    *
    * 为什么要记 key、而不是「每次都对齐」：用户往下读的时候，每次重画都把他拽回
    * 开头，比不对齐还烦人。这一点和单帧模式里 scrolledReplyAt 的道理是一样的。
@@ -3719,6 +3747,9 @@
       } else if (replyEl.querySelectorAll) {
         var saids = replyEl.querySelectorAll('.said');
         target = saids.length ? saids[saids.length - 1] : null;
+        // 「完整」模式要停的是**这一轮的头上**，不是这条回答的头上（见 trajRunHead）。
+        // 「正在流」那一路不对齐这里：用户看的就是刚流出来的那段本身。
+        if (target && state.mode === 'full') target = trajRunHead(target);
       }
       pinToTop(target);
       return;
