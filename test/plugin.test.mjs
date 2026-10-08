@@ -2311,7 +2311,14 @@ test('版本要求要写在门槛真正会读的那一格：peerDependencies', (
   assert.equal(typeof peer, 'string', '要在 peerDependencies 里声明 @deepseek-ai/dsh')
   assert.ok(peer.trim() !== '' && peer !== '*', '范围不能空着或用通配——那等于没声明')
   assert.ok(peer.includes('0.1.5-rc.2'), '下界要和 engines.dsh 一致（我们承诺的兼容起点）')
-  assert.equal(pkg.engines?.dsh, '>=0.1.5-rc.2', 'engines.dsh 保留，给市场显示用')
+  // **两处必须一字不差**（2026-10-08 改）。原来这里钉的是 `engines.dsh === '>=0.1.5-rc.2'`：
+  // 那个断言恰好把「engines 只有下界、没有上限」这个漏子**焊死在测试里**。后果不是学术问题——
+  // peer 那边挡住 0.3.0 以上（宿主的门禁读它），而读 engines 的工具（插件市场、巡检脚本、
+  // 有没有人照着它做适配展示）会以为 0.9 也能用；同一份 manifest 里两句话不一样，
+  // 「哪一句是真的」就取决于读者是谁——那是两个真相。
+  // 现在改成「和 peer 声明完全相等」：读哪一处都得到同一句话。
+  assert.equal(pkg.engines?.dsh, peer,
+    'engines.dsh 要和 peerDependencies 声明同一个区间：两处不一致时，一个读者看到有上限、另一个看到没有')
   assert.ok(!pkg.dependencies?.['@deepseek-ai/dsh'],
     '@deepseek-ai/* 绝不能进 dependencies：旧副本会遮蔽宿主')
   // schemastery 是唯一一个 import 了运行时值的 @deepseek-ai/* 包（用来声明 Config），
