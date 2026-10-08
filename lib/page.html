@@ -1461,9 +1461,16 @@
   .to-bottom::before {
     content: ''; position: absolute; inset: -4px; border-radius: 999px;
   }
-  /* ② 浅色那边再叠第二层：更安静的那一档投影（深色不叠，见上面那段注释）。 */
+  /* ② 浅色那边：环比深色**深一档**，再叠第二层更安静的那一档投影（深色两层都不动）。
+     为什么不用现成变量：浅色这套色阶里，--line（相对亮度 0.747）往下一格是空的——
+     再往下就只剩 --dim（0.298）和 --muted（0.207），一用就把「一道细线」变成「一圈描边」
+     （实测它们相对底色要差 85 / 109 个灰阶、对比度 2.4 / 3.1:1，放在这颗小圆上太重）。
+     所以在 --line 与 --fg（正文色，同一个蓝调家族）之间取一成的 --fg：
+     实测环相对相邻底色由 11/255 变成 28/255（对比度 1.096 → 1.292:1），
+     刚好从「几乎看不见」跨成「看得见的一道细线」，离 --dim 那一档还差着三倍。
+     颜色仍全部来自现成令牌，不写死任何色值；深色那边一个数没动，还是 --line。 */
   [data-theme="light"] .to-bottom {
-    box-shadow: 0 0 0 .5px var(--line), var(--sh-1);
+    box-shadow: 0 0 0 .5px color-mix(in srgb, var(--line) 90%, var(--fg)), var(--sh-1);
   }
   .to-bottom:active { background: var(--panel-2); }
   /* flex 会顶掉 hidden 自带的 display:none——少了这一句，藏起来的那颗还会占位显示。

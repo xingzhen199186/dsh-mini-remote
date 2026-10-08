@@ -467,9 +467,12 @@ test('回到底部浮标：边界走 0.5px 的环、投影浅一档（深色不�
   const baseShadow = btn.match(/box-shadow:\s*([^;]+);/)[1]
   assert.equal(baseShadow.split(',').length, 1,
     '深色不叠投影层：实测那层压在本就近黑的底色上最多只差 5/255（平均 0.07/255），叠了等于白叠')
+  // 浅色那道环第三轮加了一档深度（2026-10-08，用户真机反馈「细环太淡、跟底色只差 11/255」）。
+  // 浅色色阶里 --line 往下一格是空的（再往下就是 --dim / --muted，那是描边不是细线），
+  // 所以从 --line 与正文色 --fg 之间调一成出来——仍不写死色值，深色的环仍是 var(--line)。
   assert.match(rule('[data-theme="light"] .to-bottom'),
-    /box-shadow:\s*0 0 0 \.5px var\(--line\),\s*var\(--sh-1\)/,
-    '浅色的第二层要是 --sh-1：同一个蓝调，比 --sh-2 更小更柔')
+    /box-shadow:\s*0 0 0 \.5px color-mix\(in srgb, var\(--line\) 90%, var\(--fg\)\),\s*var\(--sh-1\)/,
+    '浅色的第二层要是 --sh-1：同一个蓝调，比 --sh-2 更小更柔；第一层要比 --line 深一档')
 
   // ③ 看得见的圆 38~40；点得到的圈由 ::before 撑（≥44）
   const w = Number(btn.match(/width:\s*(\d+(?:\.\d+)?)px/)[1])
