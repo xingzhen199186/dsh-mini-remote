@@ -29,7 +29,7 @@ Here is what the interface looks like — dark and light, switchable in settings
 
 <img width="290" alt="Dark: one conversation, carrying only your instruction and the conclusion" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/screen-dark.png" /> <img width="290" alt="Light: the same conversation, in the palette taken from the promo artwork" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/screen-light.png" />
 
-It is **not** a second screen for the desktop interface. Approval dialogs, file diffs and tool-call chains exist on the computer and nowhere on the phone — deliberately. It does very little.
+It is **not** a second screen for the desktop interface. Approval dialogs, file diffs and tool-call chains exist on the computer and nowhere on the default page — deliberately. It does very little. (If you want the **whole** desktop interface, there is an off-by-default entry in settings — see the last paragraph of [What the phone can do](#what-the-phone-can-do).)
 
 Other phone clients copy the computer's execution process over to the phone in full. This one does the opposite: **it sends only the two lines you asked for.** That is the single biggest difference between it and them.
 
@@ -66,7 +66,7 @@ If you already have the source on disk, you can point it at the folder:
 dsh plugin --profile web add <the folder you put the source in>
 ```
 
-**Which DSH versions it fits.** This plugin was developed on DSH **0.1.5-rc.2** and re-checked item by item on **0.1.7-rc.2** (every interface it uses was unchanged); **versions below 0.1.5 have not been tried**. `rc` is the tag the project puts on preview builds, and DSH as a whole is still a developer preview — minor versions may break things, so versions newer than 0.1.7 are not guaranteed either. If it ever does hit an incompatibility, the usual symptom is one entry point going missing (the model line at the top, say) while everything else keeps working: the plugin is written so that a missing service switches off that one feature rather than the whole thing.
+**Which DSH versions it fits.** This plugin was developed on DSH **0.1.5-rc.2** and re-checked item by item on **0.1.7-rc.2**; **0.2.0 itself was built on 0.2.0-rc.1 / 0.2.0-rc.2** (every interface it uses was unchanged, and the full check suite ran on both sides). **Versions below 0.1.5 have not been tried**, and the declared ceiling is **0.3.0**. `rc` is the tag the project puts on preview builds, and DSH as a whole is still a developer preview — minor versions may break things, so versions newer than 0.2.0 are not guaranteed either. If it ever does hit an incompatibility, the usual symptom is one entry point going missing (the model line at the top, say) while everything else keeps working: the plugin is written so that a missing service switches off that one feature rather than the whole thing. The phone-side interface adaptations also come with a dependency manifest and an **upgrade self-check** (`tools/structure-check.mjs`): run it against the live page after an upgrade and it walks every dependency entry by entry.
 
 Settings follow the same rule: the settings are declared the standard DSH way, and on the 0.1.5-era library that ability does not exist yet — the plugin **still installs and works exactly as before**, it just loses the "applies immediately" behaviour mentioned below. On the **0.1.7 generation** that ability is fully there.
 
@@ -131,7 +131,7 @@ Open the link and that's the whole interface: one input box, and the latest repl
 
 **She speaks up while she works.** On the computer, the model often mutters a line between steps ("let me look at this file first"). That line is now spoken by the whale girl through her speech bubble — the talking pose is a newly drawn sprite, the rotation pauses for it, and afterwards picks up from where it stopped. It stays **in the bubble** and never bleeds into the answer area below. Only the line it deliberately writes *for a human reader* is spoken; its own working thoughts — often English, often a whole paragraph — never reach the phone at all. Should that one narration line itself be in English, it is shown as-is, untranslated (translating would mean putting words in its mouth).
 
-**Two appearances, switchable anytime.** Settings has an "Appearance" row: **Dark** (the default), **Light**, and **Follow system**. Dark is deep-sea navy; the light palette is taken from the promo artwork — near-white ice blue for the ground, deep royal blue for the text, and the same royal blue on primary buttons. Your choice is stored on the phone, so it is still there next time you open the page.
+**Two appearances, switchable anytime.** Settings has an "Appearance" row: **Dark**, **Light** (the default), and **Follow system**. Dark is deep-sea navy; the light palette is taken from the promo artwork — near-white ice blue for the ground, deep royal blue for the text, and the same royal blue on primary buttons. Your choice is stored on the phone, so it is still there next time you open the page.
 
 <img width="290" alt="Settings (dark): display mode and appearance" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/settings-dark.png" /> <img width="290" alt="Settings (light): the selected states and the primary button turn royal blue too" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/settings-light.png" />
 
@@ -139,7 +139,7 @@ Open the link and that's the whole interface: one input box, and the latest repl
 
 <img width="290" alt="Running (dark, photographed on a phone): the whale girl running, 15s elapsed" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/running-dark-phone.jpg" /> <img width="290" alt="Running (light, photographed on a phone): the whale girl running, 7m43s elapsed, one instruction queued" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/running-light-phone.jpg" />
 
-**Two display modes.** Tap the ⚙ in the top right to switch. "Single frame" (the default) keeps only the newest reply on screen — good for "I just want to see how this one turned out". "Chat" is a back-and-forth bubble list — good for several rounds of follow-up questions. Use it for a while and you'll know which you prefer.
+**Three display modes.** Tap the ⚙ in the top right to switch. "Single frame" (the default) keeps only the newest reply on screen — good for "I just want to see how this one turned out". "Chat" is a back-and-forth bubble list — good for several rounds of follow-up questions. "Full" takes that same list and **puts each step's process back in its original place** (the same shape the desktop app uses), with layers you can open one by one to see what that step read — and it is searchable. Use it for a while and you'll know which you prefer.
 
 **Open a session and you see what was said in it before.** Switch to a session that has existed for a while and Chat mode lists every earlier round (the instructions you sent, the conclusion of each round); Single frame shows only the last conclusion. **Very large sessions show only the most recent stretch**: reading one of those in full — tens of thousands of events — would drag the DSH process on your computer down, so the plugin reads just the tail and says so at the top ("this is not everything, only the most recent stretch"). That line is not boilerplate; it is the truth.
 
@@ -149,7 +149,9 @@ Open the link and that's the whole interface: one input box, and the latest repl
 
 **Three things you can change in passing.** Tap the line at the top to switch the current session's model and reasoning effort; switch the permission preset (View Only / Workspace Write / Full Access); browse the computer's folders to register a new workspace and start a session in it.
 
-**You're reading conclusions, not the process.** There's no tool-call chain and no file diff on the page. The one exception is the line the whale girl says out loud — it goes into her bubble, never into the answer area (see above). **System-level confirmation dialogs cannot be answered from the phone** (approving a dangerous command, for instance) — those still need the computer. What the phone can answer is the multiple-choice question the AI puts to you; the two are not the same thing. It's a remote control: the TV still has to be on for the remote to be any use.
+**By default you're reading conclusions, not the process.** In Single frame and Chat there is no tool-call chain and no file diff; the one exception is the line the whale girl says out loud — it goes into her bubble, never into the answer area (see above). To read the process you switch to "Full" yourself. **System-level confirmation dialogs cannot be answered from the phone** (approving a dangerous command, for instance) — those still need the computer. What the phone can answer is the multiple-choice question the AI puts to you; the two are not the same thing. It's a remote control: the TV still has to be on for the remote to be any use.
+
+**The whole desktop interface can be brought over too ("Advanced settings").** Settings has an **off-by-default** "Advanced settings" entry: turn it on and a "Desktop interface" row appears below it; tap "Open" and the computer's full DSH page is embedded right there on the phone — no jump, no new tab — so model configuration, plugin install and removal, session records and anything else the remote page doesn't have can be done from here. **It is the exact opposite of the positioning above** (switch it on and the whole process is on screen), which is why it starts off: turning it on spells the consequence out (the password's reach extends to the entire desktop settings surface) and takes two taps to confirm. When the plugin cannot learn the desktop address, the entry does not appear at all.
 
 ---
 
@@ -228,6 +230,12 @@ So the interface here is deliberately crude: it drops the PC's execution steps e
 **In a sense, it exists so that you look at it less.**
 
 So you can spend your time more freely — instead of being stuck in that small screen while you're playing with your daughter or out on a trip.
+
+---
+
+## For maintainers
+
+After upgrading DSH, run `node tools/structure-check.mjs` once. It reports entry by entry: which ones still hold, which have drifted, and whether a drifted one actually needs attention. When anything has drifted the exit code is 1, so the check can be wired into a pipeline later.
 
 ---
 

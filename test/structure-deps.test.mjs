@@ -153,5 +153,7 @@ test('版本：engines.dsh 和 peerDependencies 声明的是同一个区间（�
   const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
   assert.equal(pkg.engines.dsh, pkg.peerDependencies['@deepseek-ai/dsh'],
     'engines.dsh 和 peerDependencies 必须一模一样：两处不一致时，npm 会拿一个、宿主看另一个')
-  assert.equal(pkg.version, '0.1.9', '这一轮只动 engines 那一处，版本号不许变')
+  // 版本号钉在这里：它和 CHANGELOG 的口径要一起走——发 0.2.0 时改 package.json，
+  // 就得顺手改这一行，否则这套测试红给你看（这正是它当初被写出来的用意）。
+  assert.equal(pkg.version, '0.2.0', '发版改 package.json 的版本号时，这一行要一起改')
 })
