@@ -1396,12 +1396,38 @@
      用户要的是「瞬间回到底部的按钮，圈子里一个简约的往下箭头」，参考电脑端 DSH 那颗。
 
      形状照电脑端那颗抄：圆底 + 一根下折线（矢量 svg，不是字形、不是 emoji——
-     字形换个机型就可能变成豆腐块）。尺寸不一样：电脑端是 34×34，这里是 42×42，
-     和底栏那三个控件（.attach / .send / #input 都是 42 高）对齐，也稳在手指点得准的
-     下限之上。圆角走 999px 那一档（和状态点同一个写法），不新造档位。
+     字形换个机型就可能变成豆腐块）。尺寸不一样：电脑端 34×34，这里 38×38。
+     圆角走 999px 那一档，不新造档位。
+
+     ---- 第二轮：用户要「克制而高级的主题适配」，外观只动下面这三处 ----
+
+     ① 边界从「画上去的一根 1px 线」改成「从面里长出来的一道 0.5px 环」：
+        去掉 border，环改由 box-shadow 的第一层 `0 0 0 .5px` 来画。这不是自创——
+        电脑端那套高度系统本来就长这样（dsh-client-ui-theme 里那道 elevation-stroke
+        就是「0 0 0 .5px 加描边色」，官方那颗浮标挂的 elevation-panel 第一位正是它）。
+        0.5px 在 2 倍屏上正好落成 1 个物理像素：比 1px 细一半，看得见轮廓，
+        又找不到那根线。颜色仍走 --line（全页的细线都用它）。
+
+     ② 投影换轻一档，深色单独处理：
+        · 浅色用 --sh-1，不再用 --sh-2。--sh-2（0 2px 8px / 12%）是这两档里更重的
+          一档，压在这颗 38px 的小圆上像贴了块膏药；--sh-1（0 1px 2px / 7%）
+          同一个蓝调，更小更柔。官方那套的第二三层（0 3px 8px @3% 加 0 0 16px @2%）
+          比这更浅也更宽——要贴到那个程度就得现调一组新数，与这一轮「克制」的调子
+          相悖，所以取现成的那一档。
+        · 深色把投影层整个去掉。实测它在深色下等于零：浮标落在页面底色渐变最暗的
+          那一头（近黑的 #070b11），再压一层黑色投影，同一像素开关投影前后最多差
+          5/255（整幅平均 0.07/255）。层次改由**底色本身**立——实测按钮的 --panel #121a25 比它脚下的
+          背景 #070b11 亮 (+11,+15,+20)，本身就已经高出一档，和官方那颗（深色下用
+          比背景亮的浮层底色）是同一个道理。底线是静息色不能改成 --panel-2：
+          那是这颗按钮**按下**时的底色，拿它当静息色，按下去就没有反馈了。
+
+     ③ 看得见的圆缩到 38，手指的范围反而变大：原来 42×42 是「看得见多大就点得到
+        多大」，而 42 其实低于常说的那条 44 下限；现在圆缩到 38，看不见的热区用
+        ::before 撑到 46×46。图标等比缩到 14.5px（16 × 38/42），箭头在圆里占的比例
+        和原来一样，既不空也不挤。
 
      颜色**一个令牌都不新造**，全用主屏现成的那几个：底 --panel、线 --line、
-     图标 --fg、按下 --panel-2、投影 --sh-2。两套主题各自成对，浅色下自动跟着变。
+     图标 --fg、按下 --panel-2、投影 --sh-1。两套主题各自成对。
 
      位置的关键在 .to-bottom-slot：它是 main 的最后一个孩子，靠 `position: sticky`
      贴在**滚动口下沿往上 16px** 的地方。这一手的好处是位置不用脚本算——
@@ -1417,17 +1443,33 @@
     pointer-events: none;
   }
   .to-bottom {
-    width: 42px; height: 42px; margin-top: -42px; padding: 0;
-    border: 1px solid var(--line); border-radius: 999px;
+    /* position 只是为了给下面那片透明热区一个定位原点，按钮自己一个像素没挪。 */
+    position: relative;
+    width: 38px; height: 38px; margin-top: -38px; padding: 0;
+    border: 0; border-radius: 999px;
     background: var(--panel); color: var(--fg);
-    box-shadow: var(--sh-2); cursor: pointer; pointer-events: auto;
+    /* ① 第一层就是那道 0.5px 环；深色到此为止（② 的深色那半：投影在那儿等于零）。 */
+    box-shadow: 0 0 0 .5px var(--line);
+    cursor: pointer; pointer-events: auto;
     display: flex; align-items: center; justify-content: center;
+  }
+  /* ③ 手指要的那 44 由这片**看不见**的热区补上：圆 38，热区 46。
+     绝对定位 + 负 inset 让它溢出去，不参与版式（槽的高度还是 0，位置照旧全交给
+     CSS 的 sticky）；它是按钮自己的伪元素，命中的点事件目标仍然是按钮，所以
+     「只有那一个圆圈可点」这条规矩没破，只是那个圈比看得见的那个大 4px。
+     用 4 不用 3：44 是下限，留 1px 余量，免得某些机型取整把它踩到 43.9。 */
+  .to-bottom::before {
+    content: ''; position: absolute; inset: -4px; border-radius: 999px;
+  }
+  /* ② 浅色那边再叠第二层：更安静的那一档投影（深色不叠，见上面那段注释）。 */
+  [data-theme="light"] .to-bottom {
+    box-shadow: 0 0 0 .5px var(--line), var(--sh-1);
   }
   .to-bottom:active { background: var(--panel-2); }
   /* flex 会顶掉 hidden 自带的 display:none——少了这一句，藏起来的那颗还会占位显示。
      和 .attach-bar[hidden] / .cmd-menu[hidden] 是同一个坑。 */
   .to-bottom[hidden] { display: none; }
-  .to-bottom svg { width: 16px; height: 16px; }
+  .to-bottom svg { width: 14.5px; height: 14.5px; }
 </style>
 <script>
   // 主题必须在**首屏画出来之前**定下来，否则浅色手机打开会先闪一下深色底。

@@ -428,5 +428,61 @@ test('回到底部浮标：不新造令牌、不放强调色、圆角走 999px �
   assert.match(block, /\.to-bottom-slot\s*\{[^}]*pointer-events:\s*none/,
     '槽是通栏的，不设 none 会在底边上拦掉底下内容的点击')
   assert.match(block, /\.to-bottom\s*\{[^}]*pointer-events:\s*auto/, '按钮自己要把点击收回来')
-  assert.match(block, /\.to-bottom\s*\{[^}]*margin-top:\s*-42px/, '按钮挂在槽的线上方（和电脑端同一个做法）')
+  // -38 是**看得见的圆**的高度：负的 margin-top 等于自身高度，按钮的下沿才正好落在
+  // 槽那条线上。圆从 42 缩到 38（第二轮），这个数就得跟着走——留 42 会让它整圈下移。
+  assert.match(block, /\.to-bottom\s*\{[^}]*margin-top:\s*-38px/, '按钮挂在槽的线上方（和电脑端同一个做法）')
+})
+
+/**
+ * 「回到底部」浮标第二轮（2026-10-08 用户要「克制而高级的主题适配」）。
+ *
+ * 钉的是这一轮的三处做法，免得以后有人顺手改回「1px 边框 + 面板级重投影」：
+ *   ① 边界不画线，改成投影里的第一层——一道 0.5px 的环（颜色只许用现成的 --line）；
+ *   ② 投影浅一档（--sh-1 而不是 --sh-2），而且**深色不叠投影**——实测那层在近黑底上
+ *      只差 0~2/255，层次交给底色（--panel 比它脚下的背景亮 (+11,+15,+20)）；
+ *   ③ 看得见的圆缩到 38，可点击的圈由 ::before 撑到 46（44 那条下限还留了余量）。
+ *
+ * `0 0 0 .5px` 这道环不是自创：电脑端的高度系统（elevation-stroke）就是这一条，
+ * 官方那颗浮标挂的 elevation-panel 第一位正是它。
+ */
+test('回到底部浮标：边界走 0.5px 的环、投影浅一档（深色不叠）、看的 38 点的 46', () => {
+  const from = css.indexOf('/* ---------- 「回到底部」浮标')
+  assert.ok(from > 0, '找不到回到底部浮标那段样式，锚点变了先修测试')
+  const block = css.slice(from)
+  const rule = (sel) => {
+    const esc = sel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const m = block.match(new RegExp(esc + '\\s*\\{([^}]*)\\}'))
+    assert.ok(m, `找不到规则 ${sel}`)
+    return m[1]
+  }
+  const btn = rule('.to-bottom')
+
+  // ① 边界：边界线不画了，第一层 box-shadow 就是那道 0.5px 的环
+  assert.match(btn, /border:\s*0\b/, '边界要改成投影里的环，不能再画边框')
+  assert.match(btn, /box-shadow:\s*0 0 0 \.5px var\(--line\)/,
+    '第一层必须是 0.5px 的环，颜色只用现成的 --line（不许写死色值）')
+  assert.ok(!/var\(--sh-2\)/.test(block), '--sh-2 是面板级的那一档，压在这颗小圆上太重')
+
+  // ② 深色（基础规则）只有环这一层；浅色才叠第二层，而且是更安静的 --sh-1
+  const baseShadow = btn.match(/box-shadow:\s*([^;]+);/)[1]
+  assert.equal(baseShadow.split(',').length, 1,
+    '深色不叠投影层：实测那层压在本就近黑的底色上最多只差 5/255（平均 0.07/255），叠了等于白叠')
+  assert.match(rule('[data-theme="light"] .to-bottom'),
+    /box-shadow:\s*0 0 0 \.5px var\(--line\),\s*var\(--sh-1\)/,
+    '浅色的第二层要是 --sh-1：同一个蓝调，比 --sh-2 更小更柔')
+
+  // ③ 看得见的圆 38~40；点得到的圈由 ::before 撑（≥44）
+  const w = Number(btn.match(/width:\s*(\d+(?:\.\d+)?)px/)[1])
+  const h = Number(btn.match(/height:\s*(\d+(?:\.\d+)?)px/)[1])
+  const margin = Number(btn.match(/margin-top:\s*-(\d+(?:\.\d+)?)px/)[1])
+  assert.ok(w >= 38 && w <= 40, `看得见的圆要在 38~40：现在是 ${w}`)
+  assert.equal(h, w, '圆要正圆：宽高相等')
+  assert.equal(margin, w, '负 margin 得等于圆的高度，下沿才落在槽那条线上')
+  const before = rule('.to-bottom::before')
+  assert.match(btn, /position:\s*relative/, '按钮要当热区的定位原点')
+  assert.match(before, /position:\s*absolute/, '热区绝对定位：不占版式、不推动任何东西')
+  const inset = Number(before.match(/inset:\s*-(\d+(?:\.\d+)?)px/)[1])
+  assert.ok(w + inset * 2 >= 44, `点得到的圈要 ≥44：现在是 ${w + inset * 2}`)
+  assert.match(block, /\.to-bottom svg\s*\{\s*width:\s*14\.5px;\s*height:\s*14\.5px/,
+    '图标等比缩：16 × 38/42 = 14.5，箭头在圆里占的比例不变')
 })
