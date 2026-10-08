@@ -428,9 +428,10 @@ test('回到底部浮标：不新造令牌、不放强调色、圆角走 999px �
   assert.match(block, /\.to-bottom-slot\s*\{[^}]*pointer-events:\s*none/,
     '槽是通栏的，不设 none 会在底边上拦掉底下内容的点击')
   assert.match(block, /\.to-bottom\s*\{[^}]*pointer-events:\s*auto/, '按钮自己要把点击收回来')
-  // -27 是**看得见的圆**的高度：负的 margin-top 等于自身高度，按钮的下沿才正好落在
-  // 槽那条线上。圆从 42 缩到 38（第二轮）、又缩到 27（第四轮），这个数就得跟着走。
-  assert.match(block, /\.to-bottom\s*\{[^}]*margin-top:\s*-27px/, '按钮挂在槽的线上方（和电脑端同一个做法）')
+  // -31 是**看得见的圆**的高度：负的 margin-top 等于自身高度，按钮的下沿才正好落在
+  // 槽那条线上。圆从 42 缩到 38（第二轮）、缩到 27（第四轮）、又长到 31（第五轮），
+  // 这个数就得跟着走。
+  assert.match(block, /\.to-bottom\s*\{[^}]*margin-top:\s*-31px/, '按钮挂在槽的线上方（和电脑端同一个做法）')
 })
 
 /**
@@ -445,7 +446,7 @@ test('回到底部浮标：不新造令牌、不放强调色、圆角走 999px �
  * `0 0 0 .5px` 这道环不是自创：电脑端的高度系统（elevation-stroke）就是这一条，
  * 官方那颗浮标挂的 elevation-panel 第一位正是它。
  */
-test('回到底部浮标：边界走 0.5px 的环、投影浅一档（深色不叠）、看得见的圆 27 点得到的圈 45', () => {
+test('回到底部浮标：边界走 0.5px 的环、投影浅一档（深色不叠）、看得见的圆 31 点得到的圈 49', () => {
   const from = css.indexOf('/* ---------- 「回到底部」浮标')
   assert.ok(from > 0, '找不到回到底部浮标那段样式，锚点变了先修测试')
   const block = css.slice(from)
@@ -474,11 +475,13 @@ test('回到底部浮标：边界走 0.5px 的环、投影浅一档（深色不�
     /box-shadow:\s*0 0 0 \.5px color-mix\(in srgb, var\(--line\) 90%, var\(--fg\)\),\s*var\(--sh-1\)/,
     '浅色的第二层要是 --sh-1：同一个蓝调，比 --sh-2 更小更柔；第一层要比 --line 深一档')
 
-  // ③ 看得见的圆 27（第四轮「面积减半」）；点得到的圈由 ::before 撑（≥44）
+  // ③ 看得见的圆 31（第五轮「有点缩得太小了，增大 15%」：27 × 1.15 = 31.05 → 31，
+  //    按**直径**读；按面积读是 27 × √1.15 ≈ 29，只差 2px，取大的那个）；
+  //    点得到的圈由 ::before 撑着（≥44）。inset 一个数没动，热区自己长到 49。
   const w = Number(btn.match(/width:\s*(\d+(?:\.\d+)?)px/)[1])
   const h = Number(btn.match(/height:\s*(\d+(?:\.\d+)?)px/)[1])
   const margin = Number(btn.match(/margin-top:\s*-(\d+(?:\.\d+)?)px/)[1])
-  assert.equal(w, 27, `看得见的圆是 27（38 × √2 的一半 = 26.87 → 27）：现在是 ${w}`)
+  assert.equal(w, 31, `看得见的圆是 31（27 × 1.15 = 31.05）：现在是 ${w}`)
   assert.equal(h, w, '圆要正圆：宽高相等')
   assert.equal(margin, w, '负 margin 得等于圆的高度，下沿才落在槽那条线上')
   const before = rule('.to-bottom::before')
@@ -486,8 +489,8 @@ test('回到底部浮标：边界走 0.5px 的环、投影浅一档（深色不�
   assert.match(before, /position:\s*absolute/, '热区绝对定位：不占版式、不推动任何东西')
   const inset = Number(before.match(/inset:\s*-(\d+(?:\.\d+)?)px/)[1])
   assert.ok(w + inset * 2 >= 44, `点得到的圈要 ≥44：现在是 ${w + inset * 2}`)
-  assert.match(block, /\.to-bottom svg\s*\{\s*width:\s*10\.3px;\s*height:\s*10\.3px/,
-    '图标等比缩：16 × 27/38 = 10.3，箭头在圆里占的比例不变')
+  assert.match(block, /\.to-bottom svg\s*\{\s*width:\s*11\.8px;\s*height:\s*11\.8px/,
+    '图标等比：10.3 × 31/27 = 11.8，箭头在圆里占的比例不变')
 })
 
 /**
