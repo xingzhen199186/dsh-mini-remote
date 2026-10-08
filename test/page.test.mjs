@@ -5699,9 +5699,18 @@ test('回到底部浮标：默认藏着，而且 hidden 真的管用（flex 会�
   const at = html.indexOf('id="toBottom"')
   const tag = html.slice(at, html.indexOf('>', at))
   assert.match(tag, /\shidden/, '默认要藏着——首屏还没滚动时不该出现')
-  assert.match(html, /\.to-bottom\[hidden\]\s*\{\s*display:\s*none/,
-    '作者样式表里的 display:flex 会顶掉 hidden 自带的 display:none，'
-    + '少了这一句，藏起来的那颗照样显示（和 .attach-bar[hidden] 同一个坑）')
+  // 第三轮（2026-10-08 用户要渐出）之后，「藏」不再用 display:none 收——display 一没就
+  // 没有过渡可言。改成 opacity + visibility + pointer-events 三条：淡出走完才真正不可见，
+  // 三个属性缺一个都会出事（少 opacity 不淡、少 visibility 淡完还在、少 pointer-events
+  // 淡出期间还能点到）。这里钉的是「作者样式表里确实把 hidden 这个状态写实了」，
+  // 守的仍然是原来那个坑：display:flex 会顶掉 hidden 自带的 display:none。
+  const hiddenRule = html.match(/\.to-bottom\[hidden\]\s*\{([^}]*)\}/)
+  assert.ok(hiddenRule, '找不到 .to-bottom[hidden]：作者样式表里的 display:flex 会顶掉 '
+    + 'hidden 自带的 display:none，少了这一条，藏起来的那颗照样显示')
+  assert.match(hiddenRule[1], /opacity:\s*0/, '藏起来要真的透明')
+  assert.match(hiddenRule[1], /visibility:\s*hidden/, '淡出走完要真的不可见')
+  assert.match(hiddenRule[1], /pointer-events:\s*none/,
+    '淡出期间与淡完之后都不能点到它（这一条不参与过渡，属性一挂上就生效）')
 })
 
 test('回到底部浮标：露 / 收用页面自己那条黏底判据，不另设一个数', () => {

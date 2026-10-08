@@ -1452,6 +1452,52 @@
     box-shadow: 0 0 0 .5px var(--line);
     cursor: pointer; pointer-events: auto;
     display: flex; align-items: center; justify-content: center;
+    /* ---- 第三轮（2026-10-08）：出现 / 消失各来一段 130ms 的淡入淡出 ----
+       用户原话「这个按键消失的时候应该有个渐出效果，官方 pc 端是做了的」。
+       真去量了电脑端那份界面（/mini/mirror 上逐帧采 opacity + MutationObserver 看 DOM），
+       结论是**两半都对一半**，两头都得记下来：
+
+       · 电脑端那颗按钮**身上确实挂着一条 `opacity .13s ease`**——但它不是 ChatView 自己的
+         样式，是外形（skin）那层的基础按钮规则给的（选择器是
+         `html[data-dsh-skin="claude"] button, …[role="button"], …`，实测这条很清楚地匹配到
+         那颗浮标）。所以「官方做了渐出」这句话在**声明**上是对的。
+       · 可它**画面上从来没淡过**：ChatView 是 `!followingTail && <div class=toBottomSlot>…`
+         的条件挂载，一滚到底整块节点直接被 React 摘掉，那条 transition 根本没有机会跑。
+         活服务上逐帧采样实测：消失前后只有两个状态（t≈1.5ms 时 opacity=1 且 isConnected=true，
+         t≈18.6ms 时节点已 isConnected=false、computed 全空），中间**一帧过渡值都没有**；
+         MutationObserver 同一时刻记下的是 toBottomSlot 被 childList 整块移除，没有任何
+         「先加类、过一会儿再摘」的动作。也就是说：**设计语言里那一档是 130ms ease，
+         但官方的手法是硬卸载**。
+
+       所以这里按用户的要求把它补上，并且**只补官方自己没接上的那一段**：时长与缓动
+       直接取官方那颗按钮身上现成的那一档 `130ms / ease`，不另起一个数。
+       方向对称：消失淡出、出现淡入，两边同一档，不做缩放、不做弹跳。
+
+       为什么不用 `display:none` 收：`display:none` 一挂上，元素就不在渲染树里了，
+       过渡根本无从谈起——所以「用 display 收尾」和「要一段淡出」这两件事天生互斥。两条正路：
+         (a) 脚本两端配合（先淡出，等过渡结束再置 hidden）；
+         (b) `transition-behavior: allow-discrete` + `@starting-style`。
+       这里走的是第三条、也是同一件事的**更保险写法**：藏起来用
+       `visibility: hidden` + `pointer-events: none` 代替 `display:none`。
+       理由有两条，都是实打实的：
+         · 兼容面。`allow-discrete` / `@starting-style` 要 Chrome 117 / Safari 17.4 /
+           Firefox 129 往上；手机浏览器五花八门，老一档的机器上那两条会被整条丢掉，
+           结果就是**一点淡出都没有**——正好回到用户抱怨的那个状态。而 `visibility`
+           的过渡是十年以上的老写法，哪台机器都认。
+         · 「过渡走完才真正藏起来」这件事由浏览器替我办：`visibility` 的插值规则很特别，
+           只要两端有一端是 `visible`，整个过渡期间它就一直算 `visible`，
+           到进度 1 才翻成 `hidden`。所以淡出那 130ms 里它照样画在屏幕上，
+           走完就真的不可见——等于把 (a) 交给浏览器做，脚本一行都不用加，
+           `paintToBottom` 仍然是「只改 hidden」那一个动作（页面测试也是这么钉的）。
+
+       `visibility` 那条也顺手把「出现」这半边解决了：元素在藏着的时候**仍然有计算样式**
+       （因为它不是 display:none），opacity 老老实实是 0，所以一露出来就是 0→1 的淡入，
+       不需要 `@starting-style` 去给一个起点。
+
+       最后一句：这里只有 `transition`，没有关键帧、没有 animation——
+       它是一颗按钮，不是一段表演（`test/ui.test.mjs` 里那条护栏就是钉这个的）。 */
+    transition: opacity .13s ease, visibility .13s;
+    opacity: 1; visibility: visible;
   }
   /* ③ 手指要的那 44 由这片**看不见**的热区补上：圆 38，热区 46。
      绝对定位 + 负 inset 让它溢出去，不参与版式（槽的高度还是 0，位置照旧全交给
@@ -1473,9 +1519,17 @@
     box-shadow: 0 0 0 .5px color-mix(in srgb, var(--line) 90%, var(--fg)), var(--sh-1);
   }
   .to-bottom:active { background: var(--panel-2); }
-  /* flex 会顶掉 hidden 自带的 display:none——少了这一句，藏起来的那颗还会占位显示。
-     和 .attach-bar[hidden] / .cmd-menu[hidden] 是同一个坑。 */
-  .to-bottom[hidden] { display: none; }
+  /* 藏起来的那个状态。**这一句不能省**：作者样式表里的 display:flex 会顶掉 hidden 自带的
+     display:none，所以「藏」这件事必须由我们自己在这条规则里写实。
+     原来写的是 display:none，现在换成下面这三条（为什么换见上面那段长注释）：
+       · opacity: 0 —— 淡出的终点，130ms 里从 1 走到 0；
+       · visibility: hidden —— 过渡期间它一直是 visible（visibility 的插值规则），
+         走完才翻成 hidden，所以真正不可见发生在淡出**结束之后**；
+       · pointer-events: none —— 这一条**不进过渡**，属性一挂上就立刻生效，
+         所以淡出那 130ms 里它已经点不到了；淡完之后它也不是一层透明的可点层。
+     版式一个像素都没动：槽高是 0，按钮靠 margin-top:-38px 挂在槽线上方，
+     这两个状态里它的盒子一样大，所以不产生任何位移。 */
+  .to-bottom[hidden] { opacity: 0; visibility: hidden; pointer-events: none; }
   .to-bottom svg { width: 14.5px; height: 14.5px; }
 </style>
 <script>

@@ -489,3 +489,59 @@ test('回到底部浮标：边界走 0.5px 的环、投影浅一档（深色不�
   assert.match(block, /\.to-bottom svg\s*\{\s*width:\s*14\.5px;\s*height:\s*14\.5px/,
     '图标等比缩：16 × 38/42 = 14.5，箭头在圆里占的比例不变')
 })
+
+/**
+ * 「回到底部」浮标第三轮（2026-10-08 用户要「消失的时候有个渐出效果，官方 pc 端是做了的」）。
+ *
+ * 先把官方搞清楚再动手（活服务 /mini/mirror 上逐帧量 + 读 asar 里的组件源码）：
+ *   · 官方那颗身上**确实挂着** `opacity .13s ease`，但那条来自外形（skin）的基础按钮规则
+ *     `html[data-dsh-skin="claude"] button, …`，不是 ChatView 自己的；
+ *   · 画面上它**从来没淡过**：ChatView 是条件挂载，一滚到底整块节点被 React 摘掉。
+ *     逐帧采样只见两个状态（t≈1.5ms opacity=1 且连着、t≈18.6ms 已从 DOM 摘除），
+ *     一帧过渡值都没有。
+ * 所以这一轮是**照官方的设计语言（130ms / ease），补上官方自己没接上的那一段**。
+ *
+ * 这几条断言钉的是「别在后续开发里把它改回瞬时」：
+ *   ① 两头对称、同一档时长与缓动；
+ *   ② 不许用 display:none 收尾——display 一没就没有过渡可言（这是本轮最容易被改回去的地方）；
+ *   ③ 淡出期间与淡完之后都不能点到；
+ *   ④ 不许借机加缩放之类的花活。
+ */
+test('回到底部浮标：出现与消失各一段 130ms 的淡入淡出，不许用 display:none 收尾', () => {
+  const from = css.indexOf('/* ---------- 「回到底部」浮标')
+  assert.ok(from > 0, '找不到回到底部浮标那段样式，锚点变了先修测试')
+  const block = css.slice(from)
+  const rule = (sel) => {
+    const esc = sel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const m = block.match(new RegExp(esc + '\\s*\\{([^}]*)\\}'))
+    assert.ok(m, `找不到规则 ${sel}`)
+    return m[1]
+  }
+  const btn = rule('.to-bottom')
+  const hidden = rule('.to-bottom[hidden]')
+
+  // ① 一条 transition 管两头，所以出现和消失天然同档：.13s / ease。
+  //    130ms 不是随手挑的：它就是官方那颗按钮身上现成的那一档（见上面注释），不另起一个数。
+  assert.match(btn, /transition:\s*opacity \.13s ease,\s*visibility \.13s\s*;/,
+    '显 / 隐要走同一条 130ms 的过渡：opacity 负责淡，visibility 负责「走完才真的不见」')
+  assert.match(btn, /opacity:\s*1/, '露着的时候是全不透明')
+  assert.match(btn, /visibility:\s*visible/, '露着的时候必须是 visible，否则淡入那半边没有起点')
+
+  // ② display:none 是这一轮的死线：它一挂上元素就不在渲染树里，过渡无从谈起，
+  //    等于把「渐出」又改回了「一下子没了」。
+  assert.ok(!/display\s*:/.test(hidden),
+    'hidden 那个状态不许用 display 收：display:none 一上元素就不渲染了，过渡根本不会跑')
+  assert.match(hidden, /opacity:\s*0/, '淡出的终点')
+  assert.match(hidden, /visibility:\s*hidden/,
+    '过渡期间 visibility 一直是 visible、到进度 1 才翻成 hidden——「走完才真正藏起来」靠的就是它')
+
+  // ③ pointer-events 不进过渡列表，属性一挂上立刻生效 → 淡出那 130ms 里点不到；
+  //    淡完之后它也不是一层透明的可点层。
+  assert.match(hidden, /pointer-events:\s*none/, '淡出期间与淡完之后都不许点到它')
+  assert.ok(!/pointer-events/.test(btn.match(/transition:[^;]*/)[0]),
+    'pointer-events 不能进过渡列表：进了它就变成「慢慢失去点击」，中间那段还能误触')
+
+  // ④ 只淡，不缩不弹：过渡列表里除了 opacity / visibility 不许有别的（尤其是 transform）。
+  assert.ok(!/transform/.test(btn), '不许加缩放弹跳，这里只做克制的一次透明度过渡')
+  assert.ok(!/animation:|@keyframes/.test(block), '淡入淡出用 transition，不用关键帧')
+})
