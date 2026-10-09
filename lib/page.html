@@ -4594,6 +4594,19 @@
    * **要恢复这个开关：把这一行的 false 改成 true 就行**，别的地方一处都不用动。
    */
   var SHOW_ARCHIVED_FILTER = false;
+  /**
+   * 「另有 N 条已归档、M 条还是空白的新会话」这句**也不摆到界面上**：
+   * 用户 2026-10-09 要求——这句不需要显示，先不删、隐藏起来。
+   *
+   * 所以那句话的渲染、以及支撑它的两个数（hiddenArchived / hiddenBlank，服务端照旧在算、
+   * 照旧随列表一起回来）**一行都没删**，只是不再画出来。
+   * 注意闸住的**只是这半句**：同一块里前面那句「这个工作区里没有能列出来的会话。」
+   * 照旧摆着——那是"会话全被筛掉了"这个情形的兜底文字，一起藏掉的话，
+   * 工作区标题下面就是一片空白，用户会以为界面坏了。
+   *
+   * **要恢复这句话：把下面这一行的 false 改成 true 就行**，别的地方一处都不用动。
+   */
+  var SHOW_NAV_COUNT_HINT = false;
   var navShowArchived = false; // 筛选：默认**隐藏已归档**（官方默认项就是这个）
   var navActing = '';      // 正在行内展开动作条的那条会话 id
   var navRenaming = '';    // 正在改名字的那条会话 id
@@ -4821,9 +4834,15 @@
       // 自己的会话不见了（就在刚才，那还是他亲手归档的）。
       var hid = (got.hiddenArchived || 0) + (got.hiddenBlank || 0);
       if (hid > 0) {
-        return html + '<div class="placeholder">这个工作区里没有能列出来的会话。<br>'
-          + '另有 ' + (got.hiddenArchived || 0) + ' 条已归档、'
-          + (got.hiddenBlank || 0) + ' 条还是空白的新会话。</div>';
+        // 后半句（那两条条数）由 SHOW_NAV_COUNT_HINT 闸住（见那个常量上的说明）：
+        // 闸住时只少这半句，**前面那句兜底照旧画**——全都不画就成了工作区标题下面
+        // 一片空白，用户只会以为界面坏了。恢复就是改那一个词。
+        var hint = SHOW_NAV_COUNT_HINT
+          ? '<br>另有 ' + (got.hiddenArchived || 0) + ' 条已归档、'
+            + (got.hiddenBlank || 0) + ' 条还是空白的新会话。'
+          : '';
+        return html + '<div class="placeholder">这个工作区里没有能列出来的会话。'
+          + hint + '</div>';
       }
       return html + '<div class="placeholder">这个工作区还没有会话。</div>';
     }

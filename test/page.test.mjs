@@ -2257,7 +2257,7 @@ test('SSE 实时推来的回复也要带上 interrupted（不能只有刷新才�
 // 就声明在那儿，renderNav 和 sessionsHtml 都要读它们，切在函数里面就找不到了。
 // 锚点对不上会立刻断言失败，不会安静地退化成空测试。
 
-function navHarness({ apiImpl, showArchivedFilter = false } = {}) {
+function navHarness({ apiImpl, showArchivedFilter = false, showNavCountHint = false } = {}) {
   const START_AT = 'var navList = null;'
   const END_AT = 'function bindSession'
   const a = html.indexOf(START_AT)
@@ -2276,15 +2276,16 @@ function navHarness({ apiImpl, showArchivedFilter = false } = {}) {
   // 每次现造一个的话，测试就没法把"用户打进去的字"放进去。
   const els = {}
 
-  // 「显示已归档」那枚开关被 SHOW_ARCHIVED_FILTER 闸住了（用户 2026-10-09 要求把它隐藏，
-  // 但代码一行不删）。要测**被闸住的那条路**时，在内存里的这一份切片上把那一个词换成
-  // true——磁盘上的 page.html 一个字都不动。
+  // 两处被闸住的界面块（「显示已归档」那枚开关、以及「另有 N 条已归档…」那半句——
+  // 都是用户 2026-10-09 要求隐藏、但代码一行不删的）。要测**被闸住的那条路**时，
+  // 在内存里的这一份切片上把那一个词换成 true——磁盘上的 page.html 一个字都不动。
   let slice = html.slice(a, b)
-  if (showArchivedFilter) {
+  for (const [name, on] of [['SHOW_ARCHIVED_FILTER', showArchivedFilter], ['SHOW_NAV_COUNT_HINT', showNavCountHint]]) {
+    if (!on) continue
+    const line = `var ${name} = false;`
     const before = slice
-    slice = slice.replace('var SHOW_ARCHIVED_FILTER = false;', 'var SHOW_ARCHIVED_FILTER = true;')
-    assert.notEqual(slice, before,
-      '在页面切片里找不到那处闸门：var SHOW_ARCHIVED_FILTER = false;')
+    slice = slice.replace(line, `var ${name} = true;`)
+    assert.notEqual(slice, before, `在页面切片里找不到那处闸门：${line}`)
   }
 
   // eslint-disable-next-line no-new-func
@@ -6225,11 +6226,31 @@ test('导航栏：已归档那一行点不开（官方说取消归档后才能�
     '已归档的行要挡住"打开"这个动作，并说清怎么办')
 })
 
-test('导航栏：空白会话整条不列时，说明白是被筛掉了、不是没有', () => {
+test('导航栏：会话都被筛掉时的说明——那条数那句被闸住，兜底那句照旧摆着', () => {
   // 「一条都没有」和「都被筛掉了」是两件事——用户刚才亲手归档了一条，
   // 要是看到「这个工作区还没有会话」，只会以为自己的会话不见了。
+  // 2026-10-09 用户要求：条数那句（「另有 N 条已归档、M 条还是空白的新会话」）
+  // 不需要显示，先不删、隐藏起来。这里钉的是**画不出来**，不是把渲染那一段删掉。
   const h = navWs(navHarness(), [], { hiddenArchived: 2, hiddenBlank: 3 })
   const out = h.scope.sessionsHtml('w1')
-  assert.match(out, /另有 2 条已归档、3 条还是空白的新会话/)
+  assert.ok(!out.includes('另有'), '闸住时那半句一个数都不许露出来')
+  assert.ok(!out.includes('条已归档'), '连半个说法都不许出现')
+  assert.match(out, /这个工作区里没有能列出来的会话/,
+    '兜底那句必须留着——两句一起藏掉，工作区标题下面就是一片空白，用户会以为界面坏了')
+
+  // 渲染代码必须还在原处：删掉它 = 恢复时要重新写一遍。
+  assert.ok(html.includes('var SHOW_NAV_COUNT_HINT = false;'), '闸门那一行要在（改 true 就恢复）')
+  assert.ok(html.includes("另有 ' + (got.hiddenArchived || 0) + ' 条已归档、"),
+    '那句话的渲染代码不许被删，只是不画')
+  assert.ok(html.includes('got.hiddenBlank || 0'), '支撑它的那个数照旧算、照旧留着')
+})
+
+test('导航栏：把闸门打开（常量 true）那句「另有 N 条…」照旧能画出来', () => {
+  // 被闸住的代码路径仍然要能被测到：这一趟就是在内存里把那一个词换成 true 跑的。
+  // 同时钉住两个数没被顺手改成常量/删掉——恢复之后还得照旧是实话。
+  const h = navWs(navHarness({ showNavCountHint: true }), [], { hiddenArchived: 2, hiddenBlank: 3 })
+  const out = h.scope.sessionsHtml('w1')
+  assert.match(out, /另有 2 条已归档、3 条还是空白的新会话/, '闸门一开，那句和两个数都照旧')
+  assert.match(out, /没有能列出来的会话/, '前半句照旧')
 })
 
