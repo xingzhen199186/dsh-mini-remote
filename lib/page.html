@@ -923,6 +923,10 @@
   }
   .sess-acts button:active { background: var(--line); }
   .sess-acts button.danger { color: var(--err); }
+  /* 动作条下面的一句说明（目前只有「分叉会话」那一项用得上）。
+     **只在动作条展开时才出现**，所以它不占常驻的地方；字号比按钮小一档、用灰色——
+     它是解释，不是又一个能点的东西，所以不做成按钮的样子。 */
+  .sess-acts-hint { padding: 0 14px 9px 30px; margin-top: -3px; font-size: 12px; line-height: 1.6; color: var(--muted); }
 
   /* 改名字那一行。形状照抄下面的「新建文件夹」：同样是内联输入，不用 window.prompt
      （prompt 在微信这类内嵌浏览器里会被直接屏蔽，点了什么都不发生、也没提示）。 */
@@ -4790,6 +4794,13 @@
   /**
    * 动作条。**归档行不给置顶**——官方规定归档与置顶互斥（归档会把置顶一并丢掉），
    * 摆一个按了会被拒的按钮，比不摆更糟。
+   *
+   * 顺序照电脑端的槽位号摆（2026-10-09 从 0.2.0-rc.2 的 `dsh-client-ui-workspace` 读到原文）：
+   * `sidebar.workspaces.session.menu.item` 上 pin=order 100、rename=200、**fork=300**、
+   * archive=400。手机这一条横排也是一样的先后，用户从电脑换到手机上不用重新找。
+   *
+   * 分叉这一项**归档行也留着**：官方的菜单项没有"归档就不给分叉"这条判断
+   * （只有 pin 那一个在归档行上返回 null），而且分叉出来的是一条独立的新会话。
    */
   function navActs(s) {
     var id = escapeHtml(s.id);
@@ -4801,9 +4812,16 @@
       ? '<button type="button" data-act="unarchive" data-act-id="' + id + '">取消归档</button>'
       : '<button type="button" class="danger" data-act="archive" data-act-id="' + id + '">归档会话</button>';
     return '<div class="sess-acts">'
+      + pin
       + '<button type="button" data-act="rename" data-act-id="' + id + '">重命名</button>'
-      + pin + arc
-      + '</div>';
+      + '<button type="button" data-act="fork" data-act-id="' + id + '">分叉会话</button>'
+      + arc
+      + '</div>'
+      // 「分叉」是个电脑词，非技术用户看不出它会干什么。这句是**极短的说明**：
+      // 只说两件事——从哪儿分（最近完成的一轮）、原会话会怎样（不动）。
+      // 不加的话，用户能猜到的只有"分叉"两个字，而按下去是**在电脑上真建一个会话**，
+      // 不是可以随便试的手势，所以这笔字值得花。
+      + '<div class="sess-acts-hint">分叉＝从最近完成的一轮复制出一个新会话，原来这条不动。</div>';
   }
 
   function sessionsHtml(wsId) {
@@ -4969,6 +4987,33 @@
     }).catch(function (err) { toast(err.message); });
   }
 
+  /**
+   * 分叉会话。电脑端那个功能在手机上等价的一下：在**最后一个已完成轮次**处复制出
+   * 一个新会话，标题递增。
+   *
+   * 三件事照电脑端的原样，一件都不能走样：
+   *   · **不打开新会话**：PC 那条路上 `navigation.forkSession()` 之后就结束了，
+   *     没有任何切换动作。所以这里也**一个字都不碰 `state.boundSessionId`**。
+   *   · **成功后刷新列表**：新会话是 PC 侧栏那种"排在源会话旁边"的普通行，得重新问一次
+   *     服务端才看得见。而且必须带 `refresh=1`——服务端那份会话清册有 30 秒缓存，
+   *     不绕过的话用户会看到"按了但什么都没多出来"（刚建的会话它还答不上来）。
+   *   · **失败时说 Host 那句话**：`err.message` 就是服务端转发过来的原话
+   *     （"没有已结束的轮次"那一种带上 Host 的英文原文），这里**不加工、不换词**。
+   */
+  function forkAct(id) {
+    return api('/mini/api/session/fork', {
+      method: 'POST',
+      body: JSON.stringify({ sessionId: id }),
+    }).then(function (res) {
+      navActing = '';
+      var found = navSessionById(id);
+      refreshSessions(found ? found.wsId : '', true);
+      // 把新标题报出来：手机列表可能很长，"多了一条"这句话不如"多了一条叫什么"有用，
+      // 标题里那个 (1) 也正是"它是刚才那条分出来的"最直接的凭据。
+      toast(res && res.title ? '已分叉出「' + res.title + '」' : '已分叉出新会话');
+    }).catch(function (err) { toast(err.message); });
+  }
+
   /** 置顶 / 取消置顶。*/
   function pinAct(id, on) {
     return api('/mini/api/session/pin', {
@@ -5081,13 +5126,24 @@
     el.classList.add('on');
   }
 
-  /** 重新问一遍某个工作区的会话（置顶/归档之后顺序和状态都变了）。 */
-  function refreshSessions(wsId) {
+  /**
+   * 重新问一遍某个工作区的会话（置顶/归档之后顺序和状态都变了）。
+   *
+   * `force` 是给**分叉**用的：会话清册在服务端有 30 秒缓存，而分叉是"多出来一条"，
+   * 缓存里根本没有它。不带 force 的那几处（置顶/归档）只要状态和顺序，缓存那份就够。
+   *
+   * **`loadWsSessions` 必须排在 `renderNav` 前面**（2026-10-09 活页面验证逮住的）：
+   * renderNav 自己会给每个展开着的工作区起一趟 `loadWsSessions(id)`（**不带 force**），
+   * 而那一趟会先把 `navWsFetching` 占住——后面这一趟带 force 的就被那道闩挡在门外，
+   * 结果新会话压根没被取回来（界面看着像"按了没反应"）。先起带 force 的这一趟，
+   * renderNav 顺手起的那一趟自然就被同一道闩挡掉了。
+   */
+  function refreshSessions(wsId, force) {
     if (!wsId) { loadWorkspaces(true); return; }
     delete navSessions[wsId];
     delete navWsFetching[wsId];
+    loadWsSessions(wsId, force);
     renderNav();
-    loadWsSessions(wsId);
   }
 
   /** 「展开其余」：页里还有就只是多摆几条；页里没了就去服务端多要一批。 */
@@ -5353,11 +5409,11 @@
   // navWsFetching 这道闩让同一工作区同时只有一趟在飞，别重复付读日志折标题的钱。
   // 15 秒兜底解锁是给「请求永远不回来」留的——闩本身不能变成新的卡死点，
   // 超过 15 秒就放行，让下一次渲染或点击还能再试（服务端有缓存，重发很便宜）。
-  function loadWsSessions(wsId) {
+  function loadWsSessions(wsId, force) {
     if (navSessions[wsId] || navWsFetching[wsId]) return;
     navWsFetching[wsId] = true;
     var bail = setTimeout(function () { delete navWsFetching[wsId]; }, 15000);
-    var sessionsUrl = sessionsUrlOf(wsId);
+    var sessionsUrl = sessionsUrlOf(wsId, force);
     /**
      * 接着问，直到服务端说「一条都不剩」。
      *
@@ -5403,16 +5459,19 @@
   }
 
   /**
-   * 取一个工作区会话列表的地址。两个参数都是**这次的口径**：
+   * 取一个工作区会话列表的地址。三个参数都是**这次的口径**：
    *   · `archived=1` 只在「显示已归档」打开时带——默认那一档是隐藏已归档（官方默认项）。
    *   · `limit` 只在"要过更多"时才带，平时不带。**不带就还是原来那条地址**：
    *     多带一个参数会让服务端每次都走一条不一样的路径，也没必要。
+   *   · `refresh=1` 只在**刚刚多出一条会话**（分叉）时才带：服务端那份清册有 30 秒缓存，
+   *     不绕过的话新会话不在里面。
    */
-  function sessionsUrlOf(wsId) {
+  function sessionsUrlOf(wsId, force) {
     var url = '/mini/api/workspaces/' + encodeURIComponent(wsId) + '/sessions';
     var parts = [];
     if (navShowArchived) parts.push('archived=1');
     if (navLimit[wsId]) parts.push('limit=' + navLimit[wsId]);
+    if (force) parts.push('refresh=1');
     return parts.length ? url + '?' + parts.join('&') : url;
   }
 
@@ -5553,6 +5612,7 @@
       var actId = act.getAttribute('data-act-id');
       var which = act.getAttribute('data-act');
       if (which === 'rename') startRename(actId);
+      else if (which === 'fork') forkAct(actId);
       else if (which === 'pin') pinAct(actId, act.getAttribute('data-act-on') !== '1');
       else if (which === 'archive') archiveAct(actId, false);
       else if (which === 'unarchive') unarchiveAct(actId);

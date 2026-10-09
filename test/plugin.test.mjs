@@ -3420,6 +3420,170 @@ test('Agent 模式：建会话把选中的模式带给 DSH 的 create', async (t
 })
 
 /**
+ * 手机侧栏的「分叉会话」（2026-10-09）。
+ *
+ * 官方原文（0.2.0-rc.2 的 `@deepseek-ai/dsh-api-session-controller/lib/index.js`）：
+ *   async fork(request) {
+ *     const boundary = atSeq ?? latestCompletedPrefixBoundary(source.events)
+ *     if (boundary === void 0 || source.events[boundary]?.seq !== boundary)
+ *       throw new RemoteError("session/fork-unavailable",
+ *         `session "${request.sessionId}" has no completed turn to fork from`, …)
+ *     …
+ *     return { sessionId: childId }
+ *   }
+ * 而**标题递增不在 Host 那一边**——PC 的客户端在拿到子会话之后再补一次改名
+ * （`ClientSessions.fork({ increaseTitle: true })` → `manager.rename(childId, increasedForkTitle(sourceTitle))`）。
+ * 下面这几条钉的就是"我们照同一件事做了两遍"。
+ */
+test('分叉会话：走 Host 的 fork，再照 PC 补一次标题递增', async (t) => {
+  const calls = []
+  const p = await bootPlugin({
+    sessionController: {
+      list: async () => ({
+        items: [{
+          sessionId: 'sess-src',
+          projections: { kind: 'cached', asOfSeq: 9, values: { title: '甲' } },
+        }],
+      }),
+      fork: async (req) => { calls.push(['fork', req]); return { sessionId: 'sess-child' } },
+      rename: async (req) => { calls.push(['rename', req]); return { title: req.title, seq: 1 } },
+    },
+  })
+  t.after(p.stop)
+
+  const [status, body] = await apiCall(p, '/mini/api/session/fork', {
+    method: 'POST', body: { sessionId: 'sess-src' },
+  })
+  assert.equal(status, 200, JSON.stringify(body))
+  assert.equal(body.sessionId, 'sess-child', '新会话的 id 要带回去')
+  assert.equal(body.sourceSessionId, 'sess-src')
+  assert.equal(body.title, '甲 (1)', '标题照官方那个函数的规则递增')
+  assert.deepEqual(calls, [
+    ['fork', { sessionId: 'sess-src' }],
+    ['rename', { sessionId: 'sess-child', title: '甲 (1)' }],
+  ], '先 fork、再给**子会话**改名；顺序反了就是把源标题改掉')
+})
+
+test('分叉会话：标题递增照官方规则（半角/全角括号都认），没有源标题就不硬编一个', async (t) => {
+  const renamed = []
+  const p = await bootPlugin({
+    sessionController: {
+      // **故意不给 list**：这一条走的是"Host 投影里没有标题"那条退路——
+      // 退到插件自己的标题缓存（改名时记下的那一份）。
+      fork: async (req) => ({ sessionId: 'child-' + req.sessionId }),
+      rename: async (req) => { renamed.push([req.sessionId, req.title]); return { title: req.title, seq: 1 } },
+    },
+  })
+  t.after(p.stop)
+
+  /** 先把源会话的标题摆进缓存（走真实的改名接口，不直接碰内部变量）。 */
+  const setTitle = (title) => apiCall(p, '/mini/api/session/rename', {
+    method: 'POST', body: { sessionId: 'sess-src', title },
+  })
+
+  const cases = [
+    ['甲 (1)', '甲 (2)'],
+    ['甲（3）', '甲（4）'],   // 全角括号那一支
+    ['甲', '甲 (1)'],        // 没有编号就补一个
+  ]
+  for (const [before, after] of cases) {
+    await setTitle(before)
+    renamed.length = 0   // 上面那一趟改名也算一次 rename，这里只看分叉补的那一次
+    const [status, body] = await apiCall(p, '/mini/api/session/fork', {
+      method: 'POST', body: { sessionId: 'sess-src' },
+    })
+    assert.equal(status, 200, `${before} → ${JSON.stringify(body)}`)
+    assert.equal(body.title, after, `${before} 该递增成 ${after}`)
+    assert.deepEqual(renamed, [['child-sess-src', after]], '改的是**子会话**，不是源会话')
+  }
+
+  // 源标题**一个都不知道**（缓存里没有、Host 投影也没给）：不做这次改名。
+  // 硬编一个「甲 (1)」出来就是拿猜测当事实——那条会话可能根本不叫这个名字。
+  renamed.length = 0
+  const [s2, b2] = await apiCall(p, '/mini/api/session/fork', {
+    method: 'POST', body: { sessionId: 'sess-unknown' },
+  })
+  assert.equal(s2, 200)
+  assert.equal(b2.title, '', '不知道源标题就如实说不知道')
+  assert.deepEqual(renamed, [], '不知道源标题就不该发改名那一趟')
+})
+
+test('分叉会话：源会话没有已结束轮次时，Host 那句话原样回到手机上（409）', async (t) => {
+  // PC 就是靠这个 code 区分「没有已结束轮次」和「真的失败了」
+  // （`error.rpcError.code === "session/fork-unavailable"` → 提示「当前会话没有已结束的轮次」）。
+  const hostLine = 'session "sess-blank" has no completed turn to fork from'
+  const p = await bootPlugin({
+    sessionController: {
+      fork: async () => {
+        throw Object.assign(new Error(hostLine), { code: 'session/fork-unavailable' })
+      },
+    },
+  })
+  t.after(p.stop)
+
+  const [status, body] = await apiCall(p, '/mini/api/session/fork', {
+    method: 'POST', body: { sessionId: 'sess-blank' },
+  })
+  assert.equal(status, 409)
+  assert.equal(body.reason, 'no-turn')
+  assert.ok(body.error.includes(hostLine), 'Host 那句话一个字都不许被改写：' + body.error)
+  assert.match(body.error, /没有已结束的轮次/, '还要让非技术用户看得懂')
+})
+
+test('分叉会话：会话不在了转发 Host 原话；没这个能力就如实说 503', async (t) => {
+  const p = await bootPlugin({
+    sessionController: {
+      fork: async () => { throw Object.assign(new Error('session "gone" not found'), { code: 'session/not-found' }) },
+    },
+  })
+  t.after(p.stop)
+  const [status, body] = await apiCall(p, '/mini/api/session/fork', {
+    method: 'POST', body: { sessionId: 'gone' },
+  })
+  assert.equal(status, 404)
+  assert.equal(body.error, 'session "gone" not found')
+
+  // 纯 headless 组合（没有 sessionController）：不摆一个按了没反应的按钮。
+  const p2 = await bootPlugin()
+  t.after(p2.stop)
+  const [s2, b2] = await apiCall(p2, '/mini/api/session/fork', {
+    method: 'POST', body: { sessionId: 'x' },
+  })
+  assert.equal(s2, 503)
+  assert.match(b2.error, /没提供分叉会话的能力/)
+})
+
+test('分叉会话：Host 半途违约（建好了却不给 id）如实说，不假装成功', async (t) => {
+  const p = await bootPlugin({ sessionController: { fork: async () => ({}) } })
+  t.after(p.stop)
+  const [status, body] = await apiCall(p, '/mini/api/session/fork', {
+    method: 'POST', body: { sessionId: 'x' },
+  })
+  assert.equal(status, 500)
+  assert.equal(body.reason, 'failed')
+  assert.match(body.error, /没有交出它的 id/)
+})
+
+test('分叉会话：信号改了但标题没改成，**不算分叉失败**（会话是真建出来了）', async (t) => {
+  const p = await bootPlugin({
+    sessionController: {
+      list: async () => ({
+        items: [{ sessionId: 's', projections: { kind: 'cached', asOfSeq: 1, values: { title: '甲' } } }],
+      }),
+      fork: async () => ({ sessionId: 'child' }),
+      rename: async () => { throw new Error('标题那一趟挂了') },
+    },
+  })
+  t.after(p.stop)
+  const [status, body] = await apiCall(p, '/mini/api/session/fork', {
+    method: 'POST', body: { sessionId: 's' },
+  })
+  assert.equal(status, 200, '会话已经建出来了，把它说成没建出来更坏')
+  assert.equal(body.sessionId, 'child')
+  assert.equal(body.title, '', '标题没改成，就如实说不确定它叫什么')
+})
+
+/**
  * 手机端「插件」页面（2026-10-04）。
  *
  * 要点是**内置插件到底是什么粒度**。DSH 是「一切皆插件、无特权核心」——一整套系统

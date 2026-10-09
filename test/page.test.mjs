@@ -2295,14 +2295,16 @@ function navHarness({ apiImpl, showArchivedFilter = false, showNavCountHint = fa
     `${slice}
      return { renderNav, sessionsHtml, createSession, toggleWorkspace,
               renameSubmit, startRename, toggleActs, expandMore, collapseMore,
-              setShowArchived, pinAct, archiveAct, unarchiveAct, renderNavConfirm,
+              setShowArchived, pinAct, forkAct, archiveAct, unarchiveAct, renderNavConfirm,
               navVisible, navTail, navActs, navSessionById,
+              sessionsUrlOf, refreshSessions,
               getState: () => ({
                 showArchived: navShowArchived, extra: navExtra, limit: navLimit,
                 acting: navActing, renaming: navRenaming, confirm: navConfirm,
               }),
               setSessions: (v) => { navSessions = v },
               setList: (v) => { navList = v },
+              setExpanded: (v) => { navExpanded = v },
               getSessions: () => navSessions,
               setNavPresets: (v) => { navPresets = v },
               setPicker: (w) => { navPickerWs = w } };`,
@@ -6127,6 +6129,107 @@ test('导航栏改名字：空标题当场挡掉，不递下去', async () => {
   await h.scope.renameSubmit()
   assert.deepEqual(h.calls.filter((c) => c.path.includes('/session/rename')), [])
   assert.ok(h.toasts.includes('标题不能为空'))
+})
+
+test('导航栏动作条：顺序照电脑端的槽位号——置顶 → 重命名 → 分叉 → 归档', () => {
+  // 官方原文（0.2.0-rc.2 的 dsh-client-ui-workspace，注册 sidebar.workspaces.session.menu.item）：
+  //   pin order: 100 / rename order: 200 / fork order: 300 / archive order: 400
+  // 手机上按同一个先后摆，用户从电脑换过来不用重新找。
+  const h = navHarness()
+  const out = h.scope.navActs({ id: 's1', pinned: false, archived: false })
+  const at = (k) => out.indexOf('data-act="' + k + '"')
+  assert.ok(at('pin') >= 0 && at('rename') >= 0 && at('fork') >= 0 && at('archive') >= 0,
+    '四件都要在：' + out)
+  assert.ok(at('pin') < at('rename'), '置顶在最前')
+  assert.ok(at('rename') < at('fork'), '分叉在重命名后面')
+  assert.ok(at('fork') < at('archive'), '归档在最后')
+})
+
+test('导航栏动作条：分叉那一项照 PC 原文叫「分叉会话」，归档行上也留着', () => {
+  const h = navHarness()
+  const normal = h.scope.navActs({ id: 's1', pinned: false, archived: false })
+  assert.match(normal, /data-act="fork"[^>]*>分叉会话</, '文案照 PC 词条表：menu.fork = 分叉会话')
+
+  // 官方的菜单项只有 pin 在归档行上返回 null（`if (archived) return null`），
+  // 分叉那一条没有这个判断——归档行上照样摆。
+  const archived = h.scope.navActs({ id: 's9', pinned: false, archived: true })
+  assert.match(archived, /data-act="fork"/, '归档行上也要有分叉')
+  assert.ok(!archived.includes('data-act="pin"'), '归档行不给置顶（官方规定两者互斥）')
+})
+
+test('导航栏动作条：分叉那一项下面有一句极短的说明（这个词对非技术用户不友好）', () => {
+  // 「分叉」是个电脑词，按下去又是在电脑上**真建一个会话**（不是可以随便试的手势），
+  // 所以这一笔字值得花：只说从哪儿分、原会话会怎样。
+  const h = navHarness()
+  const out = h.scope.navActs({ id: 's1', pinned: false, archived: false })
+  assert.match(out, /class="sess-acts-hint"/, '说明要有自己的那一行')
+  assert.match(out, /从最近完成的一轮复制出一个新会话/, '说清从哪儿分、分出来是什么')
+  assert.match(out, /原来这条不动/, '说清原会话不会被改——这是用户最担心的一点')
+})
+
+test('导航栏分叉：调分叉那一趟接口，成功后**绕过缓存**重新问列表', async () => {
+  const h = navWs(navHarness({
+    apiImpl: (path) => Promise.resolve(
+      path.includes('/session/fork') ? { ok: true, sessionId: 's-fork', title: '甲 (1)' } : { ok: true },
+    ),
+  }), [sess('s1', { title: '甲' })])
+  // **把这一屏摆成"展开着"**：renderNav 会给每个展开着的工作区顺手起一趟刷新，
+  // 而那一定是不带 force 的。2026-10-09 就是这个撞出来的：带 force 的那一趟被那道闩
+  // 挡掉了，新会话压根没取回来——界面看着像"按了没反应"。这一行钉的就是那个次序。
+  h.scope.setExpanded({ w1: true })
+  await h.scope.forkAct('s1')
+
+  const sent = h.calls.filter((c) => c.path.includes('/session/fork'))
+  assert.equal(sent.length, 1)
+  assert.deepEqual(JSON.parse(sent[0].opts.body), { sessionId: 's1' }, '对着被点的那一行动手')
+
+  // 新会话是"多出来一条"，服务端那份清册有 30 秒缓存——不绕过就会看到"按了什么都没多出来"。
+  const list = h.calls.filter((c) => c.path.includes('/workspaces/w1/sessions'))
+  assert.ok(list.length >= 1, '要重新问一次列表')
+  assert.ok(list.every((c) => c.path.includes('refresh=1')),
+    '这一屏上所有取列表的请求都得绕过缓存：不带的那一趟会把带的那一趟挡在门外')
+})
+
+test('导航栏分叉：绝不改变当前选中的会话（电脑端就是这个行为）', async () => {
+  // PC 那条路上 `navigation.forkSession()` 之后就结束了，没有任何 open/replaceMain。
+  // 手机上等价的一下就是：不许碰 state.boundSessionId、也不许发 /mini/api/bind。
+  const h = navWs(navHarness({
+    apiImpl: (path) => Promise.resolve(
+      path.includes('/session/fork') ? { ok: true, sessionId: 's-fork', title: '甲 (1)' } : { ok: true },
+    ),
+  }), [sess('s1', { title: '甲' }), sess('s-old', { title: '当前这条' })])
+  const before = h.state.boundSessionId
+
+  await h.scope.forkAct('s1')
+
+  assert.equal(h.state.boundSessionId, before, '选中要一个字都不动')
+  assert.deepEqual(h.calls.filter((c) => c.path.includes('/bind')), [], '不许偷偷切过去')
+})
+
+test('导航栏分叉：成功之后把新标题报出来（标题里那个 (1) 就是"刚分出来"的凭据）', async () => {
+  const h = navWs(navHarness({
+    apiImpl: (path) => Promise.resolve(
+      path.includes('/session/fork') ? { ok: true, sessionId: 's-fork', title: '甲 (1)' } : { ok: true },
+    ),
+  }), [sess('s1', { title: '甲' })])
+  await h.scope.forkAct('s1')
+  assert.ok(h.toasts.some((m) => m.includes('甲 (1)')), '要说出分出来那条叫什么：' + JSON.stringify(h.toasts))
+})
+
+test('导航栏分叉：被拒时屏幕上出现的是 Host 那句话，不是我们自己编的', async () => {
+  const hostLine = 'session "s1" has no completed turn to fork from'
+  const h = navWs(navHarness({
+    apiImpl: () => {
+      const err = new Error(`当前会话没有已结束的轮次。Host 原话：${hostLine}`)
+      err.status = 409
+      err.body = { ok: false, reason: 'no-turn', error: err.message }
+      return Promise.reject(err)
+    },
+  }), [sess('s1')])
+
+  await h.scope.forkAct('s1')
+  assert.ok(h.toasts.some((m) => m.includes(hostLine)), 'Host 原话要原样出现在提示里：' + JSON.stringify(h.toasts))
+  assert.ok(!h.toasts.some((m) => /无法分叉/.test(m)), '不许换成我们自己编的一句')
 })
 
 test('导航栏归档：静止的会话直接归档，成功后的提示带「撤销」', async () => {

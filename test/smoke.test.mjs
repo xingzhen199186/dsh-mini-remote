@@ -2735,6 +2735,10 @@ function actionNav(options = {}) {
         calls.push(['rename', id, title])
         return options.renameResult ?? { ok: true, title: String(title).trim() }
       },
+      forkSession: async (id) => {
+        calls.push(['fork', id])
+        return options.forkResult ?? { ok: true, sessionId: 's-fork', title: '甲 (1)' }
+      },
       pinSession: async (id) => {
         calls.push(['pin', id])
         return options.pinResult ?? { ok: true, archived: [], pinned: [id] }
@@ -2901,6 +2905,62 @@ test('重命名：拿不到能力时如实说没这个能力（503），不是 5
   assert.match((await res.json()).error, /没提供改标题的能力/)
 })
 
+test('分叉：走的是那一趟分叉，并把新会话 id 和递增后的标题带回来', async (t) => {
+  const { nav, calls } = actionNav()
+  const { server, base, token } = await startTestServer({ tree: nav })
+  t.after(() => server.close())
+
+  const res = await post(base, '/mini/api/session/fork?token=' + token, token, { sessionId: 's-new' })
+  assert.equal(res.status, 200)
+  const body = await res.json()
+  assert.equal(body.sessionId, 's-fork')
+  assert.equal(body.sourceSessionId, 's-new', '从哪一条分出来的要带回去')
+  assert.equal(body.title, '甲 (1)')
+  assert.deepEqual(calls, [['fork', 's-new']])
+})
+
+test('分叉：源会话没有已结束轮次时，把 Host 那句话原样端出来（409）', async (t) => {
+  // 官方原话（0.2.0-rc.2，session-controller 的 fork）：
+  //   throw new RemoteError("session/fork-unavailable",
+  //     `session "${request.sessionId}" has no completed turn to fork from`, …)
+  // 这一条**不许我们自己编一句「无法分叉」**——它正是 PC 用来区分
+  // 「没有已结束轮次」和「真的失败了」的那条判据。
+  const hostLine = 'session "s-blank" has no completed turn to fork from'
+  const { nav } = actionNav({
+    forkResult: { ok: false, reason: 'no-turn', error: `当前会话没有已结束的轮次。Host 原话：${hostLine}` },
+  })
+  const { server, base, token } = await startTestServer({ tree: nav })
+  t.after(() => server.close())
+
+  const res = await post(base, '/mini/api/session/fork?token=' + token, token, { sessionId: 's-blank' })
+  assert.equal(res.status, 409)
+  const body = await res.json()
+  assert.equal(body.reason, 'no-turn')
+  assert.ok(body.error.includes(hostLine), 'Host 那句话要在屏幕上原样出现')
+  assert.ok(!/无法分叉/.test(body.error), '不许换成我们自己编的一句')
+})
+
+test('分叉：会话不在了也是转发 Host 的原话（404），不是另编一句', async (t) => {
+  const hostLine = 'session "s-gone" not found'
+  const { nav } = actionNav({ forkResult: { ok: false, reason: 'not-found', error: hostLine } })
+  const { server, base, token } = await startTestServer({ tree: nav })
+  t.after(() => server.close())
+
+  const res = await post(base, '/mini/api/session/fork?token=' + token, token, { sessionId: 's-gone' })
+  assert.equal(res.status, 404)
+  assert.equal((await res.json()).error, hostLine)
+})
+
+test('分叉：拿不到能力时如实说没这个能力（503），不是 500', async (t) => {
+  const { nav } = actionNav({ forkResult: { ok: false, reason: 'no-service' } })
+  const { server, base, token } = await startTestServer({ tree: nav })
+  t.after(() => server.close())
+
+  const res = await post(base, '/mini/api/session/fork?token=' + token, token, { sessionId: 's' })
+  assert.equal(res.status, 503)
+  assert.match((await res.json()).error, /没提供分叉会话的能力/)
+})
+
 test('置顶 / 取消置顶：走对那一个方法，并把新的集合带回来', async (t) => {
   const { nav, calls } = actionNav()
   const { server, base, token } = await startTestServer({ tree: nav })
@@ -2989,7 +3049,7 @@ test('会话执行那几条接口一律要 token', async (t) => {
   t.after(() => server.close())
 
   for (const path of [
-    '/mini/api/session/rename', '/mini/api/session/pin',
+    '/mini/api/session/rename', '/mini/api/session/fork', '/mini/api/session/pin',
     '/mini/api/session/archive', '/mini/api/session/unarchive',
   ]) {
     const res = await post(base, path, 'x', { sessionId: 's' })
@@ -3005,6 +3065,11 @@ test('没传 tree 时执行类接口如实说「没这个能力」，不是假�
     { sessionId: 's', title: '名字' })
   assert.equal(rename.status, 503)
   assert.match((await rename.json()).error, /没提供改标题的能力/)
+
+  const fork = await post(base, '/mini/api/session/fork?token=' + token, token,
+    { sessionId: 's' })
+  assert.equal(fork.status, 503)
+  assert.match((await fork.json()).error, /没提供分叉会话的能力/)
 
   const arc = await post(base, '/mini/api/session/archive?token=' + token, token,
     { sessionId: 's' })
