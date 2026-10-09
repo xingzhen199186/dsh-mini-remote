@@ -2257,7 +2257,7 @@ test('SSE 实时推来的回复也要带上 interrupted（不能只有刷新才�
 // 就声明在那儿，renderNav 和 sessionsHtml 都要读它们，切在函数里面就找不到了。
 // 锚点对不上会立刻断言失败，不会安静地退化成空测试。
 
-function navHarness({ apiImpl } = {}) {
+function navHarness({ apiImpl, showArchivedFilter = false } = {}) {
   const START_AT = 'var navList = null;'
   const END_AT = 'function bindSession'
   const a = html.indexOf(START_AT)
@@ -2276,11 +2276,22 @@ function navHarness({ apiImpl } = {}) {
   // 每次现造一个的话，测试就没法把"用户打进去的字"放进去。
   const els = {}
 
+  // 「显示已归档」那枚开关被 SHOW_ARCHIVED_FILTER 闸住了（用户 2026-10-09 要求把它隐藏，
+  // 但代码一行不删）。要测**被闸住的那条路**时，在内存里的这一份切片上把那一个词换成
+  // true——磁盘上的 page.html 一个字都不动。
+  let slice = html.slice(a, b)
+  if (showArchivedFilter) {
+    const before = slice
+    slice = slice.replace('var SHOW_ARCHIVED_FILTER = false;', 'var SHOW_ARCHIVED_FILTER = true;')
+    assert.notEqual(slice, before,
+      '在页面切片里找不到那处闸门：var SHOW_ARCHIVED_FILTER = false;')
+  }
+
   // eslint-disable-next-line no-new-func
   const build = new Function(
     'state', 'escapeHtml', '$', 'api', 'toast', 'toastAction', 'closeNav', 'loadWorkspaces',
     'applySnapshot', 'render',
-    `${html.slice(a, b)}
+    `${slice}
      return { renderNav, sessionsHtml, createSession, toggleWorkspace,
               renameSubmit, startRename, toggleActs, expandMore, collapseMore,
               setShowArchived, pinAct, archiveAct, unarchiveAct, renderNavConfirm,
@@ -2290,6 +2301,7 @@ function navHarness({ apiImpl } = {}) {
                 acting: navActing, renaming: navRenaming, confirm: navConfirm,
               }),
               setSessions: (v) => { navSessions = v },
+              setList: (v) => { navList = v },
               getSessions: () => navSessions,
               setNavPresets: (v) => { navPresets = v },
               setPicker: (w) => { navPickerWs = w } };`,
@@ -6029,6 +6041,40 @@ test('导航栏筛选：默认不带 archived，打开后清掉旧数据并带�
   assert.deepEqual(h.scope.getSessions(), {}, '换口径要把旧数据清掉，否则会拿旧口径的列表骗人')
 })
 
+test('导航栏筛选：开关被闸住——抽屉顶部**画不出**它（代码还在，恢复只改一个词）', () => {
+  // 2026-10-09 用户要求：「显示已归档」这个功能不需要，先不删、隐藏起来。
+  // 这里钉的是**画不出来**，而不是把渲染那一段删掉——删了，恢复就得重写一遍。
+  const h = navHarness()
+  h.scope.setList([{ id: 'w1', title: '甲', count: 2 }])
+  h.scope.renderNav()
+  const out = h.navBody.innerHTML
+  assert.ok(!out.includes('data-archived-toggle'), '闸住时不许画出那枚开关')
+  assert.ok(!out.includes('显示已归档'), '连那句话也不许出现')
+  assert.match(out, /data-new-ws="1"/, '同一屏别的东西照旧——闸门只闸这一块')
+  assert.match(out, /data-ws="w1"/, '工作区那一行照旧画出来')
+
+  // 一个工作区都还没有那一档（还没连上电脑时）也不能漏出去。
+  h.scope.setList([])
+  h.scope.renderNav()
+  assert.ok(!h.navBody.innerHTML.includes('data-archived-toggle'),
+    '空列表那一档同样不画')
+
+  // 渲染代码必须还在原处：删掉它 = 恢复时要重新写一遍。
+  assert.ok(html.includes('var SHOW_ARCHIVED_FILTER = false;'), '闸门那一行要在（改 true 就恢复）')
+  assert.ok(html.includes('data-archived-toggle'), '开关的渲染代码不许被删，只是不画')
+})
+
+test('导航栏筛选：把闸门打开（常量 true）那枚开关照旧能用', () => {
+  // 被闸住的代码路径仍然要能被测到：这一趟就是在内存里把那一个词换成 true 跑的。
+  const h = navHarness({ showArchivedFilter: true })
+  h.scope.setList([{ id: 'w1', title: '甲', count: 2 }])
+  h.scope.renderNav()
+  const out = h.navBody.innerHTML
+  assert.match(out, /data-archived-toggle="1"/, '闸门一开，开关就回来')
+  assert.match(out, /显示已归档/, '文字也照旧')
+  assert.match(out, /aria-pressed="false"/, '默认那一档仍然是「隐藏已归档」')
+})
+
 test('导航栏改名字：预填的是**真实标题**，不是「未命名会话」那个显示占位', () => {
   const h = navWs(navHarness(), [sess('s1', { title: '' })])
   h.scope.startRename('s1')
@@ -6127,6 +6173,14 @@ test('导航栏归档：还有工作在跑时先弹确认，并按族列出会�
   assert.match(list, /正在写手机页/, '带得出名字的要把名字列出来')
   assert.match(list, /（共 2 项）/, '只带了一项时如实说这一族总共有几项')
   assert.match(h.els.navConfirmDesc.textContent, /在跑的会话/, '确认框要说清是对哪一个会话动的手')
+  // 归档之后**没有**「显示已归档」那个入口了（2026-10-09 用户要求把它藏起来），
+  // 所以这句承诺得改成实话：会从列表里消失 → 6 秒内可撤销 → 之后只能回电脑端。
+  // 再写成「之后可以在『显示已归档』里把它找回来」就是一句做不到的空头承诺。
+  const desc = h.els.navConfirmDesc.textContent
+  assert.match(desc, /不在列表里/, '要如实说归档之后它会从列表里消失')
+  assert.match(desc, /6 秒/, '要给出撤销那一下的有效期')
+  assert.match(desc, /电脑端/, '过了那几秒，要指出去哪儿才能恢复')
+  assert.ok(!desc.includes('显示已归档'), '不许再承诺那个已经藏起来的入口')
   assert.ok(h.els.navConfirm.classList.contains('on'), '要真的露出来')
 })
 

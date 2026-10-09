@@ -4583,6 +4583,17 @@
   var navPresetsLoaded = false;
   var navPickerWs = '';    // 正在挑模式的那个工作区（清单行内展开在它的「新建会话」下）
   // —— 会话条目的执行功能（2026-10-09）——
+  /**
+   * 「显示已归档」这枚筛选开关**摆在界面外**：用户 2026-10-09 要求——这个功能不需要，
+   * 但既然做了，先别删、隐藏起来。
+   *
+   * 所以下面这一整套**一行都没删**，只是不再画到界面上：开关的渲染（renderNav 里
+   * 那一段还在）、navShowArchived 这个状态、setShowArchived、拼请求时的 archived=1、
+   * 服务端那条筛选口径、以及相关测试。
+   *
+   * **要恢复这个开关：把这一行的 false 改成 true 就行**，别的地方一处都不用动。
+   */
+  var SHOW_ARCHIVED_FILTER = false;
   var navShowArchived = false; // 筛选：默认**隐藏已归档**（官方默认项就是这个）
   var navActing = '';      // 正在行内展开动作条的那条会话 id
   var navRenaming = '';    // 正在改名字的那条会话 id
@@ -4696,10 +4707,15 @@
     // 「显示已归档」是**整屏一个**的口径，所以放在 CTA 下面、工作区上面：
     // 它管的不是某一个工作区，是所有工作区里"已归档的那些要不要出现"。
     // 默认关（官方的默认项就是"隐藏已归档"）。
-    var filter = '<button class="nav-filter' + (navShowArchived ? ' on' : '')
-      + '" type="button" data-archived-toggle="1" aria-pressed="' + (navShowArchived ? 'true' : 'false')
-      + '">' + (navShowArchived ? '✓ ' : '')
-      + (navShowArchived ? '显示已归档（点一下收起来）' : '显示已归档') + '</button>';
+    //
+    // 整块由 SHOW_ARCHIVED_FILTER 闸住（见那个常量上的说明）：闸住时这一段一个字都不画，
+    // **但渲染代码原样留着**——恢复就是改那一个词，不用重写。
+    var filter = SHOW_ARCHIVED_FILTER
+      ? '<button class="nav-filter' + (navShowArchived ? ' on' : '')
+        + '" type="button" data-archived-toggle="1" aria-pressed="' + (navShowArchived ? 'true' : 'false')
+        + '">' + (navShowArchived ? '✓ ' : '')
+        + (navShowArchived ? '显示已归档（点一下收起来）' : '显示已归档') + '</button>'
+      : '';
     if (!list.length) {
       $('navBody').innerHTML = cta + filter + '<div class="placeholder">电脑上还没有可以切换的会话。<br>'
         + '在电脑上开一个，这里就会出现了。</div>';
@@ -5029,7 +5045,8 @@
     if (!navConfirm) { el.classList.remove('on'); return; }
     $('navConfirmDesc').textContent = '「' + (navConfirm.title || '这个会话')
       + '」还有正在进行的工作。归档会先停止这些工作；被停止的工作不会自动继续。'
-      + '之后可以在「显示已归档」里把它找回来。';
+      + '归档之后它就不在列表里了，接下来 6 秒里可以点提示上的「撤销」把它找回来；'
+      + '过了这几秒，就得到电脑端才能取消归档。';
     var items = (navConfirm.activity || []).map(function (fam) {
       var name = ACTIVITY_COPY[fam.kind] || fam.kind;
       var labels = (fam.items || []).map(function (it) {
