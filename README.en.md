@@ -6,11 +6,11 @@
 
 [中文说明](README.md)
 
-![Minimal Remote: only your instruction and the AI's conclusion reach the phone; everything in between stays on the computer](https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/promo.webp)
+![Minimal Remote: the phone keeps your instruction and its conclusion, and shows you the process only when you ask for it](https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/promo.webp)
 
-**You send one line; the phone gets one conclusion.**
+**You send one line. How the phone shows it is your call.**
 
-Tool calls, file reads and writes, sub-agent dispatch, and the body of the reasoning trace never reach the phone. This plugin exists for one situation: you're out, and all you want to do is send an instruction and read the result — a phone, one input box, the latest reply.
+Whether tool calls, file reads and writes, sub-agent dispatch and the body of the reasoning trace appear on screen is not a decision we make for you. One conversation, three ways to look at it: "Single frame", which keeps only the newest conclusion on screen; "Chat", which runs the exchange one turn after another; "Full", which puts every step back where it happened. The default is the least demanding one, Single frame: you light up the phone, and there is the one line you asked for.
 
 [What it is](#what-it-is) ・ [When you'd use it](#when-youd-use-it) ・ [Install](#install) ・ [Connecting your phone](#connecting-your-phone-three-routes-pick-one) ・ [What the phone can do](#what-the-phone-can-do) ・ [Remote control from Feishu](#remote-control-from-feishu) ・ [FAQ](#faq) ・ [Security](#security) ・ [Why I built this](#why-i-built-this-plugin)
 
@@ -20,24 +20,25 @@ Tool calls, file reads and writes, sub-agent dispatch, and the body of the reaso
 
 A plugin for [DeepSeek Harness](https://github.com/deepseek-ai/DeepSeek-Harness) (DSH, a plugin-extensible AI agent framework). Once installed:
 
-- a web page opens on your phone with exactly one input box and the latest reply;
+- a web page opens on your phone with one input box, and the conversation you are in;
 - instructions you send from the phone go straight to the session already running on your computer;
-- everything in between — tool calls, files read and written, sub-agents, the reasoning trace itself — **is never pushed to the phone**;
+- whether the process appears at all is up to the display mode you pick: Single frame and Chat carry no tool calls and no file diffs, while Full puts them back in their place among the messages, with layers you can open one at a time;
 - the only thing that "talks" is the whale girl: the line the model mutters between steps, spoken in her speech bubble.
 
 Here is what the interface looks like — dark and light, switchable in settings (rendered at a phone size of 390×844):
 
-<img width="290" alt="Dark: one conversation, carrying only your instruction and the conclusion" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/screen-dark.png" /> <img width="290" alt="Light: the same conversation, in the palette taken from the promo artwork" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/screen-light.png" />
+<img width="290" alt="Dark: one conversation laid out as back-and-forth bubbles, carrying only your instruction and the conclusion" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/screen-dark.png" /> <img width="290" alt="Light: the same conversation, in the palette taken from the promo artwork" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/screen-light.png" />
 
 It is **not** a second screen for the desktop interface. Approval dialogs, file diffs and tool-call chains exist on the computer and nowhere on the default page — deliberately. It does very little. (If you want the **whole** desktop interface, there is an off-by-default entry in settings — see the last paragraph of [What the phone can do](#what-the-phone-can-do).)
 
-Other phone clients copy the computer's execution process over to the phone in full. This one does the opposite: **it sends only the two lines you asked for.** That is the single biggest difference between it and them.
+Other phone clients copy the computer's execution process over to the phone as it is. This one adds a choice on top: **how much of that process you see, and when, is yours to make at the moment.**
 
 ## When you'd use it
 
 - **You're out and a task is still running.** The computer is at your desk mid-round; you just want to glance at the phone to see whether it finished, and hand it the next line while you're at it.
 - **You're with your kid, eating, or out for a walk.** You don't want to touch the computer, but an idea shows up and you'd like it working on that already.
 - **The computer is in the study and you're in the living room.** Not worth walking back, and not worth pulling that whole screen of process onto the phone.
+- **And the other way round: you want to know which files it just touched.** Switch to Full and the whole round is there in place; nothing is missing just because you are looking at it on a phone.
 
 ---
 
@@ -66,7 +67,7 @@ If you already have the source on disk, you can point it at the folder:
 dsh plugin --profile web add <the folder you put the source in>
 ```
 
-**Which DSH versions it fits.** This plugin was developed on DSH **0.1.5-rc.2** and re-checked item by item on **0.1.7-rc.2**; **0.2.0 itself was built on 0.2.0-rc.1 / 0.2.0-rc.2** (every interface it uses was unchanged, and the full check suite ran on both sides). **Versions below 0.1.5 have not been tried**, and the declared ceiling is **0.3.0**. `rc` is the tag the project puts on preview builds, and DSH as a whole is still a developer preview — minor versions may break things, so versions newer than 0.2.0 are not guaranteed either. If it ever does hit an incompatibility, the usual symptom is one entry point going missing (the model line at the top, say) while everything else keeps working: the plugin is written so that a missing service switches off that one feature rather than the whole thing. The phone-side interface adaptations also come with a dependency manifest and an **upgrade self-check** (`tools/structure-check.mjs`): run it against the live page after an upgrade and it walks every dependency entry by entry.
+**Which DSH versions it fits.** This plugin was developed on DSH **0.1.5-rc.2** and re-checked item by item on **0.1.7-rc.2**; **0.2.0 itself was built on 0.2.0-rc.1 / 0.2.0-rc.2**, where every interface it uses was unchanged and the full check suite ran on both sides. **Versions below 0.1.5 have not been tried**, and the declared ceiling is **0.3.0**. `rc` is the tag the project puts on preview builds, and DSH as a whole is still a developer preview — minor versions may break things, so versions newer than 0.2.0 are not guaranteed either. If it ever does hit an incompatibility, the usual symptom is one entry point going missing (the model line at the top, say) while everything else keeps working: the plugin is written so that a missing service switches off that one feature rather than the whole thing. The phone-side interface adaptations also come with a dependency manifest and an **upgrade self-check** (`tools/structure-check.mjs`): run it against the live page after an upgrade and it walks every dependency entry by entry.
 
 Settings follow the same rule: the settings are declared the standard DSH way, and on the 0.1.5-era library that ability does not exist yet — the plugin **still installs and works exactly as before**, it just loses the "applies immediately" behaviour mentioned below. On the **0.1.7 generation** that ability is fully there.
 
@@ -123,7 +124,9 @@ The difference is who can resolve the name. The Tailscale one uses a name shaped
 
 ## What the phone can do
 
-Open the link and that's the whole interface: one input box, and the latest reply.
+**Open the link and that's the whole interface: one input box, one conversation.** What that conversation looks like depends on the display mode you pick in settings, top right.
+
+**Three display modes, switchable anytime.** Tap the ⚙ in the top right. "Single frame" (the default) keeps only the newest reply on screen — good for "I just want to see how this one turned out". "Chat" lays the exchange out as a list of bubbles — good for several rounds of follow-up questions. "Full" takes that same list and **puts each step's process back in its original place** (the same shape the desktop app uses), with layers you can open one by one to see what that step read — and it is searchable. All three show the same conversation; switching changes how you look at it, never what it contains. Use it for a while and you'll know which you prefer.
 
 **Send instructions.** Type and send; the AI starts working on the computer.
 
@@ -133,13 +136,15 @@ Open the link and that's the whole interface: one input box, and the latest repl
 
 **Two appearances, switchable anytime.** Settings has an "Appearance" row: **Dark**, **Light** (the default), and **Follow system**. Dark is deep-sea navy; the light palette is taken from the promo artwork — near-white ice blue for the ground, deep royal blue for the text, and the same royal blue on primary buttons. Your choice is stored on the phone, so it is still there next time you open the page.
 
-<img width="290" alt="Settings (dark): display mode and appearance" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/settings-dark.png" /> <img width="290" alt="Settings (light): the selected states and the primary button turn royal blue too" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/settings-light.png" />
+<img width="290" alt="Settings (dark): three display modes, appearance set to dark" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/settings-dark.png" /> <img width="290" alt="Settings (light): the selected states and the primary button turn royal blue too" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/settings-light.png" />
 
 **The screen while a task is running.** She is mid-stride, the progress bar is moving, and the queue lists what goes next once this round ends. No tool calls and no file diffs on this screen — only the fact that something is running.
 
 <img width="290" alt="Running (dark, photographed on a phone): the whale girl running, 15s elapsed" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/running-dark-phone.jpg" /> <img width="290" alt="Running (light, photographed on a phone): the whale girl running, 7m43s elapsed, one instruction queued" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/running-light-phone.jpg" />
 
-**Three display modes.** Tap the ⚙ in the top right to switch. "Single frame" (the default) keeps only the newest reply on screen — good for "I just want to see how this one turned out". "Chat" is a back-and-forth bubble list — good for several rounds of follow-up questions. "Full" takes that same list and **puts each step's process back in its original place** (the same shape the desktop app uses), with layers you can open one by one to see what that step read — and it is searchable. Use it for a while and you'll know which you prefer.
+**Every session in the sidebar can be handled right there.** The ⋯ on a row holds rename, pin (tap once more to unpin), fork and archive (tap once more to restore); an archived row drops the pin, because the desktop app treats the two as mutually exclusive. A **fork** copies a new session out of the most recently completed round and leaves the original alone — that is what you want when you'd like to try another direction without dirtying the conversation you have. Rows also carry the states that matter: **待审批 / 计划待审 / 待回答** (an approval, a plan or a question is waiting on you) and **已置顶 / 已归档**. Idle sessions are not all laid out at once; **展开其余 N 个** (show the remaining N) brings up the next batch.
+
+**Scroll up and a "back to bottom" dot appears at the bottom right.** One tap returns you to the newest entry, and it fades in and out over 130 ms. **In Single frame it never appears** — that screen holds one reply, so there is no "back" to go to.
 
 **Open a session and you see what was said in it before.** Switch to a session that has existed for a while and Chat mode lists every earlier round (the instructions you sent, the conclusion of each round); Single frame shows only the last conclusion. **Very large sessions show only the most recent stretch**: reading one of those in full — tens of thousands of events — would drag the DSH process on your computer down, so the plugin reads just the tail and says so at the top ("this is not everything, only the most recent stretch"). That line is not boilerplate; it is the truth.
 
@@ -149,7 +154,7 @@ Open the link and that's the whole interface: one input box, and the latest repl
 
 **Three things you can change in passing.** Tap the line at the top to switch the current session's model and reasoning effort; switch the permission preset (View Only / Workspace Write / Full Access); browse the computer's folders to register a new workspace and start a session in it.
 
-**By default you're reading conclusions, not the process.** In Single frame and Chat there is no tool-call chain and no file diff; the one exception is the line the whale girl says out loud — it goes into her bubble, never into the answer area (see above). To read the process you switch to "Full" yourself. **System-level confirmation dialogs cannot be answered from the phone** (approving a dangerous command, for instance) — those still need the computer. What the phone can answer is the multiple-choice question the AI puts to you; the two are not the same thing. It's a remote control: the TV still has to be on for the remote to be any use.
+**By default you're reading conclusions, not the process.** In Single frame and Chat there is no tool-call chain and no file diff; the one exception is the line the whale girl says out loud — it goes into her bubble, never into the answer area (see above). To read the process, switch to "Full" yourself. **System-level confirmation dialogs cannot be answered from the phone** (approving a dangerous command, for instance) — those still need the computer. What the phone can answer is the multiple-choice question the AI puts to you; the two are not the same thing. It's a remote control: the TV still has to be on for the remote to be any use.
 
 **The whole desktop interface can be brought over too ("Advanced settings").** Settings has an **off-by-default** "Advanced settings" entry: turn it on and a "Desktop interface" row appears below it; tap "Open" and the computer's full DSH page is embedded right there on the phone — no jump, no new tab — so model configuration, plugin install and removal, session records and anything else the remote page doesn't have can be done from here. **It is the exact opposite of the positioning above** (switch it on and the whole process is on screen), which is why it starts off: turning it on spells the consequence out (the password's reach extends to the entire desktop settings surface) and takes two taps to confirm. When the plugin cannot learn the desktop address, the entry does not appear at all.
 
@@ -217,7 +222,7 @@ Beyond that: every endpoint requires the password; password comparison is consta
 
 ## Why I built this plugin
 
-The idea came from this: an agent task often takes a long time to finish, and if you step out, you need the phone to drive it remotely.
+The idea came from something plain: an agent round often takes a long time, and the moment you step out, you need the phone to take over.
 
 But the phone clients that exist show the PC's execution steps in faithful detail. You send one instruction; it may think for several minutes, read dozens of files, call tools a few times, and only then give you a conclusion. If you're out, or busy away from the computer, you simply don't have the time to watch the phone that closely.
 
@@ -225,11 +230,23 @@ I don't think that approach is bad. It's complete and controllable, and if you'r
 
 But when I'm out, what I want is something else — **a lighter way to interact that asks less of my attention**. The phone screen is small, and so is the attention I have to spare when I'm out. Most of the time I only need one thing: **this round is done, time to send the next instruction.** And even at my desk, I rarely read the AI's running commentary while it works.
 
-So the interface here is deliberately crude: it drops the PC's execution steps entirely and puts only the AI's final conclusion in front of you.
+So the interface here started out deliberately crude: it dropped the PC's execution steps entirely and put only the AI's final conclusion in front of you.
+
+Later, a fork appeared in that road. Since 0.1.9 there has been a "Full" mode, which puts the process back among the messages. It does not overturn the judgement above — the conclusion still comes first by default — but it admits one more thing: on the rare occasion you do want the process, you should not have to walk back to the computer for it.
 
 **In a sense, it exists so that you look at it less.**
 
 So you can spend your time more freely — instead of being stuck in that small screen while you're playing with your daughter or out on a trip.
+
+---
+
+## Related documents
+
+These are in Chinese only, and there is no English edition to point you at:
+
+- [Sprites and animation](docs/character.md) — the three image tools, the shared prompt blocks, the sizes and the acceptance criteria.
+- [Sprite reference frames (frozen 2026-09-28)](docs/art-refs/2026-09-28/) — nine frames with their full prompts, plus the rule that any later animation change is checked against them.
+- [Changelog](CHANGELOG.md) — what changed in each version, and why.
 
 ---
 
