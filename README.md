@@ -53,13 +53,23 @@
 
 ## 效果预览
 
-### 对话界面（单帧 / 聊天）
+### 对话界面（单帧 / 聊天 / 完整）
 
-移动端页面使用原生 JavaScript 开发，无前端构建负担，支持深海墨蓝（深色）与冰蓝宝蓝（浅色）两套高对比度主题：
+移动端页面使用原生 JavaScript 开发，无前端构建负担，支持深海墨蓝（深色）与冰蓝宝蓝（浅色）两套高对比度主题。同一场对话有三种看法：单帧整屏只留最新一条结论，聊天把历史一条条排成气泡，完整再把每一轮的执行轨迹插回对话原位：
 
 <div align="center">
-  <img width="290" alt="深色：一段对话，一来一回排成气泡，手机上只留你的指令和它的结论" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/screen-dark.png" />
-  <img width="290" alt="浅色：同一段对话，色调跟宣传图那张画统一" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/screen-light.png" />
+  <img width="290" alt="单帧（深色）：整屏只有最新一条回复" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/screen-dark.png" />
+  <img width="290" alt="单帧（浅色）：同一屏换成冰蓝宝蓝，色调跟宣传图那张画统一" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/screen-light.png" />
+</div>
+
+<div align="center">
+  <img width="290" alt="聊天（深色）：一来一回排成气泡，一屏看得到多条历史" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/screen-chat-dark.png" />
+  <img width="290" alt="聊天（浅色）：同一段对话的浅色版" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/screen-chat-light.png" />
+</div>
+
+<div align="center">
+  <img width="290" alt="完整（深色）：这一轮的执行轨迹组插在指令和回答之间" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/screen-full-dark.png" />
+  <img width="290" alt="完整（浅色）：同一个轨迹组的浅色版" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/screen-full-light.png" />
 </div>
 
 ### 设置面板与外观切换
@@ -71,13 +81,13 @@
   <img width="290" alt="设置（浅色）：选中态和主按钮都跟着换成宝蓝" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/settings-light.png" />
 </div>
 
-### 真机执行状态
+### 执行动画状态
 
 任务运行中动态展示拟人化跑动状态、耗时计时器与排队刻度尺，消除不可知等待：
 
 <div align="center">
-  <img width="290" alt="执行中（深色，手机实拍）：鲸鱼娘正在跑、已计时 15 秒" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/running-dark-phone.jpg" />
-  <img width="290" alt="执行中（浅色，手机实拍）：鲸鱼娘正在跑、已计时 7 分 43 秒、队列排着一条" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/running-light-phone.jpg" />
+  <img width="290" alt="执行中（深色）：鲸鱼娘正在跑、已计时 14 秒、队列刻度上排着一条" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/running-dark-phone.jpg" />
+  <img width="290" alt="执行中（浅色）：同一次执行，鲸鱼娘正在跑、已计时 14 秒、排队中 1 条" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/running-light-phone.jpg" />
 </div>
 
 ---

@@ -53,13 +53,23 @@ When running complex engineering tasks with desktop or web AI agents, a single t
 
 ## UI Preview
 
-### Conversation Screen (Single Frame / Chat)
+### Conversation Screen (Single Frame / Chat / Full)
 
-The mobile client is built with zero-dependency vanilla JavaScript and supports both high-contrast Dark and Light themes:
+The mobile client is built with zero-dependency vanilla JavaScript and supports both high-contrast Dark and Light themes. One conversation has three readings: **Single Frame** keeps only the latest conclusion on screen, **Chat** lays the history out as back-and-forth bubbles, and **Full** puts every turn's execution trail back where it happened:
 
 <div align="center">
-  <img width="290" alt="Dark: one conversation laid out as back-and-forth bubbles, carrying only your instruction and the conclusion" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/screen-dark.png" />
-  <img width="290" alt="Light: the same conversation, in the palette taken from the promo artwork" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/screen-light.png" />
+  <img width="290" alt="Single Frame (dark): only the latest reply on screen" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/screen-dark.png" />
+  <img width="290" alt="Single Frame (light): the same screen in the light palette taken from the promo artwork" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/screen-light.png" />
+</div>
+
+<div align="center">
+  <img width="290" alt="Chat (dark): several turns of history laid out as back-and-forth bubbles" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/screen-chat-dark.png" />
+  <img width="290" alt="Chat (light): the same conversation in the light theme" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/screen-chat-light.png" />
+</div>
+
+<div align="center">
+  <img width="290" alt="Full (dark): this turn's execution group sits between your instruction and the reply" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/screen-full-dark.png" />
+  <img width="290" alt="Full (light): the same execution group in the light theme" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/screen-full-light.png" />
 </div>
 
 ### Settings Panel & Appearance
@@ -71,13 +81,13 @@ Switch presentation modes, color themes, or trigger manual reconnects from the s
   <img width="290" alt="Settings (light): the selected states and the primary button turn royal blue too" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/settings-light.png" />
 </div>
 
-### Running State on Device
+### Execution Animation
 
 During task execution, the view presents an animated running state, elapsed timer, and queued task scale without unverified progress guesses:
 
 <div align="center">
-  <img width="290" alt="Running (dark, photographed on a phone): the whale girl running, 15s elapsed" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/running-dark-phone.jpg" />
-  <img width="290" alt="Running (light, photographed on a phone): the whale girl running, 7m43s elapsed, one instruction queued" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/running-light-phone.jpg" />
+  <img width="290" alt="Running (dark): the whale girl running, 14s elapsed, one instruction on the queue scale" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/running-dark-phone.jpg" />
+  <img width="290" alt="Running (light): the same run in the light theme, 14s elapsed, one instruction queued" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/running-light-phone.jpg" />
 </div>
 
 ---
