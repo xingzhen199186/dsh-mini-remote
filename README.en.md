@@ -58,18 +58,8 @@ When running complex engineering tasks with desktop or web AI agents, a single t
 The mobile client is built with zero-dependency vanilla JavaScript and supports both high-contrast Dark and Light themes. One conversation has three readings: **Single Frame** keeps only the latest conclusion on screen, **Chat** lays the history out as back-and-forth bubbles, and **Full** puts every turn's execution trail back where it happened:
 
 <div align="center">
-  <img width="290" alt="Single Frame (dark): only the latest reply on screen" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/screen-dark.png" />
-  <img width="290" alt="Single Frame (light): the same screen in the light palette taken from the promo artwork" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/screen-light.png" />
-</div>
-
-<div align="center">
   <img width="290" alt="Chat (dark): several turns of history laid out as back-and-forth bubbles" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/screen-chat-dark.png" />
   <img width="290" alt="Chat (light): the same conversation in the light theme" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/screen-chat-light.png" />
-</div>
-
-<div align="center">
-  <img width="290" alt="Full (dark): this turn's execution group sits between your instruction and the reply" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/screen-full-dark.png" />
-  <img width="290" alt="Full (light): the same execution group in the light theme" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/screen-full-light.png" />
 </div>
 
 ### Settings Panel & Appearance
