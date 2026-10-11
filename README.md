@@ -6,7 +6,7 @@
   <img src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/promo.webp" alt="极简遥控器：手机上只留你的指令和它的结论，过程想看的时候再调出来" width="720" />
 </p>
 
-**专为 DeepSeek Harness（DSH）桌面端用户打造的轻量级移动端遥控插件，解决外出离机时查看 Agent 运行状态与下发指令时界面冗余、注意力被大量中间过程绑架的痛点。**
+**专为 DeepSeek Harness（DSH）用户打造的轻量级移动端遥控插件，解决外出离机时查看 Agent 运行状态与下发指令时界面冗余、注意力被大量中间过程绑架的痛点。**
 
 [![npm](https://img.shields.io/npm/v/dsh-mini-remote)](https://www.npmjs.com/package/dsh-mini-remote)
 [![Node.js](https://img.shields.io/badge/node-%5E22.19.0%20%7C%7C%20%3E%3D24.0.0-brightgreen)](https://nodejs.org/)
@@ -30,7 +30,7 @@
 
 ## 背景与痛点
 
-在日常使用桌面端 Agent 执行复杂工程任务时，一次交互往往涉及数分钟的深度思考、几十次文件读写与密集的工具链调用。现有的移动端远程方案通常选择将桌面端界面完整映射至手机屏，引发以下实际问题：
+在日常使用桌面端或网页端 Agent 执行复杂工程任务时，一次交互往往涉及数分钟的深度思考、几十次文件读写与密集的工具链调用。现有的移动端远程方案通常选择将桌面端界面完整映射至手机屏，引发以下实际问题：
 
 - **信息密度失衡**：大量原始推理细节、工具调用入参以及代码差异充满小屏，关键结论被淹没。
 - **注意力过度消耗**：外出通勤、就餐或离机休憩时，用户核心诉求仅为确认当前轮次是否结束，并下达下一阶段指令，无暇逐行审查中间步骤。
