@@ -30,7 +30,7 @@
 
 ## Background & Pain Points
 
-When running complex engineering tasks with desktop AI agents, a single turn often involves several minutes of deep reasoning, dozens of file operations, and intensive tool executions. Existing mobile remote setups typically mirror the full desktop workspace onto the phone screen, causing practical friction:
+When running complex engineering tasks with desktop or web AI agents, a single turn often involves several minutes of deep reasoning, dozens of file operations, and intensive tool executions. Existing mobile remote setups typically mirror the full desktop workspace onto the phone screen, causing practical friction:
 
 - **Imbalanced Information Density**: Raw reasoning traces, verbose tool parameters, and large unified diffs overwhelm small displays, burying the primary conclusion.
 - **Attention Overload**: During commutes, meals, or brief breaks away from the keyboard, the primary goal is simply checking whether a round finished and dispatching the next instruction, without dissecting every intermediate step.
