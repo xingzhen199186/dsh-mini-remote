@@ -96,21 +96,32 @@ Confirm that your host environment satisfies the following requirements:
 
 ### Installation
 
-Execute the installation command in your terminal. Replace `web` with your custom profile name if you are not using the default profile:
+#### Option 1: Install via DSH Desktop UI (Recommended)
 
-#### Option 1: Install from npm (Recommended)
+1. Click the "Plugins" button on the top navigation bar of DSH to open the plugin manager.
+2. Click the "Add Plugin" button in the upper-right corner to open the installation dialog.
+3. Enter the package name `dsh-mini-remote` into the input field (GitHub repository URL `github:xingzhen199186/dsh-mini-remote` or local directory path is also supported). Keep the default registry ("npm official registry").
+4. Click the "Install" button at the bottom of the dialog.
+
+> ⚠️ **Notice**:
+> 1. **Verify trusted source**: Plugins run on your machine with your current user privileges. Plugins from untrusted sources may damage DeepSeek Harness or read and leak sensitive data.
+> 2. **No automatic updates yet**: Installed plugins currently do not support automatic updates. To upgrade to a newer version, uninstall the existing version before installing the new one.
+
+#### Option 2: Install from npm (Command Line)
+
+Execute the installation command in your terminal. Replace `web` with your custom profile name if you are not using the default profile:
 
 ```powershell
 dsh plugin --profile web add dsh-mini-remote
 ```
 
-#### Option 2: Install from GitHub
+#### Option 3: Install from GitHub
 
 ```powershell
 dsh plugin --profile web add github:xingzhen199186/dsh-mini-remote
 ```
 
-#### Option 3: Install from Local Directory
+#### Option 4: Install from Local Directory
 
 ```powershell
 dsh plugin --profile web add C:\path\to\dsh-mini-remote

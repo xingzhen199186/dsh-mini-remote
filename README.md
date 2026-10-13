@@ -96,21 +96,32 @@
 
 ### 安装步骤
 
-在终端中执行对应的安装命令。命令中的 `web` 为 DSH 默认 Profile 名称，若使用自定义配置档，请替换为对应名称：
+#### 途径一：DSH 桌面端图形化安装（推荐）
 
-#### 途径一：从官方 npm 注册表安装（推荐）
+1. 点击 DSH 顶部导航栏的「插件」按钮进入插件管理页面。
+2. 点击页面右上角的「添加插件」按钮打开对话框。
+3. 在输入框中输入插件包名 `dsh-mini-remote`（亦可输入 GitHub 仓库地址 `github:xingzhen199186/dsh-mini-remote` 或本地目录路径）。安装源保持默认的「npm 官方源」。
+4. 点击对话框底部的「安装」按钮完成安装。
+
+> ⚠️ **注意**：
+> 1. **确认来源可信**：插件在本机以当前用户的完整权限运行，来源不明的插件可能损坏 DeepSeek Harness，或读取和泄露敏感数据。
+> 2. **暂不支持自动更新**：插件安装后暂不支持自动更新。若需升级版本，请先卸载当前版本后再安装新版本。
+
+#### 途径二：从官方 npm 注册表安装（命令行）
+
+在终端中执行对应的安装命令。命令中的 `web` 为 DSH 默认 Profile 名称，若使用自定义配置档，请替换为对应名称：
 
 ```powershell
 dsh plugin --profile web add dsh-mini-remote
 ```
 
-#### 途径二：从 GitHub 仓库直接安装
+#### 途径三：从 GitHub 仓库直接安装
 
 ```powershell
 dsh plugin --profile web add github:xingzhen199186/dsh-mini-remote
 ```
 
-#### 途径三：本地目录安装（开发者调试）
+#### 途径四：本地目录安装（开发者调试）
 
 ```powershell
 dsh plugin --profile web add C:\path\to\dsh-mini-remote
