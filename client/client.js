@@ -850,6 +850,40 @@ window.__ModuleLoader__.load({
         h('iframe', { src: win.url, title: '电脑端界面', style: styles.frame }));
     }
 
+    // —— 「再点一下退出远程窗口」需要的两样东西：一个能跟官方布局服务说话的把手，
+    //    和「进远程窗口之前站在哪个面板」这份记忆。
+    //
+    // **为什么得自己接这一下**：侧栏那一行（按钮、onClick、悬停提示）是官方壳自己画的
+    // ——dsh-client-ui-sidebar 的 PanelRow，它 onClick 里调的是官方自己的 selectPanel。
+    // 我们注册的只是那一行里的**一枚图标**，拿不到那一行的点击回调；壳交给图标的只有
+    // 「边长」和「这一行现在是不是选中」。所以「再点一次」只能由我们在图标上接住。
+    // 壳没有开关式的第二态：同一个 id 再选一次就是原值写入，画面不会变——这也是为什么
+    // 现在点第二下没反应。
+    var layoutFace = null;        // 官方布局服务 ctx.layout；壳还没装配好时是 null
+    var panelBeforeRemote = null; // 进远程窗口之前选中的面板；null = 会话视图（官方默认）
+
+    /** 记住「上一个不是远程窗口的面板」——退出时回到它。 */
+    function rememberPanel() {
+      if (!layoutFace) return;
+      var info = layoutFace.panelInfo.getSnapshot();
+      var id = info && info.activePanelId;
+      if (id !== PANEL_ID) panelBeforeRemote = id;
+    }
+
+    /**
+     * 退出远程窗口：回到进来之前那一个面板。
+     * 拿不到（那个面板的插件被关了之类）就退回会话视图——官方把 null 当「没有选中任何
+     * 全局面板」，也就是平时那一屏会话，不是别的东西。
+     */
+    function leaveRemotePanel() {
+      if (!layoutFace) return;
+      try {
+        layoutFace.selectPanel(panelBeforeRemote);
+      } catch (err) {
+        try { layoutFace.selectPanel(null); } catch (err2) { /* 布局服务已经收摊：什么也不做 */ }
+      }
+    }
+
     /**
      * 侧栏那排图标里的一个。侧栏把图标塞进一个正方格里，
      * 边长由它给（props.size，展开态 16、收起态 18），选中态由它自己画在按钮上，
@@ -857,6 +891,7 @@ window.__ModuleLoader__.load({
      */
     function MiniRemoteIcon(props) {
       var size = typeof props.size === 'number' ? props.size : 16;
+      var active = props.active === true;
       return h('svg', {
         width: size,
         height: size,
@@ -865,6 +900,11 @@ window.__ModuleLoader__.load({
         xmlns: 'http://www.w3.org/2000/svg',
         'aria-hidden': 'true',
         focusable: 'false',
+        // 「再点一下退出」就落在这里——这一枚图标是侧栏那一行里**唯一属于我们的 DOM**。
+        // 点击先命中的是图标，再顺着 React 的事件冒泡往上走到官方那个按钮；我们在这里
+        // 拦下它，就等于把「又选中一次自己」换成了「切走」。
+        // 只有这一行已经是当前面板（active）时才拦；不是的话原样放行，官方那一下照旧。
+        onClick: active ? function (e) { e.stopPropagation(); leaveRemotePanel(); } : undefined,
       },
         // 一块屏幕的形状（远程窗口），下面一小段底座。
         h('rect', { x: 1.75, y: 2.75, width: 12.5, height: 8.5, rx: 2, stroke: 'currentColor', strokeWidth: 1.5 }),
@@ -873,6 +913,23 @@ window.__ModuleLoader__.load({
     }
 
     function apply(ctx) {
+      // —— 「再点一下退出」的接线：拿官方布局服务的把手，并盯住「上一个面板」。
+      // 布局服务（ctx.layout）由官方布局插件提供，不是我们依赖的槽位；照着官方插件
+      // （dsh-client-ui-approval 等地）的写法用 ctx.inject 等它就绪，就绪前回调不跑、
+      // 那两枚函数都是空操作。没有 ctx.inject 的极简假壳（比如离线校验里的那个替身）
+      // 直接跳过这一段：图标照画、照常被壳选中，只是没有「再点一次退出」。
+      if (typeof ctx.inject === 'function') {
+        ctx.inject(['layout'], function (scope) {
+          var layout = scope.layout;
+          if (!layout || !layout.panelInfo) return;
+          layoutFace = layout;
+          scope.effect(function () {
+            rememberPanel();
+            return layout.panelInfo.subscribe(rememberPanel);
+          }, 'dsh-mini-remote: 记住进入远程窗口之前的面板');
+        });
+      }
+
       // —— 侧栏图标 + 中间那一屏面板，一对配套的槽位。
       // main 是 keyed 槽：注册的键写在 `key` 上（不是 id）。官方对这种槽的示例是
       //   ctx.slots.inject('main', () => ctx.slots.register({ name: 'main', key: '…' }, Comp))
