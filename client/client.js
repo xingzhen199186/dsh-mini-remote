@@ -28,6 +28,11 @@ window.__ModuleLoader__.load({
     var SERVE_PATH = '/mini-remote/serve';
     var FEISHU_PATH = '/mini-remote/feishu';
 
+    // 侧栏那个图标和中间那一整屏面板共用的一个键。
+    // 契约就是这么定的：侧栏条目的 `id` 按原样去寻址 main 槽里 key 相同的那个面板
+    // （dsh-client-ui-sidebar 的契约原文：Each list id addresses the matching main panel）。
+    var PANEL_ID = 'mini-remote';
+
     // 颜色走 DSH 主题变量（真名前缀是 --dsw-alias-，深浅色自动跟随）。
     // 每个变量都带一个浅色兜底值，变量缺失时界面仍然可读。
     var styles = {
@@ -49,6 +54,8 @@ window.__ModuleLoader__.load({
       toggleRow: { display: 'flex', alignItems: 'center', gap: 8, marginTop: 10, fontSize: 13, cursor: 'pointer' },
       // cloudflared 的报错是多行原文，换行要留住，否则一长条读不了。
       detail: { color: 'var(--dsw-alias-state-warn-primary,#b45309)', fontSize: 12, lineHeight: 1.6, marginTop: 6, whiteSpace: 'pre-wrap', wordBreak: 'break-word' },
+      // 「远程窗口」占位面板：这一步只有一句话，别撑破中间那一列的布局。
+      panel: { boxSizing: 'border-box', padding: '80px 24px', textAlign: 'center', color: 'var(--dsw-alias-label-tertiary,#8b93a1)', fontSize: 14, lineHeight: 1.6 },
     };
 
     function MiniRemoteSettingsTab() {
@@ -781,7 +788,65 @@ window.__ModuleLoader__.load({
       );
     }
 
+    /**
+     * 「远程窗口」面板——就是侧栏那个图标点开之后，占满中间那一整列的那一屏。
+     *
+     * 这一步只放一句占位：**不嵌 iframe、不连任何远程机器**。先证明入口能开，
+     * 之后再往这里嵌「本机电脑端界面」，最后才谈跨机。
+     */
+    function MiniRemotePanel() {
+      return h('div', { style: styles.panel }, '远程窗口（施工中）');
+    }
+
+    /**
+     * 侧栏那排图标里的一个。侧栏把图标塞进一个正方格里，
+     * 边长由它给（props.size，展开态 16、收起态 18），选中态由它自己画在按钮上，
+     * 所以这里只管颜色跟着 currentColor 走、尺寸跟着 size 走。
+     */
+    function MiniRemoteIcon(props) {
+      var size = typeof props.size === 'number' ? props.size : 16;
+      return h('svg', {
+        width: size,
+        height: size,
+        viewBox: '0 0 16 16',
+        fill: 'none',
+        xmlns: 'http://www.w3.org/2000/svg',
+        'aria-hidden': 'true',
+        focusable: 'false',
+      },
+        // 一块屏幕的形状（远程窗口），下面一小段底座。
+        h('rect', { x: 1.75, y: 2.75, width: 12.5, height: 8.5, rx: 2, stroke: 'currentColor', strokeWidth: 1.5 }),
+        h('path', { d: 'M6.25 13.25h3.5', stroke: 'currentColor', strokeWidth: 1.5, strokeLinecap: 'round' }),
+      );
+    }
+
     function apply(ctx) {
+      // —— 侧栏图标 + 中间那一屏面板，一对配套的槽位。
+      // main 是 keyed 槽：注册的键写在 `key` 上（不是 id）。官方对这种槽的示例是
+      //   ctx.slots.inject('main', () => ctx.slots.register({ name: 'main', key: '…' }, Comp))
+      // 已占用的键只有 `conversation`；`mini-remote` 是新键，不顶掉任何官方界面。
+      // 两个槽都由别的插件声明（main 归 dsh-client-ui-layout、panellist 归 dsh-client-ui-sidebar），
+      // 所以照上面 settings.section 的老规矩：等声明出现再注册。
+      ctx.slots.inject('main', function () {
+        return ctx.slots.register({ name: 'main', key: PANEL_ID }, MiniRemotePanel);
+      });
+
+      // sidebar.panellist 是 list 槽：要 `id`（必需），可选 `order` 和 `label`。
+      // id 必须和 main 的 key 一模一样，侧栏点下来才找得到面板。
+      // order 让它排在官方那两枚之后（官方用 0 和 10；缺省是 0）。
+      ctx.slots.inject('sidebar.panellist', function () {
+        return ctx.slots.register(
+          {
+            name: 'sidebar.panellist',
+            id: PANEL_ID,
+            order: 20,
+            // 传函数：外壳用 resolveSlotLabel 求值（字符串也支持），跟设置页那条保持一致。
+            label: () => '远程窗口',
+          },
+          MiniRemoteIcon,
+        );
+      });
+
       // settings.section 由设置域插件声明；这里等声明出现再注册。
       ctx.slots.inject('settings.section', function () {
         return ctx.slots.register(

@@ -5,7 +5,9 @@
 // 做四件事：
 //   1. 伪造 window.__ModuleLoader__，把整个文件 eval 一遍，确认模块外壳被注册；
 //   2. 用 React 替身调用 factory，检查 exports（name / inject / apply）；
-//   3. 用假的 ctx 调 apply，检查注册进 settings.section 的 def 和组件；
+//   3. 用假的 ctx 调 apply，检查三个槽位的注册形状与组件：
+//      main（keyed，key 对上面板）、sidebar.panellist（list，id/order/label + 图标）、
+//      settings.section（设置页那一节）；
 //   4. 用替身 React 真渲染一遍组件：加载中 → ok:false → ok:true → 网络错误，
 //      并点一次「复制」按钮，确认文案临时变成「已复制」。
 
@@ -192,35 +194,86 @@ const fakeCtx = {
 };
 
 let Comp = null;
-let def = null;
+/** 按槽位名取注册的那一条；找不到就是漏注册了，让断言去报错。 */
+const entryOf = (name) => registered.find(({ def }) => def.name === name) || { def: {}, Comp: undefined };
 console.log('\n[3] apply(ctx) 的 slots 注册');
 await check('apply(fakeCtx) 不抛错', () => {
   assert.doesNotThrow(() => mod.apply(fakeCtx));
 });
-await check('inject 的服务名是 "settings.section"', () => {
-  assert.deepEqual(injected, ['settings.section']);
+await check('三个槽位都走 inject（等声明出现再注册）：main / sidebar.panellist / settings.section', () => {
+  assert.deepEqual(injected, ['main', 'sidebar.panellist', 'settings.section']);
 });
-await check('register 只调用了一次', () => {
-  assert.equal(registered.length, 1);
+await check('register 一共调用了三次（图标一枚 + 面板一屏 + 设置页一节）', () => {
+  assert.equal(registered.length, 3);
 });
+
+// —— main：keyed 槽。注册的键写在 `key` 上，不是 id。
+await check('main 那条：def.name === "main"', () => {
+  assert.equal(entryOf('main').def.name, 'main');
+});
+await check('main 那条：def.key === "mini-remote"（keyed 槽认的是 key）', () => {
+  assert.equal(entryOf('main').def.key, 'mini-remote');
+});
+await check('main 那条：不写 keyed 槽用不到的 id', () => {
+  assert.equal(entryOf('main').def.id, undefined);
+});
+await check('main 那条：第二个参数是面板组件函数', () => {
+  assert.equal(typeof entryOf('main').Comp, 'function');
+});
+await check('面板只放一句中文占位，且不嵌 iframe', () => {
+  const tree = entryOf('main').Comp({});
+  assert.match(textOf(tree), /远程窗口（施工中）/);
+  assert.equal(byType(tree, 'iframe').length, 0, '这一步不许嵌任何东西');
+});
+
+// —— sidebar.panellist：list 槽。id 必须和 main 的 key 对上，侧栏点下来才找得到面板。
+await check('panellist 那条：def.name === "sidebar.panellist"', () => {
+  assert.equal(entryOf('sidebar.panellist').def.name, 'sidebar.panellist');
+});
+await check('panellist 那条：id === "mini-remote"，与 main 的 key 一致', () => {
+  assert.equal(entryOf('sidebar.panellist').def.id, 'mini-remote');
+  assert.equal(entryOf('sidebar.panellist').def.id, entryOf('main').def.key);
+});
+await check('panellist 那条：order 是数字（排在官方那两枚之后）', () => {
+  assert.equal(typeof entryOf('sidebar.panellist').def.order, 'number');
+  assert.equal(entryOf('sidebar.panellist').def.order, 20);
+});
+await check('panellist 那条：label() === "远程窗口"', () => {
+  assert.equal(typeof entryOf('sidebar.panellist').def.label, 'function');
+  assert.equal(entryOf('sidebar.panellist').def.label(), '远程窗口');
+});
+await check('侧栏图标：按侧栏给的 size 画，颜色跟着 currentColor', () => {
+  const icon = entryOf('sidebar.panellist').Comp({ size: 18, active: true });
+  const svg = byType(icon, 'svg')[0];
+  assert.ok(svg, '图标应当是一个 svg');
+  assert.equal(svg.props.width, 18, '边长要用侧栏给的那个');
+  assert.equal(svg.props.height, 18);
+  assert.match(JSON.stringify(svg.children), /currentColor/, '颜色不写死，跟着侧栏的选中态走');
+});
+await check('侧栏图标：拿不到 size 时有兜底，不会画成 NaN 宽', () => {
+  const svg = byType(entryOf('sidebar.panellist').Comp({}), 'svg')[0];
+  assert.equal(svg.props.width, 16);
+});
+
+// —— settings.section：原有那一条，形状不变。
 await check('def.name === "settings.section"', () => {
-  def = registered[0].def;
-  assert.equal(def.name, 'settings.section');
+  const settingsDef = entryOf('settings.section').def;
+  assert.equal(settingsDef.name, 'settings.section');
 });
 await check('def.id === "mini-remote"', () => {
-  assert.equal(def.id, 'mini-remote');
+  assert.equal(entryOf('settings.section').def.id, 'mini-remote');
 });
 await check('def.order === 2', () => {
-  assert.equal(def.order, 2);
+  assert.equal(entryOf('settings.section').def.order, 2);
 });
 await check('def.label 是函数（typeof === "function"）', () => {
-  assert.equal(typeof def.label, 'function');
+  assert.equal(typeof entryOf('settings.section').def.label, 'function');
 });
 await check('def.label() === "手机遥控"', () => {
-  assert.equal(def.label(), '手机遥控');
+  assert.equal(entryOf('settings.section').def.label(), '手机遥控');
 });
 await check('第二个参数是组件函数', () => {
-  Comp = registered[0].Comp;
+  Comp = entryOf('settings.section').Comp;
   assert.equal(typeof Comp, 'function');
 });
 
