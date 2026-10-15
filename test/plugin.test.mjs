@@ -200,6 +200,46 @@ test('apply() 能正常加载，并生成 settings.json 与 token', async (t) =>
   assert.equal(settings.notify.channel, 'none')
 })
 
+test('设备身份：名册落在 token 并排处，而且只在「打开手机页」那一下登记', async (t) => {
+  const p = await bootPlugin()
+  t.after(p.stop)
+  const file = join(p.home, 'dsh-mini-remote', 'devices.json')
+
+  // 普通接口请求一次都不登记（bootPlugin 启动时自己也打过一趟 /mini/api/state）。
+  // 登记要是跟着普通请求走，页面一抖就多一台设备，「谁是谁」当场失真。
+  for (let i = 0; i < 3; i += 1) {
+    assert.equal((await fetch(`${p.base}/mini/api/state?token=${p.token}`)).status, 200)
+  }
+  assert.ok(!existsSync(file), '普通请求不该登记出设备来')
+
+  // 带配对码打开手机页那一下（二维码扫的就是这个地址）：顺手登记 + 发凭据，用户零动作。
+  const page = await fetch(`${p.base}/mini?token=${p.token}`)
+  assert.equal(page.status, 200)
+  const cookies = typeof page.headers.getSetCookie === 'function'
+    ? page.headers.getSetCookie()
+    : [String(page.headers.get('set-cookie') ?? '')]
+  assert.ok(cookies.some((one) => one.startsWith('dsh_mini_token=')),
+    '令牌那枚 cookie 照旧发（二维码形态一个字都没变）')
+  const issued = cookies.find((one) => one.startsWith('dsh_mini_device='))
+  assert.ok(issued, '打开手机页要顺手发下设备凭据')
+  const cred = decodeURIComponent(issued.split('=')[1].split(';')[0])
+
+  // 名册落在 token / settings.json **并排**的那个位置（插件唯一的"自己的地方"）。
+  const saved = JSON.parse(readFileSync(file, 'utf8'))
+  assert.equal(saved.devices.length, 1)
+  assert.equal(saved.devices[0].kind, 'phone')
+  assert.ok(saved.devices[0].name, '默认名字从设备类型推——名字只是标签')
+  assert.match(saved.devices[0].keyHash, /^[0-9a-f]{64}$/, '落盘的是密钥的 SHA-256，不是密钥本身')
+  assert.ok(!readFileSync(file, 'utf8').includes(cred.split('.')[1]), '密钥明文不许落盘')
+
+  // 这枚凭据真的能过门（和令牌同一道门），而且不再添新的。
+  const viaDevice = await fetch(`${p.base}/mini/api/state`, {
+    headers: { Cookie: `dsh_mini_device=${cred}` },
+  })
+  assert.equal(viaDevice.status, 200, '设备凭据要走得通')
+  assert.equal(JSON.parse(readFileSync(file, 'utf8')).devices.length, 1)
+})
+
 test('订阅到了 session/event 与 agent/status', async (t) => {
   const p = await bootPlugin()
   t.after(p.stop)
