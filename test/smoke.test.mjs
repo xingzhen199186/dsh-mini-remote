@@ -289,12 +289,27 @@ test('页面模板的占位符被正确替换', () => {
   const html = renderPage({ defaultMode: 'chat', needsToken: true, build: 'abc123def456' })
   assert.ok(!html.includes('__DEFAULT_MODE__'), '占位符必须被替换掉')
   assert.ok(!html.includes('__NEEDS_TOKEN__'))
+  assert.ok(!html.includes('__DEVICE_REVOKED__'),
+    '「被撤销」那个开关也要替换掉——它要是留在页面上，那句人话就永远不出现')
   assert.ok(!html.includes('__BUILD__'), '构建指纹也要替换掉，不能留在页面上')
   assert.ok(!html.includes('__MAX_UPLOAD__'), '上传上限也要替换成真实数字')
   assert.ok(html.includes("var DEFAULT_MODE = 'chat';"))
   assert.ok(html.includes('var NEEDS_TOKEN = true;'))
+  assert.ok(html.includes('var DEVICE_REVOKED = false;'),
+    '没被撤销时那一句不许露出来（"你被撤了"和"你第一次来"是两回事）')
   assert.ok(html.includes("var BUILD = 'abc123def456';"))
   assert.ok(html.includes('<!doctype html>'))
+})
+
+test('被撤销的设备：门禁页上那句人话默认藏着，只有服务端点名的那一次才露', () => {
+  const plain = renderPage({ needsToken: true })
+  assert.ok(plain.includes('var DEVICE_REVOKED = false;'))
+  assert.ok(plain.includes('id="gateRevoked" hidden'), '那句话默认是藏着的')
+
+  const revoked = renderPage({ needsToken: true, deviceRevoked: true })
+  assert.ok(revoked.includes('var DEVICE_REVOKED = true;'))
+  assert.ok(revoked.includes('这台设备的授权已被移除，请重新扫码。'),
+    '被撤销的那台设备要说清发生了什么、下一步做什么')
 })
 
 test('构建指纹里的可疑字符会被洗掉，不能往 HTML 里注入', () => {

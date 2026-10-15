@@ -1508,24 +1508,28 @@ test('路由门：开关关着时 /mini-remote/* 一个都不接', async (t) => 
   assert.deepEqual(hit, [], '不给一条绕过开关的通道')
 })
 
-test('路由门：入口那一下写成 cookie，并且补上尾斜杠', async (t) => {
+test('路由门：入口那一下**不再**种令牌 cookie，尾斜杠照旧补', async (t) => {
   const hit = []
   const s = await bootServer({ mirror: stubMirror(hit), mirrorEnabled: () => true })
   t.after(s.close)
 
-  // 不带尾斜杠的入口：写 cookie，然后 302 到带斜杠的那条。
+  // 不带尾斜杠的入口：302 到带斜杠的那条。
   const bare = await fetch(`${s.base}/mini/mirror?token=TOKEN-123`, { redirect: 'manual' })
   assert.equal(bare.status, 302)
   assert.equal(bare.headers.get('location'), '/mini/mirror/')
-  const cookie = bare.headers.get('set-cookie')
-  assert.ok(cookie, '入口必须顺手把 cookie 写上——否则界面里那些 /api/... 全是 401')
-  assert.match(cookie, /Path=\//, 'cookie 要覆盖整个站，不然 /api/... 带不上')
+  // **2026-10-16 第三步**：这里原来会顺手种一枚一年期的令牌 cookie。手机页早就不这么
+  // 拼地址了（第二步：框里就是 `/mini/mirror/`，靠的是设备 cookie），可**谁手动打开过
+  // 这个地址，那台浏览器里就留下一枚令牌**——它进得了 `/mini/api/*` 全部接口，于是
+  // 「名册里删掉那条记录 = 那台手机什么都做不了」在那台浏览器上就不成立了。
+  // 所以这条反过来钉住：进门那一下**一个字节的令牌都不许发给浏览器**。
+  assert.equal(bare.headers.get('set-cookie'), null, '入口不许再种令牌 cookie')
   assert.deepEqual(hit, [], '补斜杠这一步不该往上游转发')
 
   // 带尾斜杠的入口：这就是上游的首页。
   // **尾斜杠不是洁癖**：外壳写着 `<base href="./">`，少这一个字符，
   // 它引用的脚本会解析到 /mini/assets/... 上（我们自己的地盘），全 404、界面白屏。
-  // （真机上这一步靠上一条写下的 cookie 过关；这里 fetch 不共享 cookie，所以显式带令牌。）
+  // （真机上这一步靠那枚**设备 cookie**过关：它 Path=/，框里每一条请求都自动带上；
+  // 桌面端那条路靠窗口会话。这里 fetch 不共享 cookie，所以显式带令牌。）
   // **查询串整个丢掉**：里面只有我们的令牌，上游不认识它，留着反而会被它那些
   // 精确匹配的路由判成不匹配。
   const slash = await fetch(`${s.base}/mini/mirror/?token=TOKEN-123`, { redirect: 'manual' })

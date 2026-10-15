@@ -1025,6 +1025,201 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
   });
 }
 
+// 4f. 设备那一块（2026-10-16 第三步）：列出 / 改名 / 撤销（撤销要二次确认）
+{
+  console.log('\n[4f] 设备名单（列出 / 改名 / 撤销）');
+
+  const ISO = '2026-10-16T06:20:00+08:00';
+  const DEV_A = {
+    id: 'a'.repeat(32),
+    name: '妈妈那台',
+    kind: 'phone',
+    createdAt: new Date(ISO).getTime(),
+    lastSeen: new Date(ISO).getTime() + 5 * 60 * 1000,
+  };
+  // 老记录（第三步之前写下的）没有 lastSeen：界面上要说「还没有记录」，**不许凭空编一个时间**。
+  const DEV_B = {
+    id: 'b'.repeat(32), name: '客厅的旧手机', kind: 'phone',
+    createdAt: new Date(ISO).getTime(), lastSeen: 0,
+  };
+
+  const PAIRING_OK = {
+    ok: true,
+    port: 3090,
+    token: TOKEN,
+    entries: [{ kind: 'lan', label: '内网', hint: '手机连同一个 Wi-Fi 时用这个', url: URL_LAN, qr: QR }],
+    tunnel: { enabled: false, up: false, starting: false, error: null },
+  };
+
+  /**
+   * 挂一次这一节：GET /mini-remote/devices 回名单，两条动作按顺序回执。
+   * `listReplies` 是**依次**回给「列名单」那几次 GET 的（改名/撤销之后都会重新列一次）。
+   */
+  const mountDevices = async (listReplies, actionReply) => {
+    const hh = useHarness();
+    const state = { gets: [], posts: [], tree: null };
+    let listAt = 0;
+    setGlobal('fetch', async (url, init) => {
+      if (init && init.method === 'POST') {
+        state.posts.push({ url, body: JSON.parse(init.body) });
+        return jsonResponse(200, actionReply(state.posts.length));
+      }
+      state.gets.push(url);
+      if (url === '/mini-remote/devices') {
+        const reply = listReplies[Math.min(listAt, listReplies.length - 1)];
+        listAt += 1;
+        return jsonResponse(200, reply);
+      }
+      return jsonResponse(200, PAIRING_OK);
+    });
+    hh.onUpdate(() => { state.tree = hh.draw(Comp); });
+    state.tree = hh.draw(Comp);
+    hh.runEffects();   // 读配对信息
+    await tick();
+    hh.runEffects();   // 配对信息到了 → 读设备名单
+    await tick();
+    return state;
+  };
+
+  /**
+   * 设备那一块的渲染树。**按 key 找，不按位置也不按文案**：上面还有二维码、密码、
+   * 尾插、飞书那几块，位置会变；而 key='devices' 是这一块自己的记号。
+   */
+  const devicesBlockOf = (tree) => walk(tree).find((n) => n && n.props && n.props.key === 'devices');
+
+  const twoDevices = { ok: true, devices: [DEV_A, DEV_B] };
+
+  await check('名单到了就摆出来：名字、类型、创建时间、最近使用时间，一格不缺', async () => {
+    const st = await mountDevices([twoDevices], () => ({ ok: true }));
+    const text = textOf(st.tree);
+    assert.match(text, /妈妈那台/);
+    assert.match(text, /客厅的旧手机/);
+    assert.match(text, /手机/, '类型要写出来（这一版只有手机）');
+    assert.match(text, /创建于 2026-10-16 06:20/, '创建时间要说清是哪一刻');
+    assert.match(text, /最近使用 2026-10-16 06:25/);
+    // 老记录没有这个字段：说「还没有记录」，不许拿创建时间顶上（那是凭空造一次使用）。
+    assert.match(text, /最近使用 还没有记录/);
+    assert.doesNotMatch(text, /NaN|undefined|Invalid Date/);
+  });
+
+  await check('每台两个动作：「改名」和「撤销」', async () => {
+    const st = await mountDevices([twoDevices], () => ({ ok: true }));
+    const buttons = byType(devicesBlockOf(st.tree), 'button');
+    assert.equal(buttons.filter((b) => textOf(b) === '改名').length, 2);
+    assert.equal(buttons.filter((b) => textOf(b) === '撤销').length, 2);
+  });
+
+  await check('点「改名」：就地变成输入框，原名字填在里面（不弹窗、不跳页）', async () => {
+    const st = await mountDevices([twoDevices], () => ({ ok: true }));
+    const first = byType(devicesBlockOf(st.tree), 'button').filter((b) => textOf(b) === '改名')[0];
+    first.props.onClick();
+    await tick();
+    const inputs = byType(devicesBlockOf(st.tree), 'input').filter((n) => n.props.type === 'text');
+    assert.equal(inputs.length, 1, '一次只编辑一台');
+    assert.equal(inputs[0].props.value, '妈妈那台');
+    assert.equal(byType(devicesBlockOf(st.tree), 'button').filter((b) => textOf(b) === '保存').length, 1);
+  });
+
+  await check('改完点「保存」：POST 改名那条（带 id 和新名字），然后**重新列一次**', async () => {
+    const st = await mountDevices(
+      [twoDevices, { ok: true, devices: [Object.assign({}, DEV_A, { name: '新名字' }), DEV_B] }],
+      () => ({ ok: true, device: Object.assign({}, DEV_A, { name: '新名字' }) }),
+    );
+    byType(devicesBlockOf(st.tree), 'button').filter((b) => textOf(b) === '改名')[0].props.onClick();
+    await tick();
+    const input = byType(devicesBlockOf(st.tree), 'input').filter((n) => n.props.type === 'text')[0];
+    input.props.onChange({ target: { value: '新名字' } });
+    await tick();
+    byType(devicesBlockOf(st.tree), 'button').filter((b) => textOf(b) === '保存')[0].props.onClick();
+    await tick();
+    await tick();
+    assert.deepEqual(st.posts, [{ url: '/mini-remote/devices/rename', body: { id: DEV_A.id, name: '新名字' } }]);
+    assert.equal(st.gets.filter((u) => u === '/mini-remote/devices').length, 2,
+      '改完必须再列一次：屏幕上那份要来自服务端，不是我们以为改成了什么');
+    assert.match(textOf(st.tree), /新名字/);
+  });
+
+  await check('点「撤销」**什么都不发**：只把后果摊在那一行下面（说的就是"要重新扫码"）', async () => {
+    const st = await mountDevices([twoDevices], () => ({ ok: true }));
+    byType(devicesBlockOf(st.tree), 'button').filter((b) => textOf(b) === '撤销')[0].props.onClick();
+    await tick();
+    assert.deepEqual(st.posts, [], '第一下不许把设备撤掉——一次点击就造成的后果太重了');
+    const text = textOf(devicesBlockOf(st.tree));
+    assert.match(text, /撤销后，这台设备要重新扫码才能再用。/, '确认框里要说清后果');
+    assert.equal(byType(devicesBlockOf(st.tree), 'button').filter((b) => textOf(b) === '确认撤销').length, 1);
+    assert.equal(byType(devicesBlockOf(st.tree), 'button').filter((b) => textOf(b) === '取消').length, 1);
+  });
+
+  await check('点「确认撤销」才真发：POST 撤销那条，成功之后那一行消失（重新列过）', async () => {
+    const st = await mountDevices(
+      [twoDevices, { ok: true, devices: [DEV_B] }],
+      () => ({ ok: true, id: DEV_A.id, dropped: 1 }),
+    );
+    byType(devicesBlockOf(st.tree), 'button').filter((b) => textOf(b) === '撤销')[0].props.onClick();
+    await tick();
+    byType(devicesBlockOf(st.tree), 'button').filter((b) => textOf(b) === '确认撤销')[0].props.onClick();
+    await tick();
+    await tick();
+    assert.deepEqual(st.posts, [{ url: '/mini-remote/devices/revoke', body: { id: DEV_A.id } }]);
+    assert.equal(st.gets.filter((u) => u === '/mini-remote/devices').length, 2);
+    const text = textOf(devicesBlockOf(st.tree));
+    assert.doesNotMatch(text, /妈妈那台/, '撤销掉的那台要从名单上消失');
+    assert.match(text, /客厅的旧手机/, '别的设备一样都不许动');
+  });
+
+  await check('「取消」之后什么也不发生（那一行还在，弹出来的后果收回去）', async () => {
+    const st = await mountDevices([twoDevices], () => ({ ok: true }));
+    byType(devicesBlockOf(st.tree), 'button').filter((b) => textOf(b) === '撤销')[0].props.onClick();
+    await tick();
+    byType(devicesBlockOf(st.tree), 'button').filter((b) => textOf(b) === '取消')[0].props.onClick();
+    await tick();
+    assert.deepEqual(st.posts, []);
+    // 按**按钮**判，不按那句话判：这一块的说明里本来就写着"撤销之后那台设备要重新扫码"
+    // （那一句常驻），所以拿文案去查"确认框收起来了没有"是查不出来的。
+    const buttons = byType(devicesBlockOf(st.tree), 'button').map(textOf);
+    assert.ok(!buttons.includes('确认撤销'), '取消之后不该还留着"确认撤销"');
+    assert.equal(buttons.filter((b) => b === '撤销').length, 2, '两台的「撤销」都回到原位');
+    assert.match(textOf(devicesBlockOf(st.tree)), /妈妈那台/);
+  });
+
+  await check('一台设备都没有时：说清"还没有登记过的设备"，不摊一个空壳', async () => {
+    const st = await mountDevices([{ ok: true, devices: [] }], () => ({ ok: true }));
+    const block = devicesBlockOf(st.tree);
+    assert.ok(block, '这一块本身要在（它是"谁进得来"的账本）');
+    assert.match(textOf(block), /还没有登记过的设备/);
+  });
+
+  await check('名单读不到时：把那句原因照登出来，不吞', async () => {
+    const hh = useHarness();
+    let tree = null;
+    setGlobal('fetch', async (url, init) => {
+      if (init && init.method === 'POST') return jsonResponse(200, { ok: true });
+      if (url === '/mini-remote/devices') return jsonResponse(404, { error: 'not found' });
+      return jsonResponse(200, PAIRING_OK);
+    });
+    hh.onUpdate(() => { tree = hh.draw(Comp); });
+    tree = hh.draw(Comp);
+    hh.runEffects();
+    await tick();
+    hh.runEffects();
+    await tick();
+    assert.match(textOf(tree), /读设备名单失败/, '读不到要说出来，不能假装"一台都没有"');
+  });
+
+  await check('动作失败时：服务端那句原因原样摆在那一块里（不谎报成功）', async () => {
+    const st = await mountDevices(
+      [twoDevices],
+      () => ({ ok: false, error: '这台设备已经不在名册里了，刷新看看。' }),
+    );
+    byType(devicesBlockOf(st.tree), 'button').filter((b) => textOf(b) === '撤销')[0].props.onClick();
+    await tick();
+    byType(devicesBlockOf(st.tree), 'button').filter((b) => textOf(b) === '确认撤销')[0].props.onClick();
+    await tick();
+    await tick();
+    assert.match(textOf(devicesBlockOf(st.tree)), /已经不在名册里了/);
+  });
+}
+
 // ---------------------------------------------------------------- 结果
 
 console.log(`\n通过 ${passed} 项，失败 ${failures.length} 项。`);

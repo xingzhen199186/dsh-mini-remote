@@ -1467,6 +1467,16 @@
     color: var(--on-act); font-size: 16px; font-weight: 600;
   }
   #gate .err { color: var(--err); font-size: 13px; min-height: 18px; }
+  /* 被撤销的那台设备要看到的一句话。**默认不出现**，只有服务端说"这枚凭据的名册记录
+     已经被删掉了"那一次才露（见 lib/server.js 里那一条判据，以及 lib/page.js 里那个
+     注入给页面的开关）。
+     这句注释里**不许写出那个占位符本身**：服务端是拿字符串替换注入的，而 replace 只
+     换第一处——注释里写一遍，真正该被换掉的那一行就永远换不掉了（2026-10-16 真踩过）。
+     下面那句 `[hidden]` 也不能省：这个文件里 `.sheet .version[hidden]`、
+     `#mirrorView[hidden]` 都是同一件事——作者样式表里的 display 会压住浏览器默认的
+     [hidden]，少一句就变成"一句本来不该出现的话一直挂在屏幕上"。 */
+  #gate p.revoked[hidden] { display: none; }
+  #gate p.revoked { color: var(--err); }
 
   #toast {
     position: fixed; left: 50%; bottom: 84px; transform: translateX(-50%) translateY(8px);
@@ -2196,6 +2206,7 @@
 
 <div id="gate">
   <h1>需要访问令牌</h1>
+  <p class="revoked" id="gateRevoked" hidden>这台设备的授权已被移除，请重新扫码。</p>
   <p>在电脑上打开 DSH 的「设置 → 手机遥控」，用手机重新扫一次二维码就能进来。
      或者把那一页上的链接整条复制到浏览器地址栏打开。</p>
   <input id="gateInput" type="text" placeholder="粘贴 token" autocomplete="off"
@@ -2212,6 +2223,9 @@
 
   var DEFAULT_MODE = '__DEFAULT_MODE__';
   var NEEDS_TOKEN = __NEEDS_TOKEN__;
+  // 这台设备是**被撤销了**（名册里那条记录被删掉），还是从来没进过门？
+  // 由服务端判（它才知道凭据兑不兑得出来），页面只负责把那句话说给用户听。
+  var DEVICE_REVOKED = __DEVICE_REVOKED__;
   // 构建指纹，由服务端注入。拼在立绘地址后面，换了图浏览器就不会一直用缓存那张。
   var BUILD = '__BUILD__';
   // 单个文件的大小上限（字节），由服务端注入。页面里不写第二份——两处各写一个数，
@@ -7953,6 +7967,9 @@
     if (bad) history.replaceState(null, '', location.pathname);
     showGate();
     if (bad) $('gateErr').textContent = 'token 不正确，请核对后重试';
+    // 被撤销的那台设备：**说清发生了什么、下一步做什么**。不说的话，用户看到的
+    // 只是一张"要令牌"的页面——他昨天还能用，今天莫名其妙进不去了。
+    if (DEVICE_REVOKED) $('gateRevoked').hidden = false;
   } else {
     preloadPoses();
     connect();

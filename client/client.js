@@ -30,6 +30,14 @@ window.__ModuleLoader__.load({
     // 「远程窗口」取票那一条（宿主侧路由，只允许本机调用，见 lib/index.js）。
     // 它回 `{ ok:true, url:'http://127.0.0.1:<端口>/mini/mirror/?ticket=…', expiresIn:30 }`。
     var WINDOW_PATH = '/mini-remote/window';
+    // 「设备名册」那三条（宿主侧路由，只允许本机调用，见 lib/index.js）：
+    //   GET  /mini-remote/devices        → { ok:true, devices:[{id,name,kind,createdAt,lastSeen}] }
+    //   POST /mini-remote/devices/rename → { id, name } → { ok:true, device }
+    //   POST /mini-remote/devices/revoke → { id }       → { ok:true, id, dropped }
+    // **回执里永远没有 keyHash、也没有凭据本身**——名册那份东西只在电脑上、只在服务端。
+    var DEVICES_PATH = '/mini-remote/devices';
+    var DEVICE_RENAME_PATH = '/mini-remote/devices/rename';
+    var DEVICE_REVOKE_PATH = '/mini-remote/devices/revoke';
 
     // 侧栏那个图标和中间那一整屏面板共用的一个键。
     // 契约就是这么定的：侧栏条目的 `id` 按原样去寻址 main 槽里 key 相同的那个面板
@@ -64,6 +72,14 @@ window.__ModuleLoader__.load({
       // 所以外层给一个 320 的兜底高度，里面那个框绝对定位铺满——两种情况都不会塌成一条缝。
       frameWrap: { position: 'relative', boxSizing: 'border-box', width: '100%', height: '100%', minHeight: 320 },
       frame: { position: 'absolute', inset: 0, width: '100%', height: '100%', border: 0, display: 'block', background: 'var(--dsw-alias-bg-base,#fff)' },
+      // 「设备」那一块：一行一台。名字和说明在左边（flex:1，窄面板下先让它占满），
+      // 动作在右边；撤销那次「二次确认」就摊在这一行下面（这个文件里没有弹窗，
+      // 全站都是页内两步——跟着来）。
+      deviceRow: { display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center', marginTop: 12 },
+      deviceMain: { flex: '1 1 200px', minWidth: 0 },
+      deviceName: { fontWeight: 600, fontSize: 13, wordBreak: 'break-word' },
+      deviceActs: { display: 'flex', gap: 8, flex: 'none' },
+      deviceConfirm: { flex: '1 1 100%', display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' },
     };
 
     function MiniRemoteSettingsTab() {
@@ -107,6 +123,21 @@ window.__ModuleLoader__.load({
       var guideState = useState(false);
       var guideOpen = guideState[0];
       var setGuideOpen = guideState[1];
+      // 设备名册（第三步）：服务端那份名单、读不到时的原因，以及"正在改名"和
+      // "正在二次确认撤销"这两个**一次只可能有一处**的状态。
+      // 两个都存 id，不存整条记录——记录会随每次刷新变，存下来就会拿着一份旧名字去改。
+      var devicesState = useState(null);
+      var devices = devicesState[0];
+      var setDevices = devicesState[1];
+      var devErrState = useState(null);
+      var devicesError = devErrState[0];
+      var setDevicesError = devErrState[1];
+      var renameState = useState(null);
+      var renaming = renameState[0];
+      var setRenaming = renameState[1];
+      var confirmState = useState(null);
+      var confirming = confirmState[0];
+      var setConfirming = confirmState[1];
 
       // 同源 GET，不带任何 token：这台电脑自己读得到，别人的电脑读不到。
       useEffect(function () {
@@ -164,6 +195,135 @@ window.__ModuleLoader__.load({
           if (done && typeof done.then === 'function') done.then(function () { setCopied(url); }, function () {});
           else setCopied(url);
         } catch (e) { /* 剪贴板不可用：保持原样 */ }
+      };
+
+      /**
+       * 读设备名单。
+       *
+       * 每次动作之后都**重新读一遍服务端那份**，而不是在本地改一改数组（改名就把
+       * 名字换掉、撤销就把那一行删掉）：屏幕上显示的必须就是服务端此刻认的那份名册。
+       * 本地拼一份"看起来对"的列表，迟早和真名册分叉——而分叉的表现正是这一节最不能
+       * 出的那种错：「界面上删了，那台手机还能进」。
+       */
+      var loadDevices = function () {
+        return fetch(DEVICES_PATH)
+          .then(function (res) {
+            return res.json().then(
+              function (body) { return { status: res.status, body: body }; },
+              function () { return { status: res.status, body: null }; },
+            );
+          })
+          .then(function (r) {
+            var b = (r.body && typeof r.body === 'object') ? r.body : null;
+            if (b && b.ok && Array.isArray(b.devices)) {
+              setDevices(b.devices);
+              setDevicesError(null);
+            } else if (r.status === 404 || r.status === 405) {
+              // **这条路不在这儿**（宿主那一半是旧版，或者设置页没走到我们那台服务器）。
+              // 这一支单独写，是因为那种情况下服务端回的是一句给程序看的「not found」——
+              // 原样摆在设置页上，用户看到的就是一条外星文，而下一步其实只有一句话：重启。
+              setDevicesError('读设备名单失败：这台电脑上的服务没有这个接口（HTTP ' + r.status + '）。重启一次 DSH 再试。');
+            } else {
+              setDevicesError((b && b.error) || ('读设备名单失败：服务返回了 HTTP ' + r.status + '。'));
+            }
+          })
+          .catch(function (err) {
+            setDevicesError('读设备名单失败：' + ((err && err.message) || String(err)));
+          });
+      };
+
+      /**
+       * 名单在**配对信息到了之后**才拉。
+       *
+       * 判据只看"配对信息回来没有"，**不看它的 ok**：`ok:false` 说的是"这台电脑现在
+       * 没有手机连得上的地址"（比如只绑了回环），而设备名册跟那件事一点关系都没有——
+       * 地址连不上的时候，用户恰恰更需要看到名单、把旧设备撤掉。三条路由只要有
+       * webServer 就在，和手机服务绑了哪个地址无关。
+       */
+      useEffect(function () {
+        if (!info) return undefined;
+        loadDevices();
+        return undefined;
+      }, [info]);
+
+      /**
+       * 一次 POST + 解析 JSON 的短写法。
+       *
+       * **只给这一节新加的两条动作（改名 / 撤销）用**：文件里别处那些各自还带着自己的
+       * 失败分支（有的要把 appSecret 留着、有的要带一条开启链接），硬拧成一股反而看不清。
+       * 这里两条的回执形状一样，才值得这一个函数。
+       */
+      var postJson = function (path, body) {
+        return fetch(path, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(body),
+        }).then(function (res) {
+          return res.json().then(
+            function (b) { return { status: res.status, body: b }; },
+            function () { return { status: res.status, body: null }; },
+          );
+        });
+      };
+
+      /** 点「改名」：把那台设备切到编辑态。**同时收起别的确认框**（一次只做一件事）。 */
+      var startRename = function (one) {
+        setConfirming(null);
+        setDevicesError(null);
+        setRenaming({ id: one.id, draft: typeof one.name === 'string' ? one.name : '' });
+      };
+
+      /** 存新名字。名字只是标签，存完照旧认人——所以这里不掐线、不重连。 */
+      var saveRename = function () {
+        if (!renaming) return;
+        var next = (renaming.draft || '').trim();
+        if (!next) {
+          setDevicesError('名字不能是空的。');
+          return;
+        }
+        setBusy(true);
+        postJson(DEVICE_RENAME_PATH, { id: renaming.id, name: next })
+          .then(function (r) {
+            var b = (r.body && typeof r.body === 'object') ? r.body : null;
+            if (!b || b.ok !== true) {
+              setDevicesError((b && b.error) || ('改名失败：服务返回了 HTTP ' + r.status + '。'));
+              return undefined;
+            }
+            setDevicesError(null);
+            setRenaming(null);
+            // **改完再列一次**：屏幕上那份必须来自服务端，不能是我们以为改成了什么。
+            return loadDevices();
+          })
+          .catch(function (err) {
+            setDevicesError('改名失败：' + ((err && err.message) || String(err)));
+          })
+          .then(function () { setBusy(false); });
+      };
+
+      /**
+       * 真的撤销一台设备。**只有二次确认之后才会走到这儿**（见 devicesBlock：
+       * 点「撤销」只是把那句后果摊出来，要点「确认撤销」才发这一条）。
+       *
+       * 服务端那一步会删记录 + 掐掉它手上的活连接（见 lib/index.js 与 lib/server.js
+       * 的 dropDeviceConnections）。这边只管如实转述结果，成功之后重新列一次。
+       */
+      var revokeDevice = function (id) {
+        setBusy(true);
+        postJson(DEVICE_REVOKE_PATH, { id: id })
+          .then(function (r) {
+            var b = (r.body && typeof r.body === 'object') ? r.body : null;
+            if (!b || b.ok !== true) {
+              setDevicesError((b && b.error) || ('撤销失败：服务返回了 HTTP ' + r.status + '。'));
+              return undefined;
+            }
+            setDevicesError(null);
+            setConfirming(null);
+            return loadDevices();
+          })
+          .catch(function (err) {
+            setDevicesError('撤销失败：' + ((err && err.message) || String(err)));
+          })
+          .then(function () { setBusy(false); });
       };
 
       // 和服务端那道校验是同一个数。前端先拦一道只是为了让「太短了」当场说出来，
@@ -357,11 +517,25 @@ window.__ModuleLoader__.load({
           save: saveFeishu,
           guideOpen: guideOpen,
           toggleGuide: function () { setGuideOpen(function (v) { return !v; }); },
+        }, {
+          // 「设备」那一块：名单 + 两个动作 + 只属于这一块的失败原因。
+          list: devices,
+          error: devicesError,
+          renaming: renaming,
+          confirming: confirming,
+          busy: busy,
+          startRename: startRename,
+          setRenaming: setRenaming,
+          cancelRename: function () { setRenaming(null); setDevicesError(null); },
+          saveRename: saveRename,
+          askRevoke: function (id) { setRenaming(null); setDevicesError(null); setConfirming(id); },
+          cancelRevoke: function () { setConfirming(null); },
+          revoke: revokeDevice,
         }),
       );
     }
 
-    function content(info, failure, copied, copy, busy, toggle, pwd, serve, feishu) {
+    function content(info, failure, copied, copy, busy, toggle, pwd, serve, feishu, dev) {
       if (failure) return h('div', { style: styles.error }, failure);
       if (!info) return h('div', { style: styles.loading }, '正在读取配对信息…');
 
@@ -392,7 +566,119 @@ window.__ModuleLoader__.load({
       // 飞书那一块：**只要服务端带了 feishu 就出现**（成功、失败、服务还没起来那几条
       // 路径上都带着它）。它是独立的一条通路，手机服务有没有起来都不该拦着用户改它。
       if (info.feishu) blocks.push(feishuBlock(info.feishu, feishu));
+      // 设备那一块：**放在最后**。它是"谁进得来"的账本，改名/撤销都在这里；
+      // 名单还没读到（服务端没给 / 读失败）而报错也没有时，整块不出现——
+      // 不摆一个空壳，也不把上面几块的位置动一寸。
+      if (dev && (dev.list !== null || dev.error)) blocks.push(devicesBlock(dev));
       return h('div', null, blocks);
+    }
+
+    /** 时间戳 → 「2026-10-16 14:20」。取不到（0/坏值）回 null，由调用方去说「还没有记录」。 */
+    function formatTime(ms) {
+      var n = Number(ms);
+      if (!n) return null;
+      var t = new Date(n);
+      if (isNaN(t.getTime())) return null;
+      var p = function (v) { return (v < 10 ? '0' : '') + v; };
+      return t.getFullYear() + '-' + p(t.getMonth() + 1) + '-' + p(t.getDate())
+        + ' ' + p(t.getHours()) + ':' + p(t.getMinutes());
+    }
+
+    /**
+     * 一台设备那一行里那句小字：**类型 · 创建时间 · 最近使用时间**。
+     *
+     * `lastSeen` 为 0 时说「还没有记录」而不是编一个时间：老记录（第三步之前写下的
+     * 那几条）本来就没有这个字段，编成"创建时间"等于凭空造一次使用。
+     */
+    function deviceMeta(one) {
+      var kind = one.kind === 'phone' ? '手机' : String(one.kind || '设备');
+      var made = formatTime(one.createdAt);
+      var seen = formatTime(one.lastSeen);
+      var parts = [kind];
+      parts.push(made ? '创建于 ' + made : '创建时间读不到');
+      parts.push(seen ? '最近使用 ' + seen : '最近使用 还没有记录');
+      return parts.join(' · ');
+    }
+
+    /**
+     * 「设备」那一块：**谁进得来、什么时候进的、改个名字、撤销一台**（2026-10-16 第三步）。
+     *
+     * ## 为什么撤销的入口在电脑上（用户拍板的）
+     *
+     * 手机页上"删掉自己"有个死结：删完当场进不去，而下一步正是要在那台手机上做什么。
+     * 电脑这边没这个问题——撤销的就是别人（或者手上这台的旧记录）。
+     *
+     * ## 撤销为什么要点两下
+     *
+     * 删了那台设备就得**重新扫码**（凭据找不回来，这是设计的一部分，不是缺陷）。
+     * 一次点击就造成这个后果太重了，所以第一下只把后果摊在那一行下面，第二下
+     * （「确认撤销」）才真的发出去。**不用 window.confirm**：那种弹窗在微信这类内嵌
+     * 浏览器里会被直接屏蔽，屏蔽时万一返回真值就等于确认被跳过（手机页那边为同一件
+     * 事写过同一段话）。
+     *
+     * ## 名字和撤销的性质不一样
+     *
+     * 名字只是标签（见 lib/devices.js 开头）：改了照旧认人。所以「改名」一个点击就够，
+     * 不用确认。
+     */
+    function devicesBlock(d) {
+      var list = Array.isArray(d.list) ? d.list : [];
+      var rows = list.map(function (one) {
+        var editing = Boolean(d.renaming && d.renaming.id === one.id);
+        var asking = d.confirming === one.id;
+        return h('div', { key: one.id, style: styles.deviceRow },
+          h('div', { style: styles.deviceMain },
+            editing
+              ? h('input', {
+                type: 'text',
+                value: d.renaming.draft,
+                spellCheck: false,
+                placeholder: '给这台设备起个名字',
+                disabled: Boolean(d.busy),
+                onChange: function (e) { d.setRenaming({ id: one.id, draft: e.target.value }); },
+                style: styles.input,
+              })
+              : h('div', { style: styles.deviceName }, one.name ? one.name : '（这台设备没有名字）'),
+            h('div', { style: styles.muted }, deviceMeta(one)),
+          ),
+          h('div', { style: styles.deviceActs },
+            editing
+              ? h('button', {
+                type: 'button', disabled: Boolean(d.busy), onClick: function () { d.saveRename(); }, style: styles.btn,
+              }, d.busy ? '保存中…' : '保存')
+              : h('button', {
+                type: 'button', disabled: Boolean(d.busy), onClick: function () { d.startRename(one); }, style: styles.btn,
+              }, '改名'),
+            editing
+              ? h('button', {
+                type: 'button', disabled: Boolean(d.busy), onClick: function () { d.cancelRename(); }, style: styles.btn,
+              }, '取消')
+              : h('button', {
+                type: 'button', disabled: Boolean(d.busy), onClick: function () { d.askRevoke(one.id); }, style: styles.btn,
+              }, '撤销'),
+          ),
+          // 二次确认：**把后果写在按钮旁边**，不是写一句"确定吗"。
+          asking ? h('div', { style: styles.deviceConfirm },
+            h('div', { style: styles.warn }, '撤销后，这台设备要重新扫码才能再用。'),
+            h('button', {
+              type: 'button', disabled: Boolean(d.busy), onClick: function () { d.revoke(one.id); }, style: styles.btn,
+            }, d.busy ? '撤销中…' : '确认撤销'),
+            h('button', {
+              type: 'button', disabled: Boolean(d.busy), onClick: function () { d.cancelRevoke(); }, style: styles.btn,
+            }, '取消'),
+          ) : null,
+        );
+      });
+
+      return h('div', { key: 'devices', style: styles.block },
+        h('div', { style: styles.entryTitle }, '设备'),
+        h('div', { style: styles.muted },
+          '每一台手机第一次扫码进来时会自动登记，之后不用再扫码。撤销之后，那台设备要重新扫码才能再用。'),
+        d.error ? h('div', { style: styles.error }, d.error) : null,
+        rows.length
+          ? h('div', null, rows)
+          : (d.error ? null : h('div', { style: styles.muted, marginTop: 10 }, '这台电脑上还没有登记过的设备。')),
+      );
     }
 
     /**
