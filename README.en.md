@@ -47,6 +47,7 @@ When running complex engineering tasks with desktop or web AI agents, a single t
 - 🐬 **Lightweight Anthropomorphic Feedback**: Inter-step narrations are spoken aloud by the whale girl sprite in speech bubbles; execution progress and queued instructions are visualized on an exact scale, filtering out raw reasoning blocks.
 - 💬 **Feishu Long-Connection Remote**: Direct bidirectional communication through the Feishu Open Platform WebSocket long connection without public ports, supporting text dialogue, multiple-choice responses, and the `/会话` switch command.
 - 🗂️ **In-Place Mobile Session Management**: Rename, pin, archive, or fork sessions from the most recent completed turn directly on your phone, with clear indicators for pending approvals and questions.
+- 💻 **Desktop Embedded "Remote Window"**: Adds a "Remote Window" shortcut to the left sidebar of the DSH desktop app, letting you open your local desktop DSH interface directly inside the main view; click the row again to exit and return to where you were (local desktop only for now).
 - 🔒 **Rigorous Security Boundaries**: All API routes enforce constant-time token comparison to prevent timing side-channel attacks; built-in rate limiting locks out sources after 5 failed attempts in 1 minute; pairing data is accessible solely from the host loopback interface.
 
 ---
@@ -169,6 +170,17 @@ Enabling "Advanced settings" in the mobile settings drawer exposes the "Desktop 
 
 > ⚠️ **Notice**:
 > Enabling the desktop interface extends the mobile access token's scope to the entire desktop management plane. A secondary confirmation is required. If the host cannot determine the desktop listening port, this option is hidden automatically.
+
+### Desktop "Remote Window"
+
+The plugin registers a "Remote Window" icon in the DSH desktop left sidebar. Clicking it displays your local desktop DSH interface directly inside the main view without switching back and forth between an external browser and the client; clicking anywhere along the sidebar row (icon, label, or empty space) exits the view and returns to your previous panel.
+
+- **Security Credentials**: Opening the window automatically generates a one-time temporary pass (ticket) valid for 30 seconds. The pass is issued directly by the desktop backend service, so your master access token is never handed over to the browser.
+- **Embedding Policy**: By default, only local pages on this machine are allowed to embed this interface, preventing unauthorized third-party sites from framing it.
+- **Session Lifecycle**: The window's pass expires together with DSH — once DSH restarts, the pass becomes invalid immediately, and you simply click the icon to open it again.
+
+> ⚠️ **Notice**:
+> Currently available only on the local desktop app. Remote cross-machine access to this window will be supported in a future release.
 
 ### Feishu Bot Setup Guide
 
