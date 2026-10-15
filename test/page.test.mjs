@@ -24,10 +24,8 @@ assert.ok(end > start, `在 page.html 里找不到锚点「${END}」，渲染器
 const md = new Function(html.slice(start, end)
   // 渲染器拼图片地址要用 artUrl，它定义在切片范围之外（页面里在立绘那一段），
   // 所以这里补一个桩。测试关心的是「名字 → /mini/art/<名字>.webp」这个形状，
-  // 不关心 token 的实际取值。若哪天 artUrl 被挪进切片，重复声明也是合法的。
-  + '\nfunction artUrl(f) { return "/mini/art/" + f + ".webp?token=TEST"; }'
-  // 写路径那种图片地址会带上 token（imageSrc 里读 state.token），给个桩就够。
-  + '\nvar state = { token: "TEST" };'
+  // 不关心指纹的实际取值。若哪天 artUrl 被挪进切片，重复声明也是合法的。
+  + '\nfunction artUrl(f) { return "/mini/art/" + f + ".webp?v=BUILD"; }'
   + '\nreturn { escapeHtml, mdInline, mdToHtml, ICON_COPY, ICON_DONE };')()
 
 /**
@@ -266,23 +264,24 @@ test('链接：markdown 写法与裸网址都变可点的 a 标签', () => {
 })
 
 test('图片：本机名字和外链都认，且不给注入留口子', () => {
-  // ① 一个名字（带不带 .webp 都行）→ 走本机图片通道，和立绘同一条路、同样带 token。
+  // ① 一个名字（带不带 .webp 都行）→ 走本机图片通道，和立绘同一条路。
+  //    **地址里不带令牌**（2026-10-16 第二步）：靠浏览器自己带上的设备 cookie 认人。
   assert.match(md.mdToHtml('![深色](out-demo)'),
-    /<img class="md-img" src="\/mini\/art\/out-demo\.webp\?token=/)
+    /<img class="md-img" src="\/mini\/art\/out-demo\.webp\?v=BUILD"/)
   assert.match(md.mdToHtml('![深色](out-demo.webp)'),
-    /src="\/mini\/art\/out-demo\.webp\?token=/)
+    /src="\/mini\/art\/out-demo\.webp\?v=BUILD"/)
   // ①b 写成 lib/art/out-demo.webp 这种带前缀的也认——2026-09-28 助手在正文里就是这么写的，
   //    手机上成了破图标，用户第三次为此来问。写法不该这么脆。
   assert.match(md.mdToHtml('![深色](lib/art/out-demo.webp)'),
-    /src="\/mini\/art\/out-demo\.webp\?token=/)
+    /src="\/mini\/art\/out-demo\.webp\?v=BUILD"/)
   assert.match(md.mdToHtml('![深色](./lib/art/out-demo.webp)'),
-    /src="\/mini\/art\/out-demo\.webp\?token=/)
+    /src="\/mini\/art\/out-demo\.webp\?v=BUILD"/)
   // ①c 直接写一张图在电脑上的位置（相对项目根，或者 Windows 绝对路径）→ 走 ?p=，
-  //    PNG/JPG 也行，不要求先把图拷进 lib/art。
+  //    PNG/JPG 也行，不要求先把图拷进 lib/art。同样**不带令牌**。
   assert.match(md.mdToHtml('![截图](dsh-image-gen/a.png)'),
-    /src="\/mini\/art\/\?p=dsh-image-gen%2Fa\.png&token=TEST"/)
+    /src="\/mini\/art\/\?p=dsh-image-gen%2Fa\.png"/)
   assert.match(md.mdToHtml('![截图](C:\\Users\\me\\shot.png)'),
-    /src="\/mini\/art\/\?p=C%3A%5CUsers%5Cme%5Cshot\.png&token=TEST"/)
+    /src="\/mini\/art\/\?p=C%3A%5CUsers%5Cme%5Cshot\.png"/)
   // ② 完整 http(s) 链接原样用，手机直接去那个网站取。
   assert.match(md.mdToHtml('![图](https://a.example/x.png)'),
     /src="https:\/\/a\.example\/x\.png"/)
@@ -834,32 +833,32 @@ test('服务器构建号变了，页面要自己刷一次（不然会拿旧规�
   const from = html.indexOf('  function watchBuild() {')
   const to = html.indexOf('  // 复制按钮：')
   assert.ok(from > 0 && to > from, '没切到 watchBuild 那段源码')
-  const make = (api, build, inputValue, token) => {
+  const make = (api, build, inputValue, entered) => {
     const reloads = []
     const fn = new Function('api', 'BUILD', 'state', 'inputEl', 'location',
       `${html.slice(from, to)}\nreturn watchBuild;`)(
-      api, build, { token }, { value: inputValue }, { reload: () => reloads.push(1) })
+      api, build, { entered }, { value: inputValue }, { reload: () => reloads.push(1) })
     return { fn, reloads }
   }
-  const same = make(() => Promise.resolve({ build: 'abc' }), 'abc', '', 't')
+  const same = make(() => Promise.resolve({ build: 'abc' }), 'abc', '', true)
   await same.fn()
   assert.equal(same.reloads.length, 0, '构建号一样就不该刷')
 
-  const stale = make(() => Promise.resolve({ build: 'def' }), 'abc', '', 't')
+  const stale = make(() => Promise.resolve({ build: 'def' }), 'abc', '', true)
   await stale.fn()
   assert.equal(stale.reloads.length, 1, '构建号变了要刷一次')
 
-  const typing = make(() => Promise.resolve({ build: 'def' }), 'abc', '还没发出去的话', 't')
+  const typing = make(() => Promise.resolve({ build: 'def' }), 'abc', '还没发出去的话', true)
   await typing.fn()
   assert.equal(typing.reloads.length, 0, '正在打字时不能刷——不能把用户没发出去的话吞掉')
 
-  const offline = make(() => Promise.reject(new Error('连不上')), 'abc', '', 't')
+  const offline = make(() => Promise.reject(new Error('连不上')), 'abc', '', true)
   await offline.fn()
   assert.equal(offline.reloads.length, 0, '读不到就什么都不做，别把页面弄崩')
 
-  const noToken = make(() => { throw new Error('不该发请求') }, 'abc', '', '')
-  await noToken.fn()
-  assert.equal(noToken.reloads.length, 0, '没 token 时不发请求')
+  const notIn = make(() => { throw new Error('不该发请求') }, 'abc', '', false)
+  await notIn.fn()
+  assert.equal(notIn.reloads.length, 0, '没进门时不发请求')
 })
 
 test('建出来的层上真的挂着 data-frames：冲刺 6，其余 2', () => {
@@ -899,12 +898,14 @@ test('立绘站哪儿由行宽决定，跟气泡宽窄无关', () => {
   assert.ok(!/justify-content/.test(row), '行内不能再居中，否则立绘又被气泡推着走')
 })
 
-test('立绘地址由 artUrl 统一拼，带 token 和构建指纹', () => {
-  assert.match(html, /function artUrl\(file\)/, '地址拼法要收在一个函数里')
-  assert.match(html, /'\/mini\/art\/' \+ file \+ '\.webp\?token='/,
-    '立绘要带 token——立绘接口和别的接口一样要鉴权')
-  assert.match(html, /&v=' \+ encodeURIComponent\(BUILD\)/,
+test('立绘地址由 artUrl 统一拼，带构建指纹、不带令牌', () => {
+  const src = html.slice(html.indexOf('function artUrl(file)'), html.indexOf('function paintBubble'))
+  assert.ok(src.length > 0, '找不到 artUrl 那一段')
+  assert.match(src, /'\/mini\/art\/' \+ file \+ '\.webp\?v='/,
+    '立绘地址只带构建指纹——令牌不再拼进地址（第二步：靠浏览器自动带的设备 cookie 认人）')
+  assert.match(src, /'\.webp\?v=' \+ encodeURIComponent\(BUILD\)/,
     '要带构建指纹，否则换了图浏览器会一直用缓存那张')
+  assert.ok(!/token/i.test(src), '立绘地址里不该再出现令牌')
   const uses = html.match(/artUrl\(POSES\[i\]\.file\)/g) || []
   assert.equal(uses.length, 2, `建层和预加载都要用它，实际用了 ${uses.length} 次`)
 })
@@ -913,8 +914,32 @@ test('立绘在页面打开时就全部预加载', () => {
   // 不预加载的话，第一次「正在执行」会先闪一下空白再出图。
   assert.match(html, /function preloadPoses/, '要有预加载')
   assert.match(html, /preloadPoses\(\);\s*\n\s*connect\(\);/, '启动时要先预加载再连')
-  assert.match(html, /preloadPoses\(\);\s*\n\s*connect\(\);\s*\n\s*\}\)\s*\n\s*\.catch/,
-    '从门禁页手输 token 进来的人也要预加载——立绘地址是拿 state.token 拼的')
+})
+
+/**
+ * 第二步（2026-10-16）：**手机页不再自己携带令牌**。
+ *
+ * 为什么非做不可：令牌 = 入场邀请函，只在门口用一次。页面手里留一份，就等于
+ * 「名册里删掉那条记录」撤不掉这台设备——它还会拿令牌进门，撤销是假的。
+ * 身份从此是一枚 HttpOnly 设备 cookie，浏览器自己会给同源的每一趟请求带上。
+ *
+ * 这一条是**扫描**：以后有人图省事再把令牌拼回请求头或地址，它当场变红。
+ */
+test('第二步：手机页不再自己携带令牌（请求头、地址、localStorage 里都没有）', () => {
+  assert.ok(!/X-Mini-Token/.test(html), '请求头里不该再有令牌')
+  assert.ok(!/dshMiniToken/.test(html), 'localStorage 里不该再存令牌')
+  assert.ok(!/state\.token/.test(html), 'state 里不该再有 token 这一项——进没进门看 state.entered')
+  // 地址里唯一允许出现 `?token=` 的地方是**入场／闸门那一次**：把令牌交回服务端门口，
+  // 由那里换成设备凭据。别处一处都不许有（连注释里出现也算——那说明有人又在拼它）。
+  const uses = html.match(/\?token=/g) || []
+  assert.equal(uses.length, 1, `只该剩入场那一处，实际 ${uses.length} 处`)
+  assert.match(html, /location\.replace\(location\.pathname \+ '\?token=' \+ encodeURIComponent\(value\)\)/,
+    '闸门必须把令牌交回门口那一次，而不是留在手里自己用')
+  // 这几条路全都得靠浏览器自动带的 cookie 走通（SSE / 立绘 / 镜像框）。
+  assert.match(html, /new EventSource\('\/mini\/api\/stream\?clientId='/,
+    'SSE 的地址里不该再有令牌')
+  assert.match(html, /return '\/mini\/mirror\/';/, '镜像框的地址里不该再有令牌')
+  assert.match(html, /'\/mini\/art\/' \+ file \+ '\.webp\?v='/)
 })
 
 test('系统里设了「减少动态效果」就不轮播、不浮动', () => {
@@ -1103,7 +1128,7 @@ function buildWhale({ token = 'tok', reduced = false, apiRejects = false, apiErr
   }
 }
 
-test('每个立绘都建了层，地址带着 token 和构建指纹', () => {
+test('每个立绘都建了层，地址只带构建指纹', () => {
   const w = buildWhale({ token: 'abc def' })
   w.preloadPoses()
   const n = w.POSES.length
@@ -1111,12 +1136,12 @@ test('每个立绘都建了层，地址带着 token 和构建指纹', () => {
   // ——它不占轮播的格子，只在有台词时插播一下，所以是单独一层。
   assert.equal(w.els.workStage.children.length, n + 1, `${n} 个姿势各一层，外加说话那张`)
   assert.equal(w.els.workStage.children[0].style.backgroundImage,
-    'url("/mini/art/work-1-ready.webp?token=abc%20def&v=abc123")',
-    'token 要转义，指纹要带上')
+    'url("/mini/art/work-1-ready.webp?v=abc123")',
+    '地址里只有构建指纹——令牌不再拼进来（第二步）')
   // #work 是 hidden，浏览器不会为它下载背景图，所以必须另有游离的 <img> 主动拉
   const warmed = w.created.filter((e) => e.id === 'img')
   assert.equal(warmed.length, n + 1, '每一张都要主动预加载，不然第一次会闪空白')
-  assert.equal(warmed[0].src, '/mini/art/work-1-ready.webp?token=abc%20def&v=abc123')
+  assert.equal(warmed[0].src, '/mini/art/work-1-ready.webp?v=abc123')
 })
 
 test('每个姿势的翻帧速度不一样，快的快、慢的慢', () => {
@@ -1963,8 +1988,8 @@ test('传文件时不写 Content-Type: application/json', async () => {
 
   const seen = []
   // eslint-disable-next-line no-new-func
-  const build = new Function('state', 'fetch', `${html.slice(as, ae)}\nreturn api;`)
-  const api = build({ token: 'tok' }, (path, opts) => {
+  const build = new Function('fetch', `${html.slice(as, ae)}\nreturn api;`)
+  const api = build((path, opts) => {
     seen.push(opts)
     return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
   })
@@ -1972,10 +1997,14 @@ test('传文件时不写 Content-Type: application/json', async () => {
   await api('/mini/api/upload', { method: 'POST', body: new Blob(['hi']) })
   assert.equal(seen[0].headers['Content-Type'], undefined,
     '文件不能声明成 JSON——那会让服务端收到一个错的类型')
-  assert.equal(seen[0].headers['X-Mini-Token'], 'tok', '但 token 照样要带')
+  // **每一趟请求都不带令牌**（2026-10-16 第二步）：身份是一枚 HttpOnly 设备 cookie，
+  // 浏览器自己会给同源请求带上；页面手里还留着令牌，就等于撤销撤不掉这台设备。
+  assert.equal(seen[0].headers['X-Mini-Token'], undefined, '上传不该带令牌')
+  assert.ok(!/X-Mini-Token/.test(html.slice(as, ae)), '这段源码里根本不该再出现这个头')
 
   await api('/mini/api/send', { method: 'POST', body: JSON.stringify({ text: 'x' }) })
   assert.equal(seen[1].headers['Content-Type'], 'application/json', '普通请求还是 JSON')
+  assert.equal(seen[1].headers['X-Mini-Token'], undefined, '普通请求也不该带令牌')
 })
 
 test('输入框旁边有上传按钮，文件选择器是藏起来的', () => {
@@ -2192,7 +2221,7 @@ const se = html.indexOf(SE)
 assert.ok(ss > 0 && se > ss, `找不到 SSE 那一段的锚点（${SS}）`)
 
 function feedReply(payload, { mode = 'minimal', history = [] } = {}) {
-  const state = { token: 'tok', mode, history, connected: false, running: true }
+  const state = { entered: true, mode, history, connected: false, running: true }
   const els = {}
   let source = null
   class FakeEventSource {
@@ -4627,7 +4656,7 @@ function wiringHarness(apiImpl) {
   assert.ok(b > a, `在 page.html 里找不到锚点「${END_AT}」`)
 
   const state = {
-    mode: 'full', token: 'tk', boundSessionId: 's1',
+    mode: 'full', entered: true, boundSessionId: 's1',
     trajectory: [], trajectorySeq: 0, trajectoryEpoch: '',
     trajectoryLoading: false, trajectoryNote: '', trajectoryTruncated: false,
   }

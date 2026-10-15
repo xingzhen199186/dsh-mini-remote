@@ -12,6 +12,9 @@
  *   ③ **老设备升级不许踢人**：只有令牌的老设备打开手机页时自动补上设备身份，
  *      而它原来那份令牌照旧能用（设计里的硬要求：不能「升级即全踢」）。
  *   ④ **删掉记录 = 那台设备当场失效**（不必重启），而且文件里只有密钥的哈希。
+ *   ⑤ **第二步（2026-10-16）**：手机页自己不再携带令牌——入场那一下服务端**不再把令牌
+ *      cookie 递回手机**（老设备手里那枚在补上凭据的同一个响应里作废），撤销才不是假的。
+ *      见文件末尾那一组。
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -28,6 +31,7 @@ import { createDevices } from '../lib/devices.js'
 
 const TOKEN = 'testtoken0123456789abcdef012345'
 const DEVICE_COOKIE = 'dsh_mini_device'
+const TOKEN_COOKIE = 'dsh_mini_token'
 
 // ---------------------------------------------------------------- 夹具
 
@@ -112,13 +116,18 @@ function records(file) {
   }
 }
 
-/** 从响应里把设备凭据取出来（没发就是空串）。 */
-function credentialFrom(res) {
+/** 这次响应写下的全部 Set-Cookie 段（一段都没有就是空数组）。 */
+function setCookieList(res) {
   const all = typeof res.headers.getSetCookie === 'function'
     ? res.headers.getSetCookie()
-    : String(res.headers.get('set-cookie') ?? '').split(', ')
+    : [String(res.headers.get('set-cookie') ?? '')]
+  return all.filter(Boolean)
+}
+
+/** 从响应里把设备凭据取出来（没发就是空串）。 */
+function credentialFrom(res) {
   const head = `${DEVICE_COOKIE}=`
-  for (const one of all) {
+  for (const one of setCookieList(res)) {
     if (!one.startsWith(head)) continue
     return decodeURIComponent(one.slice(head.length).split(';')[0])
   }
@@ -324,4 +333,91 @@ test('文件里只有密钥的哈希；删掉记录 → 那台设备的凭据当
     headers: { Cookie: `${DEVICE_COOKIE}=${cred}` },
   })
   assert.equal(after.status, 401, '记录删了，这枚凭据当场失效——这就是撤销的语义')
+})
+
+// ---------------------------------------------------------------- ⑥ 第二步：手机不再携带令牌
+//
+// 令牌 = **入场邀请函**：门口验过就换成设备凭据，手机手上不留它。
+// 为什么这一步非做不可：邀请函要是长期留在浏览器里，「名册里删掉那条记录」就撤不掉
+// 这台设备——它还会拿邀请函进门，撤销就是假的。
+
+test('第二步：入场那一下不再把令牌 cookie 递回手机', async (t) => {
+  const { devices } = tempDevices()
+  const s = await boot({ devices })
+  t.after(s.close)
+
+  const page = await fetch(`${s.base}/mini?token=${TOKEN}`)
+  assert.equal(page.status, 200)
+  const handed = setCookieList(page)
+  assert.ok(!handed.some((one) => one.startsWith('dsh_mini_token=')),
+    '入场之后手机手上不该留令牌 cookie——留着它，「删掉记录」就撤不掉这台设备')
+  const cred = credentialFrom(page)
+  assert.ok(cred, '该给的是设备凭据')
+  assert.ok((await page.text()).includes('var NEEDS_TOKEN = false;'))
+
+  // 浏览器会把服务端给的那一份原样留着，之后的请求全靠它——这里就照这个来。
+  const cookie = `${DEVICE_COOKIE}=${cred}`
+  assert.equal((await fetch(`${s.base}/mini/api/state`, { headers: { Cookie: cookie } })).status, 200,
+    '光靠这枚凭据要走得通（手机页之后每一趟都是这么走的）')
+})
+
+test('第二步：撤销是真的——删掉记录，只带凭据的那台设备当场什么都做不了', async (t) => {
+  const { file, devices } = tempDevices()
+  const s = await boot({ devices })
+  t.after(s.close)
+
+  const page = await fetch(`${s.base}/mini?token=${TOKEN}`)
+  // **照真浏览器那样，服务端给下的 cookie 一枚不挑、全留下**。挑着留会漏掉一整类问题：
+  // 入口要是又把令牌 cookie 递回来，这里就抓不住了——而那正是「撤销是假的」的病根。
+  const cookie = setCookieList(page).map((one) => one.split(';')[0]).join('; ')
+  assert.ok(cookie.includes(`${DEVICE_COOKIE}=`), '入场该给一枚设备凭据')
+  assert.ok(!cookie.includes(`${TOKEN_COOKIE}=`), '入场不该给令牌 cookie')
+  assert.equal((await fetch(`${s.base}/mini/api/state`, { headers: { Cookie: cookie } })).status, 200)
+
+  // 撤销 = 把名册里那条记录删掉（下一步的设置页就是这么做的）。
+  writeFileSync(file, `${JSON.stringify({ version: 1, devices: [] }, null, 2)}\n`)
+  assert.equal((await fetch(`${s.base}/mini/api/state`, { headers: { Cookie: cookie } })).status, 401,
+    '删掉记录之后，手机手里那点东西必须当场作废——不然撤销是假的')
+  const again = await fetch(`${s.base}/mini`, { headers: { Cookie: cookie } })
+  assert.ok((await again.text()).includes('var NEEDS_TOKEN = true;'),
+    '撤销之后连手机页都该回门禁页，得重新扫码')
+})
+
+test('第二步：老设备回来时补上设备凭据，同一个响应里把手里那枚令牌作废（人不被踢）', async (t) => {
+  const { devices } = tempDevices()
+  const s = await boot({ devices })
+  t.after(s.close)
+
+  // 老设备的样子：只有 `dsh_mini_token` 那枚 cookie，没有设备凭据，地址里也没有 ?token=。
+  const page = await fetch(`${s.base}/mini`, { headers: { Cookie: `dsh_mini_token=${TOKEN}` } })
+  assert.equal(page.status, 200, '老设备照旧进得来——升级不许踢人')
+  assert.ok((await page.text()).includes('var NEEDS_TOKEN = false;'), '老设备看到的是正常页面')
+  const cred = credentialFrom(page)
+  assert.ok(cred, '顺手补一枚设备凭据——用户零动作')
+  const cleared = setCookieList(page).find((one) => one.startsWith('dsh_mini_token='))
+  assert.ok(cleared && /Max-Age=0/.test(cleared),
+    '同一个响应里要把老设备手里那枚令牌 cookie 作废——邀请函用完就收回')
+
+  // 换过来的这枚立刻能用：**人不被踢**。
+  const byDevice = await fetch(`${s.base}/mini/api/state`, {
+    headers: { Cookie: `${DEVICE_COOKIE}=${cred}` },
+  })
+  assert.equal(byDevice.status, 200, '老设备升级之后靠的是这枚新凭据')
+})
+
+test('第二步：没配设备名册时照旧递回令牌 cookie——不许把用户关在门外', async (t) => {
+  // `devices` 缺失 = 「这一步没开设备身份」（见 lib/server.js 里 createMiniServer 的说明）。
+  // 这一档下要是也把令牌 cookie 收走，手机下一趟就一个凭据都带不上。
+  const s = await boot({})
+  t.after(s.close)
+
+  const page = await fetch(`${s.base}/mini?token=${TOKEN}`)
+  assert.equal(page.status, 200)
+  const handed = setCookieList(page)
+  const kept = handed.find((one) => one.startsWith('dsh_mini_token='))
+  assert.ok(kept, '设备身份没开：门口只能照旧给令牌 cookie，什么都不给等于把人关在门外')
+  const state = await fetch(`${s.base}/mini/api/state`, {
+    headers: { Cookie: kept.split(';')[0] },
+  })
+  assert.equal(state.status, 200, '照旧进得来——这一档的行为一个字没变')
 })

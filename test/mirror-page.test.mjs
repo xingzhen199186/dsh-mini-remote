@@ -8,8 +8,9 @@
  *   ② 开启要**点两次**——第一次只把后果摆出来；
  *   ③ 关掉不拦（往更安全的方向走，不用确认）。
  *
- * 还测一条会悄悄坏掉的：入口链接必须**带上令牌**。新标签里没有 X-Mini-Token 头，
- * 不带令牌的那一下会被服务端 401——而且这个错在电脑上看不出来，只有手机上才发现。
+ * 还测一条会悄悄坏掉的：入口链接必须**是带尾斜杠的 `/mini/mirror/`**。
+ * （2026-10-16 第二步之前它还带 `?token=`；现在不再带了——那个框是同源文档，
+ * 设备 cookie 会自动跟着它的每一条请求走。少了尾斜杠照样白屏，所以那条还钉着。）
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -288,17 +289,19 @@ function mirrorOpenHarness() {
     addEventListener(type, fn) { (this.listeners[type] = this.listeners[type] || []).push(fn) },
   }
   const out = new Function('$', 'state', 'api', 'toast', 'window', 'location', src)(
-    (k) => table[k], { token: 'TK-123' }, () => Promise.resolve({ ok: true }), (m) => toasts.push(m),
+    (k) => table[k], { entered: true }, () => Promise.resolve({ ok: true }), (m) => toasts.push(m),
     win, { origin: 'http://phone' },
   )
   return { ...out, els: table, toasts, win }
 }
 
-test('进阶设置：地址要带令牌和尾斜杠（框里那些请求不一定都带得上 cookie）', () => {
+test('进阶设置：地址是带尾斜杠的 /mini/mirror/，不带令牌', () => {
   const h = mirrorOpenHarness()
-  assert.equal(h.mirrorUrl(), '/mini/mirror/?token=TK-123',
+  assert.equal(h.mirrorUrl(), '/mini/mirror/',
     '尾斜杠不能省：外壳写着 <base href="./">，少了它里面的脚本会解析到 /mini/assets/...'
-    + '（那是我们自己的地盘）上，全 404、界面白屏')
+    + '（那是我们自己的地盘）上，全 404、界面白屏。'
+    + '**地址里不带令牌**（第二步）：同源的框会自己带上设备 cookie。')
+  assert.ok(!/token/.test(h.mirrorUrl()), '入口地址里不该再出现令牌')
 })
 
 test('进阶设置：点「打开」只显示那一层并设地址——没有跳转', () => {
@@ -306,7 +309,7 @@ test('进阶设置：点「打开」只显示那一层并设地址——没有�
   h.mirror.enabled = true
   h.openMirror()
   assert.equal(h.els.mirrorView.hidden, false, '要把那一整屏显示出来')
-  assert.equal(h.els.mirrorFrame.src, '/mini/mirror/?token=TK-123', '地址设在里面的框上')
+  assert.equal(h.els.mirrorFrame.src, '/mini/mirror/', '地址设在里面的框上')
 })
 
 /**

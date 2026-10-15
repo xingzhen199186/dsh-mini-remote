@@ -2086,7 +2086,7 @@
     </div>
 
     <div class="foot">
-      <button class="btn" id="btnForget">清除 token</button>
+      <button class="btn" id="btnForget">重新输入令牌</button>
       <button class="btn primary" id="btnClose">完成</button>
     </div>
 
@@ -2221,7 +2221,14 @@
   // ---------------- 状态 ----------------
   var params = new URLSearchParams(location.search);
   var state = {
-    token: params.get('token') || localStorage.getItem('dshMiniToken') || '',
+    /**
+     * 进没进门——**由服务端说了算**（2026-10-16 第二步）。
+     *
+     * 服务端只在「没放行」的那一次渲染门禁页（needsToken=true）；放行时永远是 false。
+     * 这是页面之后唯一需要的身份信息：真正的凭据是一枚 HttpOnly 的设备 cookie，
+     * 页面看不见、也不该管它——浏览器自己会给同源的每一趟请求带上。
+     */
+    entered: !NEEDS_TOKEN,
     mode: localStorage.getItem('dshMiniMode') || DEFAULT_MODE || 'minimal',
     // 外观：'dark' | 'light' | 'auto'。默认深色——不给老用户换掉现在的样子；
     // 要浅色或跟着系统走，去设置页「外观」点一下。
@@ -2294,11 +2301,14 @@
      */
     pendingCommand: null
   };
-  if (params.get('token')) {
-    localStorage.setItem('dshMiniToken', params.get('token'));
-    // 别把 token 留在地址栏里，避免被截图/分享带出去。
-    history.replaceState(null, '', location.pathname);
-  }
+  /**
+   * 地址里那一枚令牌**只是入场那一下**（2026-10-16 第二步）。
+   *
+   * 服务端在上面那一次请求里已经把它换成了设备凭据（HttpOnly cookie，浏览器自己带），
+   * 页面从此不读它、不存它、也不再往任何请求里放它。这里只做一件事：把地址栏擦干净，
+   * 免得被截图/分享带出去。
+   */
+  if (params.get('token')) history.replaceState(null, '', location.pathname);
 
   /**
    * ---------------- 执行轨迹：订阅与收帧（数据层） ----------------
@@ -2463,7 +2473,7 @@
    * 读不到就把原因写出来，不说「没有过程」。
    */
   function requestTrajectory() {
-    if (state.mode !== 'full' || !state.token) return;
+    if (state.mode !== 'full' || !state.entered) return;
     var sessionId = state.boundSessionId;
     if (!sessionId) {
       state.trajectory = [];
@@ -2497,7 +2507,7 @@
    *   重连成功与否都不用在这里补救——`open` 里那一套会再走一遍。
    */
   function syncTrajectorySubscription() {
-    if (!state.token) return;
+    if (!state.entered) return;
     var want = state.mode === 'full';
     if (!want) {
       if (subscribedClientId) {
@@ -2571,8 +2581,8 @@
     var name = src.replace(/\\/g, '/').replace(/^\.\//, '');
     if (/^lib\/art\//i.test(name)) name = name.slice(8);
     if (/^[a-z0-9-]+(\.webp)?$/i.test(name)) return artUrl(name.replace(/(\.webp)?$/i, ''));
-    return '/mini/art/?p=' + encodeURIComponent(src)
-      + '&token=' + encodeURIComponent(state.token);
+    // **不拼令牌**：这条路和别的接口一样，靠浏览器自动带上的设备 cookie 认人。
+    return '/mini/art/?p=' + encodeURIComponent(src);
   }
 
   function mdInline(raw) {
@@ -2826,10 +2836,15 @@
       setTimeout(function () { el.classList.remove('with-act'); }, 220);
     }, 6000);
   }
+  /**
+   * 每一趟请求带什么头。
+   *
+   * **一个凭据都不带**（2026-10-16 第二步）：进门那一下服务端已经把身份换成了设备 cookie
+   * （HttpOnly），浏览器自己会给同源的每一趟请求带上它——请求头和地址里从此不再出现令牌。
+   * 这也是「名册里删掉那条记录 = 那台设备当场什么都做不了」能成立的前提。
+   */
   function authHeaders(isJson) {
-    return isJson === false
-      ? { 'X-Mini-Token': state.token }
-      : { 'Content-Type': 'application/json', 'X-Mini-Token': state.token };
+    return isJson === false ? {} : { 'Content-Type': 'application/json' };
   }
   function api(path, options) {
     var opts = options || {};
@@ -3032,10 +3047,12 @@
     return out;
   }
 
-  /** 立绘地址。走 query 而不是靠 cookie：从门禁页手输 token 进来时是没有 cookie 的。 */
+  /**
+   * 立绘地址。**不带令牌**（2026-10-16 第二步）：进门之后浏览器手里有设备 cookie，
+   * 同源的 <img> 自己会带上它。指纹照旧——换了图浏览器不会一直用缓存那张。
+   */
   function artUrl(file) {
-    return '/mini/art/' + file + '.webp?token=' + encodeURIComponent(state.token)
-      + '&v=' + encodeURIComponent(BUILD);
+    return '/mini/art/' + file + '.webp?v=' + encodeURIComponent(BUILD);
   }
 
   /**
@@ -4701,7 +4718,7 @@
   function prefetchWorkspaces() {
     // Agent 模式清单也是导航栏要用的、也几乎不变——顺手一起预取（见 prefetchPresets）。
     prefetchPresets();
-    if (navList || navPrefetchPromise || navView !== 'tree' || !state.token) return;
+    if (navList || navPrefetchPromise || navView !== 'tree' || !state.entered) return;
     var run = function () {
       navPrefetchPromise = api('/mini/api/workspaces').then(function (body) {
         navList = body.workspaces || [];
@@ -4725,7 +4742,7 @@
    * **不摆一个只有一项的选择题**，也不假装自己知道 DSH 有哪些模式。
    */
   function prefetchPresets() {
-    if (navPresetsLoaded || !state.token) return;
+    if (navPresetsLoaded || !state.entered) return;
     navPresetsLoaded = true;
     api('/mini/api/agent-presets').then(function (body) {
       navPresets = body && body.ok ? body : { ok: false, reason: (body && body.reason) || 'failed' };
@@ -5730,13 +5747,13 @@
   var es = null;
   function connect() {
     if (es) { try { es.close(); } catch (e) {} es = null; }
-    if (!state.token) { showGate(); return; }
+    if (!state.entered) { showGate(); return; }
     setStatus('', '连接中…');
     // clientId 每条连接都带（订阅的 POST 靠它认出这条流）；full=1 只在「完整」模式带，
     // 服务端见到就自动把这条连接订上轨迹——断线重连沿用同一个地址，重新订上由服务端
     // 自己完成，客户端不用再握手一次。
-    es = new EventSource('/mini/api/stream?token=' + encodeURIComponent(state.token)
-      + '&clientId=' + encodeURIComponent(clientId)
+    // **地址里不带令牌**（2026-10-16 第二步）：同源的 EventSource 会带上设备 cookie。
+    es = new EventSource('/mini/api/stream?clientId=' + encodeURIComponent(clientId)
       + (state.mode === 'full' ? '&full=1' : ''));
 
     es.addEventListener('open', function () {
@@ -7507,11 +7524,13 @@
    * 解析成 `/mini/`，在 `/mini/mirror/` 上才是 `/mini/mirror/`——差这一个字符，
    * 里面引用的脚本会全 404、界面白屏（真浏览器验出来的）。
    *
-   * 地址里带 token：框里那些请求不一定都带得上 cookie（这个框是新开的文档），
-   * 入口那一下顺手把 cookie 写上，之后就靠 cookie 认人了。
+   *
+   * **地址里不带令牌**（2026-10-16 第二步）：这个框是同源文档，设备 cookie 会自动跟着
+   * 它的每一条请求走（文档本身、静态资源、界面自己发的 `/api/*`），入口那一下不再需要
+   * 顺手写 cookie。上游收到的东西里一个字节的凭据都没有——第一步已经钉住。
    */
   function mirrorUrl() {
-    return '/mini/mirror/?token=' + encodeURIComponent(state.token || '');
+    return '/mini/mirror/';
   }
 
   /**
@@ -7791,10 +7810,14 @@
     toast('正在重连…');
   });
 
+  /**
+   * 「重新输入令牌」：把闸门露出来，让用户再贴一枚令牌进来。
+   *
+   * **这一下不再清除任何东西**（2026-10-16 第二步）：身份已经是一枚 HttpOnly 的设备
+   * cookie，页面看不到也删不掉它——真正的「把这台设备赶出去」在电脑那边（名册里删掉
+   * 它，下一步做进设置页）。按钮原来叫「清除 token」，那个名字从这一刻起就是假的。
+   */
   $('btnForget').addEventListener('click', function () {
-    localStorage.removeItem('dshMiniToken');
-    state.token = '';
-    if (es) { try { es.close(); } catch (e) {} es = null; }
     sheet.classList.remove('open');
     showGate();
   });
@@ -7809,28 +7832,25 @@
   $('gateInput').addEventListener('keydown', function (e) {
     if (e.key === 'Enter') submitGate();
   });
+  /**
+   * 把手里这枚令牌交回**门口那一次**（和扫码进来是同一条路）。
+   *
+   * 为什么不在这里校验一次、把它留在手里：令牌留在手里就等于**撤销失效**——名册里
+   * 把这条记录删掉之后，这台设备还会拿令牌进门。所以这里只是**跳一次**：服务端在门口
+   * 认这枚令牌、换成设备 cookie（HttpOnly），页面自己一个字节都不记。
+   * 令牌不对时服务端会重新发下门禁页；下面启动那一段看地址里那枚 token 就知道要报什么。
+   */
   function submitGate() {
     var value = $('gateInput').value.trim();
     if (!value) { $('gateErr').textContent = '请先粘贴 token'; return; }
     $('gateErr').textContent = '校验中…';
-    fetch('/mini/api/state', { headers: { 'X-Mini-Token': value } })
-      .then(function (r) {
-        if (!r.ok) throw new Error('token 不正确');
-        localStorage.setItem('dshMiniToken', value);
-        state.token = value;
-        $('gate').classList.remove('open');
-        // 手输 token 进来的人也得有立绘——立绘地址是拿 state.token 拼的，
-        // 不在这里补一次，这一路进来的用户会看到空白的立绘位。
-        preloadPoses();
-        connect();
-      })
-      .catch(function () { $('gateErr').textContent = 'token 不正确，请核对后重试'; });
+    location.replace(location.pathname + '?token=' + encodeURIComponent(value));
   }
 
   // ---------------- presence 与心跳 ----------------
   document.addEventListener('visibilitychange', function () {
     var hidden = document.hidden;
-    if (state.token) {
+    if (state.entered) {
       api('/mini/api/presence', {
         method: 'POST',
         body: JSON.stringify({ state: hidden ? 'background' : 'foreground' })
@@ -7839,12 +7859,12 @@
     if (!hidden) { render(); connectIfDead(); }
   });
   setInterval(function () {
-    if (state.token) api('/mini/api/heartbeat', { method: 'POST', body: '{}' }).catch(function () {});
+    if (state.entered) api('/mini/api/heartbeat', { method: 'POST', body: '{}' }).catch(function () {});
   }, 30000);
 
   function connectIfDead() {
     // 切回前台时 EventSource 可能已经悄悄死了，探一下。
-    if (!state.token) return;
+    if (!state.entered) return;
     if (es && es.readyState === EventSource.OPEN) return;
     connect();
   }
@@ -7863,7 +7883,7 @@
    * **正在打字就先不刷**——用户没发出去的话不能被吞掉，等下一轮再说。
    */
   function watchBuild() {
-    if (!state.token) return;
+    if (!state.entered) return;
     api('/mini/api/version').then(function (r) {
       // 设置页底部那行版本。**问到才显示**——问不到就整行不出现，
       // 不拿「unknown」糊一行上去（那个字对用户没意义，还像页面坏了）。
@@ -7925,10 +7945,14 @@
   // ---------------- 启动 ----------------
   syncSeg();
   autoGrow();
-  if (NEEDS_TOKEN && !state.token) {
+  if (!state.entered) {
+    // 服务端没放行：这是一张只用来输入令牌的门禁页。
+    // 地址里那枚 token = 刚才手输（或扫码）交上来的那一枚，它没被认下来才会走到这儿——
+    // 报一句人话，并把地址栏擦掉（不把输错的令牌留在那儿）。
+    var bad = params.get('token');
+    if (bad) history.replaceState(null, '', location.pathname);
     showGate();
-  } else if (!state.token) {
-    showGate();
+    if (bad) $('gateErr').textContent = 'token 不正确，请核对后重试';
   } else {
     preloadPoses();
     connect();
@@ -8089,7 +8113,7 @@
       var body = { provider: provider, model: model }
       if (effort) body.reasoningEffort = effort
       busy = true
-      fetch('/mini/api/set-model?token=' + encodeURIComponent(state.token), {
+      fetch('/mini/api/set-model', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body)
@@ -8111,8 +8135,8 @@
 
     // ---- 读目录 ----------------------------------------------------------
     function load() {
-      if (!state.token) return
-      fetch('/mini/api/models?token=' + encodeURIComponent(state.token), { cache: 'no-store' })
+      if (!state.entered) return
+      fetch('/mini/api/models', { cache: 'no-store' })
         .then(function (r) { return r.ok ? r.json() : null })
         .then(function (d) {
           if (!d || !d.ok) return

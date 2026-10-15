@@ -2021,6 +2021,10 @@ test('用 ?token= 打开页面后种下 cookie，后续请求不再需要带 tok
 
   const res = await fetch(`${base}/mini?token=${token}`)
   assert.equal(res.status, 200)
+  // **这个测试台没配设备身份**（createMiniServer 没拿到 devices），走的是那档退路：
+  // 门口只能照旧种下令牌 cookie，否则手机下一趟一个凭据都带不上。
+  // 真机上名册永远在（lib/index.js），那一档的行为——**入场不再递回令牌 cookie**——
+  // 钉在 test/device-identity.test.mjs 里。
   const setCookie = res.headers.get('set-cookie') ?? ''
   assert.match(setCookie, /dsh_mini_token=/)
   assert.ok((await res.text()).includes('var NEEDS_TOKEN = false;'))

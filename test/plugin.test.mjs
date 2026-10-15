@@ -218,8 +218,9 @@ test('设备身份：名册落在 token 并排处，而且只在「打开手机�
   const cookies = typeof page.headers.getSetCookie === 'function'
     ? page.headers.getSetCookie()
     : [String(page.headers.get('set-cookie') ?? '')]
-  assert.ok(cookies.some((one) => one.startsWith('dsh_mini_token=')),
-    '令牌那枚 cookie 照旧发（二维码形态一个字都没变）')
+  assert.ok(!cookies.some((one) => one.startsWith('dsh_mini_token=')),
+    '入场那一下不再把令牌 cookie 递回手机（第二步）——它留在浏览器里，'
+    + '「名册里删掉那条记录 = 那台设备当场什么都做不了」就不成立')
   const issued = cookies.find((one) => one.startsWith('dsh_mini_device='))
   assert.ok(issued, '打开手机页要顺手发下设备凭据')
   const cred = decodeURIComponent(issued.split('=')[1].split(';')[0])
