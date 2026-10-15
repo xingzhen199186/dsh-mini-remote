@@ -147,8 +147,8 @@ async function fakeApp() {
 }
 
 /** 在镜像前面再套一个真服务器，这样可以用 fetch 打它（更接近真机）。 */
-async function front(mirror) {
-  const s = await listen((req, res) => { mirror.handle(req, res) })
+async function front(mirror, opts) {
+  const s = await listen((req, res) => { mirror.handle(req, res, opts) })
   // 也要收 upgrade——真机上的路由口径见 lib/server.js（我们自己的地盘不转）。
   s.server.on('upgrade', (req, socket, head) => {
     const p = String(req.url ?? '/').split('?')[0]
@@ -218,7 +218,16 @@ test('镜像：官方那枚会话 cookie 绝不转发给手机', async (t) => {
     '官方会话 cookie 只属于服务端这一侧；发给手机等于把官方凭据漏出去了')
 })
 
-test('镜像：去掉「禁止被嵌」的响应头', async (t) => {
+/**
+ * 取景政策（2026-10-15 改成两档）。
+ *
+ * **上游写死的禁止头一律丢掉**（那一条没变），但丢完之后**由我们自己定这一页许不许被嵌**：
+ *   · 默认 = 只许同源。手机页那一层（`lib/page.html` 的 `#mirrorFrame`）是相对地址、
+ *     同源，照常能嵌；别的站点一个都嵌不进来。
+ *   · 持票那一次 = 不加任何限制头。桌面端「远程窗口」面板是**跨源**嵌它
+ *     （桌面端在 127.0.0.1:19387，镜像在 3090），不放行就只是一块空白。
+ */
+test('镜像：默认取景政策是「只许同源」，上游那份禁止头不许漏出去', async (t) => {
   const app = await fakeApp()
   const mirror = createMirror({
     upstream: `http://127.0.0.1:${app.port}`,
@@ -229,11 +238,98 @@ test('镜像：去掉「禁止被嵌」的响应头', async (t) => {
 
   const res = await fetch(`http://127.0.0.1:${f.port}/blocked`)
   assert.equal(res.status, 200)
-  assert.equal(res.headers.get('x-frame-options'), null, 'x-frame-options 要去掉')
-  assert.equal(res.headers.get('content-security-policy'), null, 'CSP 的 frame-ancestors 要去掉')
+  assert.equal(res.headers.get('x-frame-options'), 'SAMEORIGIN',
+    '上游的 DENY 要换成我们自己的 SAMEORIGIN：手机页那一层是同源 iframe，照常能嵌')
+  assert.equal(res.headers.get('content-security-policy'), "frame-ancestors 'self'",
+    '不许把上游那句 frame-ancestors \'none\' 原样放出去，但也不能什么都不写')
   const body = await res.text()
   assert.ok(body.includes('hi</body>'), '上游的正文要原样留着')
   assert.match(body, /ownsHost/, 'HTML 里要注入「你是主机」那个标记（见下面那条测试）')
+})
+
+test('镜像：持票进来的那一次不加「不许被嵌」的头（桌面端要跨源嵌它）', async (t) => {
+  const app = await fakeApp()
+  const mirror = createMirror({
+    upstream: `http://127.0.0.1:${app.port}`,
+    tokenUrl: () => `http://127.0.0.1:${app.port}/?token=LAUNCH-TOKEN`,
+  })
+  // `embed` 由 lib/server.js 判定（票换来的窗口会话还作数），这里直接照那个口径喂进来。
+  const f = await front(mirror, { embed: true })
+  t.after(async () => { await f.close(); await app.close() })
+
+  const res = await fetch(`http://127.0.0.1:${f.port}/blocked`)
+  assert.equal(res.status, 200)
+  assert.equal(res.headers.get('x-frame-options'), null, '持票那一次不许再挡跨源嵌入')
+  assert.equal(res.headers.get('content-security-policy'), null, 'CSP 也一样，一个字节都不留')
+})
+
+/**
+ * 票的规矩：**短命、一次性、用完即废**（设计稿门 2）。
+ * 这一组直接测那个存储本身，不经过 HTTP。
+ */
+test('票：一次性——同一张票换过就没了；换回来的是一个独立的窗口会话', () => {
+  const mirror = createMirror({ upstream: 'http://127.0.0.1:1', tokenUrl: () => null })
+  const ticket = mirror.issueTicket()
+  assert.equal(typeof ticket, 'string')
+  assert.ok(ticket.length >= 32, '票要够长，猜不出来')
+
+  const opened = mirror.redeemTicket(ticket)
+  assert.ok(opened && typeof opened.session === 'string', '票要能换出一个窗口会话')
+  assert.notEqual(opened.session, ticket, '会话不能就是票本身')
+  assert.equal(mirror.windowValid(opened.session), true)
+
+  assert.equal(mirror.redeemTicket(ticket), null, '**一张票只能用一次**')
+  assert.equal(mirror.redeemTicket('这张票不存在'), null)
+  assert.equal(mirror.windowValid('这个会话不存在'), false)
+  assert.equal(mirror.windowValid(opened.session), true, '别的票被拒，不该把这张好会话也判死')
+  assert.notEqual(mirror.issueTicket(), ticket, '每次发的票都不一样')
+})
+
+test('票：30 秒就作废——短命是它的一半价值', (t) => {
+  t.mock.timers.enable({ apis: ['Date'] })
+  const mirror = createMirror({ upstream: 'http://127.0.0.1:1', tokenUrl: () => null })
+
+  const ticket = mirror.issueTicket()
+  t.mock.timers.tick(mirror.ticketTtlMs + 1)
+  assert.equal(mirror.redeemTicket(ticket), null, '过期的票不认')
+})
+
+/**
+ * 窗口会话的寿命 = **这个宿主进程活着**（2026-10-15 用户拍板；原来是 12 小时）。
+ *
+ * 原来那个 12 小时是凭空定的，还会留下一种半死状态：面板开着超过 12 小时再刷新，
+ * 服务器这边已经作废、浏览器里那枚 cookie 还在，用户看到的是一条莫名其妙的 401。
+ * 现在**没有任何固定寿命**——把时间推一年，它照样认。
+ */
+test('窗口会话：没有固定寿命（进程活着就一直认）', (t) => {
+  t.mock.timers.enable({ apis: ['Date'] })
+  const mirror = createMirror({ upstream: 'http://127.0.0.1:1', tokenUrl: () => null })
+  const opened = mirror.redeemTicket(mirror.issueTicket())
+  assert.ok(opened, '刚发的票要能换')
+
+  t.mock.timers.tick(365 * 24 * 60 * 60 * 1000)
+  assert.equal(mirror.windowValid(opened.session), true,
+    '过了一年还认：寿命是「这个进程活着」，不是一段固定时间')
+})
+
+/**
+ * 而进程一走，它就作废（2026-10-15）。判据是**签名**：每枚会话都用这个进程现生成的
+ * 随机密钥签过（`v1.<随机串>.<签名>`），换一个进程就是换一串密钥，旧签名当场对不上。
+ *
+ * 「换一个进程」在这里用**把模块重新装一遍**来模拟（`?process=…` 把模块缓存岔开）：
+ * 新的一份模块会重新生成密钥，正是宿主重启时发生的事。
+ */
+test('窗口会话：换一个宿主进程，旧会话立刻不认（跟着 DSH 重启失效）', async () => {
+  const before = createMirror({ upstream: 'http://127.0.0.1:1', tokenUrl: () => null })
+  const opened = before.redeemTicket(before.issueTicket())
+  assert.equal(before.windowValid(opened.session), true, '对照：同一个进程里认')
+  assert.equal(opened.session.split('.').length, 3, '会话是「版本.随机串.签名」三节')
+
+  const fresh = await import(`../lib/mirror.js?process=${Date.now()}`)
+  const after = fresh.createMirror({ upstream: 'http://127.0.0.1:1', tokenUrl: () => null })
+  assert.equal(after.windowValid(opened.session), false,
+    '上个进程签发的会话，新进程一眼就不认')
+  assert.equal(after.windowValid('v1.abcdef.abcdef'), false, '形状对、签名不对的，一样不认')
 })
 
 /**
@@ -1238,6 +1334,35 @@ function stubMirror(log, optsLog) {
 }
 
 /**
+ * 带「票」那一套的镜像桩：够验「入口认票、之后认窗口会话、取景政策跟着哪一边走」。
+ * 真票那套逻辑在 lib/mirror.js 里另有一组用例（一次性 / 过期），这里只管路由。
+ */
+function ticketMirror(log, optsLog, { available = () => true } = {}) {
+  const tickets = new Map()
+  const windows = new Map()
+  const grants = new Map()
+  return {
+    ...stubMirror(log, optsLog),
+    available,
+    issueTicket: () => {
+      const ticket = `TICKET-${tickets.size + grants.size + 1}`
+      tickets.set(ticket, true)
+      return ticket
+    },
+    redeemTicket: (ticket) => {
+      if (!tickets.has(ticket)) return null
+      tickets.delete(ticket)
+      grants.set(ticket, true)
+      const session = `WIN-${windows.size + 1}`
+      windows.set(session, true)
+      return { session }
+    },
+    windowValid: (session) => windows.has(session),
+    ticketGranted: (ticket) => grants.has(ticket),
+  }
+}
+
+/**
  * 升级请求的接线（2026-10-06 补）。
  *
  * WebSocket **不走 onRequest**——它是一条 `Upgrade` 握手，Node 单独发 `upgrade` 事件。
@@ -1479,6 +1604,158 @@ test('路由门：拿不到令牌时连 cookie 都不该写（不给一个没验
   assert.equal(res.status, 401)
   assert.equal(res.headers.get('set-cookie'), null, '令牌不对就什么都不给')
   assert.deepEqual(hit, [])
+})
+
+// ---------------------------------------------------------------------------
+// 「远程窗口」：桌面端面板那一条路（一次性票 → 窗口会话）
+//
+// 这一组要钉住三件事：
+//   ① 票进门那一下**只换 cookie、不转发**，而且票立刻从地址里带走（302）；
+//   ② 票不对/用过 → 给框一页人话（不是 JSON）；
+//   ③ 票换来的窗口会话**只够进镜像这一层**，而且它走的那一次取景政策是「放行」。
+// **开关全程关着**：手机令牌那条路仍然一条都不接（没被这次改动放宽）。
+// ---------------------------------------------------------------------------
+
+test('远程窗口：票只授权一次，之后靠窗口会话进门（开关关着也走得通）', async (t) => {
+  const hit = []
+  const optsLog = []
+  const mirror = ticketMirror(hit, optsLog)
+  // 票由宿主那一半发（真机上是 `/mini-remote/window` 那条路由），这里直接要一张。
+  assert.equal(mirror.issueTicket(), 'TICKET-1')
+  const s = await bootServer({ mirror, mirrorEnabled: () => false })
+  t.after(s.close)
+
+  // ① 带票进门：**不重定向**，就在原地把上游首页转出来，顺手写下窗口会话 cookie。
+  //    地址里那张票要留着——取景政策靠它（见下面第 ③④ 条）。
+  const open = await fetch(`${s.base}/mini/mirror/?ticket=TICKET-1`, { redirect: 'manual' })
+  assert.equal(open.status, 200)
+  const cookie = open.headers.get('set-cookie') ?? ''
+  assert.match(cookie, /dsh_mini_window=WIN-1/, '票要换成窗口会话')
+  assert.match(cookie, /HttpOnly/, '框里跑着官方那一整套界面代码，没有理由让它读得到这枚值')
+  assert.match(cookie, /Path=\//, 'Path 要是 /，界面自己发的那些 /api/... 才带得上')
+  assert.match(cookie, /SameSite=None/, '桌面端的父页面在 dsh-app://app 上，是**跨站**')
+  assert.match(cookie, /Secure/,
+    '`SameSite=None` 必须配 `Secure`；而 http://127.0.0.1 算可信来源，所以这条在回环上成立（实测）')
+  assert.ok(!/Max-Age/.test(cookie),
+    '不写固定过期时刻：寿命是「宿主进程活着」（写死一个数就会在进程还好着的时候先把面板弄成 401）')
+  assert.deepEqual(hit, ['/'], '带斜杠的入口映射到上游首页，**查询串整个丢掉**（票不跟着转发）')
+  assert.equal(optsLog.at(-1).embed, true, '带票的那一次才放行跨源嵌入')
+  await open.text()
+
+  // ② 同一张票再来一次、而且不带 cookie：**票只授权那一次**，这次进不去。
+  const again = await fetch(`${s.base}/mini/mirror/?ticket=TICKET-1`, { redirect: 'manual' })
+  assert.equal(again.status, 401, '兑现过的票不再当通行证')
+  assert.equal(again.headers.get('set-cookie'), null, '也不再发新的窗口会话')
+
+  // ③ 但同一条地址**仍然许被嵌**：iframe 重新加载时进门的是窗口会话，
+  //    取景凭的是地址里那张票。少了这一条，框一刷新就白。
+  hit.length = 0
+  const reload = await fetch(`${s.base}/mini/mirror/?ticket=TICKET-1`, {
+    headers: { cookie: 'dsh_mini_window=WIN-1' },
+    redirect: 'manual',
+  })
+  assert.equal(reload.status, 200, '重新加载同一条地址要还能进得来')
+  assert.deepEqual(hit, ['/'])
+  assert.equal(optsLog.at(-1).embed, true, '带票的地址重新加载时，取景照样放行')
+  await reload.text()
+
+  // ④ **取景政策只认票，不认 cookie**：持着窗口会话、地址里没有票 → 照样进得去，
+  //    但这一页**不许被跨源嵌**。别有用心的站点正是卡在这一条上（它拿不到票）。
+  hit.length = 0
+  const noTicket = await fetch(`${s.base}/mini/mirror/`, {
+    headers: { cookie: 'dsh_mini_window=WIN-1' },
+    redirect: 'manual',
+  })
+  assert.equal(noTicket.status, 200)
+  assert.equal(optsLog.at(-1).embed, false,
+    '地址里没有票 → 只许同源（手机页那一层照常能嵌，别的站点嵌不了）')
+  await noTicket.text()
+
+  // ⑤ 界面自己发的绝对路径也要认这枚会话（否则进去一片 401）。
+  hit.length = 0
+  const api = await fetch(`${s.base}/api/session/list`, {
+    method: 'POST',
+    headers: { cookie: 'dsh_mini_window=WIN-1', 'content-type': 'application/json' },
+    body: '{}',
+    redirect: 'manual',
+  })
+  assert.equal(api.status, 200)
+  assert.deepEqual(hit, ['/api/session/list'])
+
+  // ⑥ 开关仍然关着：手机令牌那条路一条都不接——这次改动没有顺手把门放宽。
+  hit.length = 0
+  const byToken = await fetch(`${s.base}/mini/mirror/?token=TOKEN-123`, { redirect: 'manual' })
+  assert.equal(byToken.status, 404, '开关关着时，令牌那条路依旧查无此路')
+  assert.deepEqual(hit, [])
+})
+
+test('远程窗口：没票、票不对、会话不对——一律进不去', async (t) => {
+  const hit = []
+  const s = await bootServer({ mirror: ticketMirror(hit), mirrorEnabled: () => false })
+  t.after(s.close)
+
+  const bogus = await fetch(`${s.base}/mini/mirror/?ticket=nope`, { redirect: 'manual' })
+  assert.equal(bogus.status, 403, '票不对就不放行')
+  assert.match(bogus.headers.get('content-type') ?? '', /text\/html/,
+    '**框会把它当文档渲染**，所以要给人话，不是 JSON')
+  assert.match(await bogus.text(), /通行证/, '正文要说清是票过期了')
+  assert.deepEqual(hit, [])
+
+  // 窗口会话 cookie 是编的：进不去。
+  // **开关关着时它是 404**（那条路此刻根本不存在，和别的路径同一条口径）；
+  // 开关开着时才是 401（走到门里面，被鉴权挡下）——下面把这两种都钉住。
+  const fakeSession = await fetch(`${s.base}/mini/mirror/`, {
+    headers: { cookie: 'dsh_mini_window=fake' },
+    redirect: 'manual',
+  })
+  assert.equal(fakeSession.status, 404, '编的会话 + 开关关着 = 查无此路')
+  assert.deepEqual(hit, [])
+
+  const on = await bootServer({ mirror: ticketMirror(hit), mirrorEnabled: () => true })
+  t.after(on.close)
+  const fakeSession2 = await fetch(`${on.base}/mini/mirror/`, {
+    headers: { cookie: 'dsh_mini_window=fake' },
+    redirect: 'manual',
+  })
+  assert.equal(fakeSession2.status, 401, '开关开着时，编的会话被鉴权挡在门外')
+  assert.deepEqual(hit, [])
+
+  // 没拿到上游地址（`available()` 为假，比如宿主刚起来那几十秒）时，票那条路也不该硬闯：
+  // 查无此路，一页人话。
+  const noUp = ticketMirror(hit, null, { available: () => false })
+  noUp.issueTicket()
+  const off = await bootServer({ mirror: noUp, mirrorEnabled: () => false })
+  t.after(off.close)
+  const noUpstream = await fetch(`${off.base}/mini/mirror/?ticket=TICKET-1`, { redirect: 'manual' })
+  assert.equal(noUpstream.status, 404)
+  assert.deepEqual(hit, [])
+})
+
+test('远程窗口：持窗口会话的 WebSocket 也要接（不然框里一直「正在重新连接」）', async (t) => {
+  const hit = []
+  const mirror = ticketMirror(hit)
+  // 先造一张有效的窗口会话出来（真机上由入口那一下换来）。
+  mirror.redeemTicket(mirror.issueTicket())
+  const s = await bootServer({ mirror, mirrorEnabled: () => false })
+  t.after(s.close)
+
+  const { connect } = await import('node:net')
+  const attempt = async (headers) => {
+    const sock = connect(s.port, '127.0.0.1')
+    await once(sock, 'connect')
+    sock.write(`GET /mini/mirror/api/remote.mux HTTP/1.1\r\nHost: desktop\r\nUpgrade: websocket\r\n`
+      + 'Connection: Upgrade\r\nSec-WebSocket-Key: abc\r\nSec-WebSocket-Version: 13\r\n'
+      + headers + '\r\n')
+    await new Promise((r) => setTimeout(r, 250))
+    sock.destroy()
+  }
+
+  await attempt('')
+  assert.deepEqual(hit, [], '没有窗口会话、开关又关着 → 一个都不接')
+
+  await attempt('Cookie: dsh_mini_window=WIN-1\r\n')
+  assert.deepEqual(hit, ['upgrade /api/remote.mux'],
+    '持窗口会话时要转——官方那条常驻连接就是它，拒了界面就永远在重连')
 })
 
 test('路由门：开关是每请求现读的（开了立刻生效，不用重启）', async (t) => {

@@ -84,6 +84,9 @@ function mockCtx({ attachments, sessionQuery, commands, sessionController, subag
         list: () => [...agents.values()],
       },
       webServer: {
+        // 宿主的 web 服务报出来的端口。**镜像那一层的上游就按它算**（`mirrorUpstream`），
+        // 所以它是「这台机器有没有电脑端界面可嵌」的判据——远程窗口取票那条路要看它。
+        port: 19387,
         register: (route) => {
           routes.set(route.path, route)
           return () => routes.delete(route.path)
@@ -1347,6 +1350,51 @@ test('公网开关：关掉之后配置落盘，面板里不再有公网那条',
 
   const saved = JSON.parse(readFileSync(join(p.home, 'dsh-mini-remote', 'settings.json'), 'utf8'))
   assert.equal(saved.tunnel.enabled, false)
+})
+
+// ---------------------------------------------------------------------------
+// 「远程窗口」：桌面端面板取票那一条
+//
+// 界面半边跑在 DSH 自己的页面里，拿不到我们的令牌（令牌进浏览器就是那条硬规矩
+// 不许的事），所以由**宿主这一半**去换一张**一次性票**交给它。这一组钉住：
+// 只有本机换得到、地址里只有票没有令牌、两张票不一样。
+// ---------------------------------------------------------------------------
+
+const WINDOW_ROUTE = '/mini-remote/window'
+
+test('远程窗口：票只在本机换得到，而且地址里只有票、没有令牌', async (t) => {
+  const p = await bootPlugin()
+  t.after(p.stop)
+
+  const route = p.routes.get(WINDOW_ROUTE)
+  assert.ok(route, '换票的路由要挂上，否则面板里永远只是一句报错')
+  assert.equal(route.kind, 'exact')
+
+  // 同一个 Wi-Fi 下的别的设备来要票：一律挡住——票就是进镜像那一层的通行证。
+  const denied = fakeRes()
+  await route.handler(fakeReq('192.168.1.50', { method: 'POST' }), denied)
+  assert.equal(denied.out.status, 403, '别的机器不该换得到票')
+
+  // 只接受 POST（和别的 /mini-remote/* 一个口径）。
+  const wrong = fakeRes()
+  await route.handler(fakeReq('127.0.0.1'), wrong)
+  assert.equal(wrong.out.status, 405)
+
+  const ok = fakeRes()
+  await route.handler(fakeReq('127.0.0.1', { method: 'POST' }), ok)
+  assert.equal(ok.out.status, 200)
+  const body = JSON.parse(ok.out.body)
+  assert.equal(body.ok, true)
+  assert.match(body.url, /^http:\/\/127\.0\.0\.1:\d+\/mini\/mirror\/\?ticket=/,
+    '面板那边要把这条地址直接塞进 iframe 的 src')
+  assert.ok(!body.url.includes(p.token),
+    '**地址里不许出现令牌**——iframe 的地址会留在那台电脑的浏览历史里')
+  assert.equal(body.expiresIn, 30, '票只有 30 秒，界面要知道这个数')
+
+  // 两张票必须不一样，否则「一次性」就是假的。
+  const second = fakeRes()
+  await route.handler(fakeReq('127.0.0.1', { method: 'POST' }), second)
+  assert.notEqual(JSON.parse(second.out.body).url, body.url, '每换一次都是新票')
 })
 
 // ---------------------------------------------------------------------------

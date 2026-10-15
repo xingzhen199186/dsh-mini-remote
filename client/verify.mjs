@@ -220,11 +220,54 @@ await check('main 那条：不写 keyed 槽用不到的 id', () => {
 await check('main 那条：第二个参数是面板组件函数', () => {
   assert.equal(typeof entryOf('main').Comp, 'function');
 });
-await check('面板只放一句中文占位，且不嵌 iframe', () => {
-  const tree = entryOf('main').Comp({});
-  assert.match(textOf(tree), /远程窗口（施工中）/);
-  assert.equal(byType(tree, 'iframe').length, 0, '这一步不许嵌任何东西');
-});
+
+// —— main 那条面板：「远程窗口」整屏嵌的是电脑端界面，凭据只能是**一张一次性票**。
+//     令牌绝不能进 iframe 的地址（会留在那台电脑的浏览历史里）——这两条是这一步的核心。
+const TICKET_URL = 'http://127.0.0.1:3090/mini/mirror/?ticket=one-shot-ticket-value';
+const panelHarness = useHarness();
+const Panel = entryOf('main').Comp;
+{
+  let tree = null;
+  panelHarness.onUpdate(() => { tree = panelHarness.draw(Panel); });
+  await check('面板挂载时先换票：票没到手之前一个框都不立', () => {
+    tree = panelHarness.draw(Panel);
+    assert.match(textOf(tree), /正在准备远程窗口…/);
+    assert.equal(byType(tree, 'iframe').length, 0, '票还没到手就把框立起来，等于凭据先摆出去');
+  });
+  await check('换票是 POST /mini-remote/window（宿主那一半的路由）', () => {
+    let asked = null;
+    setGlobal('fetch', (url, init) => {
+      asked = { url, init };
+      return Promise.resolve(jsonResponse(200, { ok: true, url: TICKET_URL, expiresIn: 30 }));
+    });
+    panelHarness.runEffects();
+    assert.ok(asked, 'useEffect 里没有发起换票请求');
+    assert.equal(asked.url, '/mini-remote/window');
+    assert.equal(asked.init && asked.init.method, 'POST');
+  });
+  await check('换到票之后：框的地址就是那条带票的地址，而且不含令牌', async () => {
+    await tick();
+    await tick();
+    const iframe = byType(tree, 'iframe')[0];
+    assert.ok(iframe, '换到票之后要真的把框立起来');
+    assert.equal(iframe.props.src, TICKET_URL);
+    assert.match(iframe.props.src, /\?ticket=/, '进门的凭据只能是那张票');
+    assert.doesNotMatch(iframe.props.src, /[?&]token=/,
+      '框的地址里**不许出现令牌**——那会留在打开这台电脑的人的浏览历史里');
+  });
+  await check('换票失败时：把服务端那句原因照登出来，不摆一个空框', async () => {
+    const h2 = useHarness();
+    let tree2 = null;
+    h2.onUpdate(() => { tree2 = h2.draw(Panel); });
+    setGlobal('fetch', () => Promise.resolve(jsonResponse(503, { ok: false, error: '这台电脑上现在找不到可嵌入的「电脑端界面」。' })));
+    tree2 = h2.draw(Panel);
+    h2.runEffects();
+    await tick();
+    await tick();
+    assert.match(textOf(tree2), /找不到可嵌入/);
+    assert.equal(byType(tree2, 'iframe').length, 0, '没换到票就别立框');
+  });
+}
 
 // —— sidebar.panellist：list 槽。id 必须和 main 的 key 对上，侧栏点下来才找得到面板。
 await check('panellist 那条：def.name === "sidebar.panellist"', () => {

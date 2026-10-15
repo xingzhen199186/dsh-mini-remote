@@ -27,6 +27,9 @@ window.__ModuleLoader__.load({
     var TUNNEL_PATH = '/mini-remote/tunnel';
     var SERVE_PATH = '/mini-remote/serve';
     var FEISHU_PATH = '/mini-remote/feishu';
+    // 「远程窗口」取票那一条（宿主侧路由，只允许本机调用，见 lib/index.js）。
+    // 它回 `{ ok:true, url:'http://127.0.0.1:<端口>/mini/mirror/?ticket=…', expiresIn:30 }`。
+    var WINDOW_PATH = '/mini-remote/window';
 
     // 侧栏那个图标和中间那一整屏面板共用的一个键。
     // 契约就是这么定的：侧栏条目的 `id` 按原样去寻址 main 槽里 key 相同的那个面板
@@ -54,8 +57,13 @@ window.__ModuleLoader__.load({
       toggleRow: { display: 'flex', alignItems: 'center', gap: 8, marginTop: 10, fontSize: 13, cursor: 'pointer' },
       // cloudflared 的报错是多行原文，换行要留住，否则一长条读不了。
       detail: { color: 'var(--dsw-alias-state-warn-primary,#b45309)', fontSize: 12, lineHeight: 1.6, marginTop: 6, whiteSpace: 'pre-wrap', wordBreak: 'break-word' },
-      // 「远程窗口」占位面板：这一步只有一句话，别撑破中间那一列的布局。
-      panel: { boxSizing: 'border-box', padding: '80px 24px', textAlign: 'center', color: 'var(--dsw-alias-label-tertiary,#8b93a1)', fontSize: 14, lineHeight: 1.6 },
+      // 「远程窗口」面板：整屏嵌一个 iframe。取票那一步失败时，这两种样式就是全部内容
+      // ——那时它得读起来像一句话，而不是一个空框。
+      panelMsg: { boxSizing: 'border-box', padding: '80px 24px', textAlign: 'center', color: 'var(--dsw-alias-label-tertiary,#8b93a1)', fontSize: 14, lineHeight: 1.6 },
+      // 框铺满面板：**父容器高度拿不准**（可能是定高，也可能是被内容撑开的），
+      // 所以外层给一个 320 的兜底高度，里面那个框绝对定位铺满——两种情况都不会塌成一条缝。
+      frameWrap: { position: 'relative', boxSizing: 'border-box', width: '100%', height: '100%', minHeight: 320 },
+      frame: { position: 'absolute', inset: 0, width: '100%', height: '100%', border: 0, display: 'block', background: 'var(--dsw-alias-bg-base,#fff)' },
     };
 
     function MiniRemoteSettingsTab() {
@@ -789,13 +797,57 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * 「远程窗口」面板——就是侧栏那个图标点开之后，占满中间那一整列的那一屏。
+     * 「远程窗口」面板——侧栏那个图标点开之后，占满中间那一整列的那一屏。
      *
-     * 这一步只放一句占位：**不嵌 iframe、不连任何远程机器**。先证明入口能开，
-     * 之后再往这里嵌「本机电脑端界面」，最后才谈跨机。
+     * **这一屏嵌的是「电脑端界面」**（同一台电脑上的 DSH 界面，经我们自己的反代搬出来），
+     * 不是手机页：官方那一层本来就是给宽屏做的，放进整屏面板正合适。
+     *
+     * ## 为什么要先取一张票，而不是直接把地址写进 src
+     *
+     * 那个地址后面要跟凭据。**令牌绝不能进 iframe 地址**——浏览历史、截图、别人拿到这台
+     * 电脑就能翻出来。所以走两条腿：
+     *   · 宿主那一半（同一台电脑、本来就拿着令牌）POST `/mini-remote/window` 换一张
+     *     **一次性票**（30 秒、用完即废）；
+     *   · 界面这半边只拿得到「票 + 地址」，拼进 src 的只有票。
+     *
+     * 票进门那一刻会被兑现成一枚**窗口会话 cookie**（框里那些请求全靠它认人），
+     * 而票自己**只授权那一次**；地址里留着的那张票之后只用来回答「这一页是我嵌出来的吗」
+     * ——桌面端是**跨站**嵌进来的，只能靠票来定「许不许被嵌」。**令牌全程没进过浏览器。**
+     *
+     * **挂在 useEffect 里**：面板每被打开一次就换一张新票（票是一次性的，上次那张早废了）。
      */
     function MiniRemotePanel() {
-      return h('div', { style: styles.panel }, '远程窗口（施工中）');
+      // null = 还在换票；{ url } = 换到了；{ error } = 没换成，把原因说给用户听。
+      var winState = useState(null);
+      var win = winState[0];
+      var setWin = winState[1];
+
+      useEffect(function () {
+        var alive = true;
+        fetch(WINDOW_PATH, { method: 'POST' })
+          .then(function (res) {
+            return res.json().then(
+              function (body) { return { status: res.status, body: body }; },
+              function () { return { status: res.status, body: null }; },
+            );
+          })
+          .then(function (r) {
+            if (!alive) return;
+            var b = (r.body && typeof r.body === 'object') ? r.body : null;
+            if (b && b.ok && typeof b.url === 'string' && b.url) setWin({ url: b.url });
+            else setWin({ error: (b && b.error) || ('换一张窗口通行证失败：服务返回了 HTTP ' + r.status + '。') });
+          })
+          .catch(function (err) {
+            if (!alive) return;
+            setWin({ error: '读不到这台电脑上的遥控服务：' + ((err && err.message) || String(err)) });
+          });
+        return function () { alive = false; };
+      }, []);
+
+      if (!win) return h('div', { style: styles.panelMsg }, '正在准备远程窗口…');
+      if (win.error) return h('div', { style: styles.panelMsg }, win.error);
+      return h('div', { style: styles.frameWrap },
+        h('iframe', { src: win.url, title: '电脑端界面', style: styles.frame }));
     }
 
     /**
