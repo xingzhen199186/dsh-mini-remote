@@ -850,17 +850,20 @@ window.__ModuleLoader__.load({
         h('iframe', { src: win.url, title: '电脑端界面', style: styles.frame }));
     }
 
-    // —— 「再点一下退出远程窗口」需要的两样东西：一个能跟官方布局服务说话的把手，
-    //    和「进远程窗口之前站在哪个面板」这份记忆。
+    // —— 「再点一下退出远程窗口」需要的三样东西：一个能跟官方布局服务说话的把手、
+    //    「进远程窗口之前站在哪个面板」这份记忆，和「这一下点的是我们那一条」的认法。
     //
     // **为什么得自己接这一下**：侧栏那一行（按钮、onClick、悬停提示）是官方壳自己画的
     // ——dsh-client-ui-sidebar 的 PanelRow，它 onClick 里调的是官方自己的 selectPanel。
-    // 我们注册的只是那一行里的**一枚图标**，拿不到那一行的点击回调；壳交给图标的只有
-    // 「边长」和「这一行现在是不是选中」。所以「再点一次」只能由我们在图标上接住。
-    // 壳没有开关式的第二态：同一个 id 再选一次就是原值写入，画面不会变——这也是为什么
-    // 现在点第二下没反应。
+    // 我们注册的只是那一行里的**一枚图标**，拿不到那一行的点击回调。
+    // 壳没有开关式的第二态：同一个 id 再选一次就是原值写入，画面不会变——这就是
+    // 「点了没反应」的机制。所以退出那一下只能我们自己接。
     var layoutFace = null;        // 官方布局服务 ctx.layout；壳还没装配好时是 null
     var panelBeforeRemote = null; // 进远程窗口之前选中的面板；null = 会话视图（官方默认）
+
+    // 我们那枚图标身上的记号。认「这一条是不是我们那一条」用 DOM 认，不认标题文字
+    // ——标题是中文常量，换语言/改文案就失效了。
+    var ICON_MARK = 'data-dsh-mini-remote';
 
     /** 记住「上一个不是远程窗口的面板」——退出时回到它。 */
     function rememberPanel() {
@@ -885,13 +888,37 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * 「已经在远程窗口里，再点一下那一条 → 退出」。
+     *
+     * **为什么不接在图标上**（2026-10-15 在真页面上量出来的）：侧栏那一条是官方壳画的，
+     * 我们在这条行里只有一枚 16×16 的图标，整行却有 252×36。点在文字「远程窗口」或
+     * 行内空白上时，点子**根本不经过图标**（元素命中测绘：文字中心底下是官方的
+     * span._panelTitle）；官方那一下又是同一个 id 原值写入，等于没动。
+     * 实测同一页里：点图标 → 退出；点文字/行中心 → 什么也不发生。用户报的就是后者。
+     *
+     * 所以听整行。挂在 document 的**捕获**阶段，是从最早的地方下手：
+     *   · 点的哪儿都在同一条路径上，文字、空白、键盘回车（click 落在按钮上）一起覆盖；
+     *   · 同一个节点上别人 stopPropagation 也拦不掉我们（stopImmediatePropagation 才会）。
+     * 只在「这一条已经是当前面板」时动手，否则原样放行，官方那一下照旧把人送进面板。
+     */
+    function onDocumentClick(e) {
+      if (!layoutFace) return;
+      var target = e.target;
+      var row = target && typeof target.closest === 'function' ? target.closest('button') : null;
+      if (!row || !row.querySelector('[' + ICON_MARK + ']')) return;   // 不是我们那一条
+      var info = layoutFace.panelInfo.getSnapshot();
+      if (!info || info.activePanelId !== PANEL_ID) return;            // 还没进去：让官方照常办
+      e.stopPropagation();                                             // 拦掉官方「又选中自己」那一下
+      leaveRemotePanel();
+    }
+
+    /**
      * 侧栏那排图标里的一个。侧栏把图标塞进一个正方格里，
      * 边长由它给（props.size，展开态 16、收起态 18），选中态由它自己画在按钮上，
      * 所以这里只管颜色跟着 currentColor 走、尺寸跟着 size 走。
      */
     function MiniRemoteIcon(props) {
       var size = typeof props.size === 'number' ? props.size : 16;
-      var active = props.active === true;
       return h('svg', {
         width: size,
         height: size,
@@ -900,11 +927,8 @@ window.__ModuleLoader__.load({
         xmlns: 'http://www.w3.org/2000/svg',
         'aria-hidden': 'true',
         focusable: 'false',
-        // 「再点一下退出」就落在这里——这一枚图标是侧栏那一行里**唯一属于我们的 DOM**。
-        // 点击先命中的是图标，再顺着 React 的事件冒泡往上走到官方那个按钮；我们在这里
-        // 拦下它，就等于把「又选中一次自己」换成了「切走」。
-        // 只有这一行已经是当前面板（active）时才拦；不是的话原样放行，官方那一下照旧。
-        onClick: active ? function (e) { e.stopPropagation(); leaveRemotePanel(); } : undefined,
+        // 「这一条是我们的」这个记号，给退出那一下的点击判定用（见 onDocumentClick）。
+        'data-dsh-mini-remote': '1',
       },
         // 一块屏幕的形状（远程窗口），下面一小段底座。
         h('rect', { x: 1.75, y: 2.75, width: 12.5, height: 8.5, rx: 2, stroke: 'currentColor', strokeWidth: 1.5 }),
@@ -927,6 +951,11 @@ window.__ModuleLoader__.load({
             rememberPanel();
             return layout.panelInfo.subscribe(rememberPanel);
           }, 'dsh-mini-remote: 记住进入远程窗口之前的面板');
+          // 退出那一下：整条行的点击（文字、空白、键盘回车都算），只在已是当前面板时动手。
+          scope.effect(function () {
+            document.addEventListener('click', onDocumentClick, true);
+            return function () { document.removeEventListener('click', onDocumentClick, true); };
+          }, 'dsh-mini-remote: 再点一下那一条就退出远程窗口');
         });
       }
 
