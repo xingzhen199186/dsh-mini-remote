@@ -1380,6 +1380,33 @@
     background: var(--bg-top);
   }
   .mv-title { flex: 1 1 auto; font-size: 14px; color: var(--fg); }
+
+  /* ---------- 顶部那条横条的「收 / 放」（2026-10-15 用户要求） ----------
+     平时**完全看不见**：整条收进一个 0 高的壳里。**用「收起来」而不是「透明」**——
+     透明还占着 61px 的地方，官方界面就长不高、屏幕上留一道空当；收起来的话框自己
+     长上来填满（高度是过渡的，不跳）。
+
+     桌面：鼠标贴到屏幕顶部才滑出来，移开就滑走。
+     **顶上那条 6px 的感应带不能省**：鼠标一落到框里那份文档上，事件就进了那份文档，
+     外层页一个都收不到——不盖这一条，最顶上就没有任何东西能「碰到」。
+     它透明、只有 6px，压在官方界面最上面那道空白上：实测那 6px 里没有任何可点的东西
+     （官方自己的按钮最低也从第 22px 起，右上角那个「打开右侧边栏」在第 28px）。
+
+     **只在「主输入设备是有悬停能力的精细指针」时才收起来**（上面那个媒体查询管的就是
+     这件事）：触摸优先的设备上它匹配不上，横条保持**常驻**——触摸没有「悬停」这回事，
+     藏起来就会变成摸不到的东西。它是唯一回手机页的出口，这一条不能赌。 */
+  #mirrorHot { display: none; }
+  .mv-hot { flex: 0 0 auto; overflow: hidden; }
+  @media (hover: hover) and (pointer: fine) {
+    #mirrorHot {
+      display: block; position: absolute; left: 0; right: 0; top: 0;
+      height: 6px; z-index: 2;
+    }
+    /* 100px 是留给 `max-height` 过渡的余量：横条实测 61px，留够就不会被削。
+       收起那一侧同理——`max-height` 掉到 61px 以下才真的开始收。 */
+    .mv-hot { max-height: 0; transition: max-height .25s ease; }
+    #mirrorView.bar-on .mv-hot { max-height: 100px; }
+  }
   #mirrorFrame {
     flex: 1 1 auto; width: 100%; border: 0; background: var(--bg);
     /* 底部让开手势条（2026-10-07 从「被镜像的那份页面」搬回来的）。
@@ -2085,9 +2112,15 @@
   另外整行都能点（不只右边那个按钮）——按钮只有 54×40，手指容易点偏。
 -->
 <div id="mirrorView" hidden>
-  <div class="mv-bar">
-    <span class="mv-title">电脑端界面</span>
-    <button class="btn" id="mirrorClose" type="button">返回</button>
+  <!-- 顶部感应带：桌面上「鼠标贴到屏幕顶部」那一下由它接住。手机上它是 display:none，
+       那时横条本来就常驻——为什么必须有它、为什么手机不吃这一套，见样式表那段说明。 -->
+  <div id="mirrorHot"></div>
+  <!-- 横条外面这层壳是「收 / 放」用的：收起时压成 0 高，官方界面自己长上来填满。 -->
+  <div class="mv-hot" id="mirrorBar">
+    <div class="mv-bar">
+      <span class="mv-title">电脑端界面</span>
+      <button class="btn" id="mirrorClose" type="button">返回</button>
+    </div>
   </div>
   <!-- 地址是点开那一刻才设的：没点之前一个字节都不加载。 -->
   <iframe id="mirrorFrame" title="电脑端界面"></iframe>
@@ -7505,6 +7538,9 @@
 
   function closeMirror() {
     $('mirrorView').hidden = true;
+    // 收起状态一起复位：下次进来从「看不见」开始（鼠标若正好停在顶上，
+    // 那一下 mousemove 会把它勾出来，见下面的接线）。
+    mirrorBarOff();
     // 把地址清掉：那一屏里是个完整应用（还在跑、还连着），关掉就该真停，
     // 而不是留在后台继续占内存和连接。
     $('mirrorFrame').src = 'about:blank';
@@ -7518,6 +7554,55 @@
     openMirror();
   });
   $('mirrorClose').addEventListener('click', closeMirror);
+
+  /**
+   * 顶栏的「收 / 放」（2026-10-15 用户要的甲案：鼠标移到屏幕顶部才滑出来）。
+   *
+   * 为什么非要有那条 6px 感应带、为什么手机不走这一套：样式表里那一段说清了。
+   * 这里只说两件必须做对的事：
+   *
+   * ① **贴到顶上先停 0.18 秒再滑出**。鼠标路过顶边去点官方界面时（右上角那个
+   *    「打开右侧边栏」就在第 28px），不该把它勾出来；停这么一下就不会误触发。
+   *
+   * ② **「返回」永远可达**——它是唯一回手机页的出口，绝不能藏死：
+   *    · 鼠标碰到顶上 6px 就出来（滑出只是一次 0.18 秒的等待）；光标停在感应带上
+   *      不动也没关系：显示之后感应带还在最上面，鼠标一动就再勾一次；
+   *    · 键盘 Tab 停在「返回」上时也把它亮出来（下面 focus 那一条），
+   *      不留一个「焦点在这、按钮看不见」的坑；
+   *    · 滑出时横条**占自己的位置**、不盖在官方界面上，谁也挡不住它；
+   *    · 手机上它压根不藏（触摸没有悬停，藏了就等于摸不到）。
+   */
+  var mirrorHot = $('mirrorHot');
+  var mirrorBar = $('mirrorBar');
+  var barShowTimer = null;
+  var barHideTimer = null;
+
+  function mirrorBarOn() { $('mirrorView').classList.toggle('bar-on', true); }
+  function mirrorBarOff() { $('mirrorView').classList.toggle('bar-on', false); }
+
+  if (mirrorHot && mirrorBar && mirrorHot.addEventListener) {
+    function barScheduleShow() {
+      if (barShowTimer) return;
+      clearTimeout(barHideTimer);
+      barShowTimer = setTimeout(function () { barShowTimer = null; mirrorBarOn(); }, 180);
+    }
+    // 收的时候也先等 0.2 秒：鼠标可能是从感应带往下挪进横条里（那条就贴在它下面），
+    // 中途路过那一下不该被判成「离开了」。
+    function barScheduleHide() {
+      clearTimeout(barShowTimer);
+      barShowTimer = null;
+      clearTimeout(barHideTimer);
+      barHideTimer = setTimeout(mirrorBarOff, 200);
+    }
+    mirrorHot.addEventListener('mouseenter', barScheduleShow);
+    // 显示这一屏那一刻鼠标可能就停在顶上（那时不会再有 mouseenter）——动一下也算数。
+    mirrorHot.addEventListener('mousemove', barScheduleShow);
+    mirrorHot.addEventListener('mouseleave', barScheduleHide);
+    mirrorBar.addEventListener('mouseenter', function () { clearTimeout(barHideTimer); });
+    mirrorBar.addEventListener('mouseleave', barScheduleHide);
+  }
+  // Tab 走到「返回」上要看得见它。
+  $('mirrorClose').addEventListener('focus', mirrorBarOn);
 
   /**
    * 框里那一页自己发的「返回手机页」。
