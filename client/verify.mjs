@@ -1102,6 +1102,17 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
     assert.doesNotMatch(text, /NaN|undefined|Invalid Date/);
   });
 
+  await check('另一台电脑（kind: "desktop"）：类型那格说人话，不是原样打印 desktop', async () => {
+    const st = await mountDevices(
+      [{ ok: true, devices: [Object.assign({}, DEV_A, { kind: 'desktop' }), DEV_B] }],
+      () => ({ ok: true }),
+    );
+    const text = textOf(devicesBlockOf(st.tree));
+    assert.match(text, /另一台电脑/, '跨机配对进来的那台要说人话');
+    assert.doesNotMatch(text, /desktop/, '内部的 kind 值不该原样摆到用户眼前');
+    assert.match(text, /客厅的旧手机/, '同一张名单里别的设备照旧');
+  });
+
   await check('每台两个动作：「改名」和「撤销」', async () => {
     const st = await mountDevices([twoDevices], () => ({ ok: true }));
     const buttons = byType(devicesBlockOf(st.tree), 'button');

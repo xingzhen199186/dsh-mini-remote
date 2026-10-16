@@ -591,7 +591,10 @@ window.__ModuleLoader__.load({
      * 那几条）本来就没有这个字段，编成"创建时间"等于凭空造一次使用。
      */
     function deviceMeta(one) {
-      var kind = one.kind === 'phone' ? '手机' : String(one.kind || '设备');
+      // 类型只影响这一句小字（认人从不看它，见 lib/devices.js）。认得的两种说人话；
+      // **认不出的不吞**——原样打出来，比一律写成"设备"容易查。
+      var kind = one.kind === 'phone' ? '手机'
+        : (one.kind === 'desktop' ? '另一台电脑' : String(one.kind || '设备'));
       var made = formatTime(one.createdAt);
       var seen = formatTime(one.lastSeen);
       var parts = [kind];
