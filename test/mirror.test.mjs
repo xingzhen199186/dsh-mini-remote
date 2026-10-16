@@ -295,6 +295,32 @@ test('票：30 秒就作废——短命是它的一半价值', (t) => {
 })
 
 /**
+ * 票上记着**这一扇窗是谁的**（2026-10-16 第五步）。
+ *
+ * 跨机那条路上，票是在对面那台电脑的浏览器里打开的——它没有设备凭据、也不是本机回环，
+ * 所以身份只能在发票那一刻定下来、跟着票走。这里钉的是这张表的规矩本身：
+ * **只看不消费**（定不下身份时票不能被烧掉）、**兑现即删**（还是一次性）、
+ * **身份连着会话**（撤销才管得到已经开着的那扇窗）。
+ */
+test('票：主人寄存在服务端那张表里——只看不消费，兑现即删', () => {
+  const mirror = createMirror({ upstream: 'http://127.0.0.1:1', tokenUrl: () => null })
+
+  const ticket = mirror.issueTicket('dev-1')
+  assert.equal(mirror.ticketOwner(ticket), 'dev-1', '发票时写着谁，票上就读出谁')
+  assert.equal(mirror.ticketOwner(ticket), 'dev-1', '**只看不消费**：连着看两次，它还在')
+  assert.equal(mirror.ticketGranted(ticket), false, '看一眼不算兑现（取景政策也不认它）')
+
+  const opened = mirror.redeemTicket(ticket, mirror.ticketOwner(ticket))
+  assert.equal(mirror.ticketOwner(ticket), null, '兑现即删：票从表里没了')
+  assert.equal(mirror.windowDevice(opened.session), 'dev-1', '身份跟着会话一起被签（撤销靠它）')
+
+  const bare = mirror.issueTicket()
+  assert.equal(mirror.ticketOwner(bare), '', '不带主人发出来的票：在表里记的是空主人（兑不出来）')
+  assert.equal(mirror.redeemTicket('没这张票', 'dev-1'), null, '不在表里的票换不出东西')
+  assert.equal(mirror.ticketOwner('没这张票'), null, '不在表里的票也读不出主人')
+})
+
+/**
  * 窗口会话的寿命 = **这个宿主进程活着**（2026-10-15 用户拍板；原来是 12 小时）。
  *
  * 原来那个 12 小时是凭空定的，还会留下一种半死状态：面板开着超过 12 小时再刷新，
@@ -1336,6 +1362,11 @@ function stubMirror(log, optsLog) {
 /**
  * 带「票」那一套的镜像桩：够验「入口认票、之后认窗口会话、取景政策跟着哪一边走」。
  * 真票那套逻辑在 lib/mirror.js 里另有一组用例（一次性 / 过期），这里只管路由。
+ *
+ * **票上那个主人也要照真身来**（2026-10-16 第五步）：lib/server.js 兑票那一下读的是
+ * `ticketOwner(ticket)`，所以这个桩必须给得出主人。这些路由测试的请求都从回环来，
+ * 桩里也没有 `windowDevice` 这个口子（窗口会话一律算"没身份"），所以主人默认 `local`
+ * ——和真机上 `/mini-remote/window` 那条给的一模一样。
  */
 function ticketMirror(log, optsLog, { available = () => true } = {}) {
   const tickets = new Map()
@@ -1344,11 +1375,13 @@ function ticketMirror(log, optsLog, { available = () => true } = {}) {
   return {
     ...stubMirror(log, optsLog),
     available,
-    issueTicket: () => {
+    issueTicket: (owner = 'local') => {
       const ticket = `TICKET-${tickets.size + grants.size + 1}`
-      tickets.set(ticket, true)
+      tickets.set(ticket, { owner: typeof owner === 'string' ? owner : '' })
       return ticket
     },
+    /** 只看不消费——真身那一条也是这个口径（见 lib/mirror.js 的 ticketOwner）。 */
+    ticketOwner: (ticket) => tickets.get(ticket)?.owner ?? null,
     redeemTicket: (ticket) => {
       if (!tickets.has(ticket)) return null
       tickets.delete(ticket)
