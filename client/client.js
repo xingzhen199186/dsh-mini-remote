@@ -42,6 +42,18 @@ window.__ModuleLoader__.load({
     var DEVICES_PATH = '/mini-remote/devices';
     var DEVICE_RENAME_PATH = '/mini-remote/devices/rename';
     var DEVICE_REVOKE_PATH = '/mini-remote/devices/revoke';
+    // 「我能连的电脑」那四条（**B 侧**：这台电脑连得上去哪几台别的电脑。宿主侧路由，
+    // 只允许本机调用，见 lib/index.js 与 lib/remotes.js）：
+    //   GET  /mini-remote/remotes        → { ok:true, remotes:[{id,name,baseUrl,addedAt,lastOk}] }
+    //   POST /mini-remote/remotes/add    → { name?, baseUrl, token } → { ok:true, remote }
+    //   POST /mini-remote/remotes/window → { id } → { ok:true, url, expiresIn }   ← 取票（= 重连）
+    //   POST /mini-remote/remotes/forget → { id } → { ok:true, id, note }         ← 断开（只动本地）
+    // **回执里永远没有凭据**（见 lib/remotes.js 的 publicRecord）：界面拿得到的只有
+    // id、名字、地址和两个时间；凭据只活在宿主进程里，去对面取票时放进请求头。
+    var REMOTES_PATH = '/mini-remote/remotes';
+    var REMOTE_ADD_PATH = '/mini-remote/remotes/add';
+    var REMOTE_WINDOW_PATH = '/mini-remote/remotes/window';
+    var REMOTE_FORGET_PATH = '/mini-remote/remotes/forget';
 
     // 侧栏那个图标和中间那一整屏面板共用的一个键。
     // 契约就是这么定的：侧栏条目的 `id` 按原样去寻址 main 槽里 key 相同的那个面板
@@ -84,9 +96,170 @@ window.__ModuleLoader__.load({
       deviceName: { fontWeight: 600, fontSize: 13, wordBreak: 'break-word' },
       deviceActs: { display: 'flex', gap: 8, flex: 'none' },
       deviceConfirm: { flex: '1 1 100%', display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' },
+      // 「其他电脑」那一块：地址单独一行，等宽字体——一长条地址用正文那套字读起来费劲，
+      // 而它又是这一行里最要紧的一条（用户要拿它和对面那台电脑上的地址对一眼）。
+      remoteUrl: { fontFamily: 'ui-monospace,Menlo,monospace', fontSize: 12, lineHeight: 1.5, wordBreak: 'break-all', color: 'var(--dsw-alias-label-tertiary,#8b93a1)' },
+      // 跨机那几句话可能带换行：宿主是**原样转述**对面说的话（`REMOTE_REVOKED_HINT`
+      // 就有两行，"接不上那台电脑"那句也有两行）。不设 pre-wrap 的话两行会连成一句，
+      // 读起来像中间漏了字。
+      say: { fontSize: 12, lineHeight: 1.6, marginTop: 4, whiteSpace: 'pre-wrap', wordBreak: 'break-word' },
     };
 
-    function MiniRemoteSettingsTab() {
+    // —— 跨机 · 「其他电脑」这一块的**状态**（2026-10-16 跨机第三步的界面）。
+    //
+    // 为什么状态放在组件外面：点那一行的人在**设置页那一节**里，被打开的那一整屏在
+    // **中间那个面板**里（main 槽里 key=PANEL_ID 的那一个）——两个组件在不同的槽里，
+    // 互相看不见。所以这一份放在这里，两边都读它、两边都订它。
+    //
+    // 只有四样东西，而且**没有"永远转圈"这一档**：点开的是哪一台、正在换票的是哪一台、
+    // 换到的那张票、换不到时那一句人话（见 fetchRemoteTicket）。
+
+    /**
+     * 用户点开的是**哪一台**（`{ id, name }`；null = 没在看别的电脑）。
+     *
+     * 它和下面那张票是两件事，分开存**是必须的**：换票失败时（对面撤销了、地址不通），
+     * 票还是上一台的那一张——要是照票去画那一屏，屏幕上出现的会是**另一台电脑**的界面，
+     * 而用户刚点的这台连一句话都没说。
+     */
+    var remoteTarget = null;
+    /** 已经换到的那张票：`{ id, name, url, at, expiresIn }`；null = 手上没有票。 */
+    var remoteWin = null;
+    /** 正在为哪一台换票（`''` = 没有在换）。界面照它说「正在换票…」。 */
+    var remoteBusyId = '';
+    /** `id → { text, revoked }`：那台电脑上一次为什么没成，一句话。 */
+    var remoteProblems = {};
+    /** 谁想知道上面这三样变了（面板要先重画一遍）。 */
+    var remoteWatchers = [];
+
+    function notifyRemote() {
+      var list = remoteWatchers.slice();
+      for (var i = 0; i < list.length; i += 1) {
+        try { list[i](); } catch (err) { /* 一个订阅者出事不该拦住别人 */ }
+      }
+    }
+
+    /** 订阅那三样。返回退订函数——**组件卸载时必须退订**，否则留住一个死组件。 */
+    function subscribeRemote(fn) {
+      remoteWatchers.push(fn);
+      return function () {
+        var at = remoteWatchers.indexOf(fn);
+        if (at >= 0) remoteWatchers.splice(at, 1);
+      };
+    }
+
+    /**
+     * 对面把这条记录撤销了时，界面上那句话。
+     *
+     * 它和宿主写的那句（`REMOTE_REVOKED_HINT`，"那台电脑已经不认这枚凭据了……"）**同时**
+     * 出现：这一句说的是"现在是什么状况"，宿主那一句说的是"接下来怎么办"。用户手上真正
+     * 能做的只有一件事——拿对面的口令重新配一次，所以这一句必须摆在这一行上。
+     */
+    var REMOTE_REVOKED_ROW = '这台电脑已经被对方撤销了，要重新配对';
+
+    /**
+     * 「对面撤销了」这个判据为什么只能认字。
+     *
+     * 宿主那一半把对面回的 **401 翻成了 502**，并且换成自己写的那句话（见 lib/index.js 的
+     * `REMOTE_REVOKED_HINT`）——**401 本身到不了界面**。所以那句话是界面上唯一能认出
+     * "对面撤销了"的信号，认它最独特的那半句。认不出（对面换了说法、或者是别的错）就
+     * 照原话显示，**绝不猜**：猜错的代价是让人去重新配对一台其实好着的电脑。
+     */
+    var REMOTE_REVOKED_MARK = '已经不认这枚凭据';
+
+    /**
+     * 那一屏等多久还没打开，就把"空白框"换成一句人话。
+     *
+     * 为什么需要它：框里是**另一个源**（那台电脑的地址），我们一个字节都读不到
+     * （2026-10-16 在无头 Edge 上量过：跨源的 `contentDocument` 是 null）。能等的只有
+     * "框自己有没有 load"。量出来的事实是——**502、端口上没人应答都会照常 load**
+     * （浏览器把错误页也算一次成功的文档），只有"连上了却一直不回话"这种才是真等不到。
+     * 所以这一条**不是**用来判"对面坏了没有"的，它兜的是"一个空白框永远挂在那儿"：
+     * 到点就把框换掉，给一句人话和一个「再试一次」——**不能是个转不完的圈**。
+     */
+    var REMOTE_FRAME_WAIT_MS = 20000;
+
+    /**
+     * 去宿主那儿换一张票（**「重连」就是再调一次它**）。返回 `Promise<{ok,error?}>`。
+     *
+     * ## 每一条路都以一句话结束
+     *
+     * 「转不完的圈」是这个功能最要防的一种坏法：方案里记着那个前车之鉴——宿主回 502
+     * 时，界面外壳**不会重试**，于是永远停在「Loading plugins…」，不自愈。所以这个函数
+     * **只有两种结局**：票放进 `remoteWin`，或者一句人能照着做的话放进 `remoteProblems[id]`。
+     * 网络层失败、非 200、回执里没有地址，一条都不例外。
+     *
+     * ## 401 / 502 是怎么变成人话的
+     *
+     * 401 到不了这里（见 `REMOTE_REVOKED_MARK` 那一段），到的是宿主翻好的 502 +
+     * 那句话：这里①**照原话显示**，②认出那句话之后**额外**把这一行标成"已经被对方
+     * 撤销了"，让用户知道下一步是重新配对，而不是反复点「重连」。
+     * 别的 502（对面 503 / 403 / 地址不通）宿主也各写好了人话（见 lib/index.js 的
+     * `remoteStatusText` 与 `callRemote`），照原话显示即可——**界面这一层不自己编**。
+     */
+    function fetchRemoteTicket(id, name) {
+      remoteBusyId = id;
+      // 手上前一张票作废：它要么是**上一台**的，要么已经过期了。留着它唯一的后果是
+      // 屏幕上出现一台用户没在看的电脑。
+      remoteWin = null;
+      // 上一次那句话先撤掉：正在重试的时候，那一行不该还挂着上一次的结论。
+      delete remoteProblems[id];
+      notifyRemote();
+      return fetch(REMOTE_WINDOW_PATH, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ id: id }),
+      }).then(function (res) {
+        return res.json().then(
+          function (b) { return { status: res.status, body: b }; },
+          function () { return { status: res.status, body: null }; },
+        );
+      }).then(function (r) {
+        var b = (r.body && typeof r.body === 'object') ? r.body : null;
+        remoteBusyId = '';
+        if (b && b.ok === true && typeof b.url === 'string' && b.url) {
+          remoteWin = {
+            id: id,
+            name: name || '',
+            url: b.url,
+            at: Date.now(),
+            // 票的寿命由宿主说了算（真机上是 30 秒）。拿不到就按 0 算＝下次一定重取，
+            // 宁可多要一张票，也不要拿一张过期的票去开那一屏。
+            expiresIn: Number(b.expiresIn) || 0,
+          };
+          notifyRemote();
+          return { ok: true };
+        }
+        var text = (b && b.error) || ('换票失败：这台电脑上的服务返回了 HTTP ' + r.status + '。');
+        remoteProblems[id] = { text: text, revoked: text.indexOf(REMOTE_REVOKED_MARK) >= 0 };
+        notifyRemote();
+        return { ok: false, error: text, revoked: remoteProblems[id].revoked };
+      }).catch(function (err) {
+        remoteBusyId = '';
+        var text = '连不上这台电脑上的遥控服务：' + ((err && err.message) || String(err));
+        remoteProblems[id] = { text: text, revoked: false };
+        notifyRemote();
+        return { ok: false, error: text, revoked: false };
+      });
+    }
+
+    /** 手上那张票是**这一台**的、而且还新鲜吗（留 5 秒余量：别拿一张正好在过期的票去开那一屏）。 */
+    function remoteTicketFresh(id) {
+      if (!remoteWin || remoteWin.id !== id || !remoteWin.url) return false;
+      var ttl = Number(remoteWin.expiresIn) * 1000;
+      if (!ttl) return false;
+      return (Date.now() - remoteWin.at) < (ttl - 5000);
+    }
+
+    /**
+     * 设置页那一节。
+     *
+     * `props.close` 是**设置页外壳递进来的**（dsh-client-ui-settings-general 的
+     * `renderSlot("settings.section", { close: onClose })`）：设置页是一个盖在整个界面
+     * 上的浮层，要"整屏显示别的电脑"就得先把它关掉——不关的话切过去的那一屏在它后面，
+     * 用户看到的是"点了没反应"。拿不到（极简假壳里）也不要紧：那一块会如实说清
+     * "点侧栏那枚图标去看"（见 connectRemote）。
+     */
+    function MiniRemoteSettingsTab(props) {
       var infoState = useState(null);
       var info = infoState[0];
       var setInfo = infoState[1];
@@ -142,6 +315,30 @@ window.__ModuleLoader__.load({
       var confirmState = useState(null);
       var confirming = confirmState[0];
       var setConfirming = confirmState[1];
+      // 「其他电脑」那一块（跨机第三步的界面）：我连得上哪几台电脑。名单从宿主那份来
+      // （`GET /mini-remote/remotes`），动作两条——添加、断开（断开要二次确认）。
+      // 「点这一行」和「重连」是同一件事：去宿主那儿换一张票（见 fetchRemoteTicket）。
+      var remotesState = useState(null);
+      var remotes = remotesState[0];
+      var setRemotes = remotesState[1];
+      var remotesErrState = useState(null);
+      var remotesError = remotesErrState[0];
+      var setRemotesError = remotesErrState[1];
+      // 断开之后宿主给的那句话（说清"对面那台电脑上还留着这条记录"）。原样显示。
+      var remoteNoteState = useState(null);
+      var remoteNote = remoteNoteState[0];
+      var setRemoteNote = remoteNoteState[1];
+      // 添加那一块：`null` = 收着；一个草稿 = 摊开着（三个框 + 一次确认）。
+      var addState = useState(null);
+      var addDraft = addState[0];
+      var setAddDraft = addState[1];
+      var addErrState = useState(null);
+      var addError = addErrState[0];
+      var setAddError = addErrState[1];
+      // 正在二次确认「断开」的那一台（存 id，不存整条记录——记录每次刷新都会变）。
+      var forgetState = useState(null);
+      var forgetting = forgetState[0];
+      var setForgetting = forgetState[1];
 
       // 同源 GET，不带任何 token：这台电脑自己读得到，别人的电脑读不到。
       useEffect(function () {
@@ -247,6 +444,8 @@ window.__ModuleLoader__.load({
       useEffect(function () {
         if (!info) return undefined;
         loadDevices();
+        // 「其他电脑」那份名单和配对信息也没有关系（它是"我连得上谁"），同一趟一起读。
+        loadRemotes();
         return undefined;
       }, [info]);
 
@@ -330,7 +529,175 @@ window.__ModuleLoader__.load({
           .then(function () { setBusy(false); });
       };
 
-      // 和服务端那道校验是同一个数。前端先拦一道只是为了让「太短了」当场说出来，
+      // 「其他电脑」那三样状态在组件**外面**（见那一块的开头）：变了就重画一遍。
+      // 这一节里点一下「重连」，正在换票 / 换到了 / 没换成**都发生在这里**——
+      // 那一行要当场跟着变（尤其是没换成时那句话，它就摆在这一行底下）。
+      // 值本身不用，`setPoke` 那一下就是目的。
+      var pokeRemoteState = useState(0);
+      useEffect(function () {
+        return subscribeRemote(function () { pokeRemoteState[1](function (n) { return n + 1; }); });
+      }, []);
+
+      /**
+       * 读「我能连的电脑」那份名单。
+       *
+       * 和 `loadDevices` 同一条规矩：每次动作之后**重新读服务端那份**，不在本地改数组。
+       * 「界面上删了、其实还留着」在这个功能里同样是最难查的一种错（那一行照旧能点开
+       * 对面那台电脑）。
+       */
+      var loadRemotes = function () {
+        return fetch(REMOTES_PATH)
+          .then(function (res) {
+            return res.json().then(
+              function (body) { return { status: res.status, body: body }; },
+              function () { return { status: res.status, body: null }; },
+            );
+          })
+          .then(function (r) {
+            var b = (r.body && typeof r.body === 'object') ? r.body : null;
+            if (b && b.ok && Array.isArray(b.remotes)) {
+              setRemotes(b.remotes);
+              setRemotesError(null);
+            } else if (r.status === 404 || r.status === 405) {
+              // 这条路不在这儿：宿主那一半是旧版。服务端回的是给程序看的 `not found`，
+              // 原样摆出来用户读不懂，而下一步只有一句话：重启。
+              setRemotesError('读「其他电脑」名单失败：这台电脑上的服务没有这个接口（HTTP ' + r.status + '）。重启一次 DSH 再试。');
+            } else {
+              setRemotesError((b && b.error) || ('读「其他电脑」名单失败：服务返回了 HTTP ' + r.status + '。'));
+            }
+          })
+          .catch(function (err) {
+            setRemotesError('读「其他电脑」名单失败：' + ((err && err.message) || String(err)));
+          });
+      };
+
+      /** 摊开添加那一块。**同时收起别的确认**（一次只做一件事，照上面的改名/撤销）。 */
+      var openAdd = function () {
+        setForgetting(null);
+        setRemoteNote(null);
+        setAddError(null);
+        setAddDraft({ name: '', baseUrl: '', token: '' });
+      };
+
+      /**
+       * 添加一台电脑：拿它的**口令**换一枚自己的凭据（换到了才落盘，见 lib/index.js）。
+       *
+       * 前端这两道拦的只是"太明显了"的空格（当场说清，不用等一趟网络）；真正的门在宿主
+       * 那一边，这里改了那边不改照样进不去——和改密码那一块同一条口径。
+       */
+      var saveAdd = function () {
+        if (!addDraft || busy) return;
+        var baseUrl = (addDraft.baseUrl || '').trim();
+        var token = (addDraft.token || '').trim();
+        if (!baseUrl) {
+          setAddError('要填那台电脑的地址——就是你在那台电脑上打开 DSH 界面时用的那条地址。');
+          return;
+        }
+        if (!token) {
+          setAddError('要填那台电脑的口令（在它的「手机遥控」设置里能复制到）。');
+          return;
+        }
+        setAddError(null);
+        setBusy(true);
+        postJson(REMOTE_ADD_PATH, {
+          name: (addDraft.name || '').trim(),
+          baseUrl: baseUrl,
+          token: token,
+        })
+          .then(function (r) {
+            var b = (r.body && typeof r.body === 'object') ? r.body : null;
+            if (!b || b.ok !== true) {
+              setAddError((b && b.error) || ('添加失败：服务返回了 HTTP ' + r.status + '。'));
+              return undefined;
+            }
+            setAddDraft(null);
+            setRemoteNote(null);
+            // **加完再列一次**：屏幕上那份必须来自服务端（名字是它给的默认值）。
+            return loadRemotes();
+          })
+          .catch(function (err) {
+            setAddError('添加失败：' + ((err && err.message) || String(err)));
+          })
+          .then(function () { setBusy(false); });
+      };
+
+      /**
+       * 真的断开一台电脑：**只删这台电脑上的那一条**（对面那份记录照旧在，见 lib/remotes.js）。
+       *
+       * 只有二次确认之后才会走到这儿。成功之后把宿主给的那句话（`note`）摆出来——
+       * 它说的是"对面还留着这条记录，要彻底收回得去那边撤销"。这是最容易留下的误会：
+       * 用户以为断开等于收回了权限。
+       */
+      var forgetRemote = function (id) {
+        setBusy(true);
+        postJson(REMOTE_FORGET_PATH, { id: id })
+          .then(function (r) {
+            var b = (r.body && typeof r.body === 'object') ? r.body : null;
+            if (!b || b.ok !== true) {
+              setRemotesError((b && b.error) || ('断开失败：服务返回了 HTTP ' + r.status + '。'));
+              return undefined;
+            }
+            setRemotesError(null);
+            setForgetting(null);
+            setRemoteNote(typeof b.note === 'string' ? b.note : null);
+            // 那一台的"上一次为什么没成"跟着这条记录一起没了。
+            delete remoteProblems[id];
+            notifyRemote();
+            return loadRemotes();
+          })
+          .catch(function (err) {
+            setRemotesError('断开失败：' + ((err && err.message) || String(err)));
+          })
+          .then(function () { setBusy(false); });
+      };
+
+      /**
+       * 「点这一行」和「重连」都走它：**取票 → 把地址交给那一整屏**。
+       *
+       * ## 为什么先取票、成功了才切过去
+       *
+       * 取票是这条路上唯一会失败的一步（对面关着、地址不通、被撤销了、它的界面拿不出来
+       * ——见 lib/index.js 那几条路由）。**失败时用户还留在设置页上，那句话就摆在刚才点的
+       * 那一行底下**——比先跳到一整屏空白再告诉他出事了好得多。
+       *
+       * ## 切不过去也不装作没事
+       *
+       * 切那一屏要两样东西：官方布局服务的把手（`layoutFace`），和设置页外壳递进来的
+       * `close`（设置页是一个盖在界面上的浮层，不关掉它，切过去的那一屏还在它后面，
+       * 用户看到的是"什么都没发生"）。两样缺一，就把"去侧栏那枚图标点一下"这条路指给他
+       * ——票已经在手上了，那一下照旧打开。
+       */
+      var connectRemote = function (one) {
+        if (remoteBusyId) return;
+        // **先记住"要打开的是哪一台"**：换票失败时那一屏照它说话（不然会说上一台的事）。
+        remoteTarget = { id: one.id, name: one.name || '' };
+        fetchRemoteTicket(one.id, one.name).then(function (r) {
+          if (!r.ok) return;
+          if (goToRemotePanel()) return;
+          remoteProblems[one.id] = {
+            text: '票已经换到了，但这个界面没能自己切到那一屏。关掉设置页，点侧栏那枚「远程窗口」，'
+              + '就能看到那台电脑的界面。',
+            revoked: false,
+          };
+          notifyRemote();
+        });
+      };
+
+      /** 把那一整屏打开：先切面板、再关设置页（顺序的理由见上面那一段）。 */
+      var goToRemotePanel = function () {
+        if (!layoutFace) return false;
+        try {
+          layoutFace.selectPanel(PANEL_ID);
+        } catch (err) {
+          // 布局服务认得的面板里没有我们那个 key（官方那一列还没装配好）：如实说。
+          return false;
+        }
+        var close = props && props.close;
+        if (typeof close === 'function') {
+          try { close(); } catch (err) { /* 外壳不让我关：那一屏已经在后面打开了 */ }
+        }
+        return true;
+      };
       // 不用等一趟网络；真正的门在服务端，这里改了那边不改也进不去。
       var MIN_PASSWORD_LEN = 12;
 
@@ -574,11 +941,29 @@ window.__ModuleLoader__.load({
           // 跨机那个总开关（2026-10-16 第二步）。和 serve/feishu/dev 一样摊平成一个
           // 对象传：状态在 `info.remote` 里跟配对信息一起下来，动作就是上面那个 POST。
           toggle: toggleRemoteAccess,
+        }, {
+          // 「其他电脑」那一块：名单 + 添加 + 两个动作，以及只属于那一块的两句话
+          // （读名单失败的原因、断开之后那句"对面还留着"）。
+          list: remotes,
+          error: remotesError,
+          note: remoteNote,
+          add: addDraft,
+          addError: addError,
+          forgetting: forgetting,
+          busy: busy,
+          openAdd: openAdd,
+          setAddDraft: setAddDraft,
+          cancelAdd: function () { setAddDraft(null); setAddError(null); },
+          saveAdd: saveAdd,
+          askForget: function (id) { setAddDraft(null); setRemotesError(null); setForgetting(id); },
+          cancelForget: function () { setForgetting(null); },
+          forget: forgetRemote,
+          connect: connectRemote,
         }),
       );
     }
 
-    function content(info, failure, copied, copy, busy, toggle, pwd, serve, feishu, dev, remote) {
+    function content(info, failure, copied, copy, busy, toggle, pwd, serve, feishu, dev, remote, rmt) {
       if (failure) return h('div', { style: styles.error }, failure);
       if (!info) return h('div', { style: styles.loading }, '正在读取配对信息…');
 
@@ -617,6 +1002,10 @@ window.__ModuleLoader__.load({
       // 用户先在名单里看见一台不认识的电脑，才在上方找到那个总开关。
       if (info.remote && remote) blocks.push(remoteBlock(info.remote, busy, remote.toggle));
       if (dev && (dev.list !== null || dev.error)) blocks.push(devicesBlock(dev));
+      // 「其他电脑」那一块：**排在「设备」后面**。两块说的是相反的两件事——上面那份是
+      // "谁进得来"（别人连我这台），这一份是"我连得上谁"（我从这台去连别人）。顺序上先
+      // 说别人进来的（那是权限边界，也是这一页的主语），再说我出去的。
+      if (rmt && (rmt.list !== null || rmt.error)) blocks.push(remotesBlock(rmt));
       return h('div', null, blocks);
     }
 
@@ -728,6 +1117,138 @@ window.__ModuleLoader__.load({
         rows.length
           ? h('div', null, rows)
           : (d.error ? null : h('div', { style: styles.muted, marginTop: 10 }, '这台电脑上还没有登记过的设备。')),
+      );
+    }
+
+    /**
+     * 「其他电脑」那一块：**这台电脑连得上去哪几台别的电脑**（2026-10-16 跨机第三步的界面）。
+     *
+     * ## 和上面那一块正好相反
+     *
+     * 「设备」是**谁进得来**（别人连我这台）；这一块是**我连得上谁**（我从这台去连别人）。
+     * 两块都摆在设置页上，所以标题得一眼分得开。
+     *
+     * ## 一行一台，那一行本身就是入口
+     *
+     * 点那一行 = 打开那台电脑的界面（先取票，见 `connectRemote`）——和本机那枚侧栏图标的
+     * 做法一模一样：取票 → 把地址交给框 → 整屏 → 再点侧栏那一条退出。行里另给两个动作：
+     * 「重连」（票是一次性的、30 秒就过期，"再换一张"总得有个明确入口）和「断开」。
+     * **「重连」和"点这一行"是同一件事**（重连 = 再取一次票，见 lib/index.js 那一段）。
+     *
+     * ## 「断开」要点两下
+     *
+     * 照上面「撤销」的做法（这个文件里没有弹窗，全站都是页内两步）：第一下只把后果摊在
+     * 那一行下面。**而且要说清"对面还留着"**——断开只动这台电脑，用户很容易以为它等于
+     * 收回了对面的权限。
+     *
+     * ## 这一块上没有"转圈"
+     *
+     * 正在换票时那一行写「取票中…」，失败了就写一句人能照着做的话（`remoteProblems`；
+     * 对面撤销了另有专门的一句）。**没有任何一格会永远停在"加载中"**——见 fetchRemoteTicket。
+     */
+    function remotesBlock(r) {
+      var list = Array.isArray(r.list) ? r.list : [];
+
+      var rows = list.map(function (one) {
+        var asking = r.forgetting === one.id;
+        var problem = remoteProblems[one.id];
+        var working = remoteBusyId === one.id;
+        var lastOk = formatTime(one.lastOk);
+        return h('div', {
+          key: one.id,
+          style: Object.assign({}, styles.deviceRow, { cursor: 'pointer' }),
+          // 点这一行 = 打开那台电脑的界面。**点在行里的按钮上不算"点这一行"**——
+          // 不然一按「断开」就会顺手去取票（那是两件相反的事）。
+          onClick: function (e) {
+            var t = e && e.target;
+            if (t && typeof t.closest === 'function' && t.closest('button')) return;
+            r.connect(one);
+          },
+        },
+          h('div', { style: styles.deviceMain },
+            h('div', { style: styles.deviceName }, one.name ? one.name : '（这台电脑没有名字）'),
+            h('div', { style: styles.remoteUrl }, one.baseUrl || ''),
+            h('div', { style: styles.muted }, lastOk ? '最近成功 ' + lastOk : '最近成功 还没有记录'),
+          ),
+          h('div', { style: styles.deviceActs },
+            h('button', {
+              type: 'button',
+              disabled: Boolean(r.busy || working),
+              onClick: function () { r.connect(one); },
+              style: styles.btn,
+            }, working ? '取票中…' : '重连'),
+            h('button', {
+              type: 'button',
+              disabled: Boolean(r.busy),
+              onClick: function () { r.askForget(one.id); },
+              style: styles.btn,
+            }, '断开'),
+          ),
+          working ? h('div', { style: styles.muted }, '正在向那台电脑换一张通行证…') : null,
+          // 上一次为什么没成。**另起一行**（`deviceConfirm` 那个 `flex:1 1 100%`），不然这句话
+          // 会挤在按钮旁边，断成两截。对面撤销了这一条**单独一句**摆在最前面：用户下一步该做的
+          // 是重新配对，而不是反复点「重连」；宿主那两行原文照登，里面写着"拿口令重新添加"。
+          problem ? h('div', {
+            style: problem.revoked
+              ? Object.assign({}, styles.warn, styles.say, styles.deviceConfirm)
+              : Object.assign({}, styles.error, styles.say, styles.deviceConfirm),
+          }, problem.revoked ? REMOTE_REVOKED_ROW + '。' : problem.text) : null,
+          problem && problem.revoked ? h('div', {
+            style: Object.assign({}, styles.muted, styles.say, styles.deviceConfirm),
+          }, problem.text) : null,
+          asking ? h('div', { style: styles.deviceConfirm },
+            h('div', { style: styles.warn }, '断开之后，这台电脑就不再连它了：这条记录和本地存的那枚凭据一起删掉。'
+              + '对面那台电脑上还留着「这台电脑」这条记录——要彻底收回，得去它那边撤销那一台。'),
+            h('button', {
+              type: 'button', disabled: Boolean(r.busy), onClick: function () { r.forget(one.id); }, style: styles.btn,
+            }, r.busy ? '断开中…' : '确认断开'),
+            h('button', {
+              type: 'button', disabled: Boolean(r.busy), onClick: function () { r.cancelForget(); }, style: styles.btn,
+            }, '取消'),
+          ) : null,
+        );
+      });
+
+      // 添加那一块：两个框（地址、口令）+ 一个可选的名字，**一次确认**才发出去
+      // （口令是密码性质的，打字打到一半就发一趟不合适）。口令打码，和别处一致。
+      var addUi = r.add ? h('div', null,
+        field('那台电脑的地址（你在它上面打开 DSH 界面时用的那条）', r.add.baseUrl, 'http://…', function (v) {
+          r.setAddDraft(Object.assign({}, r.add, { baseUrl: v }));
+        }, 'text'),
+        field('那台电脑的口令（在它的「手机遥控」设置里复制）', r.add.token, '', function (v) {
+          r.setAddDraft(Object.assign({}, r.add, { token: v }));
+        }, 'password'),
+        field('给它起个名字（可留空，留空就用地址当名字）', r.add.name, '', function (v) {
+          r.setAddDraft(Object.assign({}, r.add, { name: v }));
+        }, 'text'),
+        h('div', { style: { marginTop: 12, display: 'flex', gap: 8, flexWrap: 'wrap' } },
+          h('button', {
+            type: 'button', disabled: Boolean(r.busy), onClick: r.saveAdd, style: styles.btn,
+          }, r.busy ? '配对中…' : '确认添加'),
+          h('button', {
+            type: 'button', disabled: Boolean(r.busy), onClick: r.cancelAdd, style: styles.btn,
+          }, '取消'),
+        ),
+        r.addError ? h('div', { style: Object.assign({}, styles.error, styles.say) }, r.addError) : null,
+      ) : null;
+
+      return h('div', { key: 'remotes', style: styles.block },
+        h('div', { style: styles.entryTitle }, '其他电脑'),
+        h('div', { style: styles.muted }, '这台电脑连得上去的别的电脑。配对过一台之后，点它那一行就能'
+          + '在这儿打开它的界面——和上面那份名单正好相反：上面是「谁进得来」，这里是「我连得上谁」。'),
+        h('div', { style: styles.warn }, '要连的那台电脑得先把它的「允许别的电脑连接」打开，'
+          + '而且两边要能在网络上互相够到（同一个 Wi-Fi、或者同一条 Tailscale 网络）。'),
+        r.error ? h('div', { style: Object.assign({}, styles.error, styles.say) }, r.error) : null,
+        // 断开之后宿主给的那句话：说清"对面还留着"（最容易留下的误会）。
+        r.note ? h('div', { style: Object.assign({}, styles.muted, styles.say) }, r.note) : null,
+        rows.length
+          ? h('div', null, rows)
+          : (r.error ? null : h('div', { style: styles.muted, marginTop: 10 }, '这台电脑还没连过别的电脑。')),
+        h('div', { style: { marginTop: 12 } },
+          h('button', { type: 'button', onClick: r.openAdd, style: styles.btn },
+            r.add ? '收起这一块' : '添加一台电脑'),
+        ),
+        addUi,
       );
     }
 
@@ -1174,10 +1695,36 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * 那一屏开不成时的整屏内容：**一句人话 + 一个「再试一次」**。
+     *
+     * 这一屏绝对不能是"空白框 + 转圈"——那是这个功能最要防的坏法（方案里记着的前车之鉴：
+     * 宿主回 502 时外壳不会重试，于是永远停在「Loading plugins…」，不自愈）。所以：
+     * 说清是哪一台、为什么没成（宿主那句话原样转述）、下一步点哪儿。
+     */
+    function remoteProblemPanel(id, name, problem) {
+      return h('div', { style: styles.panelMsg },
+        problem.revoked ? h('div', null, REMOTE_REVOKED_ROW + '。') : null,
+        h('div', { style: Object.assign({}, styles.muted, styles.say) }, problem.text),
+        h('div', { style: { marginTop: 18 } },
+          h('button', {
+            type: 'button',
+            onClick: function () { fetchRemoteTicket(id, name); },
+            style: styles.btn,
+          }, '再试一次'),
+        ),
+      );
+    }
+
+    /**
      * 「远程窗口」面板——侧栏那个图标点开之后，占满中间那一整列的那一屏。
      *
      * **这一屏嵌的是「电脑端界面」**（同一台电脑上的 DSH 界面，经我们自己的反代搬出来），
      * 不是手机页：官方那一层本来就是给宽屏做的，放进整屏面板正合适。
+     *
+     * 还有第二种用法（2026-10-16 跨机第三步）：设置页「其他电脑」里点开的那一台。
+     * 同一屏、同一套动作——**票**已经在那一块里换好了（`remoteWin`），这里把地址交给框；
+     * 「再点一下那一条退出」那套不用改，退出时顺手把"别的电脑"这一趟放下
+     * （见 leaveRemotePanel）。
      *
      * ## 为什么要先取一张票，而不是直接把地址写进 src
      *
@@ -1194,12 +1741,33 @@ window.__ModuleLoader__.load({
      * **挂在 useEffect 里**：面板每被打开一次就换一张新票（票是一次性的，上次那张早废了）。
      */
     function MiniRemotePanel() {
-      // null = 还在换票；{ url } = 换到了；{ error } = 没换成，把原因说给用户听。
+      // 本机那一扇：null = 还在换票；{ url } = 换到了；{ error } = 没换成，把原因说给用户听。
+      // **选了「其他电脑」时这一趟不跑**：那一张票由设置页那一块去换（见 fetchRemoteTicket），
+      // 这里只负责把它的地址交给框。
       var winState = useState(null);
       var win = winState[0];
       var setWin = winState[1];
+      // 框一直没打开时的兜底（见 REMOTE_FRAME_WAIT_MS）：到点把空白框换成一句人话。
+      var stallState = useState(false);
+      var stalled = stallState[0];
+      var setStalled = stallState[1];
+      // 订阅「其他电脑」那三样（哪一台在换、换到没有、为什么没成）：变了就重画一遍。
+      // 值本身不用，`setPoke` 那一下就是目的。
+      var pokeState = useState(0);
+      var setPoke = pokeState[1];
 
       useEffect(function () {
+        return subscribeRemote(function () { setPoke(function (n) { return n + 1; }); });
+      }, []);
+
+      var remoteId = remoteTarget ? remoteTarget.id : '';
+      var remoteName = remoteTarget ? remoteTarget.name : '';
+      var remoteUrl = (remoteWin && remoteWin.id === remoteId && remoteWin.url) ? remoteWin.url : '';
+
+      useEffect(function () {
+        // 选了别的电脑：这一趟不该再去要**本机**那一张票（那会白换一张，而且本机拿不出
+        // 可嵌的界面时还会平白报一句错）。
+        if (remoteId) return undefined;
         var alive = true;
         fetch(WINDOW_PATH, { method: 'POST' })
           .then(function (res) {
@@ -1219,7 +1787,53 @@ window.__ModuleLoader__.load({
             setWin({ error: '读不到这台电脑上的遥控服务：' + ((err && err.message) || String(err)) });
           });
         return function () { alive = false; };
-      }, []);
+      }, [remoteId]);
+
+      // 手上那张票已经不新鲜了（面板是后来才打开的，比如点了侧栏那枚图标）：**现换一张**。
+      // 票是一次性的、30 秒就过期，拿一张旧的去开只会开出一片空白——而空白框正是
+      // 这一屏最不能出现的东西。
+      useEffect(function () {
+        if (!remoteId || remoteBusyId === remoteId || remoteTicketFresh(remoteId)) return undefined;
+        fetchRemoteTicket(remoteId, remoteName);
+        return undefined;
+      }, [remoteId, remoteUrl]);
+
+      // 框等不到 load：到点就说人话（见 REMOTE_FRAME_WAIT_MS 里量出来的那几条事实）。
+      useEffect(function () {
+        if (!remoteId || !remoteUrl) return undefined;
+        setStalled(false);
+        var timer = setTimeout(function () { setStalled(true); }, REMOTE_FRAME_WAIT_MS);
+        return function () { clearTimeout(timer); };
+      }, [remoteId, remoteUrl]);
+
+      if (remoteId) {
+        var problem = remoteProblems[remoteId];
+        if (remoteBusyId === remoteId) return h('div', { style: styles.panelMsg }, '正在向那台电脑换一张通行证…');
+        if (problem) return remoteProblemPanel(remoteId, remoteName, problem);
+        // 票不在手上、或者手上那张已经不新鲜了：下面那个 effect 正在换一张新的。
+        // **这时一个框都不立**——拿一张过期的票去开，只会开出一片空白（然后一直白着）。
+        if (!remoteUrl || !remoteTicketFresh(remoteId)) {
+          return h('div', { style: styles.panelMsg }, '正在向那台电脑换一张通行证…');
+        }
+        if (stalled) {
+          return remoteProblemPanel(remoteId, remoteName, {
+            revoked: false,
+            text: '那台电脑的界面一直没打开（等了 ' + Math.round(REMOTE_FRAME_WAIT_MS / 1000) + ' 秒还没看到它）。\n'
+              + '它可能刚重启、或者这会儿连不上。点下面的「再试一次」换一张通行证再开一次。',
+          });
+        }
+        if (!remoteUrl) return h('div', { style: styles.panelMsg }, '正在准备远程窗口…');
+        return h('div', { style: styles.frameWrap },
+          h('iframe', {
+            src: remoteUrl,
+            title: '另一台电脑的界面',
+            // 框里是另一个源，里面一个字节都读不到（量过：跨源的 contentDocument 是 null）。
+            // 所以"它回来了没有"只能靠这一下——但**502 和连不上也会照常 load**，
+            // 所以它只用来取消下面那个兜底，不用来宣布成功。
+            onLoad: function () { setStalled(false); },
+            style: styles.frame,
+          }));
+      }
 
       if (!win) return h('div', { style: styles.panelMsg }, '正在准备远程窗口…');
       if (win.error) return h('div', { style: styles.panelMsg }, win.error);
@@ -1256,6 +1870,13 @@ window.__ModuleLoader__.load({
      * 全局面板」，也就是平时那一屏会话，不是别的东西。
      */
     function leaveRemotePanel() {
+      // 退出就把"另一台电脑"这一趟放下：下次点侧栏那一条，看到的是**本机**那一屏
+      // （和原来一模一样）。不放的话，隔了半天再点那一条会去开一台早就没在看的电脑。
+      if (remoteTarget || remoteWin) {
+        remoteTarget = null;
+        remoteWin = null;
+        notifyRemote();
+      }
       if (!layoutFace) return;
       try {
         layoutFace.selectPanel(panelBeforeRemote);
