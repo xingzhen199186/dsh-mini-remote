@@ -30,6 +30,10 @@ window.__ModuleLoader__.load({
     // 「远程窗口」取票那一条（宿主侧路由，只允许本机调用，见 lib/index.js）。
     // 它回 `{ ok:true, url:'http://127.0.0.1:<端口>/mini/mirror/?ticket=…', expiresIn:30 }`。
     var WINDOW_PATH = '/mini-remote/window';
+    // 「允许别的电脑连接」那个开关（宿主侧路由，只允许本机调用，见 lib/index.js）。
+    // 它收 `{ enabled }`，回的也是整份配对信息（和公网那个开关同形状）。
+    // 关着的时候，配对和跨机取票两条路由一条都不接——这是用户能读懂的"关"。
+    var REMOTE_ACCESS_PATH = '/mini-remote/remote-access';
     // 「设备名册」那三条（宿主侧路由，只允许本机调用，见 lib/index.js）：
     //   GET  /mini-remote/devices        → { ok:true, devices:[{id,name,kind,createdAt,lastSeen}] }
     //   POST /mini-remote/devices/rename → { id, name } → { ok:true, device }
@@ -391,6 +395,41 @@ window.__ModuleLoader__.load({
       };
 
       /**
+       * 开/关「允许别的电脑连接」。
+       *
+       * 和公网那个开关**同一个形状**：POST 一个 `{enabled}`，回来的还是整份配对信息
+       * （服务端算好的那一份），界面直接拿它刷新——本地自己改状态的话，那个开关
+       * 迟早和 settings.json 里那份分叉，而分叉的表现正是这一节最不能出的那种错：
+       * 「界面上开着，其实关着」。
+       *
+       * 失败不动别的状态，只把那句话摆出来（`failure`）。**默认关**：用户不动它，
+       * 这台电脑就不接受别的电脑连过来——装好不会自动打开。
+       */
+      var toggleRemoteAccess = function (enabled) {
+        if (busy) return;
+        setBusy(true);
+        fetch(REMOTE_ACCESS_PATH, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ enabled: enabled }),
+        })
+          .then(function (res) {
+            return res.json().then(
+              function (body) { return { status: res.status, body: body }; },
+              function () { return { status: res.status, body: null }; },
+            );
+          })
+          .then(function (r) {
+            if (r.body && typeof r.body === 'object') { setInfo(r.body); setFailure(null); }
+            else setFailure('切换「允许别的电脑连接」失败：服务返回了 HTTP ' + r.status + '。');
+          })
+          .catch(function (err) {
+            setFailure('切换「允许别的电脑连接」失败：' + ((err && err.message) || String(err)));
+          })
+          .then(function () { setBusy(false); });
+      };
+
+      /**
        * 开/关 Tailscale 的 HTTPS 地址。
        *
        * 失败时**不复用上面那个 failure**：这条要多带一条「点这里去开启」的链接，
@@ -531,11 +570,15 @@ window.__ModuleLoader__.load({
           askRevoke: function (id) { setRenaming(null); setDevicesError(null); setConfirming(id); },
           cancelRevoke: function () { setConfirming(null); },
           revoke: revokeDevice,
+        }, {
+          // 跨机那个总开关（2026-10-16 第二步）。和 serve/feishu/dev 一样摊平成一个
+          // 对象传：状态在 `info.remote` 里跟配对信息一起下来，动作就是上面那个 POST。
+          toggle: toggleRemoteAccess,
         }),
       );
     }
 
-    function content(info, failure, copied, copy, busy, toggle, pwd, serve, feishu, dev) {
+    function content(info, failure, copied, copy, busy, toggle, pwd, serve, feishu, dev, remote) {
       if (failure) return h('div', { style: styles.error }, failure);
       if (!info) return h('div', { style: styles.loading }, '正在读取配对信息…');
 
@@ -569,6 +612,10 @@ window.__ModuleLoader__.load({
       // 设备那一块：**放在最后**。它是"谁进得来"的账本，改名/撤销都在这里；
       // 名单还没读到（服务端没给 / 读失败）而报错也没有时，整块不出现——
       // 不摆一个空壳，也不把上面几块的位置动一寸。
+      // 跨机那个总开关**紧挨在名单前面**：这两块说的是同一件事的两半——上面是
+      // "许不许别的电脑连过来"，下面是"已经连过来的有哪几台"。顺序反过来的话，
+      // 用户先在名单里看见一台不认识的电脑，才在上方找到那个总开关。
+      if (info.remote && remote) blocks.push(remoteBlock(info.remote, busy, remote.toggle));
       if (dev && (dev.list !== null || dev.error)) blocks.push(devicesBlock(dev));
       return h('div', null, blocks);
     }
@@ -964,6 +1011,47 @@ window.__ModuleLoader__.load({
           rel: 'noreferrer',
           style: styles.link,
         }, installed ? '打开 Tailscale' : '下载 Tailscale'),
+      );
+    }
+
+    /**
+     * 「允许别的电脑连接」那一节（2026-10-16 跨机第二步）。
+     *
+     * ## 为什么它得在设置页里、而且默认关
+     *
+     * 打开它等于**把整个「电脑端界面」交给另一台电脑**（会话记录、模型配置、插件装卸
+     * 全在里面）——比手机那条路能碰到的更多。这种边界不能替用户默认打开，所以：
+     * 默认关，而且装好之后**不会自己打开**。
+     *
+     * ## 关着的时候要说清"关的是什么"
+     *
+     * 不是"少录一项配置"，而是**这台电脑不接受别的电脑连过来**：配对和取票两条都不接。
+     * 说清楚这一句，用户才敢让它是关着的。
+     *
+     * ## 开着的时候要给一句实话
+     *
+     * 那台电脑拿到的是完整的桌面界面。用户很可能以为"只是看个窗口"，所以这一句风险
+     * 必须摆出来——这是唯一一处能提前告诉他的地方。
+     */
+    function remoteBlock(st, busy, toggle) {
+      var on = Boolean(st && st.allowed);
+      return h('div', { key: 'remote', style: styles.block },
+        h('div', { style: styles.entryTitle }, '允许别的电脑连接'),
+        h('div', { style: styles.muted }, '打开之后，另一台电脑可以用这台电脑上的密码配一次对，'
+          + '以后就能从那边打开你这台电脑的「电脑端界面」。'),
+        h('label', { style: styles.toggleRow },
+          h('input', {
+            type: 'checkbox',
+            checked: on,
+            disabled: Boolean(busy),
+            onChange: function (e) { toggle(e.target.checked); },
+          }),
+          h('span', null, on ? '已开启' : '开启'),
+        ),
+        h('div', { style: styles.muted }, on
+          ? '已开启。别的电脑现在连得进来——不想让哪一台进，就在下面的名单里把它撤销。'
+          : '没开（默认）。别的电脑连不进来，连配对也不受理——这台电脑现在只接受本机和手机。'),
+        on ? h('div', { style: styles.warn }, '那台电脑拿到的是你这台电脑的完整界面：会话记录、模型设置、插件都在里面。只给你信得过的电脑开。') : null,
       );
     }
 

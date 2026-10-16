@@ -96,7 +96,11 @@ async function bootHost() {
   }, ['agents', 'logger', 'on', 'effect'], disposers)
 
   const mod = await import(new URL(`lib/index.js?t=${Date.now()}`, ROOT_URL).href)
-  mod.apply(ctx, { port, bindAddress: '127.0.0.1' })
+  // **先把这个开关打开**（2026-10-16 第二步起，配对归它管）：关着的时候配对也一律
+  // 不接——那是一个用户能读懂的整体状态（"这台电脑不接受别的电脑连过来"）。
+  // 这个文件的每一条讲的都是"开关开着时配对自己那套规矩"，所以夹具里先打开；
+  // **"默认关 + 关着时两条都不接"由 test/remote-window.test.mjs 钉着**。
+  mod.apply(ctx, { port, bindAddress: '127.0.0.1', allowRemoteComputers: true })
 
   const base = `http://127.0.0.1:${port}`
   const token = readFileSync(join(home, 'dsh-mini-remote', 'token'), 'utf8').trim()

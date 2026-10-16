@@ -1231,6 +1231,111 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
   });
 }
 
+// 4g. 「允许别的电脑连接」那一节（2026-10-16 跨机第二步）
+{
+  console.log('\n[4g] 允许别的电脑连接（跨机那个开关）');
+
+  // 这一节的 payload。**故意不给 tunnel / serve / feishu**：别的块多一个复选框，
+  // 下面按顺序取第一个就会抓错——少给几块，这里就只剩跨机这一个（照 4e 那条）。
+  const withRemote = (remote, extra) => Object.assign({
+    ok: true,
+    port: 3090,
+    token: TOKEN,
+    entries: [{ kind: 'lan', label: '内网', hint: '手机连同一个 Wi-Fi 时用这个', url: URL_LAN, qr: QR }],
+    tunnel: null,
+    serve: null,
+    feishu: null,
+    remote,
+  }, extra || {});
+
+  let tree = null;
+  let posted = [];
+  let postReply = null;
+  let infoReply = null;
+  const h = useHarness();
+  h.onUpdate(() => { tree = h.draw(Comp); });
+
+  const mount = async (payload) => {
+    posted = [];
+    infoReply = payload;
+    setGlobal('fetch', async (url, init) => {
+      if (init && init.method === 'POST') {
+        posted.push({ url, body: JSON.parse(init.body) });
+        // 服务端回的仍是整份配对信息（真机就是这样的）：开关那一格按这次请求翻转。
+        return jsonResponse(200, withRemote(
+          { allowed: JSON.parse(init.body).enabled },
+          { devices: [] },
+        ));
+      }
+      if (url === '/mini-remote/devices') return jsonResponse(200, { ok: true, devices: [] });
+      return jsonResponse(200, postReply ?? infoReply);
+    });
+    postReply = null;
+    tree = h.draw(Comp);
+    h.runEffects();
+    await tick();
+    return tree;
+  };
+
+  /** 这一块的渲染树。**按 key 找**（上面还有二维码、密码那几块，位置会变）。 */
+  const remoteBlockOf = (t) => walk(t).find((n) => n && n.props && n.props.key === 'remote');
+
+  await check('默认关：开关未选中，并说清"连配对也不受理"', async () => {
+    await mount(withRemote({ allowed: false }));
+    const block = remoteBlockOf(tree);
+    assert.ok(block, '这一块要出现（服务端给了 remote 就有得渲染）');
+    const boxes = byType(block, 'input').filter((n) => n.props.type === 'checkbox');
+    assert.equal(boxes.length, 1, '就一个开关');
+    assert.equal(boxes[0].props.checked, false, '默认是关的');
+    const text = textOf(block);
+    assert.match(text, /允许别的电脑连接/);
+    assert.match(text, /没开（默认）/, '要写明这是默认状态');
+    assert.match(text, /连配对也不受理/, '"关"是一个整体状态，得说清它关的是什么');
+  });
+
+  await check('开着时：选中，并且把那句风险摆出来（那台电脑拿到的是完整界面）', async () => {
+    await mount(withRemote({ allowed: true }));
+    const block = remoteBlockOf(tree);
+    const boxes = byType(block, 'input').filter((n) => n.props.type === 'checkbox');
+    assert.equal(boxes[0].props.checked, true);
+    const text = textOf(block);
+    assert.match(text, /完整界面/, '用户很可能以为"只是看个窗口"，这一句必须说出来');
+    assert.match(text, /只给你信得过的电脑开/);
+    assert.match(text, /名单里把它撤销/, '关掉的办法要指到下面那份名单上');
+  });
+
+  await check('点开关 → POST /mini-remote/remote-access，body 是 {enabled}', async () => {
+    await mount(withRemote({ allowed: false }));
+    const box = byType(remoteBlockOf(tree), 'input').filter((n) => n.props.type === 'checkbox')[0];
+    box.props.onChange({ target: { checked: true } });
+    await tick();
+    assert.deepEqual(posted, [{ url: '/mini-remote/remote-access', body: { enabled: true } }],
+      '存的是这一个开关，地址和 body 都写死在这里');
+    // 服务端回的那一份说了算：界面不许自己先把开关画成开着的
+    const after = byType(remoteBlockOf(tree), 'input').filter((n) => n.props.type === 'checkbox')[0];
+    assert.equal(after.props.checked, true, '存完拿服务端那份刷新');
+  });
+
+  await check('服务端没给 remote 字段时：整块不出现（不摆一个空壳）', async () => {
+    const payload = withRemote(undefined);
+    delete payload.remote;
+    await mount(payload);
+    assert.equal(remoteBlockOf(tree), undefined, '没有这一格就不画这一块');
+  });
+
+  await check('它排在设备名单前面（同一件事的两半：许不许连 / 已经连了谁）', async () => {
+    await mount(withRemote({ allowed: false }));
+    // 名单要等配对信息到了之后才拉，所以再来一轮（照 4f 那个夹具）
+    h.runEffects();
+    await tick();
+    const nodes = walk(tree);
+    const at = (key) => nodes.findIndex((n) => n && n.props && n.props.key === key);
+    assert.ok(at('remote') >= 0, '总开关要在');
+    assert.ok(at('devices') >= 0, '设备名单也要在');
+    assert.ok(at('remote') < at('devices'), '总开关要排在名单前面');
+  });
+}
+
 // ---------------------------------------------------------------- 结果
 
 console.log(`\n通过 ${passed} 项，失败 ${failures.length} 项。`);
