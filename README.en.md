@@ -44,6 +44,7 @@ When running complex engineering tasks with desktop or web AI agents, a single t
 ## Core Features
 
 - 🎛️ **Three On-Demand Presentation Modes**: Switch instantly between "Single frame" (the cleanest view, keeping only the latest conclusion), "Chat" (standard conversation bubbles), and "Full" (inline tool calls and file diffs with keyword search).
+- 📱 **Zero-Install Mobile Client**: the phone side is simply a web page — scan, open it in a browser, and that is the whole setup. No app to install, no account to create, no third-party server in between; you can add it to the home screen and it opens full-screen from there.
 - 🌐 **Multi-Route Secure Connectivity**: Connect via LAN, Tailscale private network (supporting MagicDNS and HTTPS certificates), or Cloudflare Tunnel (for environments without public IPs). All routes coexist with dedicated QR codes and tokens.
 - 🐬 **Lightweight Anthropomorphic Feedback**: Inter-step narrations are spoken aloud by the whale girl sprite in speech bubbles; execution progress and queued instructions are visualized on an exact scale, filtering out raw reasoning blocks.
 - 💬 **Feishu Long-Connection Remote**: Direct bidirectional communication through the Feishu Open Platform WebSocket long connection without public ports, supporting text dialogue, multiple-choice responses, and the `/会话` switch command.
@@ -145,6 +146,8 @@ dsh plugin --profile web add C:\path\to\dsh-mini-remote
    [dsh-mini-remote] 已启动：http://127.0.0.1:3090/mini?token=xxxxxxxxxxxx
    ```
 3. Open the DSH desktop UI, navigate to "Settings" → "Phone Remote" in the left sidebar, and view the pairing QR codes and links.
+
+> **The phone side is browser-only.** Scanning and opening it in a browser is the entire client — there is no standalone app and no mini-program. You can add the page to your home screen: the resulting icon opens full-screen and looks much like an app, but it is still the browser running the page. Switch phones or clear browser data, and you are back to scanning the code again.
 
 ---
 
