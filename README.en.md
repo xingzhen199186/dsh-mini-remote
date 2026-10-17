@@ -97,7 +97,7 @@ No window switching and no remote desktop: click "Remote Window" in the DSH desk
 
 ### Prerequisites
 
-Confirm that your host environment satisfies the following requirements:
+Before installing, make sure this computer meets the following requirements:
 
 - **Node.js**: `^22.19.0 || >=24.0.0`
 - **DSH (DeepSeek Harness)**: `>=0.1.5-rc.2 <0.3.0`
@@ -176,7 +176,7 @@ Select the route that matches your current networking environment:
 
 > ⚠️ **Notice**:
 > 1. Elevating permissions to "Full Access" permits the agent to run arbitrary system commands and modify files across the machine. Proceed with caution.
-> 2. System-level confirmation dialogs for dangerous commands belong to the host security perimeter and cannot be signed off remotely from the phone; they must be confirmed on the desktop host.
+> 2. System-level confirmation dialogs for dangerous commands belong to the DSH on your computer itself — the phone cannot approve them, so you will need to handle those on the computer.
 
 ### Advanced Settings: Embedded Desktop Interface (Phone or PC Browser)
 
@@ -193,7 +193,7 @@ How to open it:
 
 > ⚠️ **Notice**:
 > 1. **This is a permission switch, not an ordinary preference.** Turning it on extends the token's reach from "what the phone page exposes" to the **entire desktop management plane** — model configuration, credentials, plugin install/uninstall, session history. It is therefore off by default and takes two confirmations to enable.
-> 2. **When the host has no interface service, this row is not shown at all** (a headless composition, for example) — no fake switch is displayed. Both the desktop app and `dsh web` ship with that service, so normally it is there and you do not need to start a separate `dsh web`.
+> 2. **If your DSH has no web interface at all** (it only runs in the background or a terminal and you never open it in a browser), this row simply will not appear — a switch that does nothing is worse than no switch at all. Both the desktop app and `dsh web` come with that interface, so normally it is there, and **you never need to start a separate `dsh web` for it**.
 > 3. What gets embedded is the desktop interface as-is — on a narrow phone screen it adapts to its mobile layout; in a PC browser you get the original.
 
 ### Desktop "Remote Window"
