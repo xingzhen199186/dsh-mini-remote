@@ -417,6 +417,18 @@ const openFrame = async (box) => {
 const panelTicketReply = ({ url }) => (url === '/mini-remote/remotes'
   ? jsonResponse(200, { ok: true, remotes: [PANEL_FAR] })
   : jsonResponse(200, { ok: true, url: REMOTE_TICKET_URL, expiresIn: 30 }));
+/**
+ * 和 `panelTicketReply` 一样，但**每换一张票地址都不一样**（`&t=<这一趟第几条请求>`）。
+ *
+ * 为什么新写的用例要用它：真机上每一张票都是**一次性凭据**，换一张地址就变一次
+ * （地址里那枚 `?ticket=…` 就是证据）。上面那个替身每次都回同一条地址，于是
+ * "换票之后框照新地址重立"这件事在那一套里量不出来。
+ */
+const ticketReplyEach = ({ url, n }) => (url === '/mini-remote/remotes'
+  ? jsonResponse(200, { ok: true, remotes: [PANEL_FAR] })
+  : jsonResponse(200, { ok: true, url: REMOTE_TICKET_URL + '&t=' + n, expiresIn: 30 }));
+/** 这一趟一共发出去几条取票请求——"自动重取只许一次"就是数它。 */
+const ticketAsks = (box) => box.asks.filter((a) => a.url === '/mini-remote/remotes/window').length;
 /** 把这一趟放下：跨机那几样状态在组件外面（模块级），留着后面的用例会看见。 */
 const dropPanel = async (box) => {
   const back = byType(box.tree, 'button').find((b) => textOf(b) === '← 返回列表');
@@ -453,22 +465,112 @@ await check('框加载成功那一下：20 秒兜底必须被掐掉——**之�
     '放下这一趟（卸下/离开那一屏）之后，手上那个钟照旧不许留着');
 }));
 
-await check('框确实一直没打开：兜底照旧到点就响（那句人话 + 一个「再试一次」，一样都不许少）', withFakeTimers(async (pending) => {
-  // 这一条和上面那条是一对：**把钟掐掉，不等于把兜底弄坏**。框一次 load 都没来过
-  // （真机上是"连上了却一直不回话"那一种），到点必须照旧换成一句人话 + 一个下一步。
-  const box = await mountPanel(panelTicketReply);
-  const frame = await openFrame(box);
-  assert.ok(frame, '先确认框立起来了');
-  const waited = pending.find((one) => one.ms === 20000);
-  assert.ok(waited, '框立起来之后，那一个 20 秒兜底要挂着');
-  waited.fn();   // 到点，而这一次一个 load 都没来过
+// —— 20 秒兜底到点之后那一下「自动重取一张票、再试一次」（2026-10-17 补的那条约束）。
+//
+// 为什么必须补：拆掉"面板每 25 秒自己换一张票"之后**没有任何自动恢复**，只剩用户手点。
+// 于是"第一次加载被拖过票的寿命（30 秒）、票当场作废"那种洞只能白着一整屏
+// （来龙去脉写在 client.js 的 `remoteAutoRetrySpent` 那一段）。下面三条把新契约钉住：
+//   · 到点**先自动重取一张票**（只这一次），而且那一下**看得见**；
+//   · 自动那一次也没成 → **第二次到点才**给人话 + 「再试一次」，绝不自动取第三张；
+//   · 人手动点「再试一次」**不限次数**（那是人主动的，不是自动的）。
+await check('框一直没打开：20 秒到点**先自动重取一张票、再试一次**（只这一次），而且那一下看得见', withFakeTimers(async (pending) => {
+  // ⚠️ **反向验证的靶子**：把那个钟里"先自动重取"那一段拿掉（回到直接 `setStalled(true)`），
+  //    这一条立刻变红——票只换了一次、屏幕上直接就是那句人话。
+  const box = await mountPanel(ticketReplyEach);
+  const first = await openFrame(box);
+  assert.ok(first, '第一次的框立起来了');
+  assert.equal(ticketAsks(box), 1, '点这一台换过一张票');
+
+  pending.find((one) => one.ms === 20000).fn();   // 到点，而这一次一个 load 都没来过
   await settlePanel();
+  assert.equal(ticketAsks(box), 2, '**到点必须先自动重取一张票**（票是一次性的：套着旧票重载是白费）');
+  assert.match(textOf(box.tree), /第一次没打开，正在再试一次/,
+    '自动重试那一下**要看得见**——无声地又转一圈，用户会以为界面卡住了');
+
+  // 新的一张票到手：框照新地址再立一次（这就是"再给框一次机会"）。
+  box.harness.runEffects();   // 真 React 里地址变了，那个看门钟会照新地址重挂一个
+  await settlePanel();
+  const again = byType(box.tree, 'iframe')[0];
+  assert.ok(again, '自动重取到票之后，框要照新地址再立一次');
+  assert.notEqual(again.props.src, first.props.src, '地址里换了一张新票（真机上那就是另一枚一次性凭据）');
+  assert.match(textOf(box.tree), /第一次没打开，正在再试一次/,
+    '框重试期间那句话还得在（那 20 秒里框本来就是白的）');
+
+  // 框真的回来了：那句话就该收掉（不许一直挂在屏幕上）。
+  again.props.onLoad();
+  await settlePanel();
+  assert.doesNotMatch(textOf(box.tree), /正在再试一次/, '框 load 回来了，那句"正在再试一次"要收掉');
+  assert.ok(byType(box.tree, 'iframe')[0], '收那句话不许把框一起换掉');
+  assert.equal(ticketAsks(box), 2, '到这儿为止只换了两张票');
+  await dropPanel(box);
+}));
+
+await check('自动重取也没成：**第二次**到点才给人话 + 一个「再试一次」；绝不自动取第三张票', withFakeTimers(async (pending) => {
+  // 这一条和上面那条是一对：**"先自动重取"不等于"每 20 秒自己重试"**。第二次到点必须换成
+  // 一句人话 + 一个下一步（那条现成的路照旧），而且**一张多余的票都不许再换**。
+  const box = await mountPanel(ticketReplyEach);
+  await openFrame(box);
+  pending.filter((one) => one.ms === 20000).pop().fn();   // 第一次到点 → 自动重取那一次
+  await settlePanel();
+  assert.equal(ticketAsks(box), 2, '第一次到点自动重取了一张');
+  box.harness.runEffects();
+  await settlePanel();
+  assert.ok(byType(box.tree, 'iframe')[0], '重试那一次的框立着（还没到点）');
+
+  pending.filter((one) => one.ms === 20000).pop().fn();   // 第二次到点 → 这一次不许再自动重取
+  await settlePanel();
+  assert.equal(ticketAsks(box), 2,
+    '**自动重取只有一次**：这里冒出第三张票，就是"每 20 秒自动重试"那种新的无界行为');
   assert.equal(byType(box.tree, 'iframe').length, 0, '到点了：空白框要被换掉（不能永远挂在那儿）');
   assert.match(textOf(box.tree), /一直没打开/, '要有那句人话');
+  assert.match(textOf(box.tree), /自动再试了一次/,
+    '走到这儿一定自动试过了：那句话要说得出这一趟，不然和用户真实等的时间对不上');
   assert.ok(byType(box.tree, 'button').some((b) => textOf(b) === '再试一次'), '要给人一个下一步');
   assert.match(textOf(box.tree), /← 返回列表/, '出错也不是死胡同');
   await dropPanel(box);
 }));
+
+await check('自动重取那一次**取票就失败**：照旧走现成那条路（一句人话 + 「再试一次」），不许停在"正在再试一次…"', withFakeTimers(async (pending) => {
+  // 自动重取不是"必然成功"的一条路：这一趟没换成票，界面就得照旧给人话 + 下一步。
+  let first = true;
+  const box = await mountPanel(({ url }) => {
+    if (url === '/mini-remote/remotes') return jsonResponse(200, { ok: true, remotes: [PANEL_FAR] });
+    if (first) { first = false; return jsonResponse(200, { ok: true, url: REMOTE_TICKET_URL, expiresIn: 30 }); }
+    return jsonResponse(502, { ok: false, error: '那台电脑已经不认这枚凭据了——多半是它那边把这条记录撤销了。' });
+  });
+  await openFrame(box);
+  pending.find((one) => one.ms === 20000).fn();
+  await settlePanel();
+  const text = textOf(box.tree);
+  assert.match(text, /这台电脑已经被对方撤销了，要重新配对/, '取票失败照旧走现成那条路（宿主那句话原样转述）');
+  assert.doesNotMatch(text, /正在再试一次/, '已经落地了就不许还挂着"正在再试一次…"（那才是转不完的圈）');
+  assert.ok(byType(box.tree, 'button').some((b) => textOf(b) === '再试一次'), '人还有下一步');
+  assert.equal(byType(box.tree, 'iframe').length, 0, '没换到票就别立框');
+  await dropPanel(box);
+}));
+
+await check('顶上那枚「再试一次」**永远在**（框里是错误页也找得到出路），而且手点**不限次数**', async () => {
+  // ⚠️ **反向验证的靶子**：把 remoteScreen 顶上那枚按钮拿掉 → 这一条变红。
+  // 为什么要有它：跨源框读不到里面（`contentDocument` 是 null），"对面回的是一张错误页"
+  // 和"文档到了里面却是空的"这两种**我们看不见、也不猜**（见 client.js 里 onLoad 那一段）。
+  // 能保证的是：不管框里是什么，用户手上永远有一条出去的路。
+  const box = await mountPanel(ticketReplyEach);
+  assert.ok(await openFrame(box), '框立着');
+  const retries = () => byType(box.tree, 'button').filter((b) => textOf(b) === '再试一次');
+  assert.equal(retries().length, 1,
+    '框正常显示着的时候，顶上也要有那枚「再试一次」（框里是什么我们看不见，出路不能只挂在我们的判断上）');
+  // 人按的就是人按的：**不限次数**。连点三次，每一次都真的再换一张票、把框重新立起来。
+  for (let i = 0; i < 3; i += 1) {
+    const before = ticketAsks(box);
+    retries()[0].props.onClick();
+    await settlePanel();
+    assert.equal(ticketAsks(box), before + 1, `第 ${i + 1} 次手点「再试一次」照样再换一张票（人主动的，不限次数）`);
+    assert.doesNotMatch(textOf(box.tree), /正在再试一次/,
+      '人手点的那一次不是"自动重取"，那句话不许冒出来（它会误导成"我按了它自己又转一圈"）');
+    assert.ok(byType(box.tree, 'iframe')[0], '换到票就把框重新立起来');
+  }
+  await dropPanel(box);
+});
 
 // —— sidebar.panellist：list 槽。id 必须和 main 的 key 对上，侧栏点下来才找得到面板。
 await check('panellist 那条：def.name === "sidebar.panellist"', () => {

@@ -103,6 +103,11 @@ window.__ModuleLoader__.load({
       // 所以外层那一条给一个 320 的兜底高度，这一条自己 flex 撑满剩下的那一块。
       frameWrap: { position: 'relative', boxSizing: 'border-box', width: '100%', flex: '1 1 auto', minHeight: 320 },
       frame: { position: 'absolute', inset: 0, width: '100%', height: '100%', border: 0, display: 'block', background: 'var(--dsw-alias-bg-base,#fff)' },
+      // 自动重取那一次（2026-10-17 补）：**框上面先摆一条看得见的说明**，框还是照旧铺满下面。
+      // 为什么非得有这一条：重试期间那一块本来就是白的/空的，不说话就等于"无声地又转一圈"，
+      // 用户会以为界面卡住了（见 REMOTE_AUTO_RETRY_TEXT）。
+      frameBox: { display: 'flex', flexDirection: 'column', boxSizing: 'border-box', width: '100%', flex: '1 1 auto', minHeight: 0 },
+      frameNote: { flex: 'none', padding: '6px 12px', fontSize: 12, lineHeight: 1.6, color: 'var(--dsw-alias-label-tertiary,#8b93a1)', borderBottom: '1px solid var(--dsw-alias-border-l2,#e5e7eb)' },
       // 「设备」那一块：一行一台。名字和说明在左边（flex:1，窄面板下先让它占满），
       // 动作在右边；撤销那次「二次确认」就摊在这一行下面（这个文件里没有弹窗，
       // 全站都是页内两步——跟着来）。
@@ -149,7 +154,34 @@ window.__ModuleLoader__.load({
     var remoteBusyId = '';
     /** `id → { text, revoked }`：那台电脑上一次为什么没成，一句话。 */
     var remoteProblems = {};
-    /** 谁想知道上面这三样变了（面板要先重画一遍）。 */
+
+    // —— 「框没打开就自动重取一张票、再试一次」用的两样（2026-10-17 补）。
+    //
+    // 为什么要有它：2026-10-17 拆掉了"面板每 25 秒自己换一张票"那个机制（票只在开门那一下
+    // 用一次，之后那一枚窗口会话 cookie 没有寿命——见 `MiniRemotePanel` 里那一段）。拆得对，
+    // 但当时**没有补上任何自动恢复**：只剩下用户手点「再试一次」。于是又多出一个洞——
+    // **框的第一次加载被拖过票的寿命（30 秒）时**，票在那一刻已经作废，框就白着，
+    // 而旧机制那一下"到点重取"本来能顺带把它救回来。这一条就是补上的那个约束。
+
+    /**
+     * 这一次「人按下去」的自动重取**用掉了没有**。
+     *
+     * 只有 20 秒兜底到点那一下会花掉它（每花一次就自动重取一张票、再给框一次机会）。
+     * **每一次人主动发起的取票都会把它重置**（名单上点一台 / 设置页点「重连」/ 那一屏的
+     * 「再试一次」，都不带 `auto`，见 `fetchRemoteTicket`）——所以"自动重试"永远跟着一次
+     * 人的动作，最多一次，**绝不会变成"每 20 秒自己转一圈"那种新的无界行为**。
+     */
+    var remoteAutoRetrySpent = false;
+
+    /**
+     * 屏幕上这一趟正在转的圈 / 立着的框，是不是"第一次没打开、自动再试一次"那一次。
+     *
+     * 由自动那一次取票置起（`{ auto: true }`），由框真正 load 回来那一下放下。
+     * 界面照它换一句话说（见 `REMOTE_AUTO_RETRY_TEXT`）——**不许无声地又转一圈**。
+     */
+    var remoteAutoRetry = false;
+
+    /** 谁想知道上面这几样变了（面板要先重画一遍）。 */
     var remoteWatchers = [];
 
     function notifyRemote() {
@@ -188,16 +220,30 @@ window.__ModuleLoader__.load({
     var REMOTE_REVOKED_MARK = '已经不认这枚凭据';
 
     /**
-     * 那一屏等多久还没打开，就把"空白框"换成一句人话。
+     * 那一屏等多久还没打开，就算"框没打开"：先自动重取一张票再试一次，第二次到点才给人话。
      *
      * 为什么需要它：框里是**另一个源**（那台电脑的地址），我们一个字节都读不到
      * （2026-10-16 在无头 Edge 上量过：跨源的 `contentDocument` 是 null）。能等的只有
      * "框自己有没有 load"。量出来的事实是——**502、端口上没人应答都会照常 load**
      * （浏览器把错误页也算一次成功的文档），只有"连上了却一直不回话"这种才是真等不到。
-     * 所以这一条**不是**用来判"对面坏了没有"的，它兜的是"一个空白框永远挂在那儿"：
-     * 到点就把框换掉，给一句人话和一个「再试一次」——**不能是个转不完的圈**。
+     * 所以这一条**不是**用来判"对面坏了没有"的，它兜的是"一个空白框永远挂在那儿"。
+     *
+     * 到点之后做什么（2026-10-17 补的那条约束）：
+     *   · 这一次人的动作**还没用过**自动重取 → 先自动重取一张票、再给框一次机会
+     *     ——票是一次性的、30 秒就作废，"第一次加载被拖过 30 秒"那个洞就靠这一下救回来
+     *     （见 `remoteAutoRetrySpent`）；
+     *   · 自动那一趟也没成、又到点 → 才把框换成一句人话 + 「再试一次」，**不能是个转不完的圈**。
      */
     var REMOTE_FRAME_WAIT_MS = 20000;
+
+    /**
+     * 自动重取那一次在屏幕上写的那句话（2026-10-17 补）。
+     *
+     * 为什么非有不可：换票那一刻和重试那个框的这 20 秒里，那一块本来就是白的/空的
+     * （`MiniRemotePanel` 里那两处渲染用它顶着）。不说话就等于"无声地又转一圈"，
+     * 用户会以为界面卡住了——这正是这一条补丁自己要防的坏法。
+     */
+    var REMOTE_AUTO_RETRY_TEXT = '第一次没打开，正在再试一次…';
 
     /**
      * 去宿主那儿换一张票，最多等多久（**这一条请求自己的超时**）。
@@ -243,8 +289,20 @@ window.__ModuleLoader__.load({
      *
      * 见 `REMOTE_TICKET_WAIT_MS`。到点我们主动掐掉这一趟，而且**认得出是"我们等不及了"**
      * ——那不是网络自己断的，给的人话也必须是另一句（"等了 15 秒还没等到"）。
+     *
+     * ## 三个入口 + 一个自动入口（2026-10-17 补）
+     *
+     * 人按的三个（名单上点一台 / 设置页点「重连」/ 那一屏的「再试一次」）都不带 `opts`；
+     * 第四个是**框没打开时那一下自动重取**，带 `{ auto: true }`（见 `remoteAutoRetrySpent`）。
+     * 两者的差别只有一处：自动那一次**不重置**那份预算，所以自动重取绝不会自己接着自己转。
      */
-    function fetchRemoteTicket(id, name) {
+    function fetchRemoteTicket(id, name, opts) {
+      // **是不是"框没打开"那一下的自动重取**（2026-10-17 补，见 remoteAutoRetrySpent/remoteAutoRetry）。
+      // 人按的每一次（不带 auto）都把那份预算重置：自动重取于是**永远跟着一次人的动作、最多一次**；
+      // 而「再试一次」是人按的，所以它照旧可以一直点下去（无限次）。
+      var auto = !!(opts && opts.auto);
+      remoteAutoRetry = auto;
+      if (!auto) remoteAutoRetrySpent = false;
       remoteBusyId = id;
       // 手上前一张票作废：它要么是**上一台**的，要么已经过期了。留着它唯一的后果是
       // 屏幕上出现一台用户没在看的电脑。
@@ -2178,10 +2236,17 @@ window.__ModuleLoader__.load({
       var remoteUrl = (remoteWin && remoteWin.id === remoteId && remoteWin.url) ? remoteWin.url : '';
 
       /**
-       * 那一屏的外框：**顶上永远有一条**（一枚「← 返回列表」+ 这是哪一台），下面才是内容。
+       * 那一屏的外框：**顶上永远有一条**（「← 返回列表」+ 这是哪一台 + 一枚「再试一次」），
+       * 下面才是内容。
        *
        * 每一种状态都要它：正在换票、对方撤销了、框一直没起来——那些状态下用户最需要的
        * 恰恰是"怎么回去"。少了这一条，出错的时候这一屏就成了死胡同（那正是这一块要防的坏法）。
+       *
+       * 顶上那枚「再试一次」**永远在**（2026-10-17 补）：它兜的是这一屏最没法自己判的两种情形
+       * ——对面回的是一张错误页，或者文档到了里面却是空的。跨源的框读不到里面（上一段那段
+       * 量出来的事实：`contentDocument` 是 null），"里面是不是坏的"我们**看不见，也不猜**；
+       * 能保证的是：**不管框里是什么，用户手上永远有一条出去的路**——换一张通行证重开一次。
+       * 正在换票时它置灰（同一个动作不叠着发两趟，见 `fetchRemoteTicket` 那段）。
        */
       function remoteScreen(name, inner) {
         return h('div', { style: styles.screen },
@@ -2192,6 +2257,18 @@ window.__ModuleLoader__.load({
               style: styles.btn,
             }, '← 返回列表'),
             h('div', { style: styles.screenName }, name ? name : '另一台电脑'),
+            h('button', {
+              type: 'button',
+              disabled: Boolean(remoteBusyId),
+              onClick: function () {
+                // 正在换票就别再叠一趟（和名单上点一行同一个口径，见 openRemoteScreen）：
+                // 同时飞两条取票请求，后回来的那张票会把前一张盖掉。
+                if (remoteBusyId) return;
+                fetchRemoteTicket(remoteId, remoteName);
+              },
+              // 靠右（marginLeft auto）：台名那一格会被挤扁，这一枚不许跟着一起被挤掉。
+              style: Object.assign({}, styles.btn, { marginLeft: 'auto', flex: 'none' }),
+            }, '再试一次'),
           ),
           inner,
         );
@@ -2220,16 +2297,34 @@ window.__ModuleLoader__.load({
       // **面板自己不再换第二张**——地址不变，框就不重载。要重新开一扇窗（对面重启过、
       // 撤销过又配回来了），入口是「重连」和「再试一次」，都是用户按下去的动作。
 
-      // 框等不到 load：到点就说人话（见 REMOTE_FRAME_WAIT_MS 里量出来的那几条事实）。
+      // 框等不到 load：到点**先自动重取一张票再试一次**，第二次到点才说人话
+      // （见 REMOTE_FRAME_WAIT_MS 与 remoteAutoRetrySpent 里那两条）。
       //
       // **这个兜底只兜"框里一直没有任何文档"这一种**：框一旦 load 过（哪怕对面回的是一张
       // 错误页），`onLoad` 那一下就把这个钟掐掉——**它之后永远不许再响**。
       // 2026-10-17 之前它只在依赖变化/卸载时清，于是真机形态里出现过这种坏法：框明明
       // 已经加载好了，t≈20s 那一屏照样被换成「一直没打开」——一句错话盖住正常的界面。
+      //
+      // 那条"错误页 / 空白文档也算回来了"的取舍照旧没变（见下面 onLoad 那一段）：跨源读不到
+      // 里面，判不出来就不猜。补上自动重取**不等于**能做这个判断——自动重取兜的只是
+      // "框里一个文档都没有"这一种；另外两种的出路是顶上那枚永远在的「再试一次」。
       useEffect(function () {
         if (!remoteId || !remoteUrl) return undefined;
         setStalled(false);
-        stallTimerRef.current = setTimeout(function () { setStalled(true); }, REMOTE_FRAME_WAIT_MS);
+        stallTimerRef.current = setTimeout(function () {
+          // **先自动重取一张票、再试一次（只这一次）**：票是一次性的、真机上 30 秒就作废，
+          // 第一次加载被拖过那 30 秒时套着旧票重载是白费，换一张新的才有救（2026-10-17 补）。
+          // 花掉那份预算的意思是"这一次人的动作里到此为止"：它绝不会自己接着自己转下去。
+          if (!remoteAutoRetrySpent) {
+            remoteAutoRetrySpent = true;
+            // 票一换、地址就变：框整个重立一次，这个 effect 会照新地址再挂一个钟
+            // ——所以"第二次到点"是真的又过了这 20 秒，不是紧接着。
+            fetchRemoteTicket(remoteId, remoteName, { auto: true });
+            return;
+          }
+          // 自动那一趟也没成：**这才**把框换成那句人话 + 「再试一次」（下面 stalled 那一支）。
+          setStalled(true);
+        }, REMOTE_FRAME_WAIT_MS);
         return function () {
           // 换一台 / 返回列表 / 卸载都走这里：手上那个钟照旧清掉（别留下会自己响的定时器）。
           clearTimeout(stallTimerRef.current);
@@ -2240,7 +2335,10 @@ window.__ModuleLoader__.load({
       if (remoteId) {
         var problem = remoteProblems[remoteId];
         if (remoteBusyId === remoteId) {
-          return remoteScreen(remoteName, h('div', { style: styles.panelMsg }, '正在向那台电脑换一张通行证…'));
+          // 自动重取那一次要说清是"第一次没打开、正在再试一次"（见 REMOTE_AUTO_RETRY_TEXT）：
+          // 换票那一刻那一块本来就是空的，不说话就等于无声地又转一圈。
+          return remoteScreen(remoteName, h('div', { style: styles.panelMsg },
+            remoteAutoRetry ? REMOTE_AUTO_RETRY_TEXT : '正在向那台电脑换一张通行证…'));
         }
         if (problem) {
           return remoteScreen(remoteName, remoteProblemPanel(remoteId, remoteName, problem));
@@ -2253,32 +2351,45 @@ window.__ModuleLoader__.load({
           return remoteScreen(remoteName, h('div', { style: styles.panelMsg }, '正在向那台电脑换一张通行证…'));
         }
         if (stalled) {
+          // 走到这儿一定已经自动重取过一次了（见上面那个钟里那一段）：把那一下说出来，
+          // 不然"等了 20 秒"这句话和用户真实等的时间对不上。
           return remoteScreen(remoteName, remoteProblemPanel(remoteId, remoteName, {
             revoked: false,
-            text: '那台电脑的界面一直没打开（等了 ' + Math.round(REMOTE_FRAME_WAIT_MS / 1000) + ' 秒还没看到它）。\n'
+            text: '那台电脑的界面一直没打开（等了 ' + Math.round(REMOTE_FRAME_WAIT_MS / 1000) + ' 秒没看到它，'
+              + '自动再试了一次还是没看到）。\n'
               + '它可能刚重启、或者这会儿连不上。点下面的「再试一次」换一张通行证再开一次。',
           }));
         }
-        return remoteScreen(remoteName, h('div', { style: styles.frameWrap },
-          h('iframe', {
-            src: remoteUrl,
-            title: '另一台电脑的界面',
-            // 框里是另一个源，里面一个字节都读不到（量过：跨源的 contentDocument 是 null）。
-            // 所以"它回来了没有"只能靠这一下——但**502 和连不上也会照常 load**，
-            // 所以它只用来取消下面那个兜底，不用来宣布成功。
-            //
-            // **它触发的意思是"框里有一个文档了"，不是"那台电脑的界面打开了"。**
-            // 取舍（2026-10-17）：这一下必须把兜底掐掉——不清的话，一个加载好好的界面
-            // 也会在 20 秒后被一句「一直没打开」盖住（那才是用户真被伤到的那一面）。
-            // 代价：对面回一张错误页（502 之类）时，用户看到的是那张页面，而不是我们那句
-            // 人话 + 「再试一次」；顶上那枚「← 返回列表」照旧在，重开一次就是重取一张票。
-            onLoad: function () {
-              clearTimeout(stallTimerRef.current);
-              stallTimerRef.current = null;
-              setStalled(false);
-            },
-            style: styles.frame,
-          })));
+        return remoteScreen(remoteName, h('div', { style: styles.frameBox },
+          // 重试那一次的说明条（见 REMOTE_AUTO_RETRY_TEXT）：框上面先顶一条，框照旧铺满下面。
+          // 框 load 回来那一下它就收掉（见 onLoad）。
+          remoteAutoRetry ? h('div', { style: styles.frameNote }, REMOTE_AUTO_RETRY_TEXT) : null,
+          h('div', { style: styles.frameWrap },
+            h('iframe', {
+              src: remoteUrl,
+              title: '另一台电脑的界面',
+              // 框里是另一个源，里面一个字节都读不到（量过：跨源的 contentDocument 是 null）。
+              // 所以"它回来了没有"只能靠这一下——但**502 和连不上也会照常 load**，
+              // 所以它只用来取消下面那个兜底，不用来宣布成功。
+              //
+              // **它触发的意思是"框里有一个文档了"，不是"那台电脑的界面打开了"。**
+              // 取舍（2026-10-17）：这一下必须把兜底掐掉——不清的话，一个加载好好的界面
+              // 也会在 20 秒后被一句「一直没打开」盖住（那才是用户真被伤到的那一面）。
+              // 代价（照旧没变，也**不打算靠猜去补**）：对面回一张错误页（502 之类）、或者
+              // 文档到了里面是空的，都算"回来了"，这一屏不会换成我们那句人话。
+              // 出路是顶上那枚**永远在**的「再试一次」（见 remoteScreen）。
+              onLoad: function () {
+                clearTimeout(stallTimerRef.current);
+                stallTimerRef.current = null;
+                setStalled(false);
+                // 框真的回来了：那句"正在再试一次"就该收掉（见 remoteAutoRetry）。
+                if (remoteAutoRetry) {
+                  remoteAutoRetry = false;
+                  notifyRemote();
+                }
+              },
+              style: styles.frame,
+            }))));
       }
 
       // 没在看某一台：**名单**（这一屏的第一层）。
