@@ -84,7 +84,11 @@ test('只列目录，文件一个都不出现', async (t) => {
 
   const out = await listDirectory(dir)
   assert.equal(out.ok, true)
-  assert.deepEqual(out.dirs.map((d) => d.name), ['甲', '乙'])
+  // **比集合，不比顺序**。`lib/browse.js` 用的是 `localeCompare`（中文按拼音排，对用户更友好），
+  // 而拼音序依赖运行环境的 locale：本机中文环境下「甲」(jiǎ) 在「乙」(yǐ) 前，英文环境下退化成
+  // 码点序、「乙」(U+4E59) 反而在前。这条测试要验的是**只列目录、不列文件**，顺序不该被它绑死
+  // ——2026-10-17 就是它让 CI 在英文 locale 上红了一条。
+  assert.deepEqual(out.dirs.map((d) => d.name).sort(), ['甲', '乙'].sort())
   // 连名字都不该出现在返回里——不是「界面上不显示」，是根本不该传出去。
   assert.equal(JSON.stringify(out).includes('README'), false, '文件名不该出现在返回里')
   assert.equal(JSON.stringify(out).includes('密钥'), false, '文件名不该出现在返回里')

@@ -67,10 +67,21 @@ test('装窗口的那一行不许拉伸它', () => {
 })
 
 const py = process.env.PYTHON || (process.platform === 'win32' ? 'python' : 'python3')
-const hasPython = spawnSync(py, ['--version'], { encoding: 'utf8' }).status === 0
+
+/**
+ * 光"有 python"不够：`tools/whale-panel-box.py` 还要 numpy 与 Pillow。
+ *
+ * 2026-10-17 修：原来只探 `python --version`，于是"python 在、但没装 numpy"的环境
+ * （比如 CI 的 windows-latest）会被判成"该跑"，然后红在 `ModuleNotFoundError` 上——
+ * 那不是代码坏了，是**这台机器没装量图工具需要的库**。跳过它，别把环境问题报成故障。
+ */
+const pyReady = (() => {
+  if (spawnSync(py, ['--version'], { encoding: 'utf8' }).status !== 0) return false
+  return spawnSync(py, ['-c', 'import numpy, PIL'], { encoding: 'utf8' }).status === 0
+})()
 
 test('每格里的人都完整：脚贴格底、头不顶边、左右留得住',
-  { skip: hasPython ? false : `本机没有 ${py}，跳过像素级检查` }, () => {
+  { skip: pyReady ? false : `本机没有 ${py}，或它缺 numpy / Pillow，跳过像素级检查` }, () => {
     const tool = fileURLToPath(new URL('../tools/whale-panel-box.py', import.meta.url))
     const r = spawnSync(py, [tool], { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 })
     assert.equal(r.status, 0, `量格工具跑不起来：${r.stderr}`)
