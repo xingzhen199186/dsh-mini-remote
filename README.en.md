@@ -21,9 +21,9 @@
   <a href="#background--pain-points">Background & Pain Points</a> ·
   <a href="#core-features">Core Features</a> ·
   <a href="#ui-preview">UI Preview</a> ·
+  <a href="#mobile-interface-guide">Mobile Usage</a> ·
   <a href="#desktop-remote-window">Remote Window</a> ·
   <a href="#quick-start">Quick Start</a> ·
-  <a href="#mobile-interface-guide">Mobile Usage</a> ·
   <a href="#usage--configuration">Usage & Configuration</a> ·
   <a href="#license">License</a>
 </p>
