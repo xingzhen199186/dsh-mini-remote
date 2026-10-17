@@ -21,6 +21,7 @@
   <a href="#background--pain-points">Background & Pain Points</a> ·
   <a href="#core-features">Core Features</a> ·
   <a href="#ui-preview">UI Preview</a> ·
+  <a href="#desktop-remote-window">Remote Window</a> ·
   <a href="#quick-start">Quick Start</a> ·
   <a href="#usage--configuration">Usage & Configuration</a> ·
   <a href="#license">License</a>
@@ -79,6 +80,14 @@ During task execution, the view presents an animated running state, elapsed time
 <div align="center">
   <img width="290" alt="Running (dark): the whale girl running, 14s elapsed, one instruction on the queue scale" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/running-dark-phone.jpg" />
   <img width="290" alt="Running (light): the same run in the light theme, 14s elapsed, one instruction queued" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/running-light-phone.jpg" />
+</div>
+
+### Remote Window (Desktop)
+
+No window switching and no remote desktop: click "Remote Window" in the DSH desktop left sidebar and the other computer's DSH interface is embedded right in the main panel. The bar on top holds "← Back to list / which computer this is / Try again"; while the interface displays normally it auto-hides, sliding out only when the mouse reaches the top edge.
+
+<div align="center">
+  <img width="720" alt="Remote Window: another computer's DSH interface embedded in the main panel, with Remote Window selected in the left sidebar" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/remote-window.png" />
 </div>
 
 ---
@@ -173,11 +182,24 @@ Enabling "Advanced settings" in the mobile settings drawer exposes the "Desktop 
 
 ### Desktop "Remote Window"
 
-The plugin registers a "Remote Window" icon in the DSH desktop left sidebar. Clicking it lists the other computers you have paired; clicking a row embeds that computer's DSH desktop interface in the main view, without switching back and forth between an external browser and the client; clicking anywhere along the sidebar row (icon, label, or empty space) exits the view and returns to your previous panel.
+**In one sentence**: open computer A's DSH interface directly inside computer B's DSH desktop window.
 
-- **Security Credentials**: Opening the window automatically generates a one-time temporary pass (ticket) valid for 30 seconds. The pass is issued directly by the desktop backend service, so your master access token is never handed over to the browser.
-- **Embedding Policy**: Only pages carrying a valid pass may embed this interface; unauthorized third-party sites are blocked even if they obtain the address.
-- **Session Lifecycle**: The window's pass expires together with DSH — once DSH restarts, the pass becomes invalid immediately, and you simply click the icon to open it again.
+**What it replaces**: when both machines run their own DSH, looking at the other one used to take one of two detours — an extra browser window (so you keep switching between two sets of windows), or full remote desktop (the entire screen comes over, with all the resolution and shortcut friction). This entry turns "that machine" into one panel: click and it is there, click again and you are back where you were.
+
+#### What it looks like in use
+
+1. Click "Remote Window" in the left sidebar; the main view lists the computers you have paired — one row each, with name, address, and when it last connected.
+2. Click a row and that computer's interface is embedded in the panel.
+3. Click the sidebar row again (icon, label, or any blank part of the row) to leave and return to the panel you were on.
+
+While the interface displays normally, the bar at the top **auto-hides** — move the mouse to the top edge and it slides out. The bar carries "← Back to list", which computer this is, and "Try again": that is the only way out (and the way to retry) when something goes wrong, so in the connecting, failed, and never-loaded states **it stays visible and never hides**.
+
+#### What was done for security
+
+- **The pass never changes hands**: opening a window makes the server sign a one-time ticket (valid for 30 seconds, redeemable once). The browser receives that ticket only — **your access pass and long-lived credentials never enter the browser**, so they cannot end up in browsing history or inside the embedded page.
+- **Only a page carrying a valid ticket may embed**: cross-site embedding is denied by default and allowed only for that one ticket-bearing load. An outside page that learns the address still cannot get in.
+- **Revocation is immediate**: once you revoke device B on A, B's already-open window fails on its next request — no waiting for it to disconnect on its own.
+- **It dies with DSH**: restarting DSH invalidates that screen's pass; click once more to reopen.
 
 #### Cross-Machine Setup (Two Computers)
 
@@ -185,8 +207,9 @@ Below, **A** is the computer being connected to, and **B** is the one connecting
 
 **On A**
 
-1. Open "Settings → Phone Remote → Allow other computers to connect" and switch it on. It is off by default; while it is off, A does not accept pairing requests at all.
-2. In the "Password" section of the same settings page, click "Show" or "Copy" to get A's pass.
+1. **Install this plugin**, and make sure it is a version that includes "Remote Window". B connects to the code running on A — if A runs an older version, B sees the old interface.
+2. Open "Settings → Phone Remote → Allow other computers to connect" and switch it on. It is off by default; while it is off, A does not accept pairing requests at all.
+3. In the "Password" section of the same settings page, click "Show" or "Copy" to get A's pass.
 
 **On B**
 
@@ -198,12 +221,12 @@ Below, **A** is the computer being connected to, and **B** is the one connecting
 
 - Enter the address shown on A's "Phone Remote" page (no trailing `/mini` needed) — **not** the one you use to open the DSH interface on A itself.
 - **It must be `https://`.** A plain `http://` address can pair and can obtain the pass, but the frame stays blank — the browser drops that pass on a non-HTTPS address.
-- Tailscale is recommended: switch on "HTTPS address (Tailscale)" on A, then enter `https://<machine>.<your-tailnet>.ts.net` on B — **no port needed**.
+- Tailscale is recommended: switch on "HTTPS address (Tailscale)" on A, then enter `https://<machine>.<your-tailnet>.ts.net` on B — **no port needed**. The address is stable, so you set it once.
 - The "Public access" tunnel address changes on every restart, so it is not suitable for cross-machine use.
 
 **How to tell it worked**
 
-Click the row in the list and that computer's interface appears in the frame. When something fails, a plain-language line appears under that row: the far side has not switched it on, the pairing was revoked, it is unreachable, or the address is wrong — each has its own message.
+Click the row in the list and that computer's interface appears in the frame. When something fails, a plain-language line appears under that row — the far side has not switched it on, the pairing was revoked, it is unreachable, or the address is wrong; each has its own message.
 
 ### Feishu Bot Setup Guide
 
