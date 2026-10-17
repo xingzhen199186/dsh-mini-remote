@@ -4171,10 +4171,13 @@ test('自检：该回答的那几样一样不缺（版本 / 进程 / 接口 / �
   const { status, body } = await selfcheck(p.routes.get(SELFCHECK_ROUTE))
   assert.equal(status, 200)
 
-  // ① 插件版本：就是 package.json 里那个（还是 0.2.0，这个改动不碰版本号）
+  // ① 插件版本：就是 package.json 里那个。
+  // **不钉字面量**：钉了就变成"发版时要记得改这一行"，而那正是 0.2.1 发版时踩到的
+  // ——版本号一改，这两条无关的用例跟着红。真正的互证在 structure-deps.test.mjs
+  // （包版本必须等于 CHANGELOG 最顶上那条）。
   const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'))
   assert.equal(body.version, pkg.version)
-  assert.equal(body.version, '0.2.0')
+  assert.match(body.version, /^\d+\.\d+\.\d+/, '版本号要是个正经版本号，不许是空串或 undefined')
 
   // ② 宿主进程什么时候起的——那两次故障的关键一格
   assert.ok(Number.isFinite(body.process.startedAtMs), '启动时刻必须是一个毫秒数')
@@ -4325,7 +4328,9 @@ test('自检：进程比代码旧时当场认出来（真造一个"旧进程"）
   assert.match(body.code.message, /重启 DSH 才会加载新版本/, '要给下一步动作，不是光报一个 true')
   assert.ok(body.code.file, '要说清是哪一份文件比进程新')
   assert.ok(Number.isFinite(body.code.modifiedAtMs))
-  assert.equal(body.version, '0.2.0', '副本里那份 package.json 照旧读得到')
+  // 副本里那份 package.json 照旧读得到——**读副本自己的版本号，不钉字面量**。
+  const copied = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8'))
+  assert.equal(body.version, copied.version, '副本里那份 package.json 照旧读得到')
 })
 
 test('自检：进程不比代码旧的时候不许乱喊（负对照：同一个进程、同一段代码）', async (t) => {

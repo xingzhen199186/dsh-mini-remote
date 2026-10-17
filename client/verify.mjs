@@ -2193,7 +2193,7 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
 
   const SELF_OK = {
     ok: true,
-    version: '0.2.0',
+    version: '0.2.1',
     process: { pid: 4321, startedAtMs: AT(17, 17, 16), startedAt: '2026-10-17T09:16:00.000Z', uptimeSec: 7200 },
     code: { file: 'lib/index.js', modifiedAtMs: AT(17, 17, 10), stale: false, message: null },
     routes: [
@@ -2261,7 +2261,7 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
     const st = await mountSelfcheck(jsonResponse(200, SELF_OK));
     const text = textOf(selfBlockOf(st.tree));
     assert.match(text, /自检/);
-    assert.match(text, /插件版本 0\.2\.0/);
+    assert.match(text, /插件版本 0\.2\.1/);
     assert.match(text, /宿主进程启动于 2026-10-17 17:16/);
     assert.match(text, /接口一共 3 条，都在/);
     // 展开的那些细节也都在（默认展开）
