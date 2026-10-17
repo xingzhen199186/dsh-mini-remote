@@ -47,7 +47,7 @@ When running complex engineering tasks with desktop or web AI agents, a single t
 - 🐬 **Lightweight Anthropomorphic Feedback**: Inter-step narrations are spoken aloud by the whale girl sprite in speech bubbles; execution progress and queued instructions are visualized on an exact scale, filtering out raw reasoning blocks.
 - 💬 **Feishu Long-Connection Remote**: Direct bidirectional communication through the Feishu Open Platform WebSocket long connection without public ports, supporting text dialogue, multiple-choice responses, and the `/会话` switch command.
 - 🗂️ **In-Place Mobile Session Management**: Rename, pin, archive, or fork sessions from the most recent completed turn directly on your phone, with clear indicators for pending approvals and questions.
-- 💻 **Desktop Embedded "Remote Window"**: Adds a "Remote Window" shortcut to the left sidebar of the DSH desktop app, letting you open your local desktop DSH interface directly inside the main view; click the row again to exit and return to where you were (local desktop only for now).
+- 💻 **Desktop Embedded "Remote Window"**: Adds a "Remote Window" shortcut to the left sidebar of the DSH desktop app: it lists the other computers you have paired, and clicking a row embeds that computer's DSH desktop interface in the main view; click the row again to exit and return to where you were. Cross-machine access is supported; see "Desktop \"Remote Window\"" below for the pairing steps.
 - 🔒 **Rigorous Security Boundaries**: All API routes enforce constant-time token comparison to prevent timing side-channel attacks; built-in rate limiting locks out sources after 5 failed attempts in 1 minute; pairing data is accessible solely from the host loopback interface.
 
 ---
@@ -173,14 +173,37 @@ Enabling "Advanced settings" in the mobile settings drawer exposes the "Desktop 
 
 ### Desktop "Remote Window"
 
-The plugin registers a "Remote Window" icon in the DSH desktop left sidebar. Clicking it displays your local desktop DSH interface directly inside the main view without switching back and forth between an external browser and the client; clicking anywhere along the sidebar row (icon, label, or empty space) exits the view and returns to your previous panel.
+The plugin registers a "Remote Window" icon in the DSH desktop left sidebar. Clicking it lists the other computers you have paired; clicking a row embeds that computer's DSH desktop interface in the main view, without switching back and forth between an external browser and the client; clicking anywhere along the sidebar row (icon, label, or empty space) exits the view and returns to your previous panel.
 
 - **Security Credentials**: Opening the window automatically generates a one-time temporary pass (ticket) valid for 30 seconds. The pass is issued directly by the desktop backend service, so your master access token is never handed over to the browser.
-- **Embedding Policy**: By default, only local pages on this machine are allowed to embed this interface, preventing unauthorized third-party sites from framing it.
+- **Embedding Policy**: Only pages carrying a valid pass may embed this interface; unauthorized third-party sites are blocked even if they obtain the address.
 - **Session Lifecycle**: The window's pass expires together with DSH — once DSH restarts, the pass becomes invalid immediately, and you simply click the icon to open it again.
 
-> ⚠️ **Notice**:
-> Currently available only on the local desktop app. Remote cross-machine access to this window will be supported in a future release.
+#### Cross-Machine Setup (Two Computers)
+
+Below, **A** is the computer being connected to, and **B** is the one connecting to it.
+
+**On A**
+
+1. Open "Settings → Phone Remote → Allow other computers to connect" and switch it on. It is off by default; while it is off, A does not accept pairing requests at all.
+2. In the "Password" section of the same settings page, click "Show" or "Copy" to get A's pass.
+
+**On B**
+
+1. Open "Settings → Phone Remote → Other computers → Add a computer".
+2. Enter A's address under "Address" and A's pass under "Pass", then confirm.
+3. Click that row in the list.
+
+**Which address to enter**
+
+- Enter the address shown on A's "Phone Remote" page (no trailing `/mini` needed) — **not** the one you use to open the DSH interface on A itself.
+- **It must be `https://`.** A plain `http://` address can pair and can obtain the pass, but the frame stays blank — the browser drops that pass on a non-HTTPS address.
+- Tailscale is recommended: switch on "HTTPS address (Tailscale)" on A, then enter `https://<machine>.<your-tailnet>.ts.net` on B — **no port needed**.
+- The "Public access" tunnel address changes on every restart, so it is not suitable for cross-machine use.
+
+**How to tell it worked**
+
+Click the row in the list and that computer's interface appears in the frame. When something fails, a plain-language line appears under that row: the far side has not switched it on, the pairing was revoked, it is unreachable, or the address is wrong — each has its own message.
 
 ### Feishu Bot Setup Guide
 
