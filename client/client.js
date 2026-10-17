@@ -1517,6 +1517,24 @@ window.__ModuleLoader__.load({
         return '（已运行 ' + hours + ' 小时' + (rest ? ' ' + rest + ' 分' : '') + '）';
       }
 
+      /**
+       * 多久以前，说成人话。
+       *
+       * 诊断的时候「三分钟前」比「19:42:07」有用：用户记不住自己什么时候点过什么，
+       * 但他知道"刚才"和"昨天"的区别。
+       */
+      function agoText(ms) {
+        var n = Number(ms);
+        if (!isFinite(n)) return '';
+        var sec = Math.round((Date.now() - n) / 1000);
+        if (sec < 60) return '刚刚';
+        var min = Math.round(sec / 60);
+        if (min < 60) return min + ' 分钟前';
+        var hour = Math.round(min / 60);
+        if (hour < 24) return hour + ' 小时前';
+        return Math.round(hour / 24) + ' 天前';
+      }
+
       /** 接口那一行的说法：几条在、几条不在。空表只说"未知"，不编一个 0。 */
       function routeLine(routes) {
         var list = Array.isArray(routes) ? routes : [];
@@ -1549,10 +1567,16 @@ window.__ModuleLoader__.load({
         ? h('div', { style: styles.warn }, code.message)
         : null;
 
+      // 最近出错的那一叠（自检里的 `errors`：**最新在前**，最多 20 条）。
+      // 空数组是正常的——那是"这次开机以来没出过错"，不是"取不到"。
+      var errorRows = Array.isArray(st.errors) ? st.errors : [];
+
       var summary = h('div', { style: styles.selfSummary },
         '插件版本 ' + (st.version || '未知')
         + ' · 宿主进程启动于 ' + (formatTime(proc.startedAtMs) || '未知')
-        + ' · 接口' + routeLine(st.routes),
+        + ' · 接口' + routeLine(st.routes)
+        // 有错才提一句：绝大多数的正常时刻，这一行不该被"最近出错 0 条"这种噪音占满。
+        + (errorRows.length ? ' · 最近出错 ' + errorRows.length + ' 条' : ''),
       );
 
       var routePaths = Array.isArray(st.routes) ? st.routes : [];
@@ -1589,6 +1613,20 @@ window.__ModuleLoader__.load({
         h('div', { style: styles.muted },
           '名册（只报条数，不报内容）：设备 ' + (rosters.devices === null || rosters.devices === undefined ? '未知' : rosters.devices + ' 条')
           + ' · 我能连的电脑 ' + (rosters.remotes === null || rosters.remotes === undefined ? '未知' : rosters.remotes + ' 条')),
+        // 最近出错：这一块是「刚才到底发生了什么」的唯一出口。
+        // 错误原来只打到 stdout——用户看着图形界面，终端里写了什么他一个字都看不到。
+        errorRows.length
+          ? h('div', null,
+            h('div', { style: styles.muted },
+              '最近出错（最新在前，' + agoText(errorRows[0] && errorRows[0].at) + '），不落盘、重启就清空：'),
+            h('div', { style: styles.code }, errorRows.slice(0, 5).map(function (one) {
+              return '· ' + String((one && one.message) || '');
+            }).join('\n')
+            + (errorRows.length > 5 ? '\n…还有 ' + (errorRows.length - 5) + ' 条' : '')),
+            h('div', { style: styles.muted },
+              '要看更早的，去启动这个 DSH 的那个终端找 [dsh-mini-remote] 开头的行。'),
+          )
+          : h('div', { style: styles.muted }, '最近没有出错记录。'),
       );
 
       return h('div', { key: 'selfcheck', style: styles.block },

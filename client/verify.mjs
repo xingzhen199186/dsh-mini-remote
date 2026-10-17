@@ -2261,6 +2261,9 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
     assert.match(text, /dsh-mini-remote/);
     assert.match(text, /设备 2 条 · 我能连的电脑 0 条/);
     assert.match(text, /\/mini-remote\/pairing/, '接口清单一列出来');
+    // 没有错的时候不许喊狼来了，但也得说清"是真的没有"，不是"读不到"。
+    assert.match(text, /最近没有出错记录。/);
+    assert.doesNotMatch(text, /最近出错 \d+ 条/);
     assert.doesNotMatch(text, /NaN|undefined|Invalid Date/);
     st.harness.unmount();
   });
@@ -2309,6 +2312,36 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
     assert.match(text, /接口一共 2 条，其中 1 条不在/);
     assert.match(text, /\/mini-remote\/devices\/revoke/);
     assert.match(text, /（现在不在）/);
+    st.harness.unmount();
+  });
+
+  await check('最近出错：摘要报条数、明细摆最新那一条，而且说清"不落盘"', async () => {
+    const withErrors = Object.assign({}, SELF_OK, {
+      errors: [
+        { at: AT(17, 17, 30), kind: 'remote', message: '连不上那台电脑（http://127.0.0.1:1）：ECONNREFUSED。' },
+        { at: AT(17, 17, 20), kind: 'tunnel', message: '公网访问没起来：cloudflared 找不到。' },
+      ],
+    });
+    const st = await mountSelfcheck(jsonResponse(200, withErrors));
+    const text = textOf(selfBlockOf(st.tree));
+    assert.match(text, /最近出错 2 条/, '摘要要说清有几条');
+    assert.match(text, /连不上那台电脑/, '最新那一条要摆出来');
+    assert.match(text, /公网访问没起来/, '第二条也在（五条以内全列）');
+    assert.match(text, /不落盘、重启就清空/, '要告诉用户这不是日志，别拿它当历史记录找');
+    st.harness.unmount();
+  });
+
+  await check('最近出错：超过五条只列前五条 + 还有几条（不把面板撑开）', async () => {
+    const many = Object.assign({}, SELF_OK, {
+      errors: Array.from({ length: 8 }, (_, i) => ({
+        at: AT(17, 17, 30 - i), kind: 'service', message: '第 ' + (i + 1) + ' 条错误',
+      })),
+    });
+    const st = await mountSelfcheck(jsonResponse(200, many));
+    const text = textOf(selfBlockOf(st.tree));
+    assert.match(text, /最近出错 8 条/);
+    assert.match(text, /还有 3 条/);
+    assert.doesNotMatch(text, /第 6 条错误/, '第六条起不摆出来，否则默认展开的一屏全是错误');
     st.harness.unmount();
   });
 

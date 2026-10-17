@@ -4355,4 +4355,67 @@ test('自检：卸载之后这条路由跟着摘掉，清单上"现在在不在"
   assert.equal(after.routes.length, before.routes.length, '注销的是挂载，不是条目')
 })
 
+// ---------------------------------------------------------------------------
+// 错误出口（2026-10-17）：出错的时候，用户到底看不看得见
+//
+// 那天两次故障都只能靠猜——错误原来只打 stdout，用户看着图形界面，终端里写了什么
+// 他一个字都看不到。这一组钉两件事：**错误进了自检**，而且**进去之前凭据已经被换掉**。
+// ---------------------------------------------------------------------------
+
+test('脱敏：口令、飞书密钥、查询串里的凭据、设备凭据形状——四类都换成 ***', async () => {
+  const { redactSecrets } = await import(new URL(`lib/index.js?t=${Date.now()}`, ROOT_URL).href)
+  const TOKEN = 'abc12345xyz'
+  const SECRET = 'feishu-app-secret-value'
+  const CRED = '0123456789abcdef0123456789abcdef.fedcba9876543210fedcba9876543210'
+
+  assert.equal(redactSecrets(`口令是 ${TOKEN} 对吧`, [TOKEN]), '口令是 *** 对吧')
+  assert.equal(redactSecrets(`密钥 ${SECRET} 出错`, [SECRET]), '密钥 *** 出错')
+  assert.equal(redactSecrets('打开 https://h/p?token=deadbeef&x=1 失败', []),
+    '打开 https://h/p?token=***&x=1 失败', '查询串里的值要换，参数名和别的参数留着')
+  assert.equal(redactSecrets(`设备 ${CRED} 被拒`, []), '设备 *** 被拒',
+    '形状像设备凭据的值，不管出现在哪儿都换')
+  // 短值不换：否则 "ab" 这种碎片会把一整片正常文字换掉，错误消息就没法读了。
+  assert.equal(redactSecrets('abab 是正常的', ['ab']), 'abab 是正常的')
+  // 截断：一条错误不许长到把默认展开的面板撑开。
+  assert.ok(redactSecrets('x'.repeat(1000), []).length <= 300, '单条要截断到 300 字以内')
+})
+
+test('自检：errors 是一个数组，每条都带时刻、分类、一句话', async (t) => {
+  const p = await bootPlugin()
+  t.after(p.stop)
+  const { body } = await selfcheck(p.routes.get(SELFCHECK_ROUTE))
+  // 不假设"刚起来一定是 0 条"：绑定地址挑不出来之类的情况在启动期也会留下记录。
+  assert.ok(Array.isArray(body.errors), 'errors 必须是数组，不许省掉、不许是 null')
+  for (const one of body.errors) {
+    assert.ok(Number.isFinite(one.at), '每条要有毫秒时刻（界面按本地时区说"几分钟前"）')
+    assert.equal(typeof one.kind, 'string', '每条要有分类，用户才知道是哪一块在坏')
+    assert.equal(typeof one.message, 'string')
+  }
+})
+
+test('自检：跨机连不上会留痕（这条路以前完全不留痕）', async (t) => {
+  const p = await bootPlugin()
+  t.after(p.stop)
+  const route = p.routes.get('/mini-remote/remotes/add')
+  assert.ok(route, '添加那一条要挂着')
+
+  const res = fakeRes()
+  // 端口 1 上不会有人应答：一定走 callRemote 那个 catch（连不上，不是等超时）。
+  await route.handler(
+    fakeReq('127.0.0.1', {
+      method: 'POST',
+      body: JSON.stringify({ baseUrl: 'http://127.0.0.1:1', token: 'x'.repeat(12) }),
+    }),
+    res,
+  )
+  assert.equal(res.out.status, 502, '加不上要把原因回给界面')
+
+  const { body } = await selfcheck(p.routes.get(SELFCHECK_ROUTE))
+  const remote = body.errors.filter((one) => one.kind === 'remote')
+  assert.equal(remote.length, 1, '跨机那次失败要进自检——用户一退出面板就再也查不到了，那才是真的没法查')
+  assert.match(remote[0].message, /连不上那台电脑/)
+  assert.match(remote[0].message, /127\.0\.0\.1:1/, '地址要留着：那是用户下一步要改的东西')
+  assert.doesNotMatch(remote[0].message, /xxxxxxxxxxxx/, '请求体里的口令一个字节都不许跟着进错误消息')
+})
+
 
