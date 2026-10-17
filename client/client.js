@@ -816,13 +816,59 @@ window.__ModuleLoader__.load({
        * 前端这两道拦的只是"太明显了"的空格（当场说清，不用等一趟网络）；真正的门在宿主
        * 那一边，这里改了那边不改照样进不去——和改密码那一块同一条口径。
        */
+      /**
+       * 这个地址能不能用来跨机打开（2026-10-18，依据见 `docs/` 那份调研报告）。
+       *
+       * ## 为什么在填地址这一步就拦
+       *
+       * `http://` 的地址**能配对、也能取票**，但点开那一屏是**白的**：进门那一刻要种一枚
+       * 窗口会话 cookie，它是 `SameSite=None; Secure`（跨站子框架里非这样不可），而浏览器
+       * 在非 https 的地址上会把这枚 cookie **直接丢掉**，之后每个请求都过不去。
+       *
+       * 这个失败**不在配对的时刻发生**，而是延后到"点开那一行"——用户会以为是界面坏了。
+       * 所以宁可当场拒绝，把原因说在源头。
+       *
+       * ## 回环地址例外
+       *
+       * 浏览器把 `127.0.0.1` / `localhost` / `[::1]` 当作可信来源，`Secure` 那一条对它们
+       * 不适用。留这个口子是为了本机自测（在同一台机器上验证跨机链路时，地址就是回环）。
+       *
+       * @param {string} raw 用户填的原文
+       * @returns {string|null} 不能用的原因（人话）；能用回 `null`
+       */
+      function baseUrlRejection(raw) {
+        var text = String(raw || '').trim();
+        if (!text) return null;   // 空地址有它自己那一句提示
+        var m = /^([a-z][a-z0-9+.-]*):\/\//i.exec(text);
+        if (!m) return '地址要以 http:// 或 https:// 开头——就是那台电脑「手机遥控」页里那条。';
+        var scheme = m[1].toLowerCase();
+        if (scheme === 'https') return null;
+        if (scheme !== 'http') return '只支持 http:// 和 https:// 两种地址。';
+        // 拆出主机看是不是回环（`[::1]:3090` 这种要先把方括号里的整段取出来）
+        var rest = text.slice(m[0].length);
+        var hostPort = rest.split('/')[0];
+        var host = hostPort.charAt(0) === '['
+          ? hostPort.slice(0, hostPort.indexOf(']') + 1)
+          : hostPort.split(':')[0];
+        host = host.toLowerCase();
+        if (host === '127.0.0.1' || host === 'localhost' || host === '[::1]') return null;
+        return '这台电脑的地址要用 https://（Tailscale 那条就是）。'
+          + 'http:// 能配对、也能取票，但打开那一屏会是白的——进门要种的那枚会话凭据，'
+          + '浏览器在非 https 的地址上会直接丢掉。';
+      }
+
       var saveAdd = function () {
         if (!addDraft || busy) return;
         var baseUrl = (addDraft.baseUrl || '').trim();
         var token = (addDraft.token || '').trim();
         if (!baseUrl) {
-          setAddError('要填那台电脑的地址——就是它的「手机遥控」页那条（http:// 地址:3090，或者 https:// 的 Tailscale 地址；'
-            + '不要带 /mini 和它后面的参数）。');
+          setAddError('要填那台电脑的地址——就是它的「手机遥控」页那条（必须是 https://；'
+            + '只有填本机回环地址时才可以用 http://）。不要带 /mini 和它后面的参数。');
+          return;
+        }
+        var rejected = baseUrlRejection(baseUrl);
+        if (rejected) {
+          setAddError(rejected);
           return;
         }
         if (!token) {

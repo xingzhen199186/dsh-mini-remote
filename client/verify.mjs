@@ -2166,14 +2166,14 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
     assert.match(textOf(remotesBlockOf(st.tree)), /要填那台电脑的地址/);
     // 只填地址、口令空着：也要当场说清（口令是这一步唯一必须要的东西）。
     let inputs = byType(remotesBlockOf(st.tree), 'input');
-    inputs[0].props.onChange({ target: { value: 'http://192.168.1.9:19387' } });
+    inputs[0].props.onChange({ target: { value: 'https://192.168.1.9:19387' } });
     await settle();
     buttonIn(remotesBlockOf(st.tree), '确认添加').props.onClick();
     await settle();
     assert.deepEqual(st.posts, []);
     assert.match(textOf(remotesBlockOf(st.tree)), /要填那台电脑的口令/);
     inputs = byType(remotesBlockOf(st.tree), 'input');
-    assert.equal(inputs[0].props.value, 'http://192.168.1.9:19387', '当场说清之后，用户打的字还在');
+    assert.equal(inputs[0].props.value, 'https://192.168.1.9:19387', '当场说清之后，用户打的字还在');
     st.harness.unmount();
   });
 
@@ -2186,7 +2186,7 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
     buttonIn(remotesBlockOf(st.tree), '添加一台电脑').props.onClick();
     await settle();
     let inputs = byType(remotesBlockOf(st.tree), 'input');
-    inputs[0].props.onChange({ target: { value: 'http://192.168.1.9:19387' } });
+    inputs[0].props.onChange({ target: { value: 'https://192.168.1.9:19387' } });
     await settle();
     inputs = byType(remotesBlockOf(st.tree), 'input');
     inputs[1].props.onChange({ target: { value: TOKEN } });
@@ -2198,7 +2198,7 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
     await settle();
     assert.deepEqual(st.posts, [{
       url: '/mini-remote/remotes/add',
-      body: { name: '书房那台', baseUrl: 'http://192.168.1.9:19387', token: TOKEN },
+      body: { name: '书房那台', baseUrl: 'https://192.168.1.9:19387', token: TOKEN },
     }]);
     assert.equal(st.gets.filter((u) => u === '/mini-remote/remotes').length, 2);
     assert.match(textOf(remotesBlockOf(st.tree)), /书房那台/, '加完那一台就在名单上');
@@ -2212,7 +2212,7 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
     buttonIn(remotesBlockOf(st.tree), '添加一台电脑').props.onClick();
     await settle();
     let inputs = byType(remotesBlockOf(st.tree), 'input');
-    inputs[0].props.onChange({ target: { value: 'http://192.168.1.9:19387' } });
+    inputs[0].props.onChange({ target: { value: 'https://192.168.1.9:19387' } });
     await settle();
     inputs = byType(remotesBlockOf(st.tree), 'input');
     inputs[1].props.onChange({ target: { value: '错的口令' } });
@@ -2223,9 +2223,66 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
     assert.match(text, /口令不对/, '失败要说清是谁说的哪一句');
     const after = byType(remotesBlockOf(st.tree), 'input');
     assert.equal(after.length, 3, '失败之后表单不许自己收起来——用户打的那些字还在里面');
-    assert.equal(after[0].props.value, 'http://192.168.1.9:19387');
+    assert.equal(after[0].props.value, 'https://192.168.1.9:19387');
     st.harness.unmount();
   });
+
+  // —— 地址的协议校验（2026-10-18）：`http://` 能配对、能取票，但打开那一屏是白的。
+  // 所以在"填地址"这一步就拦下来，把原因说在源头。依据见那份跨站嵌入调研报告。
+  {
+    /** 填一对地址+口令、点确认、回状态（`posts` 能看出有没有真的发出去）。 */
+    const tryAdd = async (baseUrl) => {
+      fresh();
+      const st = await mountRemotes(listOf([]), () => ({ ok: true, id: 'x'.repeat(32) }));
+      buttonIn(remotesBlockOf(st.tree), '添加一台电脑').props.onClick();
+      await settle();
+      let inputs = byType(remotesBlockOf(st.tree), 'input');
+      inputs[0].props.onChange({ target: { value: baseUrl } });
+      await settle();
+      inputs = byType(remotesBlockOf(st.tree), 'input');
+      inputs[1].props.onChange({ target: { value: TOKEN } });
+      await settle();
+      buttonIn(remotesBlockOf(st.tree), '确认添加').props.onClick();
+      await settle();
+      return st;
+    };
+
+    await check('填非回环的 http:// 地址：当场拒绝，而且一个请求都不发', async () => {
+      const st = await tryAdd('http://192.168.1.9:19387');
+      const text = textOf(remotesBlockOf(st.tree));
+      assert.match(text, /要用 https:\/\//, '要说清该填什么');
+      assert.match(text, /白/, '还要说清后果——不说的话用户不知道为什么不能用');
+      assert.equal(st.posts.length, 0, '被拦下的地址不许发出去：发出去就等于让用户点开看白屏');
+      st.harness.unmount();
+    });
+
+    await check('填 http://127.0.0.1（回环）：放行——浏览器把回环当可信来源', async () => {
+      const st = await tryAdd('http://127.0.0.1:3090');
+      assert.equal(st.posts.length, 1, '回环地址该照常发出去（本机自测那条路要用它）');
+      assert.equal(st.posts[0].body.baseUrl, 'http://127.0.0.1:3090');
+      st.harness.unmount();
+    });
+
+    await check('填 https://（Tailscale 那种）：放行', async () => {
+      const st = await tryAdd('https://desktop-example.tail0000.ts.net');
+      assert.equal(st.posts.length, 1);
+      st.harness.unmount();
+    });
+
+    await check('填没带协议的地址（192.168.1.9:3090）：当场说清要带协议', async () => {
+      const st = await tryAdd('192.168.1.9:3090');
+      assert.match(textOf(remotesBlockOf(st.tree)), /要以 http:\/\/ 或 https:\/\/ 开头/);
+      assert.equal(st.posts.length, 0);
+      st.harness.unmount();
+    });
+
+    await check('填别的协议（ftp://）：拒绝', async () => {
+      const st = await tryAdd('ftp://192.168.1.9');
+      assert.match(textOf(remotesBlockOf(st.tree)), /只支持 http:\/\/ 和 https:\/\//);
+      assert.equal(st.posts.length, 0);
+      st.harness.unmount();
+    });
+  }
 
   await check('名单读不到时：把那句原因照登出来，不说成"还没连过别的电脑"', async () => {
     fresh();

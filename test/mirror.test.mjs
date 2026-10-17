@@ -1673,6 +1673,11 @@ test('远程窗口：票只授权一次，之后靠窗口会话进门（开关�
   assert.match(cookie, /SameSite=None/, '桌面端的父页面在 dsh-app://app 上，是**跨站**')
   assert.match(cookie, /Secure/,
     '`SameSite=None` 必须配 `Secure`；而 http://127.0.0.1 算可信来源，所以这条在回环上成立（实测）')
+  // `Partitioned`（CHIPS，2026-10-18 加）：这枚 cookie 属于"第三方 cookie"，浏览器正在收紧
+  // 这一类；标成分区之后它只属于「这个第三方 + 这个顶层站点」这一个组合，于是不再被当追踪工具。
+  // 认不出的浏览器会忽略这个属性、退回原行为，所以它是向后兼容的。
+  assert.match(cookie, /Partitioned/,
+    '窗口会话要带 `Partitioned`（CHIPS）：不然用户一开"阻止第三方 cookie"，这一屏就整片白')
   assert.ok(!/Max-Age/.test(cookie),
     '不写固定过期时刻：寿命是「宿主进程活着」（写死一个数就会在进程还好着的时候先把面板弄成 401）')
   assert.deepEqual(hit, ['/'], '带斜杠的入口映射到上游首页，**查询串整个丢掉**（票不跟着转发）')
