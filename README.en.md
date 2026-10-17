@@ -168,6 +168,20 @@ Select the route that matches your current networking environment:
 
 ### Mobile Interface Guide
 
+**First, get the address of this page.** Open "Settings → Phone Remote" in the DSH desktop app; it lists **every address this computer can be reached at** — "This machine", "LAN", "Tailscale", "Tailscale (encrypted)", "Public access". Which ones appear depends on what this computer has installed and switched on.
+
+Each one is a block: **QR code on the left, the full URL on the right**. Scanning the QR code with the phone is the easiest way; to type it on another device, click "Copy" on the right, or click into the URL field (it selects the whole address for you).
+
+An address looks like this:
+
+```text
+http://192.168.1.2:3090/mini?token=xxxxxxxxxxxx
+```
+
+> ⚠️ **That URL carries the access pass** — whoever gets it can operate this computer. Do not screenshot it to others, and do not paste it anywhere public. To change the pass, see the "Password" section in the settings page.
+
+Once you are in, this page lets you:
+
 - **Sending & Queuing**: Enter instructions in the bottom input box. When an agent is busy, subsequent messages queue up sequentially and appear on the scale.
 - **Slash Commands**: Type `/` to bring up available session commands with parameter guidance and search filtering.
 - **Interactive Questions**: When the agent requests clarification or user choice, an interactive card pops up for one-tap answers or custom replies.
