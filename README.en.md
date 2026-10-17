@@ -93,7 +93,7 @@ Confirm that your host environment satisfies the following requirements:
 - **DSH (DeepSeek Harness)**: `>=0.1.5-rc.2 <0.3.0`
 - **OS**: Windows, macOS, or Linux
 
-> ⚠️ **Notice**: DSH is in active development. This plugin is verified across `0.1.5-rc.2`, `0.1.7-rc.2`, `0.2.0-rc.1`, and `0.2.0-rc.2`. Versions below `0.1.5` are untested, and versions above `0.3.0` risk breaking changes in upstream host interfaces.
+> ⚠️ **Notice**: DSH is in active development. This plugin is verified across `0.1.5-rc.2`, `0.1.7-rc.2`, `0.2.0-rc.1`, and `0.2.0-rc.2`. Versions below `0.1.5` are untested, and versions above `0.3.0` risk breaking changes in upstream host interfaces — **`0.3.0` is the upper bound this release declares**. Once DSH moves past it, wait for the plugin to catch up instead of upgrading straight away.
 
 ### Installation
 
