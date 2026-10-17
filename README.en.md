@@ -193,8 +193,7 @@ How to open it:
 
 > ⚠️ **Notice**:
 > 1. **This is a permission switch, not an ordinary preference.** Turning it on extends the token's reach from "what the phone page exposes" to the **entire desktop management plane** — model configuration, credentials, plugin install/uninstall, session history. It is therefore off by default and takes two confirmations to enable.
-> 2. **If your DSH has no web interface at all** (it only runs in the background or a terminal and you never open it in a browser), this row simply will not appear — a switch that does nothing is worse than no switch at all. Both the desktop app and `dsh web` come with that interface, so normally it is there, and **you never need to start a separate `dsh web` for it**.
-> 3. What gets embedded is the desktop interface as-is — on a narrow phone screen it adapts to its mobile layout; in a PC browser you get the original.
+> 2. What gets embedded is the desktop interface as-is — on a narrow phone screen it adapts to its mobile layout; in a PC browser you get the original.
 
 ### Desktop "Remote Window"
 
