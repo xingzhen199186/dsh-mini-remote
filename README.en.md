@@ -207,15 +207,22 @@ Below, **A** is the computer being connected to, and **B** is the one connecting
 
 **On A**
 
-1. **Install this plugin**, and make sure it is a version that includes "Remote Window". B connects to the code running on A — if A runs an older version, B sees the old interface.
+1. **Install this plugin, version `0.2.1` or newer.** "Remote Window" first shipped in `0.2.1` — B connects to the code running on A, so if A is on an older version, B sees the old interface.
 2. Open "Settings → Phone Remote → Allow other computers to connect" and switch it on. It is off by default; while it is off, A does not accept pairing requests at all.
-3. In the "Password" section of the same settings page, click "Show" or "Copy" to get A's pass.
+3. In the "Password" section of the same settings page, click "Copy" to get A's pass.
 
-**On B**
+**On B** (in B's "Settings → Phone Remote")
 
-1. Open "Settings → Phone Remote → Other computers → Add a computer".
-2. Enter A's address under "Address" and A's pass under "Pass", then confirm.
-3. Click that row in the list.
+The section you need is "Other computers", near the bottom of the settings page. It is the mirror image of the "Devices" section above — that one lists who can get in, this one lists whom you can reach.
+
+1. Click "Add a computer" to unfold three fields.
+2. **That computer's address (the one on its "Phone Remote" page, no `/mini`)** — enter A's address. This is the field that matters most; see "Which address to enter" below.
+3. **That computer's pass (copy it from its "Phone Remote" settings)** — paste what you copied in step 3 on A. This field is masked.
+4. **Give it a name (optional; the address is used if you leave it blank)** — so you can tell it apart in the list.
+5. Click "Confirm add". This really does pair with A once — afterwards A's settings page gains a "this computer" entry and B gains a row.
+6. Click that row in the list.
+
+Each row shows the name, the address, `last ok <time>` (or "no record yet"), and two buttons on the right: **"Reconnect"** fetches a fresh pass, **"Disconnect"** removes the pairing. Disconnecting asks once and states that the entry on the far computer **stays** — to revoke it fully, remove this device on A.
 
 **Which address to enter**
 
@@ -226,7 +233,11 @@ Below, **A** is the computer being connected to, and **B** is the one connecting
 
 **How to tell it worked**
 
-Click the row in the list and that computer's interface appears in the frame. When something fails, a plain-language line appears under that row — the far side has not switched it on, the pairing was revoked, it is unreachable, or the address is wrong; each has its own message.
+Click the row in the list and that computer's interface appears in the frame. When something fails, an explanation appears under that row — the far side has not switched it on, the pairing was revoked, it is unreachable, or the address is wrong; each has its own message.
+
+**Revoking a computer later**
+
+On A, open "Settings → Phone Remote → Devices" — the list of who can get in, each row carrying "Rename" and "Revoke". Find that computer, click "Revoke", then "Confirm revoke". **It takes effect immediately**: a window the far side already has open fails on its next request; no need to wait for it to disconnect.
 
 ### Feishu Bot Setup Guide
 
