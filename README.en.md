@@ -189,9 +189,11 @@ How to open it:
 3. A "Desktop interface" row appears right below (hint: "the complete desktop DSH page"). Click "Open".
 4. A full-screen copy of the DSH desktop interface is embedded right in this page: plugin management, model configuration, session history, and full logs. The bar on top exits back to the remote page.
 
+**It moves this computer's own interface over — it does not start a second one.** Whatever you change or send here happens **on this DSH**; the desktop app and this view share one state. Nor is it "spinning up another web instance": the plugin's server authenticates once through the official door, then **proxies every request** to the local interface in real time (even live UI refreshes are forwarded as they come, never buffered). The phone never touches any official credential.
+
 > ⚠️ **Notice**:
 > 1. **This is a permission switch, not an ordinary preference.** Turning it on extends the token's reach from "what the phone page exposes" to the **entire desktop management plane** — model configuration, credentials, plugin install/uninstall, session history. It is therefore off by default and takes two confirmations to enable.
-> 2. **When the host has no web endpoint, this row is not shown at all.** No fake switch is displayed — so on a machine running only the DSH desktop app and never `dsh web`, you will most likely never see it. Use the main path instead: the remote page itself.
+> 2. **When the host has no interface service, this row is not shown at all** (a headless composition, for example) — no fake switch is displayed. Both the desktop app and `dsh web` ship with that service, so normally it is there and you do not need to start a separate `dsh web`.
 > 3. What gets embedded is the desktop interface as-is — on a narrow phone screen it adapts to its mobile layout; in a PC browser you get the original.
 
 ### Desktop "Remote Window"
