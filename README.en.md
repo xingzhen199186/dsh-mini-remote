@@ -38,7 +38,7 @@ When running complex engineering tasks with desktop or web AI agents, a single t
 - **Attention Overload**: During commutes, meals, or brief breaks away from the keyboard, the primary goal is simply checking whether a round finished and dispatching the next instruction, without dissecting every intermediate step.
 - **Inflexible Connectivity**: Pure LAN routes disconnect as soon as you step outside, while centralised cloud relays introduce external credential custody risks.
 
-**Minimal Remote** was built to solve this: by default, the mobile view presents only your input and the AI's final answer, filtering out execution noise while allowing you to drill down into the full trace on demand.
+**Minimal Remote** is built around exactly that: it fits several ways of working and hands attention control back to you. On mobile, three modes — "Single frame", "Chat" and "Full" — let you hide execution noise entirely, or expand the full trace whenever you want. On PC, the "Remote Window" feature lets you drive the DeepSeek Harness on your main machine from other devices, inside its own native desktop UI.
 
 ---
 
