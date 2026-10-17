@@ -23,6 +23,7 @@
   <a href="#ui-preview">UI Preview</a> ·
   <a href="#desktop-remote-window">Remote Window</a> ·
   <a href="#quick-start">Quick Start</a> ·
+  <a href="#mobile-interface-guide">Mobile Usage</a> ·
   <a href="#usage--configuration">Usage & Configuration</a> ·
   <a href="#license">License</a>
 </p>
@@ -48,8 +49,8 @@ When running complex engineering tasks with desktop or web AI agents, a single t
 - 🌐 **Multi-Route Secure Connectivity**: Connect via LAN, Tailscale private network (supporting MagicDNS and HTTPS certificates), or Cloudflare Tunnel (for environments without public IPs). All routes coexist with dedicated QR codes and tokens.
 - 🐬 **Lightweight Anthropomorphic Feedback**: Inter-step narrations are spoken aloud by the whale girl sprite in speech bubbles; execution progress and queued instructions are visualized on an exact scale, filtering out raw reasoning blocks.
 - 💬 **Feishu Long-Connection Remote**: Direct bidirectional communication through the Feishu Open Platform WebSocket long connection without public ports, supporting text dialogue, multiple-choice responses, and the `/会话` switch command.
-- 🗂️ **In-Place Mobile Session Management**: Rename, pin, archive, or fork sessions from the most recent completed turn directly on your phone, with clear indicators for pending approvals and questions.
-- 💻 **Desktop Embedded "Remote Window"**: Adds a "Remote Window" shortcut to the left sidebar of the DSH desktop app: it lists the other computers you have paired, and clicking a row embeds that computer's DSH desktop interface in the main view; click the row again to exit and return to where you were. Cross-machine access is supported; see "Desktop \"Remote Window\"" below for the pairing steps.
+- 🗂️ **In-Place Mobile Session Management**: Open it as a web page in your phone's browser and rename, pin, archive, or fork sessions right there, with clear indicators for pending approvals and questions.
+- 💻 **Desktop Embedded "Remote Window"**: A "Remote Window" shortcut in the DSH desktop left sidebar lets you operate another computer's DSH desktop remotely, with native-feeling window transitions and no page switch; see "Desktop \"Remote Window\"" below for the pairing steps.
 - 🔒 **Rigorous Security Boundaries**: All API routes enforce constant-time token comparison to prevent timing side-channel attacks; built-in rate limiting locks out sources after 5 failed attempts in 1 minute; pairing data is accessible solely from the host loopback interface.
 
 ---
