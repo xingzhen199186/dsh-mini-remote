@@ -24,6 +24,19 @@ const source = readFileSync(join(here, 'client.js'), 'utf8');
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 
 /**
+ * 造一个「本地时刻」：`localMs(16, 15, 8)` = 2026-10-16 15:08，**按本机时区算**。
+ *
+ * ## 为什么不用 `new Date('2026-10-16T15:08:00+08:00')`
+ *
+ * 那是**绝对时刻**，而 `formatTime`（client.js）是按**运行环境的本地时区**显示的：
+ * 本机在 UTC+8 上两者碰巧一致；CI 跑在 UTC 上就差 8 小时，显示成 07:08。
+ *
+ * 2026-10-17 CI 首跑就是为这个红了三条（"最近成功 15:08"、"创建于 06:20"、"最近成功 07:08"）。
+ * **本机永远发现不了** —— 这正是加 CI 的意义。用本地构造之后，任何时区下显示出来都是同一串。
+ */
+const localMs = (day, hour, minute) => new Date(2026, 9, day, hour, minute, 0, 0).getTime();
+
+/**
  * 把一条「点击 → 发请求 → 回执 → 存状态 → 通知 → 重画」的链子走完。
  *
  * 这条链子全是微任务（`setImmediate` 之前微任务已经排干），一次 tick 通常就够；
@@ -255,7 +268,7 @@ await check('main 那条：第二个参数是面板组件函数', () => {
 const REMOTE_TICKET_URL = 'http://192.168.1.9:19387/mini/mirror/?ticket=one-shot-remote-value';
 const PANEL_FAR = {
   id: 'f'.repeat(32), name: '书房那台', baseUrl: 'http://192.168.1.9:19387',
-  lastOk: new Date('2026-10-16T15:08:00+08:00').getTime(),
+  lastOk: localMs(16, 15, 8),
 };
 const PANEL_OLD = { id: 'e'.repeat(32), name: '', baseUrl: 'http://100.92.105.99:19387', lastOk: 0 };
 const Panel = entryOf('main').Comp;
@@ -1332,18 +1345,17 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
 {
   console.log('\n[4f] 设备名单（列出 / 改名 / 撤销）');
 
-  const ISO = '2026-10-16T06:20:00+08:00';
-  const DEV_A = {
+    const DEV_A = {
     id: 'a'.repeat(32),
     name: '妈妈那台',
     kind: 'phone',
-    createdAt: new Date(ISO).getTime(),
-    lastSeen: new Date(ISO).getTime() + 5 * 60 * 1000,
+    createdAt: localMs(16, 6, 20),
+    lastSeen: localMs(16, 6, 25),
   };
   // 老记录（第三步之前写下的）没有 lastSeen：界面上要说「还没有记录」，**不许凭空编一个时间**。
   const DEV_B = {
     id: 'b'.repeat(32), name: '客厅的旧手机', kind: 'phone',
-    createdAt: new Date(ISO).getTime(), lastSeen: 0,
+    createdAt: localMs(16, 6, 20), lastSeen: 0,
   };
 
   const PAIRING_OK = {
@@ -1643,18 +1655,17 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
 {
   console.log('\n[4h] 其他电脑（列出 / 添加 / 打开那一屏 / 断开）');
 
-  const ISO2 = '2026-10-16T07:05:00+08:00';
-  const FAR = {
+    const FAR = {
     id: 'f'.repeat(32),
     name: '书房那台',
     baseUrl: 'http://192.168.1.9:19387',
-    addedAt: new Date(ISO2).getTime(),
-    lastOk: new Date(ISO2).getTime() + 3 * 60 * 1000,
+    addedAt: localMs(16, 7, 5),
+    lastOk: localMs(16, 7, 8),
   };
   // 老记录没有 lastOk（刚加进来还没换过票）：界面上说「还没有记录」，**不许编一个时间**。
   const OLD = {
     id: 'e'.repeat(32), name: '', baseUrl: 'http://100.92.105.99:19387',
-    addedAt: new Date(ISO2).getTime(), lastOk: 0,
+    addedAt: localMs(16, 7, 5), lastOk: 0,
   };
   /** 宿主换回来的那条地址（真机上是 `http://<对面>/mini/mirror/?ticket=…`）。 */
   const REMOTE_TICKET = 'http://192.168.1.9:19387/mini/mirror/?ticket=one-shot-remote';
