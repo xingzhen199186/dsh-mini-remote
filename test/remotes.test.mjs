@@ -818,3 +818,60 @@ test('卸载之后 B 侧这四条一起摘干净（十六条注册，十六条�
   b.dispose()
   assert.equal(b.routes.size, 0, '卸载之后一条都不该还挂在这台电脑上')
 })
+
+// ---------------------------------------------------------------------------
+// ⑦ 「B 到底该填哪条地址」（2026-10-17 第七步）
+//
+// 这一步回答的就是上一个子代理留下的那个洞：**B 手上只有一条地址**，而 A 这边两条路
+// 本来分在两个端口上（配对/取票在宿主那一半，`/mini/mirror/` 在手机服务那一半）。
+// 取票回的地址用的是**请求到达时的 Host**，所以填哪一边都有一半对不上：填宿主那一半，
+// 框里那条 `/mini/mirror/` 是 404；填手机服务那一半，配对那一下先被门拦住（401/404）。
+//
+// 下面这一条把"填手机服务那条"整条链走完，用的全是**真 http**：
+// 配对 → 取票 → 兑票 → 框里那些请求（绝对路径 + 前缀下面的静态资源）。
+// ---------------------------------------------------------------------------
+
+test('⚠️ B 只填一条地址（手机服务那一半）：配对 → 取票 → 兑票 → 框里那些请求，全在同一个源上', async (t) => {
+  const { a, b } = await bootPair(t)
+  await openSwitch(a) // 先在 A 上打开「允许别的电脑连接」
+
+  // ① 配对：B 填的是**手机服务**那条地址（真机上就是 3090——跨机时它是唯一一条
+  //    能到达 A 的地址；宿主那一半只绑在本机回环上）。
+  const added = await addRemote(b, a, { baseUrl: a.base, name: '书房那台' })
+  assert.equal(added.status, 200,
+    `配对得能在手机服务上打通（回的是 ${added.status}：${added.text.slice(0, 300)}）`)
+  assert.equal(added.body.remote.baseUrl, a.base)
+
+  // ② 取票：同一条地址。回给界面的那条地址**必须还是这个源**——
+  //    否则就是"票开在 A 上、框去 B 的本机端口找"那类错。
+  const asked = await askWindow(b, added.body.remote.id)
+  assert.equal(asked.status, 200,
+    `取票要走同一条地址（回的是 ${asked.status}：${asked.text.slice(0, 300)}）`)
+  const url = new URL(asked.body.url)
+  assert.equal(url.origin, a.base, '回来的地址必须和 B 填的是同一个源：不同源就是"填哪边都有一半对不上"')
+  assert.equal(url.pathname, '/mini/mirror/', '还是镜像那扇门')
+
+  // ③ 兑票：**拿 A 给的那条地址原样兑现**（不再像从前那样把前缀换成 a.base）。
+  const opened = await redeem(asked.body.url)
+  assert.equal(opened.status, 200, `那条地址得在它自己的源上兑现得了（回的是 ${opened.status}）`)
+  assert.match(opened.session, /^v1\./, '兑票那一下要发下窗口会话 cookie')
+  assert.match(opened.body, /电脑端界面/, '入口那一下要真的是电脑端界面，不是一句 404/401')
+
+  // ④ 框里那些请求：内置界面的写法有两种，两种都要认得这枚会话。
+  //    绝对路径（`/api/...`）和挂在 `/mini/mirror/` 下面的静态资源。
+  const cookie = `dsh_mini_window=${opened.session}`
+  const abs = await fetch(`${a.base}/api/session/list`, { headers: { cookie } })
+  assert.equal(abs.status, 200, `框里的绝对路径要能过（回的是 ${abs.status}）`)
+  const rel = await fetch(`${a.base}/mini/mirror/assets/index-abc.js`, { headers: { cookie } })
+  assert.equal(rel.status, 200, `框里前缀下面的静态资源要能过（回的是 ${rel.status}）`)
+
+  // 反面：不带这枚会话就进不去——说明上面那两个 200 是会话换来的，不是路口开着。
+  // （回 404 不是 401：这台电脑上「进阶设置」那个开关还没开，整块镜像路由照旧当
+  //  不存在——那是它本来的规矩。要紧的是**没有 200**。）
+  const bare = await fetch(`${a.base}/mini/mirror/assets/index-abc.js`)
+  assert.notEqual(bare.status, 200, `没带会话就不该拿到东西（回的是 ${bare.status}）`)
+
+  // ⑤ 宿主那一半那条老路**一个字都没动**（本机的面板还在用它）。
+  const viaHost = await addRemote(b, a, { baseUrl: a.host })
+  assert.equal(viaHost.status, 200, '宿主那一半的配对照旧能走（这一条是回归保护）')
+})

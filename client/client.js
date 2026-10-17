@@ -590,7 +590,8 @@ window.__ModuleLoader__.load({
         var baseUrl = (addDraft.baseUrl || '').trim();
         var token = (addDraft.token || '').trim();
         if (!baseUrl) {
-          setAddError('要填那台电脑的地址——就是你在那台电脑上打开 DSH 界面时用的那条地址。');
+          setAddError('要填那台电脑的地址——就是它的「手机遥控」页那条（http:// 地址:3090，或者 https:// 的 Tailscale 地址；'
+            + '不要带 /mini 和它后面的参数）。');
           return;
         }
         if (!token) {
@@ -1212,7 +1213,7 @@ window.__ModuleLoader__.load({
       // 添加那一块：两个框（地址、口令）+ 一个可选的名字，**一次确认**才发出去
       // （口令是密码性质的，打字打到一半就发一趟不合适）。口令打码，和别处一致。
       var addUi = r.add ? h('div', null,
-        field('那台电脑的地址（你在它上面打开 DSH 界面时用的那条）', r.add.baseUrl, 'http://…', function (v) {
+        field('那台电脑的地址（它「手机遥控」页那条，不带 /mini）', r.add.baseUrl, 'http://…', function (v) {
           r.setAddDraft(Object.assign({}, r.add, { baseUrl: v }));
         }, 'text'),
         field('那台电脑的口令（在它的「手机遥控」设置里复制）', r.add.token, '', function (v) {
