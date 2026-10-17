@@ -23,6 +23,24 @@ window.__ModuleLoader__.load({
     var useEffect = React.useEffect;
     var useRef = React.useRef;
 
+    /**
+     * 主输入设备有没有「悬停」能力。
+     *
+     * 顶上那条横条要不要自动收起来，取决于这一条：**触摸屏没有悬停这回事**，藏起来就成了
+     * 摸不到的东西——而它上面挂着「← 返回列表」，是那一屏唯一的出口。
+     * 和 `lib/page.html` 那条镜像顶栏同一条口径（那边用媒体查询，这边是 inline style，
+     * 所以在加载时算一次就够）。
+     *
+     * **算不出来就当作没有悬停** → 横条常驻。宁可多占一行，不可让人出不去。
+     */
+    var HAS_HOVER = (function () {
+      try {
+        return window.matchMedia('(hover: hover) and (pointer: fine)').matches;
+      } catch (err) {
+        return false;
+      }
+    })();
+
     var PAIRING_PATH = '/mini-remote/pairing';
     var TOKEN_PATH = '/mini-remote/token';
     var TUNNEL_PATH = '/mini-remote/tunnel';
@@ -93,10 +111,18 @@ window.__ModuleLoader__.load({
       // （deviceRow/deviceName/remoteUrl），这里只多一个居中的容器和一行标题。
       listWrap: { boxSizing: 'border-box', width: '100%', maxWidth: 760, margin: '0 auto', padding: '28px 24px' },
       listHead: { fontWeight: 600, fontSize: 14, marginBottom: 6 },
-      // 「某一台的界面」那一屏：顶上一条细横条（一枚「← 返回列表」+ 这台电脑叫什么），
+      // 「某一台的界面」那一屏：顶上一条横条（「← 返回列表」+ 这台电脑叫什么 + 「再试一次」），
       // 下面才是那个铺满的框。**横条在每一种状态下都要在**（正在换票、出错、框没起来），
       // 不然用户会卡在那一屏里出不来。
-      screen: { display: 'flex', flexDirection: 'column', boxSizing: 'border-box', width: '100%', height: '100%', minHeight: 320 },
+      //
+      // **框正常显示时它会自动收起**（鼠标碰顶才滑出，2026-10-17 用户要求）：
+      // 那一行平时占着四十来像素，而这块面板是拿来"看另一台电脑的界面"的，能多给一行是一行。
+      // 收起用 `max-height: 0`、**不是透明**——透明还占着高度，框就长不上来（同 lib/page.html 那套）。
+      screen: { position: 'relative', display: 'flex', flexDirection: 'column', boxSizing: 'border-box', width: '100%', height: '100%', minHeight: 320 },
+      /** 收起时最上面那条 16px 的感应带：鼠标碰到就把它勾出来。 */
+      screenHot: { position: 'absolute', left: 0, right: 0, top: 0, height: 16, zIndex: 2 },
+      /** 横条外壳：收起时高度归零，占位跟着让出来（高度是过渡的，不跳）。 */
+      screenBarWrap: { flex: 'none', overflow: 'hidden', transition: 'max-height .25s ease' },
       screenBar: { flex: 'none', display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', borderBottom: '1px solid var(--dsw-alias-border-l2,#e5e7eb)' },
       screenName: { fontSize: 12, color: 'var(--dsw-alias-label-tertiary,#8b93a1)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
       // 框铺满面板：**父容器高度拿不准**（可能是定高，也可能是被内容撑开的），
@@ -2223,6 +2249,15 @@ window.__ModuleLoader__.load({
       // 和立钟的那个 effect 隔着一次渲染——留在一个只属于那个 effect 的闭包里，`onLoad` 够不着。
       // 2026-10-17 修的就是这个：框加载好了，那个钟却还挂着，到点照样把正常的界面换掉。
       var stallTimerRef = useRef(null);
+      // 顶上那条横条现在是不是滑出来了（见 `remoteScreen`）。**只有"框正常显示 + 有悬停能力"
+      // 时才可能收起**，其余状态它常驻——出错那一屏全靠它的「再试一次」。
+      var barState = useState(false);
+      var barOpen = barState[0];
+      var setBarOpen = barState[1];
+      // 两个定时器：显示等 0.18 秒（鼠标可能只是路过屏幕顶部），收起等 0.2 秒
+      // （光标常常是从感应带往下挪进横条里，中途路过那一下不该算"离开"）。
+      var barShowTimer = useRef(null);
+      var barHideTimer = useRef(null);
       // 订阅「其他电脑」那三样（哪一台在换、换到没有、为什么没成）：变了就重画一遍。
       // 值本身不用，`setPoke` 那一下就是目的。
       var pokeState = useState(0);
@@ -2273,40 +2308,127 @@ window.__ModuleLoader__.load({
       var remoteName = remoteTarget ? remoteTarget.name : '';
       var remoteUrl = (remoteWin && remoteWin.id === remoteId && remoteWin.url) ? remoteWin.url : '';
 
+      // 换一台 / 退回名单 / 重新进来：顶上那条回到收起状态。
+      // 不重置的话，下次点开是展开的——而"展开"本该只由鼠标碰顶那一下产生。
+      //
+      // **只在真的展开着时才写**：本来就收起的时候这一下是空操作，别拿它去换一次重渲染
+      // （替身 React 里 setState 不做同值跳过，真机上也只是白白多画一帧）。
+      useEffect(function () {
+        if (barOpen) setBarOpen(false);
+        clearTimeout(barShowTimer.current);
+        clearTimeout(barHideTimer.current);
+        barShowTimer.current = null;
+        barHideTimer.current = null;
+      }, [remoteId]);
+
+      // 卸载时把两个钟收掉：留着它们，200 毫秒后会在一个已经没了的组件上 setState。
+      useEffect(function () {
+        return function () {
+          clearTimeout(barShowTimer.current);
+          clearTimeout(barHideTimer.current);
+        };
+      }, []);
+
+      /** 把顶上那条勾出来。等 0.18 秒：鼠标可能只是路过屏幕顶部。 */
+      function scheduleBarShow() {
+        if (barShowTimer.current) return;
+        clearTimeout(barHideTimer.current);
+        barHideTimer.current = null;
+        barShowTimer.current = setTimeout(function () {
+          barShowTimer.current = null;
+          setBarOpen(true);
+        }, 180);
+      }
+
+      /** 收起来。等 0.2 秒：光标常常是从感应带往下挪进横条里，中途路过那一下不算离开。 */
+      function scheduleBarHide() {
+        clearTimeout(barShowTimer.current);
+        barShowTimer.current = null;
+        clearTimeout(barHideTimer.current);
+        barHideTimer.current = setTimeout(function () {
+          barHideTimer.current = null;
+          setBarOpen(false);
+        }, 200);
+      }
+
+      /** 光标已经进到横条上了：那个 0.2 秒的钟撤掉，别把它收走。 */
+      function cancelBarHide() {
+        clearTimeout(barHideTimer.current);
+        barHideTimer.current = null;
+      }
+
       /**
-       * 那一屏的外框：**顶上永远有一条**（「← 返回列表」+ 这是哪一台 + 一枚「再试一次」），
+       * 那一屏的外框：**顶上有条横条**（「← 返回列表」+ 这是哪一台 + 一枚「再试一次」），
        * 下面才是内容。
        *
-       * 每一种状态都要它：正在换票、对方撤销了、框一直没起来——那些状态下用户最需要的
-       * 恰恰是"怎么回去"。少了这一条，出错的时候这一屏就成了死胡同（那正是这一块要防的坏法）。
+       * ## 什么时候常驻、什么时候能收起（2026-10-17 用户要求）
        *
-       * 顶上那枚「再试一次」**永远在**（2026-10-17 补）：它兜的是这一屏最没法自己判的两种情形
-       * ——对面回的是一张错误页，或者文档到了里面却是空的。跨源的框读不到里面（上一段那段
-       * 量出来的事实：`contentDocument` 是 null），"里面是不是坏的"我们**看不见，也不猜**；
-       * 能保证的是：**不管框里是什么，用户手上永远有一条出去的路**——换一张通行证重开一次。
-       * 正在换票时它置灰（同一个动作不叠着发两趟，见 `fetchRemoteTicket` 那段）。
+       * 收起（鼠标碰顶才滑出）**只在一种状态下成立：框真的显示出来了**。
+       * 正在换票、对方撤销了、框一直没起来——那几屏本来就是空白，横条上挂着唯一的出路
+       * （「← 返回列表」和「再试一次」），**藏起来等于把人关在里面**。所以那几种一律常驻。
+       *
+       * 没有悬停能力的设备（触摸屏）也一律常驻：触摸没有"碰一下顶"这回事，
+       * 藏了就是摸不到（和 `lib/page.html` 那条镜像顶栏同一条口径）。
+       *
+       * ## 感应带那 16px 不能省
+       *
+       * 鼠标一进到框里那份文档，事件就进了那份文档，外层一个都收不到——不盖一条的话，
+       * 最上面就没有任何东西能"碰到"。它透明、只 16px，压在框顶上那道空白上。
+       * 收起时横条的**位置跟着让出来**（`max-height: 0`），框自己长上来填满，不跳。
+       *
+       * 顶上那枚「再试一次」**永远在**：它兜的是这一屏最没法自己判的两种情形
+       * ——对面回的是一张错误页，或者文档到了里面却是空的。跨源的框读不到里面
+       * （量过的事实：`contentDocument` 是 null），"里面是不是坏的"我们**看不见，也不猜**；
+       * 能保证的是：**不管框里是什么，用户手上永远有一条出去的路**。
+       *
+       * @param {string} name 那台电脑叫什么
+       * @param {*} inner 横条下面那一块（框 / 一句人话 / 「正在换票」）
+       * @param {boolean} canAutoHide 横条允许自动收起吗——**只有"框已经显示出来"时传 true**
        */
-      function remoteScreen(name, inner) {
+      function remoteScreen(name, inner, canAutoHide) {
+        // 两个条件都得成立才收：这一屏允许（canAutoHide）且这台设备能悬停（HAS_HOVER）。
+        var collapsible = Boolean(canAutoHide) && HAS_HOVER;
+        var hidden = collapsible && !barOpen;
+
         return h('div', { style: styles.screen },
-          h('div', { style: styles.screenBar },
-            h('button', {
-              type: 'button',
-              onClick: function () { leaveRemoteScreen(); },
-              style: styles.btn,
-            }, '← 返回列表'),
-            h('div', { style: styles.screenName }, name ? name : '另一台电脑'),
-            h('button', {
-              type: 'button',
-              disabled: Boolean(remoteBusyId),
-              onClick: function () {
-                // 正在换票就别再叠一趟（和名单上点一行同一个口径，见 openRemoteScreen）：
-                // 同时飞两条取票请求，后回来的那张票会把前一张盖掉。
-                if (remoteBusyId) return;
-                fetchRemoteTicket(remoteId, remoteName);
-              },
-              // 靠右（marginLeft auto）：台名那一格会被挤扁，这一枚不许跟着一起被挤掉。
-              style: Object.assign({}, styles.btn, { marginLeft: 'auto', flex: 'none' }),
-            }, '再试一次'),
+          // 感应带：盖在最顶上那 16px 上（见上面那段"不能省"）。
+          collapsible ? h('div', {
+            style: styles.screenHot,
+            onMouseEnter: scheduleBarShow,
+            // 显示这一屏那一刻鼠标可能就停在顶上（那时不会再有 mouseenter）——动一下也算数。
+            onMouseMove: scheduleBarShow,
+            onMouseLeave: scheduleBarHide,
+          }) : null,
+          h('div', {
+            style: Object.assign({}, styles.screenBarWrap, { maxHeight: hidden ? 0 : 100 }),
+            onMouseEnter: cancelBarHide,
+            onMouseLeave: collapsible ? scheduleBarHide : null,
+            // Tab 走到横条里那几枚按钮上时也要把它亮出来——
+            // 不留"焦点在这、按钮看不见"的坑（手机镜像页那条也是这么兜的）。
+            onFocus: collapsible
+              ? function () { cancelBarHide(); setBarOpen(true); }
+              : null,
+          },
+            h('div', { style: styles.screenBar },
+              h('button', {
+                type: 'button',
+                onClick: function () { leaveRemoteScreen(); },
+                style: styles.btn,
+              }, '← 返回列表'),
+              h('div', { style: styles.screenName }, name ? name : '另一台电脑'),
+              h('button', {
+                type: 'button',
+                disabled: Boolean(remoteBusyId),
+                onClick: function () {
+                  // 正在换票就别再叠一趟（和名单上点一行同一个口径，见 openRemoteScreen）：
+                  // 同时飞两条取票请求，后回来的那张票会把前一张盖掉。
+                  if (remoteBusyId) return;
+                  fetchRemoteTicket(remoteId, remoteName);
+                },
+                // 靠右（marginLeft auto）：台名那一格会被挤扁，这一枚不许跟着一起被挤掉。
+                style: Object.assign({}, styles.btn, { marginLeft: 'auto', flex: 'none' }),
+              }, '再试一次'),
+            ),
           ),
           inner,
         );
@@ -2427,7 +2549,7 @@ window.__ModuleLoader__.load({
                 }
               },
               style: styles.frame,
-            }))));
+            }))), true);
       }
 
       // 没在看某一台：**名单**（这一屏的第一层）。

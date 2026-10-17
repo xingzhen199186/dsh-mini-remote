@@ -176,7 +176,13 @@ async function check(label, fn) {
 // ---------------------------------------------------------------- 1. 模块外壳
 
 let captured = null;
-setGlobal('window', { __ModuleLoader__: { load: (registration) => { captured = registration; } } });
+setGlobal('window', {
+  __ModuleLoader__: { load: (registration) => { captured = registration; } },
+  // 「顶上那条横条要不要自动收起」靠这一条判断（见 client.js 的 HAS_HOVER）。
+  // 这里给真的 `matches: true`：**桌面端就是精细指针**，收起那条路才是线上真实行为。
+  // 少了它，`HAS_HOVER` 会走 catch 变成 false，横条永远常驻——那等于把要验的东西跳过去了。
+  matchMedia: (query) => ({ matches: /hover/.test(String(query)), media: String(query) }),
+});
 (0, eval)(source); // 间接 eval：在全局作用域执行，模拟浏览器加载这个脚本
 
 console.log('\n[1] 模块外壳 window.__ModuleLoader__.load');
@@ -440,14 +446,100 @@ const panelTicketReply = ({ url }) => (url === '/mini-remote/remotes'
 const ticketReplyEach = ({ url, n }) => (url === '/mini-remote/remotes'
   ? jsonResponse(200, { ok: true, remotes: [PANEL_FAR] })
   : jsonResponse(200, { ok: true, url: REMOTE_TICKET_URL + '&t=' + n, expiresIn: 30 }));
-/** 这一趟一共发出去几条取票请求——"自动重取只许一次"就是数它。 */
-const ticketAsks = (box) => box.asks.filter((a) => a.url === '/mini-remote/remotes/window').length;
-/** 把这一趟放下：跨机那几样状态在组件外面（模块级），留着后面的用例会看见。 */
+
 const dropPanel = async (box) => {
   const back = byType(box.tree, 'button').find((b) => textOf(b) === '← 返回列表');
   if (back) { back.props.onClick(); await settlePanel(); }
   box.harness.unmount();
 };
+
+// —— 顶上那条横条（2026-10-17 用户要求）：**框正常显示时自动收起，鼠标碰顶再滑出**。
+//
+// 和 lib/page.html 那条镜像顶栏同一套手感：碰顶 16px → 等 0.18 秒 → 滑出；移开 → 等 0.2 秒 → 收起。
+// **只在"框真的显示出来"时才收**：出错、正在换票那几屏，横条上挂着唯一的出路
+// （「← 返回列表」和「再试一次」），藏起来等于把人关在里面。
+
+/** 横条外壳：靠 `transition` 认（收起时 `maxHeight` 归零）。 */
+const barWrapOf = (tree) => walk(tree).find((n) => n && n.props && n.props.style
+  && n.props.style.transition === 'max-height .25s ease');
+/** 感应带：绝对定位、16px 高、贴着顶。 */
+const hotZoneOf = (tree) => walk(tree).find((n) => n && n.props && n.props.style
+  && n.props.style.position === 'absolute' && n.props.style.height === 16);
+
+await check('框正常显示时：顶上那条是收起的，而且留了一条感应带', async () => {
+  const box = await mountPanel(panelTicketReply);
+  await openFrame(box);
+  const wrap = barWrapOf(box.tree);
+  assert.ok(wrap, '横条外壳要在');
+  assert.equal(wrap.props.style.maxHeight, 0, '框正常时它收起——那一行是拿来让给界面的');
+  assert.ok(hotZoneOf(box.tree), '收起了必须留感应带，不然鼠标碰不到、也就再也出不去');
+  // 文字还在树里（只是被 maxHeight 收起来了）：可不能"收起 = 删掉"
+  assert.ok(byType(box.tree, 'button').some((b) => textOf(b) === '← 返回列表'));
+  await dropPanel(box);
+});
+
+await check('鼠标碰顶上 16px：0.18 秒后滑出；移开 0.2 秒后收起', withFakeTimers(async (pending) => {
+  const box = await mountPanel(panelTicketReply);
+  await openFrame(box);
+  const hot = hotZoneOf(box.tree);
+  assert.equal(barWrapOf(box.tree).props.style.maxHeight, 0, '一开始是收起的');
+
+  hot.props.onMouseEnter();
+  const show = pending.find((one) => one.ms === 180);
+  assert.ok(show, '碰顶要挂一个 0.18 秒的钟——不是一碰就弹出来（鼠标常常只是路过）');
+  show.fn();
+  await tick();
+  assert.equal(barWrapOf(box.tree).props.style.maxHeight, 100, '钟响了就该滑出来');
+
+  barWrapOf(box.tree).props.onMouseLeave();
+  const hide = pending.find((one) => one.ms === 200);
+  assert.ok(hide, '离开要挂一个 0.2 秒的钟（光标可能只是从横条上路过）');
+  hide.fn();
+  await tick();
+  assert.equal(barWrapOf(box.tree).props.style.maxHeight, 0, '钟响了就该收回去');
+  await dropPanel(box);
+}));
+
+await check('光标已经回到横条上：那个"0.2 秒后收起"要撤掉，不能把展开的它收走', withFakeTimers(async (pending) => {
+  const box = await mountPanel(panelTicketReply);
+  await openFrame(box);
+  hotZoneOf(box.tree).props.onMouseEnter();
+  pending.find((one) => one.ms === 180).fn();   // 先展开
+  await tick();
+  barWrapOf(box.tree).props.onMouseLeave();     // 挂着"0.2 秒后收"
+  barWrapOf(box.tree).props.onMouseEnter();     // 但光标又回到横条上了
+  assert.equal(pending.some((one) => one.ms === 200), false, '那个收的钟该被撤掉');
+  await tick();
+  assert.equal(barWrapOf(box.tree).props.style.maxHeight, 100, '这一下不许把它收走');
+  await dropPanel(box);
+}));
+
+await check('出错那一屏：横条**常驻**，也不留感应带（它上面挂着唯一的出路）', async () => {
+  const box = await mountPanel(({ url }) => (url === '/mini-remote/remotes'
+    ? jsonResponse(200, { ok: true, remotes: [PANEL_FAR] })
+    : jsonResponse(502, { ok: false, error: '那台电脑已经不认这枚凭据了——多半是它那边把这条记录撤销了。' })));
+  panelRow(box, PANEL_FAR.id).props.onClick();
+  await settlePanel();
+  const wrap = barWrapOf(box.tree);
+  assert.equal(wrap.props.style.maxHeight, 100, '出错时横条必须常驻：它的「再试一次」是这一屏唯一的下一步');
+  assert.equal(hotZoneOf(box.tree), undefined, '常驻的横条不需要感应带——盖着反而挡事');
+  await dropPanel(box);
+});
+
+await check('键盘 Tab 停在横条上：也要把它亮出来（不留"焦点在这、按钮看不见"的坑）', withFakeTimers(async () => {
+  const box = await mountPanel(panelTicketReply);
+  await openFrame(box);
+  assert.equal(barWrapOf(box.tree).props.style.maxHeight, 0, '先是收起的');
+  barWrapOf(box.tree).props.onFocus();
+  await tick();
+  assert.equal(barWrapOf(box.tree).props.style.maxHeight, 100, '焦点进来就要看得见');
+  await dropPanel(box);
+}));
+
+
+/** 这一趟一共发出去几条取票请求——"自动重取只许一次"就是数它。 */
+const ticketAsks = (box) => box.asks.filter((a) => a.url === '/mini-remote/remotes/window').length;
+/** 把这一趟放下：跨机那几样状态在组件外面（模块级），留着后面的用例会看见。 */
 
 await check('框加载成功那一下：20 秒兜底必须被掐掉——**之后永远不许再响**（不许一句错话盖住正常界面）', withFakeTimers(async (pending) => {
   // ⚠️ **反向验证的靶子**：把 `onLoad` 里那一下 clearTimeout 拿掉（回到"只在依赖变化时清"），
@@ -1113,6 +1205,7 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
       text.indexOf('公网访问') < text.indexOf('HTTPS 地址（Tailscale）'),
       'HTTPS 那一块该排在公网后面',
     );
+
     assert.equal(serveBox().length, 2, '两块各有一个开关');
   });
 }
