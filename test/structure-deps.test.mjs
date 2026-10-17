@@ -153,7 +153,27 @@ test('版本：engines.dsh 和 peerDependencies 声明的是同一个区间（�
   const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
   assert.equal(pkg.engines.dsh, pkg.peerDependencies['@deepseek-ai/dsh'],
     'engines.dsh 和 peerDependencies 必须一模一样：两处不一致时，npm 会拿一个、宿主看另一个')
-  // 版本号钉在这里：它和 CHANGELOG 的口径要一起走——发 0.2.0 时改 package.json，
-  // 就得顺手改这一行，否则这套测试红给你看（这正是它当初被写出来的用意）。
-  assert.equal(pkg.version, '0.2.0', '发版改 package.json 的版本号时，这一行要一起改')
+})
+
+/**
+ * 版本号与 CHANGELOG 必须同步。
+ *
+ * 2026-10-17 之前这里钉的是字面量 `'0.2.0'`——发版要记得**手动改这一行**，忘改就红。
+ * 那没有解决问题，只是把"两处靠记性同步"的哑点从 package.json 挪到了测试里：
+ * 发一次版要改三个地方，其中一处（这一行）纯粹是为了让测试继续绿。
+ *
+ * 现在换成两条互证的：`package.json` 的 version 必须等于 `CHANGELOG.md` 最顶上那条。
+ * 发版照旧改两处（包版本、日志一节），但**它们语义上本来就是一件事**，
+ * 忘一处必红，而且红的话说的是人话（"这两处要一起改"）。
+ */
+test('版本：package.json 的 version 必须等于 CHANGELOG 最顶上那一条', () => {
+  const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
+  const changelog = readFileSync(new URL('../CHANGELOG.md', import.meta.url), 'utf8')
+  const first = changelog.match(/^##\s*\[([^\]]+)\]/m)
+  assert.ok(first, 'CHANGELOG 里找不到 `## [版本]` 形状的条目，发版惯例已经走样了')
+  assert.equal(pkg.version, first[1],
+    'package.json 的 version 和 CHANGELOG 最顶上那条不一致：发版时这两处要一起改')
+  // 顺带钉形状：带 `v` 前缀或四位号时人眼会和 package.json 对不上，而测试当时看不出来。
+  assert.match(first[1], /^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/,
+    `CHANGELOG 那条版本号形状不对：${JSON.stringify(first[1])}（要 x.y.z，预发布就 x.y.z-xxx）`)
 })

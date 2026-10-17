@@ -1,0 +1,69 @@
+# 回归闸门。
+#
+# ## 为什么只有这两层
+#
+# 工程说明把验证分成四层，这里只跑第①层（离线测试 + 客户端校验）。另外两层不能进 CI：
+#   ② 加载探针   —— 要真的 cordis 与 DSH 宿主
+#   ③ 活体检查   —— 要**正在运行**的 DSH 打真接口
+#   ④ 真机       —— 要一台手机
+# 把跑不了的东西塞进 CI，只会让它长期红着、然后没人看。它们仍然是"改完手跑"的。
+#
+# ## 两个 job 的职责不一样，别合并
+#
+#   gate  —— 和开发机同平台（Windows），**红了就是真红**，必须修。
+#   probe —— Linux 上跑一遍，**允许红**，但必须看得见。它红了一般是"某条断言只在
+#            Windows 上成立"（测试里有 `process.platform` 分支、也有 `I:\...` 这种
+#            假路径），那属于测试的平台假设，修测试，不放宽断言。
+#
+# ## 超时
+#
+# 15 分钟是防"挂死"的：这个仓库真出过一次测试进程卡住不退出（一个断言在踩到
+# 句柄泄漏的路径上抛了，进程吊在那儿），当时在本地白等了半小时。CI 上更要有上限。
+
+name: test
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  gate:
+    name: gate (windows / node ${{ matrix.node }})
+    runs-on: windows-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        # 与 package.json 的 engines 对齐：^22.19.0 || >=24.0.0
+        node: ['22', '24']
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # 版本一致性校验要读 CHANGELOG 与 package.json 的完整历史？不需要，只要工作区。
+          fetch-depth: 1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - name: 装依赖（按 lock 文件，不接受漂移）
+        run: npm ci
+      - name: 离线测试
+        run: npm test
+      - name: 客户端那半边的自验（零依赖、不需要 DSH 在跑）
+        run: node client/verify.mjs
+
+  probe:
+    name: probe (linux / node 22)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # 允许红：这里是"跨平台探测"，不是回归闸门。红了要报告，但不阻塞合并。
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: node client/verify.mjs
