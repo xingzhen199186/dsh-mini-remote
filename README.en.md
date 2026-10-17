@@ -148,6 +148,8 @@ dsh plugin --profile web add C:\path\to\dsh-mini-remote
 3. Open the DSH desktop UI, navigate to "Settings" → "Phone Remote" in the left sidebar, and view the pairing QR codes and links.
 
 > **The phone side is browser-only.** Scanning and opening it in a browser is the entire client — there is no standalone app and no mini-program. You can add the page to your home screen: the resulting icon opens full-screen and looks much like an app, but it is still the browser running the page. Switch phones or clear browser data, and you are back to scanning the code again.
+>
+> Conversely, this page **is not picky about the device either**: open the same address in a PC browser and it works just as well — and from there you can open the complete DSH desktop interface. See "Advanced Settings: Embedded Desktop Interface".
 
 ---
 
@@ -176,12 +178,21 @@ Select the route that matches your current networking environment:
 > 1. Elevating permissions to "Full Access" permits the agent to run arbitrary system commands and modify files across the machine. Proceed with caution.
 > 2. System-level confirmation dialogs for dangerous commands belong to the host security perimeter and cannot be signed off remotely from the phone; they must be confirmed on the desktop host.
 
-### Advanced Settings: Embedded Desktop Interface
+### Advanced Settings: Embedded Desktop Interface (Phone or PC Browser)
 
-Enabling "Advanced settings" in the mobile settings drawer exposes the "Desktop interface" action. Tapping it loads the full desktop DSH web UI inside an iframe, allowing plugin management, model parameter adjustments, and full transcript audits on mobile.
+**The remote page is not phone-only.** Open the same address (the one the QR code points at) in a PC browser and it works just the same — the layout is simply tuned for a phone screen. What makes this route genuinely useful on a PC is "Advanced settings": it embeds the complete DSH desktop interface, so you do not have to spin up a separate `dsh web`.
+
+How to open it:
+
+1. Click the gear in the top-right corner, find the "Advanced settings" row (its hint reads "Open the DSH interface on the computer and change the settings the phone does not have"), and switch it to on.
+2. It asks once more — **you must confirm a second time**.
+3. A "Desktop interface" row appears right below (hint: "the complete desktop DSH page"). Click "Open".
+4. A full-screen copy of the DSH desktop interface is embedded right in this page: plugin management, model configuration, session history, and full logs. The bar on top exits back to the remote page.
 
 > ⚠️ **Notice**:
-> Enabling the desktop interface extends the mobile access token's scope to the entire desktop management plane. A secondary confirmation is required. If the host cannot determine the desktop listening port, this option is hidden automatically.
+> 1. **This is a permission switch, not an ordinary preference.** Turning it on extends the token's reach from "what the phone page exposes" to the **entire desktop management plane** — model configuration, credentials, plugin install/uninstall, session history. It is therefore off by default and takes two confirmations to enable.
+> 2. **When the host has no web endpoint, this row is not shown at all.** No fake switch is displayed — so on a machine running only the DSH desktop app and never `dsh web`, you will most likely never see it. Use the main path instead: the remote page itself.
+> 3. What gets embedded is the desktop interface verbatim; it feels cramped on a narrow phone screen, and **a PC browser is where it breathes**.
 
 ### Desktop "Remote Window"
 
