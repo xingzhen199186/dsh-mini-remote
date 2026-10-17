@@ -27,9 +27,9 @@ window.__ModuleLoader__.load({
     var TUNNEL_PATH = '/mini-remote/tunnel';
     var SERVE_PATH = '/mini-remote/serve';
     var FEISHU_PATH = '/mini-remote/feishu';
-    // 「远程窗口」取票那一条（宿主侧路由，只允许本机调用，见 lib/index.js）。
-    // 它回 `{ ok:true, url:'http://127.0.0.1:<端口>/mini/mirror/?ticket=…', expiresIn:30 }`。
-    var WINDOW_PATH = '/mini-remote/window';
+    // **这里原来有一条本机取票的地址常量**：面板点开时拿它去换一张「本机电脑端界面」的票。
+    // 2026-10-17 退休了——那段道理写在 `MiniRemotePanel` 的注释里。宿主侧那条路由一个字没动
+    // （还在 lib/index.js 上，跨机那条路复用的取票/嵌框/过门也照旧），只是界面上没人走它了。
     // 「允许别的电脑连接」那个开关（宿主侧路由，只允许本机调用，见 lib/index.js）。
     // 它收 `{ enabled }`，回的也是整份配对信息（和公网那个开关同形状）。
     // 关着的时候，配对和跨机取票两条路由一条都不接——这是用户能读懂的"关"。
@@ -84,9 +84,19 @@ window.__ModuleLoader__.load({
       // 「远程窗口」面板：整屏嵌一个 iframe。取票那一步失败时，这两种样式就是全部内容
       // ——那时它得读起来像一句话，而不是一个空框。
       panelMsg: { boxSizing: 'border-box', padding: '80px 24px', textAlign: 'center', color: 'var(--dsw-alias-label-tertiary,#8b93a1)', fontSize: 14, lineHeight: 1.6 },
+      // 名单那一屏（2026-10-17）：**面板的第一屏**。行样式复用设置页那几样
+      // （deviceRow/deviceName/remoteUrl），这里只多一个居中的容器和一行标题。
+      listWrap: { boxSizing: 'border-box', width: '100%', maxWidth: 760, margin: '0 auto', padding: '28px 24px' },
+      listHead: { fontWeight: 600, fontSize: 14, marginBottom: 6 },
+      // 「某一台的界面」那一屏：顶上一条细横条（一枚「← 返回列表」+ 这台电脑叫什么），
+      // 下面才是那个铺满的框。**横条在每一种状态下都要在**（正在换票、出错、框没起来），
+      // 不然用户会卡在那一屏里出不来。
+      screen: { display: 'flex', flexDirection: 'column', boxSizing: 'border-box', width: '100%', height: '100%', minHeight: 320 },
+      screenBar: { flex: 'none', display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', borderBottom: '1px solid var(--dsw-alias-border-l2,#e5e7eb)' },
+      screenName: { fontSize: 12, color: 'var(--dsw-alias-label-tertiary,#8b93a1)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
       // 框铺满面板：**父容器高度拿不准**（可能是定高，也可能是被内容撑开的），
-      // 所以外层给一个 320 的兜底高度，里面那个框绝对定位铺满——两种情况都不会塌成一条缝。
-      frameWrap: { position: 'relative', boxSizing: 'border-box', width: '100%', height: '100%', minHeight: 320 },
+      // 所以外层那一条给一个 320 的兜底高度，这一条自己 flex 撑满剩下的那一块。
+      frameWrap: { position: 'relative', boxSizing: 'border-box', width: '100%', flex: '1 1 auto', minHeight: 320 },
       frame: { position: 'absolute', inset: 0, width: '100%', height: '100%', border: 0, display: 'block', background: 'var(--dsw-alias-bg-base,#fff)' },
       // 「设备」那一块：一行一台。名字和说明在左边（flex:1，窄面板下先让它占满），
       // 动作在右边；撤销那次「二次确认」就摊在这一行下面（这个文件里没有弹窗，
@@ -248,6 +258,32 @@ window.__ModuleLoader__.load({
       var ttl = Number(remoteWin.expiresIn) * 1000;
       if (!ttl) return false;
       return (Date.now() - remoteWin.at) < (ttl - 5000);
+    }
+
+    /**
+     * 从「某一台的界面」**退回名单**：手上这一趟放下，人还留在我们这一屏里（2026-10-17）。
+     *
+     * 和下面的 `leaveRemotePanel` 是两件事：那个是**离开这一屏**（回到进来之前那一屏），
+     * 这个是**只上一层**。两处都用到它：界面顶上那枚「← 返回列表」，和"再点一下侧栏那一条"
+     * （见 onDocumentClick）。
+     */
+    function leaveRemoteScreen() {
+      remoteTarget = null;
+      remoteWin = null;
+      notifyRemote();
+    }
+
+    /**
+     * 从名单上点开一台：**先记住是哪一台**，再去换一张票（那一下的成败都落在这一份状态里）。
+     *
+     * 顺序是刻意的：先写 `remoteTarget` 再取票，取票失败时那一屏才说得清"是哪一台没成"
+     * ——照票去画的话，屏幕上会出现上一台电脑的界面（见 `remoteTarget` 那段）。
+     * 设置页那一块（`connectRemote`）走的是同一条路的前两步，第三步它自己接（切到这一屏 + 关掉设置页）。
+     */
+    function openRemoteScreen(one) {
+      if (remoteBusyId) return;
+      remoteTarget = { id: one.id, name: one.name || '' };
+      fetchRemoteTicket(one.id, one.name);
     }
 
     /**
@@ -1131,9 +1167,11 @@ window.__ModuleLoader__.load({
      *
      * ## 一行一台，那一行本身就是入口
      *
-     * 点那一行 = 打开那台电脑的界面（先取票，见 `connectRemote`）——和本机那枚侧栏图标的
-     * 做法一模一样：取票 → 把地址交给框 → 整屏 → 再点侧栏那一条退出。行里另给两个动作：
-     * 「重连」（票是一次性的、30 秒就过期，"再换一张"总得有个明确入口）和「断开」。
+     * 点那一行 = 打开那台电脑的界面（先取票，见 `connectRemote`）：取票 → 把地址交给框 →
+     * 切到「远程窗口」那一屏 → 把设置页这个浮层关掉。**2026-10-17 起那一屏点开的第一层
+     * 也是同一份名单**（见 MiniRemotePanel）：在这儿点，就跳过名单直接进那一台。
+     * 行里另给两个动作：「重连」（票是一次性的、30 秒就过期，"再换一张"总得有个明确入口）
+     * 和「断开」。
      * **「重连」和"点这一行"是同一件事**（重连 = 再取一次票，见 lib/index.js 那一段）。
      *
      * ## 「断开」要点两下
@@ -1719,35 +1757,104 @@ window.__ModuleLoader__.load({
     /**
      * 「远程窗口」面板——侧栏那个图标点开之后，占满中间那一整列的那一屏。
      *
-     * **这一屏嵌的是「电脑端界面」**（同一台电脑上的 DSH 界面，经我们自己的反代搬出来），
-     * 不是手机页：官方那一层本来就是给宽屏做的，放进整屏面板正合适。
+     * ## 这一屏有两层（2026-10-17 起）
      *
-     * 还有第二种用法（2026-10-16 跨机第三步）：设置页「其他电脑」里点开的那一台。
-     * 同一屏、同一套动作——**票**已经在那一块里换好了（`remoteWin`），这里把地址交给框；
-     * 「再点一下那一条退出」那套不用改，退出时顺手把"别的电脑"这一趟放下
-     * （见 leaveRemotePanel）。
+     *   · **上面一层：一份「其他电脑」名单**（`MiniRemoteList`）。侧栏那枚图标点开先看到
+     *     的就是它——一行一台，点一行就把那一台的界面显示在这一屏里。
+     *   · **下面一层：选中那一台的「电脑端界面」**（另一个源，经它自己的镜像门嵌进来）。
+     *
+     * ## 为什么不再显示"本机"了（用户拍板的一条产品修正）
+     *
+     * 原来点开显示的是**本机**的电脑端界面——那是跨机还没做出来时的中间验证（脚手架）：
+     * 用它证明"取票 → 嵌框 → 过门"这一套真的能通。跨机做通之后它就没意义了，
+     * 用户的原话是：「远程窗口我们为什么要设置为显示当前电脑的dsh页面，这没有意义啊」
+     * ——**人就坐在这台电脑前面，为什么还要在这块面板里再看一遍自己的界面。**
+     *
+     * 所以本机那条**从界面上退休**：面板挂载时不再去换本机那张票。**底下那套零件一个字没删**
+     * ——宿主侧那条路由还在 `lib/index.js` 上，跨机这条路复用的取票/嵌框/过门也照旧
+     * （`lib/` 里一个字都没动）。
      *
      * ## 为什么要先取一张票，而不是直接把地址写进 src
      *
      * 那个地址后面要跟凭据。**令牌绝不能进 iframe 地址**——浏览历史、截图、别人拿到这台
      * 电脑就能翻出来。所以走两条腿：
-     *   · 宿主那一半（同一台电脑、本来就拿着令牌）POST `/mini-remote/window` 换一张
-     *     **一次性票**（30 秒、用完即废）；
+     *   · 宿主那一半（同一台电脑、本来就拿着令牌）去换一张**一次性票**（30 秒、用完即废）；
      *   · 界面这半边只拿得到「票 + 地址」，拼进 src 的只有票。
      *
      * 票进门那一刻会被兑现成一枚**窗口会话 cookie**（框里那些请求全靠它认人），
      * 而票自己**只授权那一次**；地址里留着的那张票之后只用来回答「这一页是我嵌出来的吗」
      * ——桌面端是**跨站**嵌进来的，只能靠票来定「许不许被嵌」。**令牌全程没进过浏览器。**
      *
-     * **挂在 useEffect 里**：面板每被打开一次就换一张新票（票是一次性的，上次那张早废了）。
+     * **挂在 useEffect 里**：每换一台就换一张新票（票是一次性的，上次那张早废了）。
      */
+    /**
+     * 面板里那一份「其他电脑」名单（2026-10-17）：侧栏那枚图标点开之后看到的**第一屏**。
+     *
+     * 它是 `MiniRemotePanel` 里那一段的"画法"，不是另一个组件：hook 全排在面板那一头
+     * （见那里的注释），这里只管把已经读到的三样东西画出来。
+     *
+     * ## 三种结局，一个转不完的圈都没有
+     *
+     *   · 读到了、有内容 → 一行一台（名字 + 地址 + 最近一次成功）；
+     *   · 读到了、一台也没有 → 「还没连过别的电脑。去『设置 → 手机遥控 → 其他电脑』里加一台。」；
+     *   · 读不到 → 照登原因（和设置页那一块同一条口径：404/405 = 宿主是旧版，下一步重启 DSH）。
+     *
+     * "读不到"和"一台都没有"是两件事，**绝不能说成同一句**：把读失败说成"还没连过"，
+     * 用户会去重配一台其实早就配好的电脑。
+     */
+    function remoteListScreen(list, error, again) {
+      if (error) {
+        return h('div', { style: styles.panelMsg },
+          h('div', { style: Object.assign({}, styles.muted, styles.say) }, error),
+          h('div', { style: { marginTop: 18 } }, again),
+        );
+      }
+      if (list === null) return h('div', { style: styles.panelMsg }, '正在读取「其他电脑」名单…');
+      if (!list.length) {
+        return h('div', { style: styles.panelMsg },
+          h('div', null, '还没连过别的电脑。去『设置 → 手机遥控 → 其他电脑』里加一台。'),
+          h('div', { style: { marginTop: 18 } }, again),
+        );
+      }
+
+      var rows = list.map(function (one) {
+        var lastOk = formatTime(one.lastOk);
+        var working = remoteBusyId === one.id;
+        return h('div', {
+          key: one.id,
+          style: Object.assign({}, styles.deviceRow, { cursor: 'pointer' }),
+          onClick: function () { openRemoteScreen(one); },
+        },
+          h('div', { style: styles.deviceMain },
+            h('div', { style: styles.deviceName }, one.name ? one.name : '（这台电脑没有名字）'),
+            h('div', { style: styles.remoteUrl }, one.baseUrl || ''),
+            h('div', { style: styles.muted }, lastOk ? '最近成功 ' + lastOk : '最近成功 还没有记录'),
+          ),
+          working ? h('div', { style: styles.muted }, '取票中…') : null,
+        );
+      });
+
+      return h('div', { style: styles.listWrap },
+        h('div', { style: styles.listHead }, '其他电脑'),
+        h('div', { style: styles.muted }, '点一台，就把它的界面显示在这儿。'),
+        h('div', null, rows),
+        h('div', { style: { marginTop: 12 } }, again),
+      );
+    }
+
     function MiniRemotePanel() {
-      // 本机那一扇：null = 还在换票；{ url } = 换到了；{ error } = 没换成，把原因说给用户听。
-      // **选了「其他电脑」时这一趟不跑**：那一张票由设置页那一块去换（见 fetchRemoteTicket），
-      // 这里只负责把它的地址交给框。
-      var winState = useState(null);
-      var win = winState[0];
-      var setWin = winState[1];
+      // —— 名单那一层要的三样东西。**hook 全排在函数开头**：这一屏有两层，下面按
+      //    「在看某一台 / 在看名单」分两头返回；hook 排在分支之后的话，切换那一瞬间
+      //    React 会看到 hook 个数变了（那是真机上会炸的一种错）。
+      var listState = useState(null);   // null = 还在读；[] = 读到了，一台也没有
+      var list = listState[0];
+      var setList = listState[1];
+      var listErrorState = useState(null);
+      var listError = listErrorState[0];
+      var setListError = listErrorState[1];
+      var tryState = useState(0);       // 每按一次「重新读一遍」+1 = 重读一次
+      var tries = tryState[0];
+      var setTries = tryState[1];
       // 框一直没打开时的兜底（见 REMOTE_FRAME_WAIT_MS）：到点把空白框换成一句人话。
       var stallState = useState(false);
       var stalled = stallState[0];
@@ -1761,16 +1868,20 @@ window.__ModuleLoader__.load({
         return subscribeRemote(function () { setPoke(function (n) { return n + 1; }); });
       }, []);
 
-      var remoteId = remoteTarget ? remoteTarget.id : '';
-      var remoteName = remoteTarget ? remoteTarget.name : '';
-      var remoteUrl = (remoteWin && remoteWin.id === remoteId && remoteWin.url) ? remoteWin.url : '';
-
+      /**
+       * 读名单。**读的是设置页那一块同一个接口**（`GET /mini-remote/remotes`）：两边不可能各说各话。
+       *
+       * 为什么这一屏要自己读一遍：设置页那一份住在设置页的浮层里，这一份住在 main 槽里
+       * ——两个组件在不同的槽里，互相看不见（和上面那份跨机状态同一个理由）。
+       *
+       * 为什么挂在 `[tries]` 上：这一屏可能一直挂在后台（面板没被卸载），而用户是在设置页里
+       * 把电脑加进去的。给一个明确的"再看一眼"的入口（那枚「重新读一遍」），比指望外壳
+       * 什么时候重挂一遍可靠。
+       */
       useEffect(function () {
-        // 选了别的电脑：这一趟不该再去要**本机**那一张票（那会白换一张，而且本机拿不出
-        // 可嵌的界面时还会平白报一句错）。
-        if (remoteId) return undefined;
         var alive = true;
-        fetch(WINDOW_PATH, { method: 'POST' })
+        setListError(null);
+        fetch(REMOTES_PATH)
           .then(function (res) {
             return res.json().then(
               function (body) { return { status: res.status, body: body }; },
@@ -1780,17 +1891,45 @@ window.__ModuleLoader__.load({
           .then(function (r) {
             if (!alive) return;
             var b = (r.body && typeof r.body === 'object') ? r.body : null;
-            if (b && b.ok && typeof b.url === 'string' && b.url) setWin({ url: b.url });
-            else setWin({ error: (b && b.error) || ('换一张窗口通行证失败：服务返回了 HTTP ' + r.status + '。') });
+            if (b && b.ok && Array.isArray(b.remotes)) { setList(b.remotes); return; }
+            // 宿主那一半是旧版（接口都不在）时，服务端回的是给程序看的 `not found`：
+            // 原样摆出来用户读不懂，而下一步只有一句话——重启。和设置页那一块说法一致。
+            setListError(r.status === 404 || r.status === 405
+              ? '读「其他电脑」名单失败：这台电脑上的服务没有这个接口（HTTP ' + r.status + '）。重启一次 DSH 再试。'
+              : ((b && b.error) || ('读「其他电脑」名单失败：服务返回了 HTTP ' + r.status + '。')));
           })
           .catch(function (err) {
             if (!alive) return;
-            setWin({ error: '读不到这台电脑上的遥控服务：' + ((err && err.message) || String(err)) });
+            setListError('读「其他电脑」名单失败：' + ((err && err.message) || String(err)));
           });
         return function () { alive = false; };
-      }, [remoteId]);
+      }, [tries]);
 
-      // 手上那张票已经不新鲜了（面板是后来才打开的，比如点了侧栏那枚图标）：**现换一张**。
+      var remoteId = remoteTarget ? remoteTarget.id : '';
+      var remoteName = remoteTarget ? remoteTarget.name : '';
+      var remoteUrl = (remoteWin && remoteWin.id === remoteId && remoteWin.url) ? remoteWin.url : '';
+
+      /**
+       * 那一屏的外框：**顶上永远有一条**（一枚「← 返回列表」+ 这是哪一台），下面才是内容。
+       *
+       * 每一种状态都要它：正在换票、对方撤销了、框一直没起来——那些状态下用户最需要的
+       * 恰恰是"怎么回去"。少了这一条，出错的时候这一屏就成了死胡同（那正是这一块要防的坏法）。
+       */
+      function remoteScreen(name, inner) {
+        return h('div', { style: styles.screen },
+          h('div', { style: styles.screenBar },
+            h('button', {
+              type: 'button',
+              onClick: function () { leaveRemoteScreen(); },
+              style: styles.btn,
+            }, '← 返回列表'),
+            h('div', { style: styles.screenName }, name ? name : '另一台电脑'),
+          ),
+          inner,
+        );
+      }
+
+      // 手上那张票已经不新鲜了（比如从名单上点开之后又绕了一圈回来）：**现换一张**。
       // 票是一次性的、30 秒就过期，拿一张旧的去开只会开出一片空白——而空白框正是
       // 这一屏最不能出现的东西。
       useEffect(function () {
@@ -1809,22 +1948,25 @@ window.__ModuleLoader__.load({
 
       if (remoteId) {
         var problem = remoteProblems[remoteId];
-        if (remoteBusyId === remoteId) return h('div', { style: styles.panelMsg }, '正在向那台电脑换一张通行证…');
-        if (problem) return remoteProblemPanel(remoteId, remoteName, problem);
+        if (remoteBusyId === remoteId) {
+          return remoteScreen(remoteName, h('div', { style: styles.panelMsg }, '正在向那台电脑换一张通行证…'));
+        }
+        if (problem) {
+          return remoteScreen(remoteName, remoteProblemPanel(remoteId, remoteName, problem));
+        }
         // 票不在手上、或者手上那张已经不新鲜了：下面那个 effect 正在换一张新的。
         // **这时一个框都不立**——拿一张过期的票去开，只会开出一片空白（然后一直白着）。
         if (!remoteUrl || !remoteTicketFresh(remoteId)) {
-          return h('div', { style: styles.panelMsg }, '正在向那台电脑换一张通行证…');
+          return remoteScreen(remoteName, h('div', { style: styles.panelMsg }, '正在向那台电脑换一张通行证…'));
         }
         if (stalled) {
-          return remoteProblemPanel(remoteId, remoteName, {
+          return remoteScreen(remoteName, remoteProblemPanel(remoteId, remoteName, {
             revoked: false,
             text: '那台电脑的界面一直没打开（等了 ' + Math.round(REMOTE_FRAME_WAIT_MS / 1000) + ' 秒还没看到它）。\n'
               + '它可能刚重启、或者这会儿连不上。点下面的「再试一次」换一张通行证再开一次。',
-          });
+          }));
         }
-        if (!remoteUrl) return h('div', { style: styles.panelMsg }, '正在准备远程窗口…');
-        return h('div', { style: styles.frameWrap },
+        return remoteScreen(remoteName, h('div', { style: styles.frameWrap },
           h('iframe', {
             src: remoteUrl,
             title: '另一台电脑的界面',
@@ -1833,13 +1975,16 @@ window.__ModuleLoader__.load({
             // 所以它只用来取消下面那个兜底，不用来宣布成功。
             onLoad: function () { setStalled(false); },
             style: styles.frame,
-          }));
+          })));
       }
 
-      if (!win) return h('div', { style: styles.panelMsg }, '正在准备远程窗口…');
-      if (win.error) return h('div', { style: styles.panelMsg }, win.error);
-      return h('div', { style: styles.frameWrap },
-        h('iframe', { src: win.url, title: '电脑端界面', style: styles.frame }));
+      // 没在看某一台：**名单**（这一屏的第一层）。
+      var again = h('button', {
+        type: 'button',
+        onClick: function () { setTries(function (n) { return n + 1; }); },
+        style: styles.btn,
+      }, '重新读一遍');
+      return remoteListScreen(list, listError, again);
     }
 
     // —— 「再点一下退出远程窗口」需要的三样东西：一个能跟官方布局服务说话的把手、
@@ -1871,8 +2016,8 @@ window.__ModuleLoader__.load({
      * 全局面板」，也就是平时那一屏会话，不是别的东西。
      */
     function leaveRemotePanel() {
-      // 退出就把"另一台电脑"这一趟放下：下次点侧栏那一条，看到的是**本机**那一屏
-      // （和原来一模一样）。不放的话，隔了半天再点那一条会去开一台早就没在看的电脑。
+      // 退出就把"另一台电脑"这一趟放下：下次点侧栏那一条，看到的是**名单**（这一屏的第一层）。
+      // 不放的话，隔了半天再点那一条会去开一台早就没在看的电脑。
       if (remoteTarget || remoteWin) {
         remoteTarget = null;
         remoteWin = null;
@@ -1887,7 +2032,12 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * 「已经在远程窗口里，再点一下那一条 → 退出」。
+     * 「再点一下侧栏那一条」——**上一层**（2026-10-17 改）。
+     *
+     * 这一屏有两层：上面是「其他电脑」名单，下面是其中一台的界面。所以这一下：
+     *   · 人在**某一台的界面**里 → 退回**名单**（还在这一屏里，和顶上那枚「← 返回列表」同一件事）；
+     *   · 人已经在**名单**上 → 退出这一屏，回到进来之前那一屏。
+     * 一层一层退，用户不用先找到那枚按钮才出得去。
      *
      * **为什么不接在图标上**（2026-10-15 在真页面上量出来的）：侧栏那一条是官方壳画的，
      * 我们在这条行里只有一枚 16×16 的图标，整行却有 252×36。点在文字「远程窗口」或
@@ -1908,6 +2058,8 @@ window.__ModuleLoader__.load({
       var info = layoutFace.panelInfo.getSnapshot();
       if (!info || info.activePanelId !== PANEL_ID) return;            // 还没进去：让官方照常办
       e.stopPropagation();                                             // 拦掉官方「又选中自己」那一下
+      // 在某一台的界面里：这一下是**退回名单**（还在这一屏里）；已经在名单上才是退出。
+      if (remoteTarget) { leaveRemoteScreen(); return; }
       leaveRemotePanel();
     }
 

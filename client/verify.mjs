@@ -23,6 +23,14 @@ const source = readFileSync(join(here, 'client.js'), 'utf8');
 
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 
+/**
+ * 把一条「点击 → 发请求 → 回执 → 存状态 → 通知 → 重画」的链子走完。
+ *
+ * 这条链子全是微任务（`setImmediate` 之前微任务已经排干），一次 tick 通常就够；
+ * 多走几步是为了让断言别看到**上一轮**的结果（那是"差一条"的经典成因）。
+ */
+const settlePanel = async () => { for (let i = 0; i < 6; i += 1) await tick(); };
+
 const setGlobal = (name, value) =>
   Object.defineProperty(globalThis, name, { value, configurable: true, writable: true });
 
@@ -226,53 +234,138 @@ await check('main 那条：第二个参数是面板组件函数', () => {
   assert.equal(typeof entryOf('main').Comp, 'function');
 });
 
-// —— main 那条面板：「远程窗口」整屏嵌的是电脑端界面，凭据只能是**一张一次性票**。
-//     令牌绝不能进 iframe 的地址（会留在那台电脑的浏览历史里）——这两条是这一步的核心。
-const TICKET_URL = 'http://127.0.0.1:3090/mini/mirror/?ticket=one-shot-ticket-value';
-const panelHarness = useHarness();
+// —— main 那条面板（2026-10-17 改过）：**侧栏图标点开先看到一份「其他电脑」名单**。
+//     点某一台，才去换**那一台**的票、把它的界面嵌进来。
+//
+//     原来点开这一屏显示的是**本机**的电脑端界面——那是跨机还没做出来时的脚手架。
+//     下面第一、二条就是它「从界面上退休」的凭据：面板挂载只读名单，**一次本机取票都不许有**，
+//     源码里也不许再出现那条地址。宿主侧那条路由一个字没动（见 lib/index.js）。
+const REMOTE_TICKET_URL = 'http://192.168.1.9:19387/mini/mirror/?ticket=one-shot-remote-value';
+const PANEL_FAR = {
+  id: 'f'.repeat(32), name: '书房那台', baseUrl: 'http://192.168.1.9:19387',
+  lastOk: new Date('2026-10-16T15:08:00+08:00').getTime(),
+};
+const PANEL_OLD = { id: 'e'.repeat(32), name: '', baseUrl: 'http://100.92.105.99:19387', lastOk: 0 };
 const Panel = entryOf('main').Comp;
-{
-  let tree = null;
-  panelHarness.onUpdate(() => { tree = panelHarness.draw(Panel); });
-  await check('面板挂载时先换票：票没到手之前一个框都不立', () => {
-    tree = panelHarness.draw(Panel);
-    assert.match(textOf(tree), /正在准备远程窗口…/);
-    assert.equal(byType(tree, 'iframe').length, 0, '票还没到手就把框立起来，等于凭据先摆出去');
+
+/**
+ * 挂一次「那一整屏」：`reply({ url, init, n })` 给响应，`box.asks` 是这一趟发出去的全部请求。
+ * 返回的 `box` 里那棵树会跟着重画走（重画之后读 `box.tree` 才是新的）。
+ */
+const mountPanel = async (reply) => {
+  const hh = useHarness();
+  const box = { asks: [], tree: null, harness: hh };
+  setGlobal('fetch', (url, init) => {
+    box.asks.push({ url, method: (init && init.method) || 'GET', body: init && init.body });
+    return Promise.resolve(reply({ url, init, n: box.asks.length }));
   });
-  await check('换票是 POST /mini-remote/window（宿主那一半的路由）', () => {
-    let asked = null;
-    setGlobal('fetch', (url, init) => {
-      asked = { url, init };
-      return Promise.resolve(jsonResponse(200, { ok: true, url: TICKET_URL, expiresIn: 30 }));
-    });
-    panelHarness.runEffects();
-    assert.ok(asked, 'useEffect 里没有发起换票请求');
-    assert.equal(asked.url, '/mini-remote/window');
-    assert.equal(asked.init && asked.init.method, 'POST');
-  });
-  await check('换到票之后：框的地址就是那条带票的地址，而且不含令牌', async () => {
-    await tick();
-    await tick();
-    const iframe = byType(tree, 'iframe')[0];
-    assert.ok(iframe, '换到票之后要真的把框立起来');
-    assert.equal(iframe.props.src, TICKET_URL);
-    assert.match(iframe.props.src, /\?ticket=/, '进门的凭据只能是那张票');
-    assert.doesNotMatch(iframe.props.src, /[?&]token=/,
-      '框的地址里**不许出现令牌**——那会留在打开这台电脑的人的浏览历史里');
-  });
-  await check('换票失败时：把服务端那句原因照登出来，不摆一个空框', async () => {
-    const h2 = useHarness();
-    let tree2 = null;
-    h2.onUpdate(() => { tree2 = h2.draw(Panel); });
-    setGlobal('fetch', () => Promise.resolve(jsonResponse(503, { ok: false, error: '这台电脑上现在找不到可嵌入的「电脑端界面」。' })));
-    tree2 = h2.draw(Panel);
-    h2.runEffects();
-    await tick();
-    await tick();
-    assert.match(textOf(tree2), /找不到可嵌入/);
-    assert.equal(byType(tree2, 'iframe').length, 0, '没换到票就别立框');
-  });
-}
+  hh.onUpdate(() => { box.tree = hh.draw(Panel); });
+  box.tree = hh.draw(Panel);
+  hh.runEffects();
+  await settlePanel();
+  return box;
+};
+/** 名单来一份的两条路：读到了（有/没有内容）和读不到。 */
+const remotesOk = (remotes) => () => jsonResponse(200, { ok: true, remotes: remotes });
+const panelRow = (box, id) => walk(box.tree).find((n) => n && n.props && n.props.key === id);
+
+await check('点开先读「其他电脑」名单：GET /mini-remote/remotes（**不再去换本机那张票**）', async () => {
+  // ⚠️ **反向验证的靶子**：把「打开名单」改回「显示本机」（面板挂载时 POST 那条本机取票），
+  //    这一条必须变红——它就是"看本机那条路退休了没有"的看门人。
+  const box = await mountPanel(remotesOk([PANEL_FAR]));
+  assert.deepEqual(box.asks.map((a) => a.method + ' ' + a.url), ['GET /mini-remote/remotes'],
+    '面板点开那一刻，发出去的**只能**是读名单那一条');
+  assert.equal(box.asks.filter((a) => a.method === 'POST').length, 0,
+    '**看本机那条路退休了**：面板点开不再换本机那张票（POST 一次都不该有）');
+  box.harness.unmount();
+});
+
+await check('看本机那条取票路确实退休：client.js 里不再出现那条地址', () => {
+  assert.doesNotMatch(source, /\/mini-remote\/window/,
+    '界面上不再走本机取票那条路（宿主侧那条路由还留着，不在这个文件里——见 lib/index.js）');
+});
+
+await check('名单到了：一行一台，名字 + 地址 + 最近一次成功的时间', async () => {
+  const box = await mountPanel(remotesOk([PANEL_FAR, PANEL_OLD]));
+  const text = textOf(box.tree);
+  assert.match(text, /书房那台/);
+  assert.match(text, /http:\/\/192\.168\.1\.9:19387/, '地址要摆出来（用户拿它和对面核对）');
+  assert.match(text, /最近成功 2026-10-16 15:08/, '要说清"最近一次成功"是哪一刻');
+  assert.match(text, /最近成功 还没有记录/, '没成功过就说还没有记录，不编一个时间');
+  assert.match(text, /（这台电脑没有名字）/, '名字空着（用地址当名字时也可能为空）也要有个说法');
+  assert.doesNotMatch(text, /NaN|undefined|Invalid Date/);
+  assert.equal(byType(box.tree, 'iframe').length, 0, '还没点哪一台，一个框都不许立');
+  box.harness.unmount();
+});
+
+await check('一台也没连过：那句人话（去设置里加一台）+ 一个「重新读一遍」', async () => {
+  const box = await mountPanel(remotesOk([]));
+  const text = textOf(box.tree);
+  assert.match(text, /还没连过别的电脑/);
+  assert.match(text, /设置 → 手机遥控 → 其他电脑/);
+  assert.ok(byType(box.tree, 'button').some((b) => textOf(b) === '重新读一遍'),
+    '要给人一个"再看一眼"的入口（他可能刚在设置页里加完）');
+  assert.equal(byType(box.tree, 'iframe').length, 0);
+  box.harness.unmount();
+});
+
+await check('名单读不到：照登原因（接口都没有 = 重启），**不说成"还没连过"**', async () => {
+  const box = await mountPanel(() => jsonResponse(404, { ok: false, error: 'not found' }));
+  const text = textOf(box.tree);
+  assert.match(text, /读「其他电脑」名单失败/);
+  assert.match(text, /重启一次 DSH 再试/, '接口都没有（宿主是旧版）时，下一步只有一句话：重启');
+  assert.doesNotMatch(text, /还没连过别的电脑/, '读不到 ≠ 一台都没有（说错了会让人去重配一台好着的）');
+  box.harness.unmount();
+});
+
+await check('点某一台 → 换**那一台**的票，框的地址里只有票、没有令牌', async () => {
+  const box = await mountPanel(({ url }) => (url === '/mini-remote/remotes'
+    ? jsonResponse(200, { ok: true, remotes: [PANEL_FAR] })
+    : jsonResponse(200, { ok: true, url: REMOTE_TICKET_URL, expiresIn: 30 })));
+  const row = panelRow(box, PANEL_FAR.id);
+  assert.ok(row, '名单上要有那一行');
+  row.props.onClick();
+  await settlePanel();
+  const post = box.asks.filter((a) => a.method === 'POST');
+  assert.equal(post.length, 1, '点一行 = 去换那一台的票');
+  assert.equal(post[0].url, '/mini-remote/remotes/window');
+  assert.deepEqual(JSON.parse(post[0].body), { id: PANEL_FAR.id });
+  const iframe = byType(box.tree, 'iframe')[0];
+  assert.ok(iframe, '票到手了就把那一台的框立起来');
+  assert.equal(iframe.props.src, REMOTE_TICKET_URL);
+  assert.match(iframe.props.src, /\?ticket=/, '进门的凭据只能是那张票');
+  assert.doesNotMatch(iframe.props.src, /[?&]token=/,
+    '框的地址里**不许出现令牌**——那会留在打开这台电脑的人的浏览历史里');
+  // 看完这一台，从界面**回到名单**：顶上那枚按钮，而且人还在这一屏里（不退出面板）。
+  const back = byType(box.tree, 'button').find((b) => textOf(b) === '← 返回列表');
+  assert.ok(back, '界面顶上要有一条回名单的路');
+  back.props.onClick();
+  box.harness.runEffects();   // 回到名单那一层：名单的 effect 重新读一遍
+  await settlePanel();
+  assert.equal(byType(box.tree, 'iframe').length, 0, '回到名单就不该还嵌着那一台');
+  assert.ok(panelRow(box, PANEL_FAR.id), '名单又回来了（这一屏没离开）');
+  box.harness.unmount();
+});
+
+await check('**出错那几种状态下**也回得去：那句人话旁边就是「← 返回列表」', async () => {
+  const box = await mountPanel(({ url }) => (url === '/mini-remote/remotes'
+    ? jsonResponse(200, { ok: true, remotes: [PANEL_FAR] })
+    : jsonResponse(502, { ok: false, error: '那台电脑已经不认这枚凭据了——多半是它那边把这条记录撤销了。' })));
+  panelRow(box, PANEL_FAR.id).props.onClick();
+  await settlePanel();
+  const text = textOf(box.tree);
+  assert.match(text, /这台电脑已经被对方撤销了，要重新配对/, '出错了要给人话（上一轮做好的那一条）');
+  assert.match(text, /再试一次/, '还要给一个下一步');
+  assert.equal(byType(box.tree, 'iframe').length, 0, '没换到票就别立框');
+  const back = byType(box.tree, 'button').find((b) => textOf(b) === '← 返回列表');
+  assert.ok(back, '出错的时候最需要的恰恰是"怎么回去"——这一条不能只在成功时才有');
+  back.props.onClick();
+  box.harness.runEffects();
+  await settlePanel();
+  assert.equal(byType(box.tree, 'iframe').length, 0);
+  assert.ok(panelRow(box, PANEL_FAR.id), '退回名单，人没卡在那一屏里');
+  box.harness.unmount();
+});
 
 // —— sidebar.panellist：list 槽。id 必须和 main 的 key 对上，侧栏点下来才找得到面板。
 await check('panellist 那条：def.name === "sidebar.panellist"', () => {
@@ -1460,8 +1553,7 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
     hh.onUpdate(() => { box.tree = hh.draw(entryOf('main').Comp); });
     box.tree = hh.draw(entryOf('main').Comp);
     hh.runEffects();
-    await tick();
-    await tick();
+    await settlePanel();
     return box;
   };
   const listOf = (remotes) => [{ status: 200, body: { ok: true, remotes: remotes } }];
@@ -1780,30 +1872,41 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
     st.harness.unmount();
   });
 
-  await check('再点一下侧栏那一条就退出：回到进来之前那一屏，并且放下"别的电脑"这一趟', async () => {
+  await check('再点一下侧栏那一条：在某一台的界面里 → 退回**名单**（还在这一屏里）；名单上再点 → 退出', async () => {
     fresh();
-    const st = await mountRemotes(listOf([FAR]), ({ url }) => (url === '/mini-remote/window'
-      ? { ok: true, url: LOCAL_TICKET, expiresIn: 30 }
-      : { ok: true, url: REMOTE_TICKET, expiresIn: 30 }));
+    const st = await mountRemotes(listOf([FAR]), () => ({ ok: true, url: REMOTE_TICKET, expiresIn: 30 }));
     buttonIn(rowOf(st.tree, FAR.id), '重连').props.onClick();
     await settle();
-    // 退出那一下挂在 document 的捕获阶段（真机上是官方壳那一行按钮），照它点一下。
     const onDocClick = docListeners.filter((one) => one.type === 'click').pop();
-    assert.ok(onDocClick, '「再点一下退出」那一下要挂上');
+    assert.ok(onDocClick, '「再点一下」那一下要挂上');
     fakeLayout.panelInfo.getSnapshot = () => ({ activePanelId: 'mini-remote' });
+
+    // ① 人在**某一台的界面**里：这一下是退回名单，**不许**把人送出这一屏。
+    const onScreen = await drawPanel();
+    assert.ok(byType(onScreen.tree, 'iframe'), '先确认人在那一台的界面里');
+    const atPanel = layoutCalls.length;   // 上面设置页那一下已经切过面板了，从这儿往后数
+    onDocClick.fn({
+      target: { closest: () => ({ querySelector: () => ({}) }) },
+      stopPropagation: () => {},
+    });
+    assert.equal(layoutCalls.length, atPanel, '这一下只上一层：不许切面板');
+    const onList = await drawPanel();
+    assert.equal(byType(onList.tree, 'iframe').length, 0, '退回名单就不该还嵌着那一台');
+    assert.match(textOf(onList.tree), /书房那台/, '退回的是名单那一层');
+    onScreen.harness.unmount();
+    onList.harness.unmount();
+
+    // ② 人已经站在**名单**上：这一下才是退出（回到进来之前那一屏）。
     onDocClick.fn({
       target: { closest: () => ({ querySelector: () => ({}) }) },
       stopPropagation: () => {},
     });
     assert.deepEqual(layoutCalls.slice(-1), ['conversation'],
       '退出要回到进来之前那一屏（进来之前是会话）');
-    // 放下之后：那一屏再去要的是**本机**那张票（不再是我们刚点的那台电脑）。
-    const before = st.posts.length;
+    // 放下之后：再点开看到的是**名单**（不是刚才那一台，也不再是本机那一屏）。
     const box = await drawPanel();
-    assert.ok(byType(box.tree, 'iframe'), '退出之后本机那一屏照旧');
-    assert.equal(byType(box.tree, 'iframe')[0].props.src, LOCAL_TICKET);
-    assert.deepEqual(st.posts.slice(before).map((one) => one.url), ['/mini-remote/window'],
-      '退出之后要的是本机那张票（`/mini-remote/window`），不是别的电脑那张');
+    assert.equal(byType(box.tree, 'iframe').length, 0, '退出之后那一趟放下了：点开是名单');
+    assert.match(textOf(box.tree), /书房那台/);
     box.harness.unmount();
     st.harness.unmount();
     fakeLayout.panelInfo.getSnapshot = () => ({ activePanelId: 'conversation' });
