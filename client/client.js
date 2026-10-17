@@ -21,6 +21,7 @@ window.__ModuleLoader__.load({
     var h = React.createElement;
     var useState = React.useState;
     var useEffect = React.useEffect;
+    var useRef = React.useRef;
 
     var PAIRING_PATH = '/mini-remote/pairing';
     var TOKEN_PATH = '/mini-remote/token';
@@ -1908,6 +1909,10 @@ window.__ModuleLoader__.load({
       var stallState = useState(false);
       var stalled = stallState[0];
       var setStalled = stallState[1];
+      // 兜底那个定时器的把手。**它必须活在 effect 外面**：要把它掐掉的那一下在 `onLoad` 里，
+      // 和立钟的那个 effect 隔着一次渲染——留在一个只属于那个 effect 的闭包里，`onLoad` 够不着。
+      // 2026-10-17 修的就是这个：框加载好了，那个钟却还挂着，到点照样把正常的界面换掉。
+      var stallTimerRef = useRef(null);
       // 订阅「其他电脑」那三样（哪一台在换、换到没有、为什么没成）：变了就重画一遍。
       // 值本身不用，`setPoke` 那一下就是目的。
       var pokeState = useState(0);
@@ -2002,11 +2007,20 @@ window.__ModuleLoader__.load({
       // 撤销过又配回来了），入口是「重连」和「再试一次」，都是用户按下去的动作。
 
       // 框等不到 load：到点就说人话（见 REMOTE_FRAME_WAIT_MS 里量出来的那几条事实）。
+      //
+      // **这个兜底只兜"框里一直没有任何文档"这一种**：框一旦 load 过（哪怕对面回的是一张
+      // 错误页），`onLoad` 那一下就把这个钟掐掉——**它之后永远不许再响**。
+      // 2026-10-17 之前它只在依赖变化/卸载时清，于是真机形态里出现过这种坏法：框明明
+      // 已经加载好了，t≈20s 那一屏照样被换成「一直没打开」——一句错话盖住正常的界面。
       useEffect(function () {
         if (!remoteId || !remoteUrl) return undefined;
         setStalled(false);
-        var timer = setTimeout(function () { setStalled(true); }, REMOTE_FRAME_WAIT_MS);
-        return function () { clearTimeout(timer); };
+        stallTimerRef.current = setTimeout(function () { setStalled(true); }, REMOTE_FRAME_WAIT_MS);
+        return function () {
+          // 换一台 / 返回列表 / 卸载都走这里：手上那个钟照旧清掉（别留下会自己响的定时器）。
+          clearTimeout(stallTimerRef.current);
+          stallTimerRef.current = null;
+        };
       }, [remoteId, remoteUrl]);
 
       if (remoteId) {
@@ -2038,7 +2052,17 @@ window.__ModuleLoader__.load({
             // 框里是另一个源，里面一个字节都读不到（量过：跨源的 contentDocument 是 null）。
             // 所以"它回来了没有"只能靠这一下——但**502 和连不上也会照常 load**，
             // 所以它只用来取消下面那个兜底，不用来宣布成功。
-            onLoad: function () { setStalled(false); },
+            //
+            // **它触发的意思是"框里有一个文档了"，不是"那台电脑的界面打开了"。**
+            // 取舍（2026-10-17）：这一下必须把兜底掐掉——不清的话，一个加载好好的界面
+            // 也会在 20 秒后被一句「一直没打开」盖住（那才是用户真被伤到的那一面）。
+            // 代价：对面回一张错误页（502 之类）时，用户看到的是那张页面，而不是我们那句
+            // 人话 + 「再试一次」；顶上那枚「← 返回列表」照旧在，重开一次就是重取一张票。
+            onLoad: function () {
+              clearTimeout(stallTimerRef.current);
+              stallTimerRef.current = null;
+              setStalled(false);
+            },
             style: styles.frame,
           })));
       }

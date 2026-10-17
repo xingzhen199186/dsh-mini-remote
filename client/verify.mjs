@@ -82,7 +82,19 @@ function createHarness() {
       return [cells[i], set];
     },
     useEffect(fn) { pending.push(fn); },
-    useRef(initial) { return { current: initial }; },
+    /**
+     * **跨渲染得是同一个对象**（React 的 useRef 就是这样的把手）。
+     *
+     * 这里原来是 `return { current: initial }`——每次渲染给一个新的。平时看不出来，
+     * 但只要有人把"下一次要用的东西"存在 ref 里，就会静默失效：立钟的那一次渲染和
+     * 清钟的那一次渲染手里拿的不是同一个盒子（2026-10-17 那一处 20 秒兜底就是这么撞上的）。
+     * 和 useState 用同一个 cursor：hook 的顺序口径两边一致。
+     */
+    useRef(initial) {
+      const i = cursor++;
+      if (i >= cells.length) cells.push({ current: initial });
+      return cells[i];
+    },
   };
 
   return {
@@ -366,6 +378,97 @@ await check('**出错那几种状态下**也回得去：那句人话旁边就是
   assert.ok(panelRow(box, PANEL_FAR.id), '退回名单，人没卡在那一屏里');
   box.harness.unmount();
 });
+
+// —— 那一屏的 20 秒兜底（2026-10-17 修）：**框加载成功之后，那个钟必须被掐掉**。
+//
+// 下面两条是一对：前一条管"加载好了就不许再吓人"，后一条管"真的没打开照样要说人话"。
+// 两条合起来才是这个兜底该有的样子——只测前一条的话，把兜底整个删掉也能变绿。
+//
+// 这里把 `setTimeout` / `clearTimeout` 换成能手动点的：**清掉 = 从待响那一堆里拿走**，
+// 「20 秒过去」= 让还挂着的那几个响一次。真无头浏览器里量到的那条坏法（框明明加载好了，
+// t≈20s 那一屏照样被换成「一直没打开」）就是这个形状。
+const withFakeTimers = (fn) => async () => {
+  const pending = [];
+  let seq = 0;
+  const realSetTimeout = globalThis.setTimeout;
+  const realClearTimeout = globalThis.clearTimeout;
+  setGlobal('setTimeout', (cb, ms) => { seq += 1; pending.push({ id: seq, fn: cb, ms }); return seq; });
+  setGlobal('clearTimeout', (id) => {
+    const i = pending.findIndex((one) => one.id === id);
+    if (i >= 0) pending.splice(i, 1);
+  });
+  try { return await fn(pending); } finally {
+    setGlobal('setTimeout', realSetTimeout);
+    setGlobal('clearTimeout', realClearTimeout);
+  }
+};
+/** 挂起那一屏、点开某一台、把框立起来；返回的 `frame` 就是那一屏里的跨源框。 */
+const openFrame = async (box) => {
+  // 上一趟要是没放下（跨机那几样状态是模块级的），先退回名单——不然名单上那一行根本不在树上。
+  const back = byType(box.tree, 'button').find((b) => textOf(b) === '← 返回列表');
+  if (back) { back.props.onClick(); await settlePanel(); }
+  panelRow(box, PANEL_FAR.id).props.onClick();
+  await settlePanel();
+  // 真 React 在提交之后自己跑 effect；这个替身要手点一下（`draw()` 会把没跑过的 effect 丢掉）。
+  box.harness.runEffects();
+  await settlePanel();
+  return byType(box.tree, 'iframe')[0];
+};
+const panelTicketReply = ({ url }) => (url === '/mini-remote/remotes'
+  ? jsonResponse(200, { ok: true, remotes: [PANEL_FAR] })
+  : jsonResponse(200, { ok: true, url: REMOTE_TICKET_URL, expiresIn: 30 }));
+/** 把这一趟放下：跨机那几样状态在组件外面（模块级），留着后面的用例会看见。 */
+const dropPanel = async (box) => {
+  const back = byType(box.tree, 'button').find((b) => textOf(b) === '← 返回列表');
+  if (back) { back.props.onClick(); await settlePanel(); }
+  box.harness.unmount();
+};
+
+await check('框加载成功那一下：20 秒兜底必须被掐掉——**之后永远不许再响**（不许一句错话盖住正常界面）', withFakeTimers(async (pending) => {
+  // ⚠️ **反向验证的靶子**：把 `onLoad` 里那一下 clearTimeout 拿掉（回到"只在依赖变化时清"），
+  //    这一条立刻变红——t=20s 那一屏会被换成「一直没打开」。
+  const box = await mountPanel(panelTicketReply);
+  const frame = await openFrame(box);
+  assert.ok(frame, '票到手了就把那一台的框立起来');
+  assert.equal(pending.filter((one) => one.ms === 20000).length, 1,
+    '框立起来之后，那一个 20 秒兜底必须已经挂上（否则这一条量不到东西）');
+
+  // 框加载成功：真机上是浏览器替我们调这一下（跨源读不到里面，只有这一下能用）。
+  frame.props.onLoad();
+  await settlePanel();
+  assert.equal(pending.filter((one) => one.ms === 20000).length, 0,
+    '**加载成功那一刻，那个 20 秒兜底必须从待响里被拿走**');
+  assert.ok(byType(box.tree, 'iframe')[0], '清兜底的那一下不许把框一起换掉');
+
+  // 「20 秒过去了」：还挂着的那一个响一次（真机上时间到了就会响）。
+  for (const one of pending.filter((each) => each.ms === 20000)) one.fn();
+  await settlePanel();
+  assert.ok(byType(box.tree, 'iframe')[0],
+    '**20 秒过去之后，那一屏必须还是那台电脑的界面**（不许被「一直没打开」换掉）');
+  assert.doesNotMatch(textOf(box.tree), /一直没打开/,
+    '框都加载好了还说"一直没打开"，就是一句错话盖住正常界面');
+
+  await dropPanel(box);
+  assert.equal(pending.filter((one) => one.ms === 20000).length, 0,
+    '放下这一趟（卸下/离开那一屏）之后，手上那个钟照旧不许留着');
+}));
+
+await check('框确实一直没打开：兜底照旧到点就响（那句人话 + 一个「再试一次」，一样都不许少）', withFakeTimers(async (pending) => {
+  // 这一条和上面那条是一对：**把钟掐掉，不等于把兜底弄坏**。框一次 load 都没来过
+  // （真机上是"连上了却一直不回话"那一种），到点必须照旧换成一句人话 + 一个下一步。
+  const box = await mountPanel(panelTicketReply);
+  const frame = await openFrame(box);
+  assert.ok(frame, '先确认框立起来了');
+  const waited = pending.find((one) => one.ms === 20000);
+  assert.ok(waited, '框立起来之后，那一个 20 秒兜底要挂着');
+  waited.fn();   // 到点，而这一次一个 load 都没来过
+  await settlePanel();
+  assert.equal(byType(box.tree, 'iframe').length, 0, '到点了：空白框要被换掉（不能永远挂在那儿）');
+  assert.match(textOf(box.tree), /一直没打开/, '要有那句人话');
+  assert.ok(byType(box.tree, 'button').some((b) => textOf(b) === '再试一次'), '要给人一个下一步');
+  assert.match(textOf(box.tree), /← 返回列表/, '出错也不是死胡同');
+  await dropPanel(box);
+}));
 
 // —— sidebar.panellist：list 槽。id 必须和 main 的 key 对上，侧栏点下来才找得到面板。
 await check('panellist 那条：def.name === "sidebar.panellist"', () => {
