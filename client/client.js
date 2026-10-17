@@ -189,6 +189,28 @@ window.__ModuleLoader__.load({
     var REMOTE_FRAME_WAIT_MS = 20000;
 
     /**
+     * 去宿主那儿换一张票，最多等多久（**这一条请求自己的超时**）。
+     *
+     * 为什么定 15 秒：宿主那一半替我们去问那台电脑时**自己有一条 8 秒的上限**
+     * （lib/index.js 的 `REMOTE_CALL_TIMEOUT_MS` 与 `callRemote` 里那个 `AbortSignal.timeout`），
+     * 所以正常情况下最坏 ~8 秒就会带着一句人话回来。15 秒 = 那条上限 + 一段余量
+     * （宿主进程正忙、本机这一跳排在长任务后面）。**比 8 秒小是不对的**：那会把
+     * "慢一点但会成"的正当请求掐掉，用户白点一次。
+     *
+     * 这一条防的是**另一个形状**的坏：宿主整个不回话（本机这个服务卡住、这一跳根本没被处理）
+     * ——那种情况下请求不会自己失败，界面就永远停在"正在向那台电脑换一张通行证…"，
+     * 那正是这个功能最要防的"转不完的圈"。到点主动掐掉，换成一句人话 + 「再试一次」。
+     */
+    var REMOTE_TICKET_WAIT_MS = 15000;
+
+    /**
+     * 等不到宿主回话时，那一屏上写的那句话（落到 `remoteProblems[id]` 里走现成那条路：
+     * **一句人话 + 「再试一次」+ 顶上那条「← 返回列表」**，见 remoteProblemPanel 与 remoteScreen）。
+     */
+    var REMOTE_TIMEOUT_TEXT = '等这台电脑上的遥控服务回话，等了 ' + Math.round(REMOTE_TICKET_WAIT_MS / 1000) + ' 秒还没等到。\n'
+      + '它可能正忙，或者这会儿本机的服务卡住了。点下面的「再试一次」再换一张通行证。';
+
+    /**
      * 去宿主那儿换一张票（**「重连」就是再调一次它**）。返回 `Promise<{ok,error?}>`。
      *
      * ## 每一条路都以一句话结束
@@ -205,6 +227,11 @@ window.__ModuleLoader__.load({
      * 撤销了"，让用户知道下一步是重新配对，而不是反复点「重连」。
      * 别的 502（对面 503 / 403 / 地址不通）宿主也各写好了人话（见 lib/index.js 的
      * `remoteStatusText` 与 `callRemote`），照原话显示即可——**界面这一层不自己编**。
+     *
+     * ## 等不到回话：这一条请求**自己带一个超时**
+     *
+     * 见 `REMOTE_TICKET_WAIT_MS`。到点我们主动掐掉这一趟，而且**认得出是"我们等不及了"**
+     * ——那不是网络自己断的，给的人话也必须是另一句（"等了 15 秒还没等到"）。
      */
     function fetchRemoteTicket(id, name) {
       remoteBusyId = id;
@@ -214,16 +241,45 @@ window.__ModuleLoader__.load({
       // 上一次那句话先撤掉：正在重试的时候，那一行不该还挂着上一次的结论。
       delete remoteProblems[id];
       notifyRemote();
+      // `spent`：这一趟已经落地（成功/失败/超时）。一立起来，**后面再来什么回音都不改了**
+      // ——超时之后才回来的那份回执，拿它去开框等于让屏幕上突然冒出一个用户已经放弃的界面。
+      var spent = false;
+      var stopper = typeof AbortController === 'function' ? new AbortController() : null;
+      var timer = null;
+      /**
+       * 这一趟落地成"没成"：一句人话进 `remoteProblems[id]`，并清掉"正在换票"。
+       * 和别的失败走的是**同一条路**——那一屏照旧是人话 + 「再试一次」+ 「← 返回列表」。
+       */
+      var fail = function (text) {
+        if (spent) return { ok: false, error: text, revoked: false };
+        spent = true;
+        clearTimeout(timer);
+        remoteBusyId = '';
+        remoteProblems[id] = { text: text, revoked: false };
+        notifyRemote();
+        return { ok: false, error: text, revoked: false };
+      };
+      // **这一条请求自己的超时**（时长与理由见 REMOTE_TICKET_WAIT_MS）。
+      // 掐不掉那条请求时（老浏览器没有 AbortController）状态也照落：迟到的回执被 `spent`
+      // 挡住，界面绝不会停在"正在换票…"上。
+      timer = setTimeout(function () {
+        if (stopper) stopper.abort();
+        fail(REMOTE_TIMEOUT_TEXT);
+      }, REMOTE_TICKET_WAIT_MS);
       return fetch(REMOTE_WINDOW_PATH, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ id: id }),
+        signal: stopper ? stopper.signal : undefined,
       }).then(function (res) {
         return res.json().then(
           function (b) { return { status: res.status, body: b }; },
           function () { return { status: res.status, body: null }; },
         );
       }).then(function (r) {
+        if (spent) return { ok: false, error: REMOTE_TIMEOUT_TEXT, revoked: false };
+        spent = true;
+        clearTimeout(timer);
         var b = (r.body && typeof r.body === 'object') ? r.body : null;
         remoteBusyId = '';
         if (b && b.ok === true && typeof b.url === 'string' && b.url) {
@@ -232,8 +288,9 @@ window.__ModuleLoader__.load({
             name: name || '',
             url: b.url,
             at: Date.now(),
-            // 票的寿命由宿主说了算（真机上是 30 秒）。拿不到就按 0 算＝下次一定重取，
-            // 宁可多要一张票，也不要拿一张过期的票去开那一屏。
+            // 票的寿命（宿主说了算，真机上是 30 秒）。**界面不再照它定期重取**：票只在
+            // "开这一台"那一刻用一次（进门那一下兑成窗口会话 cookie），地址一旦交给框就不再变。
+            // 留着这两个字段是如实记下宿主回执的形状，也方便出事时对时间。
             expiresIn: Number(b.expiresIn) || 0,
           };
           notifyRemote();
@@ -244,20 +301,9 @@ window.__ModuleLoader__.load({
         notifyRemote();
         return { ok: false, error: text, revoked: remoteProblems[id].revoked };
       }).catch(function (err) {
-        remoteBusyId = '';
-        var text = '连不上这台电脑上的遥控服务：' + ((err && err.message) || String(err));
-        remoteProblems[id] = { text: text, revoked: false };
-        notifyRemote();
-        return { ok: false, error: text, revoked: false };
+        if (spent) return { ok: false, error: REMOTE_TIMEOUT_TEXT, revoked: false };
+        return fail('连不上这台电脑上的遥控服务：' + ((err && err.message) || String(err)));
       });
-    }
-
-    /** 手上那张票是**这一台**的、而且还新鲜吗（留 5 秒余量：别拿一张正好在过期的票去开那一屏）。 */
-    function remoteTicketFresh(id) {
-      if (!remoteWin || remoteWin.id !== id || !remoteWin.url) return false;
-      var ttl = Number(remoteWin.expiresIn) * 1000;
-      if (!ttl) return false;
-      return (Date.now() - remoteWin.at) < (ttl - 5000);
     }
 
     /**
@@ -1785,7 +1831,10 @@ window.__ModuleLoader__.load({
      * 而票自己**只授权那一次**；地址里留着的那张票之后只用来回答「这一页是我嵌出来的吗」
      * ——桌面端是**跨站**嵌进来的，只能靠票来定「许不许被嵌」。**令牌全程没进过浏览器。**
      *
-     * **挂在 useEffect 里**：每换一台就换一张新票（票是一次性的，上次那张早废了）。
+     * **票在"开这一台"那一刻换一次，之后不动**（2026-10-17 改）：名单上点一台、设置页点
+     * 「重连」、那一屏的「再试一次」——三个入口各换一次（都在 `fetchRemoteTicket` 里）。
+     * **面板自己不会再去换第二张**：那一枚窗口会话 cookie 没有时间限制，按票的寿命定期
+     * 重取只会把**框整个重载一遍**（来龙去脉写在下面那个"原来有个 effect"那一段里）。
      */
     /**
      * 面板里那一份「其他电脑」名单（2026-10-17）：侧栏那枚图标点开之后看到的**第一屏**。
@@ -1929,14 +1978,28 @@ window.__ModuleLoader__.load({
         );
       }
 
-      // 手上那张票已经不新鲜了（比如从名单上点开之后又绕了一圈回来）：**现换一张**。
-      // 票是一次性的、30 秒就过期，拿一张旧的去开只会开出一片空白——而空白框正是
-      // 这一屏最不能出现的东西。
-      useEffect(function () {
-        if (!remoteId || remoteBusyId === remoteId || remoteTicketFresh(remoteId)) return undefined;
-        fetchRemoteTicket(remoteId, remoteName);
-        return undefined;
-      }, [remoteId, remoteUrl]);
+      // —— **这里原来有一个"票不新鲜了就现换一张"的 effect**（2026-10-17 拆掉）。
+      //
+      // 它看着很稳妥（票是一次性的、30 秒就过期），后果却是：**票一变，框的地址就变，
+      // 于是整个框重载一遍**——用户只是想一直看着那一台电脑，屏幕上却是每约 25 秒
+      // （30 秒寿命 − 5 秒余量）刷新一次。而"重新取票"根本不必要：
+      //
+      //   · 票**只在第一次打开那一刻**需要：那一下进门的请求把它兑成一枚**窗口会话 cookie**
+      //     （lib/server.js:1639-1643 种的那一枚），框里之后的请求（静态资源、`api/*`、
+      //     WebSocket）全靠那枚 cookie 认人，**票不再参与**；
+      //   · 那枚 cookie **没有时间限制**：会话体只有"形状 + 本进程签名"两项判据，没有
+      //     到期时刻（lib/mirror.js:1131-1147），密钥是每个宿主进程现生成的
+      //     （lib/mirror.js:1112）；`lib/mirror.js:1200` 写着"没有固定寿命，跟着这个宿主进程走"，
+      //     lib/server.js:1640-1643 也**故意不写 Max-Age**。它只在两件事上失效：**DSH 重启**、
+      //     或者**对面把这条设备记录撤销了**（lib/mirror.js:1108-1110 + 每次放行现查名册）；
+      //   · 地址里留着的那张票随后只用来回答"这一页是我嵌出来的吗"（取景判据），而兑过的票
+      //     进 `grants` 之后**同样没有寿命**（lib/mirror.js:1229/1293）——所以**同一条地址
+      //     再加载一次照样进得去**，不需要换一张新票。
+      //
+      // 所以票改成"**开这一台那一刻换一次，之后不动**"：三个入口各换一次（名单上点一台 /
+      // 设置页点「重连」/ 那一屏的「再试一次」，都在 `fetchRemoteTicket` 里）。
+      // **面板自己不再换第二张**——地址不变，框就不重载。要重新开一扇窗（对面重启过、
+      // 撤销过又配回来了），入口是「重连」和「再试一次」，都是用户按下去的动作。
 
       // 框等不到 load：到点就说人话（见 REMOTE_FRAME_WAIT_MS 里量出来的那几条事实）。
       useEffect(function () {
@@ -1954,9 +2017,11 @@ window.__ModuleLoader__.load({
         if (problem) {
           return remoteScreen(remoteName, remoteProblemPanel(remoteId, remoteName, problem));
         }
-        // 票不在手上、或者手上那张已经不新鲜了：下面那个 effect 正在换一张新的。
-        // **这时一个框都不立**——拿一张过期的票去开，只会开出一片空白（然后一直白着）。
-        if (!remoteUrl || !remoteTicketFresh(remoteId)) {
+        // 手上还没有这一台的地址（正在换票，或者还没换）：**这时一个框都不立**。
+        // 地址一拿到就只认它——**不再按票的寿命判"新不新鲜"**（那正是"每 25 秒把框
+        // 重载一遍"的来路，见上面那一段）：票在框第一次加载那一刻就兑成了窗口会话 cookie，
+        // 那枚 cookie 没有时间限制。
+        if (!remoteUrl) {
           return remoteScreen(remoteName, h('div', { style: styles.panelMsg }, '正在向那台电脑换一张通行证…'));
         }
         if (stalled) {

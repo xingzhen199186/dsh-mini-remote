@@ -1632,21 +1632,76 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
     st.harness.unmount();
   });
 
-  await check('票不新鲜时那一屏自己现换一张（**不拿一张过期的票去开一片空白**）', async () => {
+  await check('票过了寿命也**不再自己重取**：地址不变 ⇒ 框不重载（"去掉定时换票"的看门人）', async () => {
+    // ⚠️ **反向验证的靶子**：把"面板按票的寿命再换一张"加回去（那个 effect + 新鲜度判据），
+    //    这一条立刻变红——它会多出 POST，而且框的地址被换掉（真机上那就是整屏重载一次）。
     fresh();
     const st = await mountRemotes(listOf([FAR]), ({ url }) => (url === '/mini-remote/remotes/window'
-      ? { ok: true, url: REMOTE_TICKET, expiresIn: 0 }   // expiresIn 0 = 手上这张立刻算过期
+      ? { ok: true, url: REMOTE_TICKET, expiresIn: 0 }   // expiresIn 0 = 宿主说这张票已经过期了
       : { ok: true, url: LOCAL_TICKET, expiresIn: 30 }));
     buttonIn(rowOf(st.tree, FAR.id), '重连').props.onClick();
     await settle();
-    assert.equal(st.posts.length, 1);
+    assert.equal(st.posts.length, 1, '开这一台只换一次票');
     const p = await drawPanel();
-    assert.equal(byType(p.tree, 'iframe').length, 0, '过期的那张票一个框都不许立');
-    assert.match(textOf(p.tree), /正在向那台电脑换一张通行证…/, '正在换票时要说出来（这句有终点，不是转圈）');
-    assert.equal(st.posts.length, 2, '面板自己现换了一张');
-    assert.deepEqual(st.posts[1].body, { id: FAR.id });
+    const iframe = byType(p.tree, 'iframe')[0];
+    assert.ok(iframe, '票一到手就把地址交给框：**不再看它的寿命**（票在框第一次加载那一下就已经用掉了）');
+    const firstSrc = iframe.props.src;
+    assert.equal(firstSrc, REMOTE_TICKET);
+    // 真机上这一屏的外壳一直在重画；面板被重挂也是常事（切走再切回来）。
+    // **地址必须一直是同一条**——变一次，框就整个重载一次。
+    await drawPanel();
+    await drawPanel();
+    assert.equal(byType(p.tree, 'iframe')[0].props.src, firstSrc,
+      '**地址不许变**：一变，用户正在看的那台电脑的界面就整屏重载一遍');
+    assert.equal(st.posts.length, 1, '面板自己不许再换第二张票（票只在"开这一台"那一刻换）');
     p.harness.unmount();
     st.harness.unmount();
+  });
+
+  await check('宿主迟迟不回话：到点（15 秒）就说人话 + 「再试一次」+「← 返回列表」，**不许一直转**', async () => {
+    fresh();
+    // 这一趟的取票请求**永远不回话**（宿主卡住）。把 setTimeout 换成能手动点的，
+    // 免得这个用例真等 15 秒。
+    const timers = [];
+    const realSetTimeout = globalThis.setTimeout;
+    setGlobal('setTimeout', (fn, ms) => { timers.push({ fn, ms }); return timers.length; });
+    try {
+      const st = await mountRemotes(listOf([FAR]), () => new Promise(() => {}));
+      buttonIn(rowOf(st.tree, FAR.id), '重连').props.onClick();
+      await settle();
+      assert.match(textOf(rowOf(st.tree, FAR.id)), /取票中/, '还没到点：那一行照实说正在取票');
+      const waited = timers.find((one) => one.ms === 15000);
+      assert.ok(waited, '取票那一条必须**自己带一个超时**（15 秒；宿主那一半自己只有 8 秒上限）');
+      waited.fn();   // 到点
+      await settle();
+      // ⚠️ 顺序要紧：**先在设置页那一套状态上看**，再 `drawPanel()`——后者会把替身 React 的
+      //    "当前状态单元"切到面板那一套上（见 ReactFacade 那段注释）。
+      const rowText = textOf(rowOf(st.tree, FAR.id));
+      assert.match(rowText, /等了 15 秒还没等到/, '设置页那一行照登同一句话（人还留在刚才点的地方）');
+      assert.doesNotMatch(rowText, /取票中/, '超时之后不许还挂着"取票中"');
+      const p = await drawPanel();
+      const text = textOf(p.tree);
+      assert.match(text, /等了 15 秒还没等到/, '超时要有一句**人话**（说清是"等不到回话"，不是别的事）');
+      assert.doesNotMatch(text, /正在向那台电脑换一张通行证/,
+        '**不许停在"正在换票…"上**——那就是转不完的圈（前车之鉴：502 让外壳永远停在 Loading plugins…）');
+      assert.ok(buttonIn(p.tree, '再试一次'), '要给人下一步');
+      assert.match(text, /← 返回列表/, '顶上那条出口一直都在（出错也不是死胡同）');
+      assert.equal(byType(p.tree, 'iframe').length, 0, '没换到票就别立框');
+      // 「再试一次」是一条真出路：它再取一次票，而且**又带上了那个超时**。
+      const before = st.posts.length;
+      buttonIn(p.tree, '再试一次').props.onClick();
+      await settle();
+      assert.equal(st.posts.length, before + 1, '「再试一次」就是再取一次票');
+      assert.ok(timers.filter((one) => one.ms === 15000).length >= 2, '新的一趟照样自己带超时');
+      // 收尾：把这一趟也判成超时落地。**这一步是必须的**——跨机那几样状态在组件外面
+      // （模块级），留着一条"永远不回话、还挂在取票中"的请求，后面的用例会看见它。
+      timers.filter((one) => one.ms === 15000).pop().fn();
+      await settle();
+      p.harness.unmount();
+      st.harness.unmount();
+    } finally {
+      setGlobal('setTimeout', realSetTimeout);
+    }
   });
 
   await check('被对面撤销了：那一行写成「这台电脑已经被对方撤销了，要重新配对」+ 宿主原话', async () => {
@@ -1690,8 +1745,9 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
 
   await check('那一屏没开成时：**一句人话 + 一个「再试一次」**，不是空白框', async () => {
     fresh();
-    // 前两次取票都失败（设置页点的那一次 + 那一屏自己进去时试的那一次），第三次才换成。
-    const st = await mountRemotes(listOf([FAR]), ({ n }) => (n <= 2
+    // 第一次取票失败（设置页点的那一次），第二次（「再试一次」）才换成。
+    // **面板自己不会再去试第二次**——那一趟只由用户的动作发起（2026-10-17 起，见 client.js 里那段）。
+    const st = await mountRemotes(listOf([FAR]), ({ n }) => (n <= 1
       ? jsonResponse(502, { ok: false, error: REVOKED_HINT })
       : { ok: true, url: REMOTE_TICKET, expiresIn: 30 }));
     buttonIn(rowOf(st.tree, FAR.id), '重连').props.onClick();
@@ -1703,7 +1759,7 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
     assert.equal(byType(p.tree, 'iframe').length, 0, '没换到票就别立框');
     buttonIn(p.tree, '再试一次').props.onClick();
     await settle();
-    assert.equal(st.posts.length, 3, '「再试一次」就是再取一次票');
+    assert.equal(st.posts.length, 2, '「再试一次」就是再取一次票');
     assert.equal(byType(p.tree, 'iframe')[0].props.src, REMOTE_TICKET, '这次换到了，框就立起来');
     p.harness.unmount();
     st.harness.unmount();
