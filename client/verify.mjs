@@ -2072,6 +2072,205 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
   });
 }
 
+{
+  console.log('\n[4h] 自检（这台电脑到底在跑什么）');
+
+  // 时刻都用「本地时间构造 + 本地时间断言」：换一台时区的机器跑也照样对得上。
+  const AT = (d, h, m) => new Date(2026, 9, d, h, m, 0, 0).getTime();
+
+  const SELF_OK = {
+    ok: true,
+    version: '0.2.0',
+    process: { pid: 4321, startedAtMs: AT(17, 17, 16), startedAt: '2026-10-17T09:16:00.000Z', uptimeSec: 7200 },
+    code: { file: 'lib/index.js', modifiedAtMs: AT(17, 17, 10), stale: false, message: null },
+    routes: [
+      { path: '/mini-remote/pairing', kind: 'exact', mounted: true },
+      { path: '/mini-remote/token', kind: 'exact', mounted: true },
+      { path: '/mini-remote/selfcheck', kind: 'exact', mounted: true },
+    ],
+    allowRemoteComputers: false,
+    phoneService: {
+      listening: true, port: 3090, addresses: ['127.0.0.1', '192.168.1.5'], error: null,
+      hostHalf: { pair: true, remoteWindow: true },
+    },
+    dataDir: 'C:\\Users\\me\\.dsh\\dsh-mini-remote',
+    rosters: { devices: 2, remotes: 0 },
+  };
+
+  const PAIRING_OK = {
+    ok: true,
+    port: 3090,
+    token: TOKEN,
+    entries: [{ kind: 'lan', label: '内网', hint: '手机连同一个 Wi-Fi 时用这个', url: URL_LAN, qr: QR }],
+    tunnel: { enabled: false, up: false, starting: false, error: null },
+  };
+
+  /**
+   * 挂一次设置页那一节：自检那条按 `reply` 回，别的三条（配对 / 设备 / 其他电脑）
+   * 回空的。**和真机一样的顺序**：配对信息回来之后，那三条同一趟一起读。
+   */
+  const mountSelfcheck = async (reply) => {
+    const hh = useHarness();
+    const state = { gets: [], tree: null };
+    setGlobal('fetch', async (url) => {
+      state.gets.push(url);
+      if (url === '/mini-remote/selfcheck') {
+        return typeof reply === 'function' ? reply(state) : reply;
+      }
+      if (url === '/mini-remote/devices') return jsonResponse(200, { ok: true, devices: [] });
+      if (url === '/mini-remote/remotes') return jsonResponse(200, { ok: true, remotes: [] });
+      return jsonResponse(200, PAIRING_OK);
+    });
+    hh.onUpdate(() => { state.tree = hh.draw(Comp); });
+    state.tree = hh.draw(Comp);
+    hh.runEffects();      // 读配对信息
+    await tick();
+    hh.runEffects();      // 配对信息到了 → 设备 / 其他电脑 / 自检 同一趟
+    await tick();
+    await tick();
+    state.harness = hh;
+    return state;
+  };
+
+  /** 自检那一块的渲染树：按 key 找，不按位置也不按文案。 */
+  const selfBlockOf = (tree) => walk(tree).find((n) => n && n.props && n.props.key === 'selfcheck');
+  const buttonIn = (tree, label) => byType(tree, 'button').filter((b) => textOf(b) === label)[0];
+
+  await check('挂上这一节就去读自检：GET /mini-remote/selfcheck（和配对/设备/其他电脑同一趟）', async () => {
+    const st = await mountSelfcheck(jsonResponse(200, SELF_OK));
+    assert.ok(st.gets.includes('/mini-remote/selfcheck'), '这一节没去读自检');
+    assert.ok(st.gets.indexOf('/mini-remote/selfcheck') > st.gets.indexOf('/mini-remote/pairing'),
+      '自检是在配对信息回来之后那一趟读的（和另外两条名单同一趟）');
+    st.harness.unmount();
+  });
+
+  await check('摘要一行说清：插件版本 · 进程何时起的 · 接口几条在', async () => {
+    const st = await mountSelfcheck(jsonResponse(200, SELF_OK));
+    const text = textOf(selfBlockOf(st.tree));
+    assert.match(text, /自检/);
+    assert.match(text, /插件版本 0\.2\.0/);
+    assert.match(text, /宿主进程启动于 2026-10-17 17:16/);
+    assert.match(text, /接口一共 3 条，都在/);
+    // 展开的那些细节也都在（默认展开）
+    assert.match(text, /插件文件最后改动于：2026-10-17 17:10（lib\/index\.js）/);
+    assert.match(text, /「允许别的电脑连接」：关（默认关）/);
+    assert.match(text, /在听端口 3090，绑了 127\.0\.0\.1、192\.168\.1\.5/);
+    assert.match(text, /数据目录/);
+    assert.match(text, /dsh-mini-remote/);
+    assert.match(text, /设备 2 条 · 我能连的电脑 0 条/);
+    assert.match(text, /\/mini-remote\/pairing/, '接口清单一列出来');
+    assert.doesNotMatch(text, /NaN|undefined|Invalid Date/);
+    st.harness.unmount();
+  });
+
+  await check('一句人话的说明：这块只给本机看、里面没有密码', async () => {
+    const st = await mountSelfcheck(jsonResponse(200, SELF_OK));
+    const text = textOf(selfBlockOf(st.tree));
+    assert.match(text, /这一块只给这台电脑看（只有本机能读），里面没有一个字是密码或密钥。/);
+    st.harness.unmount();
+  });
+
+  await check('进程比代码旧：那句"重启 DSH"当场出现，而且**收起之后照样看得见**', async () => {
+    const stale = Object.assign({}, SELF_OK, {
+      code: {
+        file: 'lib/index.js',
+        modifiedAtMs: AT(17, 17, 40),
+        stale: true,
+        message: '这台电脑的插件可能不是最新的，重启 DSH 才会加载新版本。',
+      },
+      process: Object.assign({}, SELF_OK.process, { startedAtMs: AT(17, 17, 16) }),
+    });
+    const st = await mountSelfcheck(jsonResponse(200, stale));
+    const block = selfBlockOf(st.tree);
+    assert.match(textOf(block), /这台电脑的插件可能不是最新的，重启 DSH 才会加载新版本。/,
+      '进程比代码旧时，那句话必须在');
+    // 收起整块：**那句警告不许跟着藏起来**（要用户先点开才能看见，等于把它藏起来）
+    buttonIn(block, '收起自检').props.onClick();
+    await tick();
+    const collapsed = selfBlockOf(st.tree);
+    assert.match(textOf(collapsed), /这台电脑的插件可能不是最新的，重启 DSH 才会加载新版本。/,
+      '收起之后那句警告还得在');
+    assert.doesNotMatch(textOf(collapsed), /插件文件最后改动于/, '收起的是那些细节');
+    assert.match(textOf(collapsed), /接口/, '摘要那一行照旧在');
+    st.harness.unmount();
+  });
+
+  await check('接口清单里"现在不在"的那几条要标出来，摘要也说清几条不在', async () => {
+    const partial = Object.assign({}, SELF_OK, {
+      routes: [
+        { path: '/mini-remote/pairing', kind: 'exact', mounted: true },
+        { path: '/mini-remote/devices/revoke', kind: 'exact', mounted: false },
+      ],
+    });
+    const st = await mountSelfcheck(jsonResponse(200, partial));
+    const text = textOf(selfBlockOf(st.tree));
+    assert.match(text, /接口一共 2 条，其中 1 条不在/);
+    assert.match(text, /\/mini-remote\/devices\/revoke/);
+    assert.match(text, /（现在不在）/);
+    st.harness.unmount();
+  });
+
+  await check('这条接口没有（宿主是旧版）：说清"装的是新版、跑的可能是旧版"+ 重启', async () => {
+    const st = await mountSelfcheck(jsonResponse(404, { ok: false, error: 'not found' }));
+    const block = selfBlockOf(st.tree);
+    const text = textOf(block);
+    assert.match(text, /没有「自检」这个接口/);
+    assert.match(text, /重启一次 DSH 才会加载新版本/, '下一步只有一句话：重启');
+    assert.equal(byType(block, 'button').filter((b) => textOf(b) === '重新自检').length, 1,
+      '读不到也要给一个"重新自检"');
+    st.harness.unmount();
+  });
+
+  await check('服务还没起来 / 版本读不到：一律说「未知」，不许 NaN、不许崩', async () => {
+    const st = await mountSelfcheck(jsonResponse(200, {
+      ok: true,
+      version: null,
+      process: { startedAtMs: 0, uptimeSec: 0 },
+      code: { file: null, modifiedAtMs: null, stale: null, message: null },
+      routes: [],
+      allowRemoteComputers: false,
+      phoneService: {
+        listening: false, port: null, addresses: [],
+        error: '端口 3090 往后连续 10 个都被占用了。',
+        hostHalf: { pair: false, remoteWindow: false },
+      },
+      dataDir: 'C:\\Users\\me\\.dsh\\dsh-mini-remote',
+      rosters: { devices: null, remotes: null },
+    }));
+    const tree = selfBlockOf(st.tree);
+    const text = textOf(tree);
+    assert.match(text, /插件版本 未知/);
+    assert.match(text, /宿主进程启动于 未知/);
+    assert.match(text, /接口清单/);
+    assert.match(text, /（读不到）/);
+    assert.match(text, /手机服务：没起来（端口 3090 往后连续 10 个都被占用了。）/, '起不来时把原因说清，别只说"没起来"');
+    assert.match(text, /配对 不在、取票 不在/);
+    assert.match(text, /设备 未知 · 我能连的电脑 未知/);
+    assert.doesNotMatch(text, /NaN|undefined|Invalid Date/);
+    st.harness.unmount();
+  });
+
+  await check('点「重新自检」：再读一次那条接口（服务刚起来、路由刚变时用得着）', async () => {
+    const st = await mountSelfcheck(jsonResponse(200, SELF_OK));
+    const before = st.gets.filter((u) => u === '/mini-remote/selfcheck').length;
+    buttonIn(selfBlockOf(st.tree), '重新自检').props.onClick();
+    await tick();
+    await tick();
+    assert.equal(st.gets.filter((u) => u === '/mini-remote/selfcheck').length, before + 1);
+    st.harness.unmount();
+  });
+
+  await check('自检那一块排在最后（不抢前面那些要操作的位置）', async () => {
+    const st = await mountSelfcheck(jsonResponse(200, SELF_OK));
+    const keys = walk(st.tree)
+      .filter((n) => n && n.props && typeof n.props.key === 'string' && n.props.key !== 'guide')
+      .map((n) => n.props.key);
+    assert.ok(keys.indexOf('selfcheck') >= 0);
+    assert.ok(keys.indexOf('selfcheck') > keys.indexOf('remotes'), '自检排在「其他电脑」后面');
+    st.harness.unmount();
+  });
+}
+
 // ---------------------------------------------------------------- 结果
 
 console.log(`\n通过 ${passed} 项，失败 ${failures.length} 项。`);

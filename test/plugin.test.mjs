@@ -7,9 +7,10 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { createServer } from 'node:net'
 import { zstdCompressSync } from 'node:zlib'
 // 提问钩子要用的两个能力放在这里（模块级单例）——钩子的测试会临时替换它们，
@@ -18,6 +19,7 @@ import { miniControl } from '../lib/server.js'
 
 // 动态 import 要的是 file:// URL，不是 Windows 路径，所以这里全程保留 URL 形态。
 const ROOT_URL = new URL('..', import.meta.url)
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 
 /** 先占一个端口拿到号再放掉，用来给被测插件一个确定的监听地址。 */
 function freePort() {
@@ -40,14 +42,20 @@ function freePort() {
  * 照抄这条纪律，好让「写 ctx.webServer」这类在真机必崩的代码在测试里就先挂掉
  * ——它曾经真的从测试底下溜过去了。
  */
-function makeCtx(services, directNames) {
+function makeCtx(services, directNames, collected = []) {
   return new Proxy(services, {
     get: (target, prop, receiver) => {
       if (typeof prop === 'symbol') return Reflect.get(target, prop, receiver)
       if (prop === 'get') return (name) => target[name]
-      // 假 inject：服务本来就在，直接同步回调（真机上服务缺席时回调压根不跑）
+      // 假 inject：服务本来就在，直接同步回调（真机上服务缺席时回调压根不跑）。
+      // **回调返回的那条注销函数也要收下来**（`collected`，和 test/remotes.test.mjs 那份
+      // 假 ctx 一样）：真 cordis 就是这么收的。不收它，「插件卸载之后路由摘干净了没有」
+      // 在这份测试里永远测不到——而"摘干净"正是每加一条 `/mini-remote/*` 都得补一笔的事。
       if (prop === 'inject') {
-        return (names, callback) => callback(makeCtx(target, [...directNames, ...names]))
+        return (names, callback) => {
+          const off = callback(makeCtx(target, [...directNames, ...names], collected))
+          if (typeof off === 'function') collected.push(off)
+        }
       }
       if (directNames.includes(prop)) return Reflect.get(target, prop, receiver)
       if (prop in target) {
@@ -138,12 +146,12 @@ function mockCtx({ attachments, sessionQuery, commands, sessionController, subag
       // 设置文档：问「这台部署 served 了哪些设置命名空间」——官方那几张设置卡片
       // 就是按它决定出不出现（DSH 那边是 configForms.whileServed）。可缺席。
       ...(settings ? { settings } : {}),
-    }, ['agents', 'logger', 'on', 'effect']),
+    }, ['agents', 'logger', 'on', 'effect'], disposers),
   }
 }
 
 /** 起一个被测插件实例，返回访问它所需的一切。 */
-async function bootPlugin({ agents = {}, config = {}, attachments = null, sessionQuery = null, commands = null, stored = null, sessionController = null, subagents = null, sessionProjections = null, sessions = null, agentPresets = null, workspaceRegistry = null, pluginManager = null, loader = null, pluginPackages = null, settings = null } = {}) {
+async function bootPlugin({ agents = {}, config = {}, attachments = null, sessionQuery = null, commands = null, stored = null, sessionController = null, subagents = null, sessionProjections = null, sessions = null, agentPresets = null, workspaceRegistry = null, pluginManager = null, loader = null, pluginPackages = null, settings = null, files = null, pluginDir = null } = {}) {
   const home = mkdtempSync(join(tmpdir(), 'dsh-mini-home-'))
   process.env.DSH_HOME = home
 
@@ -153,13 +161,25 @@ async function bootPlugin({ agents = {}, config = {}, attachments = null, sessio
     writeFileSync(join(home, 'dsh-mini-remote', 'settings.json'), `${JSON.stringify(stored, null, 2)}\n`)
   }
 
+  // 还有几份是插件自己管的名册（devices.json / remotes.json）：用例要往里面摆东西
+  // （比如"里面真的有一枚凭据"），也得在 apply 之前摆好——插件是加载时读盘的。
+  if (files) {
+    mkdirSync(join(home, 'dsh-mini-remote'), { recursive: true })
+    for (const [name, content] of Object.entries(files)) {
+      writeFileSync(join(home, 'dsh-mini-remote', name), `${JSON.stringify(content, null, 2)}\n`)
+    }
+  }
+
   const port = await freePort()
   const mock = mockCtx({ attachments, sessionQuery, commands, sessionController, subagents, sessionProjections, sessions, agentPresets, workspaceRegistry, pluginManager, loader, pluginPackages, settings })
   const { ctx, handlers, handlerOptions, agents: agentMap } = mock
   for (const [id, agent] of Object.entries(agents)) agentMap.set(id, agent)
 
-  // 每次重新 import，避免模块级缓存串味
-  const mod = await import(new URL(`lib/index.js?t=${Date.now()}`, ROOT_URL).href)
+  // 每次重新 import，避免模块级缓存串味。
+  // `pluginDir` 是给「自检」那几条用例用的：从一个**副本**加载（见 bootClonedPlugin）。
+  const mod = pluginDir
+    ? await import(`${pathToFileURL(join(pluginDir, 'lib', 'index.js')).href}?t=${Date.now()}`)
+    : await import(new URL(`lib/index.js?t=${Date.now()}`, ROOT_URL).href)
   mod.apply(ctx, { port, bindAddress: '127.0.0.1', ...config })
 
   const base = `http://127.0.0.1:${port}`
@@ -4069,6 +4089,270 @@ test('设置是排队（或不跑）时照旧 followup()，插话只发生在「
   assert.equal(r3.ok, true, '没有 steer 也要能把指令发出去')
   assert.equal(f3.length, 1, '退回 followup')
   assert.equal(r3.queued, true, '如实说它排队了')
+})
+
+// ---------------------------------------------------------------------------
+// 自检（2026-10-17）：**这台电脑到底在跑什么**
+//
+// 那天排两台真机的故障都卡在同一件事上——看不见那台机器在跑什么：一台的桌面端连开了
+// 一整天（跑的是新功能写下来之前的代码）、另一台装的是旧版本插件（新接口根本没出现）。
+// 这一组钉住"自检"能把那些答案说清楚，而且**一个字节的凭据都不带**。
+// ---------------------------------------------------------------------------
+
+const SELFCHECK_ROUTE = '/mini-remote/selfcheck'
+
+/** 打一次自检那一条（默认从本机来）。回 `{ status, raw, body }`。 */
+async function selfcheck(route, { from = '127.0.0.1', method = 'GET' } = {}) {
+  const res = fakeRes()
+  await route.handler(fakeReq(from, { method }), res)
+  let body = null
+  try { body = JSON.parse(res.out.body) } catch { /* 调用方自己看 raw */ }
+  return { status: res.out.status, raw: res.out.body, body }
+}
+
+/** 把返回值里每一层的 key 摊平——用来查"有没有凭据性质的字段名"。 */
+function allKeys(value, out = []) {
+  if (Array.isArray(value)) {
+    for (const one of value) allKeys(one, out)
+    return out
+  }
+  if (value && typeof value === 'object') {
+    for (const [k, v] of Object.entries(value)) {
+      out.push(k)
+      allKeys(v, out)
+    }
+  }
+  return out
+}
+
+test('「进程比代码旧」那条判据：两个方向都判，拿不到就说不知道', async () => {
+  const { staleCodeVerdict } = await import(new URL(`lib/index.js?t=${Date.now()}`, ROOT_URL).href)
+  const CODE_AT = Date.parse('2026-10-17T09:00:00.000Z')
+  // 进程起得比代码早 = 现在跑的是上一版（那天故障的样子）
+  const old = staleCodeVerdict(CODE_AT - 60_000, { file: 'lib/index.js', at: CODE_AT })
+  assert.equal(old.stale, true)
+  assert.match(old.message, /重启 DSH 才会加载新版本/, '要给下一步动作，不能只报一个 true')
+  assert.equal(old.file, 'lib/index.js')
+  // 进程起得晚 = 这份代码已经在跑了，一个字都不该喊
+  const fresh = staleCodeVerdict(CODE_AT + 60_000, { file: 'lib/index.js', at: CODE_AT })
+  assert.equal(fresh.stale, false)
+  assert.equal(fresh.message, null, '没旧的时候不许喊狼来了')
+  // 拿不到插件文件的改动时刻 = 不知道（null），不许猜成"旧"也不许猜成"新"
+  assert.equal(staleCodeVerdict(CODE_AT, null).stale, null)
+  assert.equal(staleCodeVerdict(NaN, { file: 'x', at: CODE_AT }).stale, null)
+})
+
+test('自检：只有本机读得到（同一个 Wi-Fi 下的设备一律挡住）', async (t) => {
+  const p = await bootPlugin()
+  t.after(p.stop)
+  const route = p.routes.get(SELFCHECK_ROUTE)
+  assert.ok(route, '自检这条路由要挂上，设置页才有得读')
+  assert.equal(route.kind, 'exact')
+
+  for (const addr of ['192.168.1.50', '100.92.105.99', '::ffff:192.168.1.50']) {
+    const denied = await selfcheck(route, { from: addr })
+    assert.equal(denied.status, 403, `${addr} 不该读到自检`)
+    assert.match(denied.body.error, /只能在这台电脑上看/)
+  }
+
+  for (const addr of ['127.0.0.1', '::1', '::ffff:127.0.0.1']) {
+    const ok = await selfcheck(route, { from: addr })
+    assert.equal(ok.status, 200, `${addr} 应该读得到`)
+    assert.equal(ok.body.ok, true)
+  }
+
+  const wrongMethod = await selfcheck(route, { method: 'POST' })
+  assert.equal(wrongMethod.status, 405, '自检只是只读的一条：别的动词不接')
+})
+
+test('自检：该回答的那几样一样不缺（版本 / 进程 / 接口 / 开关 / 服务 / 数据目录 / 名册条数）', async (t) => {
+  const p = await bootPlugin({ config: { bindAddress: 'auto' } })
+  t.after(p.stop)
+  const { status, body } = await selfcheck(p.routes.get(SELFCHECK_ROUTE))
+  assert.equal(status, 200)
+
+  // ① 插件版本：就是 package.json 里那个（还是 0.2.0，这个改动不碰版本号）
+  const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'))
+  assert.equal(body.version, pkg.version)
+  assert.equal(body.version, '0.2.0')
+
+  // ② 宿主进程什么时候起的——那两次故障的关键一格
+  assert.ok(Number.isFinite(body.process.startedAtMs), '启动时刻必须是一个毫秒数')
+  assert.ok(Number.isFinite(body.process.uptimeSec))
+  const rebuilt = Date.now() - body.process.uptimeSec * 1000
+  assert.ok(Math.abs(rebuilt - body.process.startedAtMs) < 3000,
+    '启动时刻要由"现在减去已运行多久"反推，不是编一个数')
+  assert.equal(body.process.startedAt, new Date(body.process.startedAtMs).toISOString())
+  assert.ok(Number.isFinite(body.process.pid))
+
+  // ③ 接口清单：注册了哪些、哪些现在在（一眼看出装的是新版还是旧版）
+  const paths = body.routes.map((one) => one.path)
+  for (const want of [
+    '/mini-remote/pairing', '/mini-remote/tunnel', '/mini-remote/serve', '/mini-remote/token',
+    '/mini-remote/feishu', '/mini-remote/window', '/mini-remote/remote/window',
+    '/mini-remote/remote-access', '/mini-remote/devices', '/mini-remote/devices/rename',
+    '/mini-remote/devices/revoke', '/mini-remote/pair', '/mini-remote/remotes',
+    '/mini-remote/remotes/add', '/mini-remote/remotes/window', '/mini-remote/remotes/forget',
+    '/mini-remote/selfcheck',
+  ]) {
+    assert.ok(paths.includes(want), `清单里少了 ${want}`)
+  }
+  assert.equal(body.routes.length, 17, '十七条注册就报十七条（清单和注册同一处发生）')
+  assert.ok(body.routes.every((one) => one.mounted === true), '刚起来的这一份，条条都该是"在"')
+
+  // ④ 开关：默认关
+  assert.equal(body.allowRemoteComputers, false, '「允许别的电脑连接」默认关')
+
+  // ⑤ 服务那一半：在听哪个端口、绑了哪些地址（只报这些，不报凭据）
+  assert.equal(body.phoneService.listening, true)
+  assert.equal(body.phoneService.port, Number(new URL(p.base).port))
+  assert.ok(Array.isArray(body.phoneService.addresses))
+  assert.ok(body.phoneService.addresses.includes('127.0.0.1'))
+  assert.equal(body.phoneService.error, null)
+  assert.equal(body.phoneService.hostHalf.pair, true, '跨机那两条在手机服务那一半也要挂上')
+  assert.equal(body.phoneService.hostHalf.remoteWindow, true)
+
+  // ⑥ 数据目录 + ⑦ 两份名册的条数
+  assert.equal(body.dataDir, join(p.home, 'dsh-mini-remote'))
+  assert.equal(body.rosters.devices, 0)
+  assert.equal(body.rosters.remotes, 0)
+})
+
+test('自检：没有一个字节是凭据（口令 / 设备密钥哈希 / 名册里的凭据 / 飞书密钥）', async (t) => {
+  const APP_SECRET = 'cli-secret-不許外泄-01'
+  const KEY_HASH = 'b'.repeat(64)
+  const REMOTE_CRED = 'pc-deadbeefdeadbeef.0123456789abcdef0123456789abcdef'
+  // 口令不写进 settings.json：那样写下去插件就不会再落一份 token 文件，而 bootPlugin
+  // 正是从那个文件读口令的。让它自己生成一枚，再拿 `p.token` 当"要盯着的那串口令"。
+  const p = await bootPlugin({
+    stored: {
+      allowRemoteComputers: true,
+      feishu: { enabled: false, appId: 'cli_不存在', appSecret: APP_SECRET, openIds: '', chatIds: '' },
+    },
+    files: {
+      'devices.json': {
+        version: 1,
+        devices: [{ id: 'dev-pre', name: '妈妈那台', kind: 'phone', keyHash: KEY_HASH, createdAt: 1, lastSeen: 2 }],
+      },
+      'remotes.json': {
+        version: 1,
+        remotes: [{ id: 'pc-pre', name: '客厅那台', baseUrl: 'http://192.168.1.9:3090', credential: REMOTE_CRED, addedAt: 1, lastOk: 0 }],
+      },
+    },
+  })
+  t.after(p.stop)
+  const TOKEN_SECRET = p.token
+  assert.match(TOKEN_SECRET, /^[0-9a-f]{32}$/, '这一台的口令就是它自己生成的那一串')
+
+  // 再走真路登记一台设备（打开手机页那一下会发一枚凭据），把那枚活凭据也一起盯着。
+  const page = await fetch(`${p.base}/mini?token=${TOKEN_SECRET}`)
+  assert.equal(page.status, 200)
+  const cookies = typeof page.headers.getSetCookie === 'function'
+    ? page.headers.getSetCookie()
+    : [String(page.headers.get('set-cookie') ?? '')]
+  const issued = cookies.find((one) => one.startsWith('dsh_mini_device='))
+  assert.ok(issued, '打开手机页要顺手发下设备凭据')
+  const cred = decodeURIComponent(issued.split('=')[1].split(';')[0])
+
+  const { raw, body } = await selfcheck(p.routes.get(SELFCHECK_ROUTE))
+
+  // ① 一个字节都不许出现
+  for (const secret of [TOKEN_SECRET, APP_SECRET, KEY_HASH, REMOTE_CRED, cred, cred.split('.')[1]]) {
+    assert.ok(!raw.includes(secret), `返回值里出现了凭据：${secret.slice(0, 12)}…`)
+  }
+  // ② 也不许出现凭据性质的字段名（换个别名塞进来也算漏）
+  const credentialish = allKeys(body).filter((k) => /token|secret|credential|keyhash|password/i.test(k))
+  assert.deepEqual(credentialish, [], `这些字段名不该出现在自检里：${credentialish}`)
+  // ③ 名册只报条数，不报内容（名字、id、地址都不该来）
+  assert.equal(body.rosters.devices, 2, '一条是我们摆进去的，一条是刚才打开手机页时登记的')
+  assert.equal(body.rosters.remotes, 1)
+  for (const content of ['妈妈那台', '客厅那台', 'dev-pre', 'pc-pre', '192.168.1.9']) {
+    assert.ok(!raw.includes(content), `名册的内容不该出现在自检里：${content}`)
+  }
+  // ④ 但开关那种"给人看的状态"照旧要报
+  assert.equal(body.allowRemoteComputers, true)
+})
+
+test('自检：手机服务还没起来时，服务那一段回「未知」而不是抛错', async (t) => {
+  const p = await bootPlugin()
+  // 先把路由那一份抓在手里（卸载之后 p.routes 里就没有它了）
+  const route = p.routes.get(SELFCHECK_ROUTE)
+  p.stop()
+
+  const { status, body } = await selfcheck(route)
+  assert.equal(status, 200, '自检自己不能跟着坏掉')
+  assert.equal(body.ok, true)
+  assert.equal(body.phoneService.listening, false)
+  assert.equal(body.phoneService.port, null)
+  assert.deepEqual(body.phoneService.addresses, [])
+  assert.ok(body.dataDir, '服务没起来不影响数据目录那一条')
+  assert.ok(body.version, '也不影响版本那条')
+})
+
+/**
+ * 起一个**从副本加载**的插件（自检那两条"进程比代码旧"的用例要用）。
+ *
+ * 副本里的文件是这个测试进程**起来之后**才写下的——于是"进程比代码旧"是真的，
+ * 不是装出来的（进程的启动时刻没法造假，只能造文件）。这也正是真机上那天发生的事：
+ * 文件是新的，跑着的进程是旧的。
+ *
+ * `node_modules` 用一条目录链接指过去（Windows 上是 junction，不需要管理员权限）：
+ * 插件要 `import '@deepseek-ai/schemastery'`，裸名字是按"哪个文件在 import"往上找的，
+ * 副本得能看见仓库那份 node_modules。
+ */
+function clonePlugin() {
+  const dir = mkdtempSync(join(tmpdir(), 'dsh-mini-clone-'))
+  mkdirSync(join(dir, 'lib'), { recursive: true })
+  mkdirSync(join(dir, 'client'), { recursive: true })
+  for (const f of readdirSync(join(ROOT, 'lib'))) {
+    if (!f.endsWith('.js') && !f.endsWith('.html')) continue
+    writeFileSync(join(dir, 'lib', f), readFileSync(join(ROOT, 'lib', f)))
+  }
+  writeFileSync(join(dir, 'package.json'), readFileSync(join(ROOT, 'package.json')))
+  writeFileSync(join(dir, 'client', 'client.js'), readFileSync(join(ROOT, 'client', 'client.js')))
+  symlinkSync(join(ROOT, 'node_modules'), join(dir, 'node_modules'), 'junction')
+  return dir
+}
+
+test('自检：进程比代码旧时当场认出来（真造一个"旧进程"）', async (t) => {
+  const dir = clonePlugin()
+  t.after(() => rmSync(dir, { recursive: true, force: true }))
+  const p = await bootPlugin({ pluginDir: dir })
+  t.after(p.stop)
+
+  const { body } = await selfcheck(p.routes.get(SELFCHECK_ROUTE))
+  assert.equal(body.code.stale, true, '副本里的文件是这个进程起来之后才写下的——就是"进程比代码旧"')
+  assert.match(body.code.message, /重启 DSH 才会加载新版本/, '要给下一步动作，不是光报一个 true')
+  assert.ok(body.code.file, '要说清是哪一份文件比进程新')
+  assert.ok(Number.isFinite(body.code.modifiedAtMs))
+  assert.equal(body.version, '0.2.0', '副本里那份 package.json 照旧读得到')
+})
+
+test('自检：进程不比代码旧的时候不许乱喊（负对照：同一个进程、同一段代码）', async (t) => {
+  // 上面那条用的是副本（刚写下），这一条用仓库里那份（这次进程起来之前就写好了）。
+  // 两条走的都是同一段代码、同一个进程——所以这一对断言正好钉住"那个判断真的在判"。
+  const p = await bootPlugin()
+  t.after(p.stop)
+  const { body } = await selfcheck(p.routes.get(SELFCHECK_ROUTE))
+  assert.equal(body.code.stale, false, '仓库里的文件都写在这次测试进程起来之前')
+  assert.equal(body.code.message, null, '没旧的时候不许喊狼来了')
+  assert.ok(Number.isFinite(body.code.modifiedAtMs))
+})
+
+test('自检：卸载之后这条路由跟着摘掉，清单上"现在在不在"也跟着翻', async (t) => {
+  const p = await bootPlugin()
+  const route = p.routes.get(SELFCHECK_ROUTE)
+  assert.ok(route)
+  const before = (await selfcheck(route)).body
+  assert.ok(before.routes.every((one) => one.mounted === true))
+
+  p.stop()
+
+  assert.equal(p.routes.get(SELFCHECK_ROUTE), undefined, '卸载之后这条路由不许还挂在服务器上')
+  const after = (await selfcheck(route)).body
+  assert.ok(after.routes.every((one) => one.mounted === false),
+    '清单里那个"在不在"要跟着注销翻——它不该是一个写死的 true')
+  assert.equal(after.routes.length, before.routes.length, '注销的是挂载，不是条目')
 })
 
 

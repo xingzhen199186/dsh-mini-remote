@@ -55,6 +55,10 @@ window.__ModuleLoader__.load({
     var REMOTE_ADD_PATH = '/mini-remote/remotes/add';
     var REMOTE_WINDOW_PATH = '/mini-remote/remotes/window';
     var REMOTE_FORGET_PATH = '/mini-remote/remotes/forget';
+    // 「自检」那一条（宿主侧路由，只允许本机调用，见 lib/index.js）：
+    //   GET /mini-remote/selfcheck → 这台电脑在跑哪一版、哪些接口在、开关什么状态
+    // **返回值里没有一个字节的凭据**：它只数条数、只报"在不在听、绑了哪些地址"。
+    var SELFCHECK_PATH = '/mini-remote/selfcheck';
 
     // 侧栏那个图标和中间那一整屏面板共用的一个键。
     // 契约就是这么定的：侧栏条目的 `id` 按原样去寻址 main 槽里 key 相同的那个面板
@@ -114,6 +118,12 @@ window.__ModuleLoader__.load({
       // 就有两行，"接不上那台电脑"那句也有两行）。不设 pre-wrap 的话两行会连成一句，
       // 读起来像中间漏了字。
       say: { fontSize: 12, lineHeight: 1.6, marginTop: 4, whiteSpace: 'pre-wrap', wordBreak: 'break-word' },
+      // 「自检」那一块的摘要行：整块里最该被看见的一行（哪一版 · 进程何时起的 · 接口几条在）。
+      // 用正文色而不是灰字——它要和上面那些说明文字拉开一点层次。
+      selfSummary: { fontSize: 12, lineHeight: 1.7, marginTop: 8, color: 'var(--dsw-alias-label-primary,inherit)', wordBreak: 'break-word' },
+      // 「自检」里那几样机器味的东西（接口清单、数据目录）：等宽字体 + 保留换行。
+      // 一长条路径和十几个接口名用正文那套字读起来分不清，而它们就是要一眼扫过去的。
+      code: { fontFamily: 'ui-monospace,Menlo,monospace', fontSize: 12, lineHeight: 1.7, marginTop: 4, whiteSpace: 'pre-wrap', wordBreak: 'break-all', color: 'var(--dsw-alias-label-tertiary,#8b93a1)' },
     };
 
     // —— 跨机 · 「其他电脑」这一块的**状态**（2026-10-16 跨机第三步的界面）。
@@ -422,6 +432,20 @@ window.__ModuleLoader__.load({
       var forgetState = useState(null);
       var forgetting = forgetState[0];
       var setForgetting = forgetState[1];
+      // 「自检」那一块（2026-10-17）：这台电脑在跑哪一版、哪些接口在、开关什么状态。
+      // 一个快照 + 一个「重新自检」按钮——手机服务可能刚起来、路由可能刚变，
+      // 用户得能当场再看一眼，而不是关掉这一页再进来一次。
+      var selfState = useState(null);
+      var selfcheck = selfState[0];
+      var setSelfcheck = selfState[1];
+      var selfErrState = useState(null);
+      var selfError = selfErrState[0];
+      var setSelfError = selfErrState[1];
+      // 默认展开：这一块是"出问题时才来看"的，进来了就该直接看见那几行，
+      // 而不是先点一下。内容不长（十来行），不会把上面要操作的几块挤走。
+      var selfOpenState = useState(true);
+      var selfOpen = selfOpenState[0];
+      var setSelfOpen = selfOpenState[1];
 
       // 同源 GET，不带任何 token：这台电脑自己读得到，别人的电脑读不到。
       useEffect(function () {
@@ -529,6 +553,9 @@ window.__ModuleLoader__.load({
         loadDevices();
         // 「其他电脑」那份名单和配对信息也没有关系（它是"我连得上谁"），同一趟一起读。
         loadRemotes();
+        // 自检同理：它读的是这台电脑自己的底细（版本、进程、路由、开关、端口），
+        // 和"手机连不连得上"一点关系都没有——所以配对信息一回来就一起读。
+        loadSelfcheck();
         return undefined;
       }, [info]);
 
@@ -651,6 +678,43 @@ window.__ModuleLoader__.load({
           })
           .catch(function (err) {
             setRemotesError('读「其他电脑」名单失败：' + ((err && err.message) || String(err)));
+          });
+      };
+
+      /**
+       * 读「自检」那一份（`GET /mini-remote/selfcheck`，只允许本机）。
+       *
+       * 三种结局分开说，一种都不许含糊：
+       *   · 读到了 → 把那一份摊开；
+       *   · **404/405 = 这条路不在这儿**（宿主那一半是旧版）。这一支要单独说，因为
+       *     服务端回的是给程序看的 `not found`，原样摆出来用户读不懂，而它能得到的
+       *     最有用的信息恰恰是那句话：**装是装上了，但跑的还是旧的，重启一次 DSH**。
+       *   · 别的错（网络断了、服务没起来）→ 照登原因。
+       *
+       * 读不到**不吞**：这一块照样出现，只是那句原因摆在那儿（见 selfcheckBlock）。
+       */
+      var loadSelfcheck = function () {
+        return fetch(SELFCHECK_PATH)
+          .then(function (res) {
+            return res.json().then(
+              function (body) { return { status: res.status, body: body }; },
+              function () { return { status: res.status, body: null }; },
+            );
+          })
+          .then(function (r) {
+            var b = (r.body && typeof r.body === 'object') ? r.body : null;
+            if (b && b.ok === true) {
+              setSelfcheck(b);
+              setSelfError(null);
+            } else if (r.status === 404 || r.status === 405) {
+              setSelfError('这台电脑上的服务没有「自检」这个接口（HTTP ' + r.status + '）。'
+                + '装上的是新版、跑的却可能是旧版——重启一次 DSH 才会加载新版本。');
+            } else {
+              setSelfError((b && b.error) || ('读自检失败：服务返回了 HTTP ' + r.status + '。'));
+            }
+          })
+          .catch(function (err) {
+            setSelfError('读自检失败：' + ((err && err.message) || String(err)));
           });
       };
 
@@ -1043,11 +1107,19 @@ window.__ModuleLoader__.load({
           cancelForget: function () { setForgetting(null); },
           forget: forgetRemote,
           connect: connectRemote,
+        }, {
+          // 「自检」那一块：一份快照 + 展开/收起 + 重新自检。读不到时 error 里那句话
+          // 就摆在这一块里（它照样出现，见 selfcheckBlock）。
+          data: selfcheck,
+          error: selfError,
+          open: selfOpen,
+          toggle: function () { setSelfOpen(function (v) { return !v; }); },
+          reload: loadSelfcheck,
         }),
       );
     }
 
-    function content(info, failure, copied, copy, busy, toggle, pwd, serve, feishu, dev, remote, rmt) {
+    function content(info, failure, copied, copy, busy, toggle, pwd, serve, feishu, dev, remote, rmt, self) {
       if (failure) return h('div', { style: styles.error }, failure);
       if (!info) return h('div', { style: styles.loading }, '正在读取配对信息…');
 
@@ -1090,6 +1162,10 @@ window.__ModuleLoader__.load({
       // "谁进得来"（别人连我这台），这一份是"我连得上谁"（我从这台去连别人）。顺序上先
       // 说别人进来的（那是权限边界，也是这一页的主语），再说我出去的。
       if (rmt && (rmt.list !== null || rmt.error)) blocks.push(remotesBlock(rmt));
+      // 「自检」那一块：**永远排在最末**，而且只要服务端答了话（或者答不上话但说清了
+      // 原因）就出现。它是这一页的"体检报告"——不抢前面那些要操作的位置，
+      // 但也不能因为"读不到"而整块消失（那正好是最需要它的时候）。
+      if (self) blocks.push(selfcheckBlock(self));
       return h('div', null, blocks);
     }
 
@@ -1335,6 +1411,144 @@ window.__ModuleLoader__.load({
             r.add ? '收起这一块' : '添加一台电脑'),
         ),
         addUi,
+      );
+    }
+
+    /**
+     * 「自检」那一块（2026-10-17）：**这台电脑到底在跑什么**。
+     *
+     * ## 为什么值得摆在设置页上
+     *
+     * 那天排两台真机的故障都卡在同一件事上——**看不见那台机器在跑什么**：一台的桌面端
+     * 连开了一整天，加载的是"新功能写下来之前"的代码；另一台装的插件是旧版本，新接口
+     * 根本没出现。当时只能靠用户来回反馈、靠一个个地址去敲。这一块把那些答案摆在一处：
+     * 哪一版、宿主进程什么时候起的、哪些接口在、开关什么状态、服务听哪儿、数据在哪。
+     *
+     * ## 那一句警告**不展开也得看得见**
+     *
+     * 「进程比代码旧」是那次故障最常见的样子（装是装上了，跑的却还是旧的），而它对应的
+     * 动作只有一个：重启 DSH。所以那句话摆在摘要上面、**不受展开/收起影响**——
+     * 要用户点开才看得见，等于把它藏起来。
+     *
+     * ## 读不到也要出现
+     *
+     * 这一块**没有"读不到就不显示"这一档**：读不到（宿主是旧版、服务没起来）时，
+     * 那句原因就摆在这儿，下面照样有一个「重新自检」。整块消失的话，用户看到的是
+     * 「设置页上根本没有自检」——那和"没装这个功能"分不清。
+     *
+     * ## 除了那一句警告，别的都不许用感叹号或大红字
+     *
+     * 它是体检报告，不是警报：正常的时候（插件是最新的）就该安静地读过去。
+     */
+    function selfcheckBlock(sc) {
+      var st = sc.data;
+      var code = (st && st.code) || {};
+      var proc = (st && st.process) || {};
+      var phone = (st && st.phoneService) || {};
+      var rosters = (st && st.rosters) || {};
+
+      /** 运行了多久，说成人话（诊断的时候"连开了多久"本身就是一个线索）。 */
+      function uptimeLine(sec) {
+        var n = Number(sec);
+        if (!isFinite(n) || n < 0) return '';
+        if (n < 120) return '（刚起来 ' + Math.round(n) + ' 秒）';
+        var mins = Math.round(n / 60);
+        if (mins < 120) return '（已运行 ' + mins + ' 分钟）';
+        var hours = Math.floor(mins / 60);
+        var rest = mins % 60;
+        return '（已运行 ' + hours + ' 小时' + (rest ? ' ' + rest + ' 分' : '') + '）';
+      }
+
+      /** 接口那一行的说法：几条在、几条不在。空表只说"未知"，不编一个 0。 */
+      function routeLine(routes) {
+        var list = Array.isArray(routes) ? routes : [];
+        if (!list.length) return '未知';
+        var live = list.filter(function (one) { return one && one.mounted !== false; });
+        return live.length === list.length
+          ? ('一共 ' + list.length + ' 条，都在')
+          : ('一共 ' + list.length + ' 条，其中 ' + (list.length - live.length) + ' 条不在');
+      }
+
+      function list(labels) {
+        return labels.filter(Boolean).join('、');
+      }
+
+      if (!st) {
+        // 还没读到 / 读不到：这一块照旧出现，把那句原因摆出来（尤其是"没有这个接口
+        // = 宿主是旧版"那一条，它是这一块最有用的一句话）。
+        return h('div', { key: 'selfcheck', style: styles.block },
+          h('div', { style: styles.entryTitle }, '自检'),
+          h('div', { style: styles.muted }, '这一块只给这台电脑看（只有本机能读），里面没有一个字是密码或密钥。'),
+          h('div', { style: Object.assign({}, styles.error, styles.say) },
+            sc.error || '正在自检…'),
+          h('div', { style: { marginTop: 12 } },
+            h('button', { type: 'button', onClick: sc.reload, style: styles.btn }, '重新自检')),
+        );
+      }
+
+      // 「进程比代码旧」——这一句不受展开/收起影响（见上面那段）。
+      var alert = code.stale === true && code.message
+        ? h('div', { style: styles.warn }, code.message)
+        : null;
+
+      var summary = h('div', { style: styles.selfSummary },
+        '插件版本 ' + (st.version || '未知')
+        + ' · 宿主进程启动于 ' + (formatTime(proc.startedAtMs) || '未知')
+        + ' · 接口' + routeLine(st.routes),
+      );
+
+      var routePaths = Array.isArray(st.routes) ? st.routes : [];
+      var details = h('div', null,
+        h('div', { style: styles.muted },
+          '宿主进程（就是跑着这个插件的那个 DSH）启动于：' + (formatTime(proc.startedAtMs) || '未知')
+          + uptimeLine(proc.uptimeSec)),
+        h('div', { style: styles.muted },
+          '插件文件最后改动于：' + (formatTime(code.modifiedAtMs) || '未知')
+          + (code.file ? '（' + code.file + '）' : '')),
+        h('div', { style: styles.muted },
+          '接口清单一共 ' + routePaths.length + ' 条' + (routePaths.length ? '：' : '（读不到）')),
+        routePaths.length
+          // 一行一条要占掉十几行（这一块默认是展开的），挤在一起又读不清：
+          // 用顿号连起来让它自己折行，一眼扫得完，又不会把面板撑得老长。
+          ? h('div', { style: styles.code }, routePaths.map(function (one) {
+            return String(one && one.path) + (one && one.mounted === false ? '（现在不在）' : '');
+          }).join('、'))
+          : null,
+        h('div', { style: styles.muted },
+          '「允许别的电脑连接」：' + (st.allowRemoteComputers ? '开' : '关（默认关）')),
+        h('div', { style: styles.muted },
+          '手机服务：' + (phone.listening
+            ? ('在听端口 ' + phone.port + '，绑了 ' + ((phone.addresses || []).join('、') || '未知'))
+            : ('没起来' + (phone.error ? '（' + phone.error + '）' : '')))),
+        h('div', { style: styles.muted },
+          '跨机那两条接口在手机服务那一半也挂了一份：'
+          + list([
+            phone.hostHalf && phone.hostHalf.pair ? '配对 在' : '配对 不在',
+            phone.hostHalf && phone.hostHalf.remoteWindow ? '取票 在' : '取票 不在',
+          ])),
+        h('div', { style: styles.muted }, '数据目录（这台电脑上的那份，不随插件卸载而删）：'),
+        h('div', { style: styles.code }, String(st.dataDir || '未知')),
+        h('div', { style: styles.muted },
+          '名册（只报条数，不报内容）：设备 ' + (rosters.devices === null || rosters.devices === undefined ? '未知' : rosters.devices + ' 条')
+          + ' · 我能连的电脑 ' + (rosters.remotes === null || rosters.remotes === undefined ? '未知' : rosters.remotes + ' 条')),
+      );
+
+      return h('div', { key: 'selfcheck', style: styles.block },
+        h('div', { style: styles.entryTitle }, '自检'),
+        h('div', { style: styles.muted }, '这一块只给这台电脑看（只有本机能读），里面没有一个字是密码或密钥。'),
+        alert,
+        summary,
+        sc.error ? h('div', { style: Object.assign({}, styles.error, styles.say) }, sc.error) : null,
+        sc.open ? details : null,
+        h('div', { style: { marginTop: 12 } },
+          h('button', { type: 'button', onClick: sc.toggle, style: styles.btn },
+            sc.open ? '收起自检' : '展开自检'),
+          h('button', {
+            type: 'button',
+            onClick: sc.reload,
+            style: Object.assign({}, styles.btn, { marginLeft: 8 }),
+          }, '重新自检'),
+        ),
       );
     }
 
