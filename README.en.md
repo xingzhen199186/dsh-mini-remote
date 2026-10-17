@@ -242,7 +242,7 @@ Each row shows the name, the address, `last ok <time>` (or "no record yet"), and
 **Which address to enter**
 
 - Enter the address shown on A's "Phone Remote" page (no trailing `/mini` needed) — **not** the one you use to open the DSH interface on A itself.
-- **It must be `https://`.** A plain `http://` address can pair and can obtain the pass, but the frame stays blank — the browser drops that pass on a non-HTTPS address.
+- **It must be `https://`.** A plain `http://` address can pair and can fetch a ticket, but the frame stays blank: on the way in, the browser has to store a cookie for this screen (every request inside the frame is then identified by it), and it will only store such a cookie over an encrypted connection. On an http address that cookie is dropped outright, so every later request is refused. Local `127.0.0.1` is the one exception — browsers treat loopback as a trusted origin — which is why this restriction only bites cross-machine setups.
 - Tailscale is recommended: switch on "HTTPS address (Tailscale)" on A, then enter `https://<machine>.<your-tailnet>.ts.net` on B — **no port needed**. The address is stable, so you set it once.
 - The "Public access" tunnel address changes on every restart, so it is not suitable for cross-machine use.
 
