@@ -7,8 +7,21 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { join, parse } from 'node:path'
 
 import { listWorkspaces, listSessionsOf, createSessionIn, createWorkspaceAt, TITLE_CONCURRENCY } from '../lib/tree.js'
+
+/**
+ * 当前平台的根：Windows 是 `I:\`，Linux 是 `/`。
+ *
+ * 2026-10-17 之前这几条测试把工作区路径写死成 `'I:\\写作算法\\素材'`，指望 `basename`
+ * 取出 `素材`。Windows 上 `\` 是分隔符，取得到；**Linux 上 `\` 只是个普通字符**，
+ * `basename` 会把整串原样返回——CI 的 `probe`（Linux）因此红了三条。
+ *
+ * 产品代码没有错（它用 `node:path`，在各平台上处理各平台的真实路径都对），
+ * 错的是测试假设了"根一定是 `I:\`"。换成平台根之后，验的仍然是"标题空着就退到目录名"。
+ */
+const PLATFORM_ROOT = parse(process.cwd()).root
 
 function ws(id, path, title, sessionIds) {
   return { id, path, title, sessionIds }
@@ -94,7 +107,7 @@ test('子 agent 的会话不进手机', async () => {
 })
 
 test('工作区标题为空时退到目录名，而不是显示 UUID', async () => {
-  const registry = registryOf(ws('w1', 'I:\\极简遥控器\\极简遥控器', '', ['s1']))
+  const registry = registryOf(ws('w1', join(PLATFORM_ROOT, '极简遥控器', '极简遥控器'), '', ['s1']))
   const out = await listWorkspaces({ registry, query: queryOf([rec('s1', 1)]) })
   assert.equal(out[0].title, '极简遥控器')
 })
@@ -352,7 +365,7 @@ test('建会话时把工作区标题带回去，手机能说清建在哪儿', as
 })
 
 test('工作区没标题时退到目录名，而不是留空', async () => {
-  const registry = registryOf(ws('w1', 'I:\\写作算法\\素材', '', []))
+  const registry = registryOf(ws('w1', join(PLATFORM_ROOT, '写作算法', '素材'), '', []))
   const controller = controllerOf(async () => ({ sessionId: 's9' }))
   const out = await createSessionIn({ controller, registry, workspaceId: 'w1' })
   assert.equal(out.workspaceTitle, '素材')
@@ -482,8 +495,9 @@ test('没有工作区服务时说没这个能力，不是笼统报错', async ()
 })
 
 test('工作区标题为空时退到目录名', async () => {
-  const registry = registryFor({ created: { id: 'w9', path: 'I:\\写作算法\\素材', title: '' } })
-  const out = await createWorkspaceAt({ registry, path: 'I:\\写作算法\\素材' })
+  const dir = join(PLATFORM_ROOT, '写作算法', '素材')
+  const registry = registryFor({ created: { id: 'w9', path: dir, title: '' } })
+  const out = await createWorkspaceAt({ registry, path: dir })
   assert.equal(out.workspace.title, '素材')
 })
 

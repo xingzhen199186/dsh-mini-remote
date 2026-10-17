@@ -15,7 +15,7 @@ import assert from 'node:assert/strict'
 import { mkdtemp, mkdir, writeFile, readdir, rm, symlink } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
-import { join, parse } from 'node:path'
+import { join, parse, sep } from 'node:path'
 
 import {
   MAX_DIRS, MAX_RECENT, ancestorsOf, listDirectory, listRoots,
@@ -28,6 +28,23 @@ async function sandbox(t) {
   t.after(() => rm(dir, { recursive: true, force: true }))
   return dir
 }
+
+/**
+ * 当前平台的根：Windows 是 `I:\`，Linux 是 `/`。
+ *
+ * ## 为什么用"当前平台的根"而不是写死 `I:`
+ *
+ * 2026-10-17 之前这里有两条测试用 `join('I:', 'a', '..')` 造绝对路径。在 Windows 上
+ * `I:` 是盘符，`resolve` 之后还是 `I:\…`；**在 Linux 上 `I:` 只是个普通的目录名**，
+ * `resolve` 会先把它拼到当前工作目录后面，结果和断言完全不是一回事。
+ *
+ * 产品代码没有错——它用的是 `node:path`，在各自平台上处理各自的真实路径都对。
+ * 错的是测试：它隐含假设了"跑在 Windows 上"。CI 的 `probe`（Linux）因此红了 5 条。
+ *
+ * 换成平台根之后，验的仍然是同一件事（**绝对路径的规范化、面包屑的切法**），
+ * 只是不再假设根叫什么。
+ */
+const PLATFORM_ROOT = parse(process.cwd()).root
 
 // ---------------------------------------------------------------------------
 // 目录名的合法口径
@@ -47,9 +64,11 @@ test('目录名不合法的一律挡掉', () => {
 })
 
 test('路径规范化会把 .. 和 . 算掉', () => {
-  // 这是故意的：不猜用户想干什么，只保证拿去读的是一条干净的绝对路径。
-  const out = normalizePath(join('I:', 'a', '..', 'b', '.', 'c'))
-  assert.equal(out, join('I:', 'b', 'c'))
+  // **手拼字符串、不经过 `join`**：`join` 自己就会把 `..` 规范化掉，用它造输入等于
+  // 让 `normalizePath` 什么都不用干——那条断言就成了摆设（2026-10-17 顺便发现的）。
+  const raw = PLATFORM_ROOT + 'a' + sep + '..' + sep + 'b' + sep + '.' + sep + 'c'
+  const out = normalizePath(raw)
+  assert.equal(out, join(PLATFORM_ROOT, 'b', 'c'))
 })
 
 test('畸形路径直接拒绝，不试着修补', () => {
@@ -59,15 +78,15 @@ test('畸形路径直接拒绝，不试着修补', () => {
 })
 
 test('面包屑是从根到目标那一串', () => {
-  const out = ancestorsOf(join('I:', 'a', 'b', 'c'))
-  assert.equal(out[0].path, parse(join('I:', 'a')).root, '第一格是根')
+  const out = ancestorsOf(join(PLATFORM_ROOT, 'a', 'b', 'c'))
+  assert.equal(out[0].path, parse(join(PLATFORM_ROOT, 'a')).root, '第一格是根')
   assert.deepEqual(out.map((x) => x.name).slice(1), ['a', 'b', 'c'])
-  assert.equal(out.at(-1).path, join('I:', 'a', 'b', 'c'), '最后一格是目标自己')
+  assert.equal(out.at(-1).path, join(PLATFORM_ROOT, 'a', 'b', 'c'), '最后一格是目标自己')
 })
 
 test('面包屑是纯字符串算的，目录读不出来也画得出来', () => {
   // 读失败时界面还得有面包屑，不然用户卡在空白页上连退都退不回去。
-  const ghost = join('I:', '这个目录不存在', '子目录')
+  const ghost = join(PLATFORM_ROOT, '这个目录不存在', '子目录')
   assert.equal(ancestorsOf(ghost).at(-1).path, ghost)
 })
 
