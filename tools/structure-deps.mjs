@@ -72,19 +72,22 @@ export const MARKERS = [
   {
     id: 'sidebar-pane',
     group: '⑱ 侧栏能滚（最底下的「设置」够得着）',
-    marker: '[data-pane="sidebar"]',
+    marker: '[class*="_sidebarCol"]',
     scope: 'page',
     expect: 'present',
-    probe: '[data-pane="sidebar"]',
-    tokens: ['attr:data-pane'],
-    codeText: '[data-pane="sidebar"]{overflow-y:auto !important',
+    probe: '[class*="_sidebarCol"]',
+    tokens: ['class:_sidebarCol'],
+    codeText: '[class*="_sidebarCol"]{overflow-y:auto !important',
     where: 'lib/mirror.js · ADAPT_CSS ⑱；同一段说明里也写着它量到的那几个数',
-    why: '侧栏那一列上官方渲染的固定标记（不是类名哈希），全文档只有一个。官方把这一列写成 '
-      + '`overflow:hidden`，而它 scrollHeight 696 / clientHeight 599——最底下的「设置」整条被裁在屏幕外。',
+    why: '侧栏那一列。**原来点的是官方的 `data-pane="sidebar"` 属性，2026-10-18 官方把它整套去掉了**'
+      + '（8.9MB 客户端包里一次都不出现），那条规则于是静默失效——侧栏滚不动，'
+      + '最底下的「设置」落到屏幕外，会话列表被上面几块挤没。现在改点类名 `哈希_sidebarCol`：'
+      + '前缀是每次构建随机生成的，所以只能按稳定那半截匹配。官方在这一列上写着 `overflow:hidden`，'
+      + '而它 scrollHeight 696 / clientHeight 599。',
     fail: '侧栏少一条命中的话，「放开纵向滚动」这条不生效：手机上再也够不着「设置」，'
       + '而点设置是进面板的唯一入口——等于面板整个进不去。这一条**必须**绿。',
     harm: 'safe',
-    guard: '按属性+值点它（官方固定标记），比按类名后缀猜稳；`overflow-x:hidden` 一起写着，收起态不会被撑出横向滚动',
+    guard: '按类名后缀匹配（前缀是构建哈希，写死必失效）；`overflow-x:hidden` 一起写着，收起态不会被撑出横向滚动',
   },
   {
     id: 'region-area',

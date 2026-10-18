@@ -980,7 +980,7 @@ test('镜像：共用内容区头里的动作区藏掉——写在共用层，�
  * 用户报：「导航栏其实没显示全，设置按钮是看不到的，能否搞个滚动条」。在活的镜像页上
  * 逐层量（390×660 的外层视口、框内 **599**、侧栏展开）：
  *
- *   · 侧栏那一列 `[data-pane="sidebar"]`（官方的 `_sidebarCol`，`position:absolute`）：
+ *   · 侧栏那一列 `.哈希_sidebarCol`（**2026-10-18 前是 `[data-pane="sidebar"]`**，`position:absolute`）：
  *     321×599、`overflow-y:hidden`，而 **scrollHeight 696 / clientHeight 599 —— 97px 被裁掉**；
  *   · 里面那层 `_2H3hWW_root`（`height:100%` 的竖排 flex）：`overflow-y:visible`，
  *     它自己的 scrollHeight 也是 696 —— **内容确实比框高，两层却都不滚**；
@@ -994,8 +994,8 @@ test('镜像：共用内容区头里的动作区藏掉——写在共用层，�
  * **缺的是一个滚动容器**。官方侧栏是按桌面窗口设计的（它自己在 root 上写了
  * `--dsh-scrollbar-thumb` 那套变量），窗口高 ≥ 696 时看不出问题，手机框内只有 ~600 就露馅。
  *
- * 这条测试守三件事：**规则在**、**钉在官方那个固定标记上**（`[data-pane="sidebar"]`，
- * 全文档实测只有 1 个；不按类名哈希猜）、**横向必须一起钉成 hidden**
+ * 这条测试守三件事：**规则在**、**钉在官方的类名上**（`[class*="_sidebarCol"]`——
+ * 前缀是每次构建的哈希，只能按稳定那半截匹配）、**横向必须一起钉成 hidden**
  * （侧栏收起成图标条时那一列只有 52px 宽、里面的 root 仍是 280px，横向本来就是靠裁的，
  * 放开成 auto 会平白多出一条横向滚动）。
  */
@@ -1009,18 +1009,19 @@ test('镜像：侧栏那一列要能纵向滚（不然最底下的「设置」�
   t.after(async () => { await f.close(); await app.close() })
 
   const body = await (await fetch(`http://127.0.0.1:${f.port}/blocked`)).text()
-  assert.match(body, /\[data-pane="sidebar"\]\{overflow-y:auto !important;overflow-x:hidden !important\}/,
+  assert.match(body, /\[class\*="_sidebarCol"\]\{overflow-y:auto !important;overflow-x:hidden !important\}/,
     '侧栏那一列要放开纵向滚动：它是那个 scrollHeight(696) 大于 clientHeight(599) 的层，'
     + '也正是那个写着 overflow:hidden 的层——不改它，「设置」那 97px 永远拉不回来')
   // **横向那半句不能少**：收起态那一列 52px 宽、里面的 root 280px，横向靠裁；
   // 只写 overflow-y:auto 的话另一轴会被算成 auto，平白多一条横向滚动。
-  assert.match(body, /\[data-pane="sidebar"\]\{[^}]*overflow-x:hidden !important\}/,
+  assert.match(body, /\[class\*="_sidebarCol"\]\{[^}]*overflow-x:hidden !important\}/,
     '横向要一起钉成 hidden（收起成图标条时靠它裁）')
-  // 不许按类名哈希点它：`_sidebarCol` / `_root` 那两半的哈希每次构建都变。
-  assert.doesNotMatch(body, /\[class\*="_sidebarCol"\]\{[^}]*overflow-y:auto/,
-    '不许按类名哈希点侧栏——要用官方那个固定标记 `[data-pane="sidebar"]`')
+  // **别再改回 `data-pane="sidebar"`**（2026-10-18）：官方已经把这个属性整套去掉了，
+  // 改回去这条规则会**静默失效**——规则还在、但匹配不到任何元素，症状和没修一样。
+  assert.doesNotMatch(body, /\[data-pane="sidebar"\]/,
+    '别再改回 `data-pane="sidebar"`：官方已去掉这个属性，改回去规则会静默失效')
   // 动侧栏那一列的规则**只许有一条**（多一条就是多改了别的东西，得有人解释）。
-  const sideRules = [...body.matchAll(/\[data-pane="sidebar"\][^{}]*\{[^}]*\}/g)].map((m) => m[0])
+  const sideRules = [...body.matchAll(/\[class\*="_sidebarCol"\][^{}]*\{[^}]*\}/g)].map((m) => m[0])
   assert.equal(sideRules.length, 1, '动侧栏那一列的规则只许有一条')
 
   // 同一次注入里，**设置面板那几轮的战果一个都不许掉**（这条改动和它们不相干，钉在一起防回退）。
@@ -1110,7 +1111,7 @@ test('镜像：侧栏中间那块 `_regionArea` 不参与压缩（「工作区/�
     '不许按类名哈希点这一层——要用后缀 `[class*="_regionArea"]`')
 
   // 同一份注入里，前面几轮的战果一个都不许掉（这条改动和它们不相干，钉在一起防回退）。
-  assert.match(body, /\[data-pane="sidebar"\]\{overflow-y:auto !important;overflow-x:hidden !important\}/,
+  assert.match(body, /\[class\*="_sidebarCol"\]\{overflow-y:auto !important;overflow-x:hidden !important\}/,
     '侧栏那一列的纵向滚动还在（够不着「设置」那一轮的战果）')
   assert.match(body, /\[data-shortcut-modal="settings"\] \[class\*="_content"\]\{min-height:0 !important\}/,
     '设置面板内容区的 min-height:0 还在')

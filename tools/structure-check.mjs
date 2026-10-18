@@ -232,7 +232,7 @@ function batchExpression(rows) {
 const READY = {
   // 「应用挂上了吗」用的信号**不在清单里**（侧栏那一列 / 应用根），
   // 这样「清单里某个标记没了」才会报成失配，而不是被当成「没到那一档」。
-  app: `!!document.querySelector('[data-pane="sidebar"], [data-slot="root"], #root, main')`,
+  app: `!!document.querySelector('[class*="_sidebarCol"], [data-slot="root"], #root, main')`,
   panel: `!!document.querySelector('[aria-modal="true"], button[aria-haspopup="dialog"][aria-expanded="true"]')`,
 }
 
