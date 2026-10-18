@@ -2563,7 +2563,11 @@ window.__ModuleLoader__.load({
             revoked: false,
             text: '那台电脑的界面一直没打开（等了 ' + Math.round(REMOTE_FRAME_WAIT_MS / 1000) + ' 秒没看到它，'
               + '自动再试了一次还是没看到）。\n'
-              + '它可能刚重启、或者这会儿连不上。点下面的「再试一次」换一张通行证再开一次。',
+              // 三个原因并列，**浏览器那一条不能省**：cookie 被拒的后果是静默的（框停在
+              // 「Loading plugins…」），用户只会去怀疑对面没开或网络不通，而修法完全不同。
+              + '可能是它刚重启、这会儿连不上；也可能是你这边的浏览器拦了跨站凭据'
+              + '（开了「阻止第三方 cookie」或严格隐私模式时常见——换一个浏览器试试）。\n'
+              + '点顶上那条横条里的「再试一次」换一张通行证再开一次。',
           }));
         }
         return remoteScreen(remoteName, h('div', { style: styles.frameBox },

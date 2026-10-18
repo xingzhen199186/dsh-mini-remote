@@ -1312,7 +1312,7 @@ test('镜像：拿不到「带令牌的地址」时如实报错，不假装能�
 // ---------------------------------------------------------------------------
 
 /** 只给镜像那一段用得上的最小服务外壳；其余路径不碰，所以桩可以很薄。 */
-async function bootServer({ mirror = null, mirrorEnabled = () => true } = {}) {
+async function bootServer({ mirror = null, mirrorEnabled = () => true, warns = null } = {}) {
   const port = await (async () => {
     const probe = createServer()
     probe.listen(0, '127.0.0.1')
@@ -1327,7 +1327,8 @@ async function bootServer({ mirror = null, mirrorEnabled = () => true } = {}) {
     config: { port, defaultMode: 'minimal' },
     token: 'TOKEN-123',
     bindAddresses: ['127.0.0.1'],
-    log: { info: () => {}, warn: () => {} },
+    // 传了 `warns` 就把 warn 收进来（不传则什么都不做，和以前一样）。
+    log: { info: () => {}, warn: warns ? (m) => warns.push(String(m)) : () => {} },
     nav: undefined,
     tree: {},
     browse: {},
@@ -1774,6 +1775,36 @@ test('远程窗口：没票、票不对、会话不对——一律进不去', as
   const noUpstream = await fetch(`${off.base}/mini/mirror/?ticket=TICKET-1`, { redirect: 'manual' })
   assert.equal(noUpstream.status, 404)
   assert.deepEqual(hit, [])
+})
+
+test('窗口凭据没被浏览器收下时，要报一条人话（而不是静默白屏）', async (t) => {
+  // ⚠️ **反向验证的靶子**：把 `windowCookieMisses` 那段检测删掉，这一条立刻变红——
+  //    真机上那就是「框里停在 Loading plugins…」，用户只会去怪网络或对面没开。
+  const hit = []
+  const warns = []
+  const mirror = ticketMirror(hit)
+  mirror.issueTicket()
+  const s = await bootServer({ mirror, mirrorEnabled: () => false, warns })
+  t.after(s.close)
+
+  // ① 兑票：这一下会把窗口 cookie 种下去，并记下时刻。
+  const open = await fetch(`${s.base}/mini/mirror/?ticket=TICKET-1`, { redirect: 'manual' })
+  assert.equal(open.status, 200)
+  await open.text();
+  assert.equal(warns.length, 0, '刚种下还不该报——这时一切正常')
+
+  // ② 第一个"不带 cookie"的请求：可能是竞态，**先不报**（这就是那条负对照）。
+  const one = await fetch(`${s.base}/mini/mirror/`, { redirect: 'manual' })
+  await one.text()
+  assert.equal(warns.length, 0, '只漏一次先不报：可能只是竞态（刚改过密码、同时开了两个浏览器）')
+
+  // ③ 第二个：连着两次都不带，那就是浏览器没存下它。
+  const two = await fetch(`${s.base}/mini/mirror/`, { redirect: 'manual' })
+  await two.text()
+  assert.equal(warns.length, 1, '连两次才算数，而且只说一次')
+  assert.match(warns[0], /窗口凭据没被浏览器收下/);
+  assert.match(warns[0], /第三方 cookie/, '要说清最常见的原因，用户才知道去改哪儿')
+  assert.match(warns[0], /换一个浏览器/, '还要给一条走得通的路')
 })
 
 test('远程窗口：持窗口会话的 WebSocket 也要接（不然框里一直「正在重新连接」）', async (t) => {
