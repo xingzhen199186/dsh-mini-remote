@@ -232,7 +232,11 @@ function batchExpression(rows) {
 const READY = {
   // 「应用挂上了吗」用的信号**不在清单里**（侧栏那一列 / 应用根），
   // 这样「清单里某个标记没了」才会报成失配，而不是被当成「没到那一档」。
-  app: `!!document.querySelector('[class*="_sidebarCol"], [data-slot="root"], #root, main')`,
+  //
+  // **2026-10-18 收紧过**（原来还认 `#root` 和 `main`）：那两样在骨架阶段就已经存在，
+  // 而侧栏那一列要等客户端插件跑起来才渲染——于是这个检查会在**侧栏还没出现时**就去查
+  // `[class*="_sidebarCol"]`，一律报成「查到 0 个」的假失配。实测收紧后要等约 9 秒。
+  app: `!!document.querySelector('[class*="_sidebarCol"], [data-slot="root"]')`,
   panel: `!!document.querySelector('[aria-modal="true"], button[aria-haspopup="dialog"][aria-expanded="true"]')`,
 }
 
