@@ -1394,21 +1394,25 @@
      在第 28px）；**窄到 800px 时最早的可点元素从第 18px 起**（左上那颗图标按钮），所以
      带的高度停在 16px——两边各留 2~6px 余量，谁也不挡。
 
-     **只在「主输入设备是有悬停能力的精细指针」时才收起来**（上面那个媒体查询管的就是
-     这件事）：触摸优先的设备上它匹配不上，横条保持**常驻**——触摸没有「悬停」这回事，
-     藏起来就会变成摸不到的东西。它是唯一回手机页的出口，这一条不能赌。 */
-  #mirrorHot { display: none; }
-  .mv-hot { flex: 0 0 auto; overflow: hidden; }
-  @media (hover: hover) and (pointer: fine) {
-    #mirrorHot {
-      display: block; position: absolute; left: 0; right: 0; top: 0;
-      height: 16px; z-index: 2;
-    }
-    /* 100px 是留给 `max-height` 过渡的余量：横条实测 61px，留够就不会被削。
-       收起那一侧同理——`max-height` 掉到 61px 以下才真的开始收。 */
-    .mv-hot { max-height: 0; transition: max-height .25s ease; }
-    #mirrorView.bar-on .mv-hot { max-height: 100px; }
+     2026-10-18 起**触摸设备也收起**——但那条"不能赌"的底线换了个守法：顶部留一条
+     **看得见的把手**（`#mirrorHot::before`，一条 40×4 的细条），点它把横条拉出来、
+     再点一下收回去。所以"摸不到出口"这件事不会发生：把手一直在、而且看得见。
+     触摸走 click（触摸没有悬停这回事），桌面仍走 hover——两套事件见下面的脚本。 */
+  #mirrorHot {
+    position: absolute; left: 0; right: 0; top: 0;
+    height: 16px; z-index: 2;
   }
+  /* 把手：收起状态下唯一能看出"这里能拉"的东西。
+     居中、40px 宽——够小不碍事，也够大点得中。 */
+  #mirrorHot::before {
+    content: ''; position: absolute; left: 50%; top: 5px;
+    width: 40px; height: 4px; margin-left: -20px;
+    border-radius: 2px; background: rgba(128, 128, 128, .5);
+  }
+  /* 100px 是留给 `max-height` 过渡的余量：横条实测 61px，留够就不会被削。
+     收起那一侧同理——`max-height` 掉到 61px 以下才真的开始收。 */
+  .mv-hot { flex: 0 0 auto; overflow: hidden; max-height: 0; transition: max-height .25s ease; }
+  #mirrorView.bar-on .mv-hot { max-height: 100px; }
   #mirrorFrame {
     flex: 1 1 auto; width: 100%; border: 0; background: var(--bg);
     /* 底部让开手势条（2026-10-07 从「被镜像的那份页面」搬回来的）。
@@ -7629,12 +7633,25 @@
       clearTimeout(barHideTimer);
       barHideTimer = setTimeout(mirrorBarOff, 200);
     }
-    mirrorHot.addEventListener('mouseenter', barScheduleShow);
-    // 显示这一屏那一刻鼠标可能就停在顶上（那时不会再有 mouseenter）——动一下也算数。
-    mirrorHot.addEventListener('mousemove', barScheduleShow);
-    mirrorHot.addEventListener('mouseleave', barScheduleHide);
-    mirrorBar.addEventListener('mouseenter', function () { clearTimeout(barHideTimer); });
-    mirrorBar.addEventListener('mouseleave', barScheduleHide);
+    // **桌面与触摸走两套事件**（2026-10-18）：桌面有悬停，鼠标贴到顶上滑出、移开收回；
+    // 触摸没有悬停这回事，改成"点一下切换"——点顶部那条把手拉出来，再点一下收回去。
+    // 判定用媒体查询，和样式表里同一套条件（`hover:hover and pointer:fine` = 有鼠标）。
+    var barHasHover = !!(window.matchMedia
+      && window.matchMedia('(hover: hover) and (pointer: fine)').matches);
+    if (barHasHover) {
+      mirrorHot.addEventListener('mouseenter', barScheduleShow);
+      // 显示这一屏那一刻鼠标可能就停在顶上（那时不会再有 mouseenter）——动一下也算数。
+      mirrorHot.addEventListener('mousemove', barScheduleShow);
+      mirrorHot.addEventListener('mouseleave', barScheduleHide);
+      mirrorBar.addEventListener('mouseenter', function () { clearTimeout(barHideTimer); });
+      mirrorBar.addEventListener('mouseleave', barScheduleHide);
+    } else {
+      // 触摸：按住拖动不算（不在 iframe 里），只有"点"才切换。
+      mirrorHot.addEventListener('click', function () {
+        if ($('mirrorView').classList.contains('bar-on')) mirrorBarOff();
+        else mirrorBarOn();
+      });
+    }
   }
   // Tab 走到「返回」上要看得见它。
   $('mirrorClose').addEventListener('focus', mirrorBarOn);

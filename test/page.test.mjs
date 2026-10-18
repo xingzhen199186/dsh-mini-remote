@@ -6386,3 +6386,26 @@ test('导航栏：把闸门打开（常量 true）那句「另有 N 条…」照
   assert.match(out, /没有能列出来的会话/, '前半句照旧')
 })
 
+
+test('镜像横条：触摸设备也要能收起，但收起后必须留一条看得见的把手', () => {
+  // 2026-10-18：上一版只在「有悬停能力的精细指针」上才收起
+  // （`@media (hover: hover) and (pointer: fine)`），触摸设备上横条**常驻**——
+  // 理由是不敢让「回手机页的出口」变成摸不到的东西。现在改成触摸也能收，
+  // 代价是**必须留一条看得见的把手**，所以这几条要一起钉住。
+  const cssStart = html.indexOf('#mirrorHot {')
+  const cssEnd = html.indexOf('#mirrorFrame {')
+  assert.ok(cssStart > 0 && cssEnd > cssStart, '找不到 #mirrorHot 那段样式（锚点可能改名了）')
+  const css = html.slice(cssStart, cssEnd)
+
+  assert.doesNotMatch(css, /display:\s*none/,
+    '#mirrorHot 不能整个藏起来——它是拉出横条的唯一入口，藏了手机上就摸不到')
+  assert.match(css, /#mirrorHot::before/,
+    '要有一条看得见的把手，不然收起之后用户找不到出口（这正是当初不敢让手机收起的原因）')
+  // 收起逻辑本身不能还躲在媒体查询里：那正是"手机上常驻"的旧行为。
+  assert.doesNotMatch(html, /@media \(hover: hover\) and \(pointer: fine\)\s*\{[^}]*\.mv-hot/,
+    '收起逻辑不能只在桌面生效——触摸设备也要能收')
+  // 桌面与触摸走两套事件：桌面 hover、触摸 click。
+  assert.match(html, /barHasHover/, '要按设备能力分两套事件')
+  assert.match(html, /addEventListener\('click', function \(\) \{\s*if \(\$\('mirrorView'\)\.classList\.contains\('bar-on'\)\)/,
+    '触摸设备走"点一下切换"：已经开着就收起来，否则拉出来')
+})
