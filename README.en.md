@@ -163,7 +163,7 @@ Select the route that matches your current networking environment:
 | Route | Scenario | Prerequisites | Trade-offs |
 | :--- | :--- | :--- | :--- |
 | **LAN** | Phone and computer on the same Wi-Fi subnet | None | Ready immediately; disconnects upon leaving Wi-Fi |
-| **Tailscale** | Stable remote access across locations | Tailscale installed and logged in on both devices | Fixed private IP; optional HTTPS certificate support |
+| **Tailscale** | Stable remote access across locations | [Tailscale](https://tailscale.com/download) installed and logged in on both devices | Fixed private IP; optional HTTPS certificate support |
 | **Public Tunnel** | No public IP and no third-party client installation | Enable Cloudflare Tunnel in settings | Temporary URL rotates on each DSH restart; initial setup downloads ~50 MB binary |
 | **Feishu Long Connection** | Direct enterprise IM messaging without browser | Feishu custom bot credentials configured | No inbound ports required; bidirectional mobile approvals |
 

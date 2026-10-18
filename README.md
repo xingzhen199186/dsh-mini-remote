@@ -163,7 +163,7 @@ dsh plugin --profile web add C:\path\to\dsh-mini-remote
 | 通道类型 | 适用场景 | 依赖条件 | 特性与代价 |
 | :--- | :--- | :--- | :--- |
 | **局域网（LAN）** | 手机与电脑处于同一 Wi-Fi 子网 | 无额外客户端 | 配置即用；脱离当前局域网后立即断开 |
-| **Tailscale** | 跨地域移动访问，要求网络地址稳定 | 电脑与手机均安装并登录 Tailscale | 固定私网 IP；可额外申请 Tailscale HTTPS 证书 |
+| **Tailscale** | 跨地域移动访问，要求网络地址稳定 | 电脑与手机均安装并登录 [Tailscale](https://tailscale.com/download) | 固定私网 IP；可额外申请 Tailscale HTTPS 证书 |
 | **公网隧道** | 无公网 IP 且不便安装任何额外客户端 | 需开启 Cloudflare 隧道开关 | 每次重启 DSH 自动更换临时二级域名；初次开启下载约 50 MB 运行组件 |
 | **飞书长连接** | 仅依赖企业 IM，完全脱离浏览器 | 配置飞书自建应用机器人凭据 | 无需公网暴露，通过长连接双向收发，支持移动审批 |
 
