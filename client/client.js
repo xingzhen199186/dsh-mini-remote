@@ -125,6 +125,37 @@ window.__ModuleLoader__.load({
       screenBarWrap: { flex: 'none', overflow: 'hidden', transition: 'max-height .25s ease' },
       screenBar: { flex: 'none', display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', borderBottom: '1px solid var(--dsw-alias-border-l2,#e5e7eb)' },
       screenName: { fontSize: 12, color: 'var(--dsw-alias-label-tertiary,#8b93a1)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+      // —— 远程窗口里「挑目录 / 登记工作区」的弹层（2026-10-19 加）。
+      // 盖在整屏上（`position: fixed`），因为要压住那个跨源 iframe——它自己是个独立文档，
+      // 用 `position: absolute` 会被它盖住。
+      browseOverlay: {
+        position: 'fixed', left: 0, right: 0, top: 0, bottom: 0, zIndex: 100,
+        background: 'rgba(0,0,0,.45)', display: 'flex', alignItems: 'center',
+        justifyContent: 'center', padding: 16, boxSizing: 'border-box',
+      },
+      browseSheet: {
+        width: '100%', maxWidth: 520, maxHeight: '80vh', display: 'flex', flexDirection: 'column',
+        background: 'var(--dsw-alias-bg-base,#fff)', borderRadius: 12, overflow: 'hidden',
+        boxShadow: '0 12px 40px rgba(0,0,0,.25)',
+      },
+      browseHead: {
+        flex: 'none', display: 'flex', alignItems: 'center', gap: 10,
+        padding: '10px 12px', borderBottom: '1px solid var(--dsw-alias-border-l2,#e5e7eb)',
+      },
+      browseTitle: {
+        flex: '1 1 auto', fontSize: 12, overflow: 'hidden',
+        textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+      },
+      browseBody: { flex: '1 1 auto', overflowY: 'auto', padding: 8 },
+      browseRow: {
+        display: 'block', width: '100%', textAlign: 'left', padding: '8px 10px',
+        margin: '2px 0', borderRadius: 8, border: '1px solid transparent',
+        background: 'transparent', cursor: 'pointer', fontSize: 13,
+        color: 'var(--dsw-alias-label-primary,#1f2328)', overflow: 'hidden',
+        textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+      },
+      browseNote: { padding: '8px 10px', fontSize: 12, color: 'var(--dsw-alias-label-tertiary,#8b93a1)' },
+      browseErr: { padding: '8px 10px', fontSize: 12, color: 'var(--dsw-alias-label-danger,#c62828)' },
       // 框铺满面板：**父容器高度拿不准**（可能是定高，也可能是被内容撑开的），
       // 所以外层那一条给一个 320 的兜底高度，这一条自己 flex 撑满剩下的那一块。
       frameWrap: { position: 'relative', boxSizing: 'border-box', width: '100%', flex: '1 1 auto', minHeight: 320 },
@@ -2309,6 +2340,34 @@ window.__ModuleLoader__.load({
       var pokeState = useState(0);
       var setPoke = pokeState[1];
 
+      // —— 远程窗口里「挑目录 / 登记工作区」（2026-10-19 加）。
+      //
+      // 为什么需要它：远程窗口嵌的是**对面那台电脑的官方界面**，它那个「新建工作区」走官方
+      // `directoryPicker/pick`——官方实现是 `dialog.showOpenDialog`，**在对面那台的屏幕上**
+      // 弹系统对话框。用户坐在这一台前面，看不到也点不到，请求挂到超时只报一句
+      // `HTTP 502`。手机页早就绕开这件事了（自己读目录，见 lib/browse.js），这里把同一套
+      // 能力接到远程窗口：**这一台**列对面的目录、选一个、让对面登记成工作区。
+      //
+      // **必须用 useState**：`var` 在组件里每次渲染都会重置，值留不住。
+      var browseOpenState = useState(false);
+      var browseOpen = browseOpenState[0];
+      var setBrowseOpen = browseOpenState[1];
+      var browseAtState = useState('');
+      var browseAt = browseAtState[0];
+      var setBrowseAt = browseAtState[1];
+      var browseRootsState = useState(null);
+      var browseRoots = browseRootsState[0];
+      var setBrowseRoots = browseRootsState[1];
+      var browseDataState = useState(null);
+      var browseData = browseDataState[0];
+      var setBrowseData = browseDataState[1];
+      var browseBusyState = useState(false);
+      var browseBusy = browseBusyState[0];
+      var setBrowseBusy = browseBusyState[1];
+      var browseErrState = useState('');
+      var browseErr = browseErrState[0];
+      var setBrowseErr = browseErrState[1];
+
       useEffect(function () {
         return subscribeRemote(function () { setPoke(function (n) { return n + 1; }); });
       }, []);
@@ -2431,6 +2490,82 @@ window.__ModuleLoader__.load({
        * @param {*} inner 横条下面那一块（框 / 一句人话 / 「正在换票」）
        * @param {boolean} canAutoHide 横条允许自动收起吗——**只有"框已经显示出来"时传 true**
        */
+      /**
+       * 远程窗口里「挑目录 / 登记工作区」（2026-10-19 加）——四个动作。
+       *
+       * 这三个请求都打到**本机**（`/mini-remote/remotes/browse*`、`/remotes/workspaces`），
+       * 由宿主带着对面那台电脑的设备凭据去调它。面板**不能直连对面**：它在 `dsh-app://`
+       * 里，而对面那些接口没发 CORS 头，跨站直连会被浏览器拦掉。
+       */
+      function closeRemoteBrowse() {
+        setBrowseOpen(false);
+        setBrowseAt('');
+        setBrowseData(null);
+        setBrowseBusy(false);
+        setBrowseErr('');
+      }
+
+      /** 打开：先拉「常用位置」（主目录 / 最近用过 / 磁盘）。 */
+      function openRemoteBrowse() {
+        if (!remoteId) return;
+        setBrowseOpen(true);
+        setBrowseAt('');
+        setBrowseData(null);
+        setBrowseErr('');
+        if (browseRoots) return;          // 开过一次就够，不必每回都重拉
+        setBrowseBusy(true);
+        api('/mini-remote/remotes/browse/roots?id=' + encodeURIComponent(remoteId))
+          .then(function (body) { setBrowseRoots(body); setBrowseBusy(false); })
+          .catch(function (err) {
+            setBrowseBusy(false);
+            setBrowseErr((err && err.message) || String(err));
+          });
+      }
+
+      /** 进到某个目录（传 `''` = 回「常用位置」那一屏）。 */
+      function remoteBrowseTo(p) {
+        setBrowseAt(p || '');
+        setBrowseData(null);
+        setBrowseErr('');
+        if (!p) return;
+        setBrowseBusy(true);
+        api('/mini-remote/remotes/browse?id=' + encodeURIComponent(remoteId)
+          + '&path=' + encodeURIComponent(p))
+          .then(function (body) { setBrowseData(body); setBrowseBusy(false); })
+          .catch(function (err) {
+            setBrowseBusy(false);
+            setBrowseErr((err && err.message) || String(err));
+          });
+      }
+
+      /** 把当前这个目录登记成对面那台电脑的工作区。 */
+      function remoteBrowsePick() {
+        var at = browseAt;
+        if (!at || browseBusy) return;
+        setBrowseBusy(true);
+        setBrowseErr('');
+        postJson('/mini-remote/remotes/workspaces', { id: remoteId, path: at })
+          .then(function (r) {
+            var b = (r.body && typeof r.body === 'object') ? r.body : null;
+            if (!b || b.ok !== true) {
+              setBrowseBusy(false);
+              setBrowseErr((b && b.error) || ('登记失败：服务返回了 HTTP ' + r.status + '。'));
+              return undefined;
+            }
+            // 登记成功：收起弹层、清掉缓存，让对面那台下次进来看到新工作区。
+            setBrowseOpen(false);
+            setBrowseBusy(false);
+            setBrowseAt('');
+            setBrowseData(null);
+            setBrowseRoots(null);
+            return undefined;
+          })
+          .catch(function (err) {
+            setBrowseBusy(false);
+            setBrowseErr('登记失败：' + ((err && err.message) || String(err)));
+          });
+      }
+
       function remoteScreen(name, inner, canAutoHide) {
         // 两个条件都得成立才收：这一屏允许（canAutoHide）且这台设备能悬停（HAS_HOVER）。
         var collapsible = Boolean(canAutoHide) && HAS_HOVER;
@@ -2462,6 +2597,13 @@ window.__ModuleLoader__.load({
                 style: styles.btn,
               }, '← 返回列表'),
               h('div', { style: styles.screenName }, name ? name : '另一台电脑'),
+              // 「新建工作区」（2026-10-19 加）：对面官方界面里那个按钮会**在对面屏幕上**
+              // 弹系统对话框，这边点不到。这一枚走我们自己的路：列对面对面的目录、让对面登记。
+              h('button', {
+                type: 'button',
+                onClick: function () { openRemoteBrowse(); },
+                style: Object.assign({}, styles.btn, { flex: 'none' }),
+              }, '新建工作区'),
               h('button', {
                 type: 'button',
                 disabled: Boolean(remoteBusyId),
@@ -2477,6 +2619,71 @@ window.__ModuleLoader__.load({
             ),
           ),
           inner,
+          // 目录选择弹层：**关掉就整个不渲染**，不常驻。
+          browseOpen ? (function () {
+            var rows = [];
+            if (browseErr) rows.push(h('div', { key: 'err', style: styles.browseErr }, browseErr));
+            if (browseBusy) {
+              rows.push(h('div', { key: 'busy', style: styles.browseNote }, '正在读取…'));
+            } else if (!browseAt) {
+              if (!browseRoots) {
+                rows.push(h('div', { key: 'none', style: styles.browseNote }, '正在读取常用位置…'));
+              } else {
+                rows.push(h('div', { key: 'note', style: styles.browseNote },
+                  '挑一个文件夹，登记成那台电脑的工作区。'));
+                var pairs = [['主目录', browseRoots.home]]
+                  .concat((browseRoots.recent || []).map(function (p) { return ['最近用过', p]; }))
+                  .concat((browseRoots.drives || []).map(function (p) { return ['磁盘', p]; }));
+                pairs.forEach(function (pair, i) {
+                  if (!pair[1]) return;
+                  rows.push(h('button', {
+                    key: 'r' + i, type: 'button',
+                    onClick: function () { remoteBrowseTo(pair[1]); },
+                    style: styles.browseRow,
+                  }, pair[0] + '：' + pair[1]));
+                });
+              }
+            } else if (!browseData) {
+              rows.push(h('div', { key: 'none', style: styles.browseNote }, '正在读取…'));
+            } else {
+              var chain = browseData.ancestors || [];
+              var up = chain.length > 1 ? chain[chain.length - 2].path : '';
+              rows.push(h('button', {
+                key: 'up', type: 'button',
+                onClick: function () { remoteBrowseTo(up); },
+                style: styles.browseRow,
+              }, '← 上一级'));
+              rows.push(h('button', {
+                key: 'pick', type: 'button',
+                onClick: remoteBrowsePick,
+                style: Object.assign({}, styles.browseRow, { fontWeight: '600' }),
+              }, '就选这个目录'));
+              var dirs = browseData.dirs || [];
+              dirs.forEach(function (d, i) {
+                rows.push(h('button', {
+                  key: 'd' + i, type: 'button',
+                  onClick: function () { remoteBrowseTo(d.path); },
+                  style: styles.browseRow,
+                }, d.name));
+              });
+              if (!dirs.length) {
+                rows.push(h('div', { key: 'empty', style: styles.browseNote }, '这个目录下面没有子目录。'));
+              }
+              if (browseData.truncated) {
+                rows.push(h('div', { key: 'cut', style: styles.browseNote },
+                  '只列了前 ' + dirs.length + ' 个，共 ' + browseData.total + ' 个。'));
+              }
+            }
+            return h('div', { key: 'browse', style: styles.browseOverlay },
+              h('div', { style: styles.browseSheet },
+                h('div', { style: styles.browseHead },
+                  h('div', { style: styles.browseTitle }, browseAt ? browseAt : '挑一个文件夹'),
+                  h('button', { type: 'button', onClick: closeRemoteBrowse, style: styles.btn }, '关闭'),
+                ),
+                h('div', { style: styles.browseBody }, rows),
+              ),
+            );
+          })() : null,
         );
       }
 
