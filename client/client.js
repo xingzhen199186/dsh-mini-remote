@@ -219,6 +219,22 @@ window.__ModuleLoader__.load({
     /** `id → { text, revoked }`：那台电脑上一次为什么没成，一句话。 */
     var remoteProblems = {};
 
+    /**
+     * **把「远程窗口」这一趟彻底清干净**（2026-10-19 提出来）。
+     *
+     * 原本这段只写在退出这一屏那一处（`leaveRemotePanel`）。提成独立函数是因为它有了
+     * 第二个调用者：**测试**。那批用例假设「每个场景互不影响」，而保活会让状态跨场景
+     * 留下——它们每次开始前必须能把这几样清掉。
+     *
+     * 这个函数**只清状态、不碰任何渲染**：单独加上它跑一遍测试，应该一条都不红。
+     */
+    function resetRemoteSession() {
+      remoteTarget = null;
+      remoteWin = null;
+      remoteBusyId = '';
+      remoteProblems = {};
+    }
+
     // —— 「框没打开就自动重取一张票、再试一次」用的两样（2026-10-17 补）。
     //
     // 为什么要有它：2026-10-17 拆掉了"面板每 25 秒自己换一张票"那个机制（票只在开门那一下
@@ -447,8 +463,9 @@ window.__ModuleLoader__.load({
      * （见 onDocumentClick）。
      */
     function leaveRemoteScreen() {
+      // **只清"在看哪一台"，不清 `remoteWin`**（2026-10-19 保活）：那一屏的 iframe 要留着。
+      // 「彻底放下这一趟」只有一处——`resetRemoteSession`（退出这一屏时调）。
       remoteTarget = null;
-      remoteWin = null;
       notifyRemote();
     }
 
@@ -461,6 +478,13 @@ window.__ModuleLoader__.load({
      */
     function openRemoteScreen(one) {
       if (remoteBusyId) return;
+      // **同一台、而且那一屏还活着 → 直接回去，不重新取票**（2026-10-19 保活）。
+      // 重新取票不只是白跑一趟，还会把整个界面重载一遍——那正是要省掉的等待。
+      if (remoteWin && remoteWin.url && remoteWin.id === one.id) {
+        remoteTarget = { id: one.id, name: one.name || remoteWin.name || '' };
+        notifyRemote();
+        return;
+      }
       remoteTarget = { id: one.id, name: one.name || '' };
       fetchRemoteTicket(one.id, one.name);
     }
@@ -2423,9 +2447,21 @@ window.__ModuleLoader__.load({
         return function () { alive = false; };
       }, [tries]);
 
-      var remoteId = remoteTarget ? remoteTarget.id : '';
-      var remoteName = remoteTarget ? remoteTarget.name : '';
-      var remoteUrl = (remoteWin && remoteWin.id === remoteId && remoteWin.url) ? remoteWin.url : '';
+      // 保活（2026-10-19）：`remoteTarget` 空、但上一台那一屏还活着时，用 `remoteWin` 兜底
+      // 算出 id / 名字 / 地址——这样 `remoteScreen` 照旧被渲染出来（它自己会藏起来），
+      // iframe 于是不会被卸载。「彻底清」只在 `resetRemoteSession` 那一处收口。
+      var liveWin = (remoteWin && remoteWin.url) ? remoteWin : null;
+      var remoteId = remoteTarget ? remoteTarget.id : (liveWin ? liveWin.id : '');
+      var remoteName = remoteTarget ? remoteTarget.name : (liveWin ? liveWin.name : '');
+      var remoteUrl = (liveWin && liveWin.id === remoteId && liveWin.url) ? liveWin.url : '';
+
+      // 名单那一屏要用的「重新读一遍」。**提到前面来**：`remoteScreen` 在"在看名单"时
+      // 要把名单一起画出来（保活那一层），那时它得拿到这一枚。
+      var again = h('button', {
+        type: 'button',
+        onClick: function () { setTries(function (n) { return n + 1; }); },
+        style: styles.btn,
+      }, '重新读一遍');
 
       // 换一台 / 退回名单 / 重新进来：顶上那条回到收起状态。
       // 不重置的话，下次点开是展开的——而"展开"本该只由鼠标碰顶那一下产生。
@@ -2612,7 +2648,7 @@ window.__ModuleLoader__.load({
         var collapsible = Boolean(canAutoHide) && HAS_HOVER;
         var hidden = collapsible && !barOpen;
 
-        return h('div', { style: styles.screen },
+        var root = h('div', { style: styles.screen },
           // 感应带：盖在最顶上那 16px 上（见上面那段"不能省"）。
           collapsible ? h('div', {
             style: styles.screenHot,
@@ -2754,6 +2790,18 @@ window.__ModuleLoader__.load({
             );
           })() : null,
         );
+
+        // 保活（2026-10-19）：正在看那一台 → 照旧只返回它。
+        if (remoteTarget) return root;
+
+        // 在看名单、但上一台那一屏还活着（`liveWin` 兜底出来的）：**把它藏着留在 DOM 里**，
+        // 名单画在上面。藏着而不是拆掉——`display:none` 不会卸载 iframe，切回来只是露出来，
+        // 不走一遍「取票 + 重新加载」。（真正要彻底放下这一趟时走 `resetRemoteSession`，
+        // 那时 `remoteWin` 被清、这一屏才真的被拆掉。）
+        return h('div', { style: { position: 'relative', width: '100%', height: '100%' } },
+          h('div', { key: 'kept-screen', style: { display: 'none' } }, root),
+          remoteListScreen(list, listError, again),
+        );
       }
 
       // —— **这里原来有一个"票不新鲜了就现换一张"的 effect**（2026-10-17 拆掉）。
@@ -2879,11 +2927,6 @@ window.__ModuleLoader__.load({
       }
 
       // 没在看某一台：**名单**（这一屏的第一层）。
-      var again = h('button', {
-        type: 'button',
-        onClick: function () { setTries(function (n) { return n + 1; }); },
-        style: styles.btn,
-      }, '重新读一遍');
       return remoteListScreen(list, listError, again);
     }
 
@@ -2919,8 +2962,8 @@ window.__ModuleLoader__.load({
       // 退出就把"另一台电脑"这一趟放下：下次点侧栏那一条，看到的是**名单**（这一屏的第一层）。
       // 不放的话，隔了半天再点那一条会去开一台早就没在看的电脑。
       if (remoteTarget || remoteWin) {
-        remoteTarget = null;
-        remoteWin = null;
+        // 退出这一屏 = **彻底放下**（和「返回列表」不同：那一个只清一半、留着那一屏保活）。
+        resetRemoteSession();
         notifyRemote();
       }
       if (!layoutFace) return;
@@ -3054,6 +3097,9 @@ window.__ModuleLoader__.load({
     exports.name = 'dsh-mini-remote';
     exports.inject = ['slots'];
     exports.apply = apply;
+    // 给测试用：把「远程窗口」那一趟彻底清干净（见 `resetRemoteSession` 那段说明）。
+    // 生产路径上没有调用者——`leaveRemotePanel` 走同一个函数，但不经过这个出口。
+    exports.resetRemoteSession = resetRemoteSession;
     return module.exports;
   }
 });

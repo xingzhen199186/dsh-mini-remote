@@ -163,6 +163,15 @@ const failures = [];
 
 async function check(label, fn) {
   try {
+    // 2026-10-19：**每条用例开始前把「远程窗口」那一趟清干净**。
+    //
+    // 那些状态（`remoteTarget` / `remoteWin` / `remoteBusyId` / `remoteProblems`）是
+    // **模块级**的，会跨用例、跨测试块留下。保活之后「返回列表」不再清 `remoteWin`，
+    // 于是上一个用例的票会让本用例的取票根本不发生——一眼假红，而且是随机红。
+    //
+    // 清在这里而不是各个 `fresh()` 里：`fresh()` 只覆盖了某一个测试块，清在运行器里
+    // 才覆盖得上全部（第一个用例时 `mod` 还没造出来，跳过即可）。
+    if (mod && typeof mod.resetRemoteSession === 'function') mod.resetRemoteSession();
     await fn();
     passed += 1;
     console.log(`  ✓ ${label}`);
@@ -207,7 +216,9 @@ const fakeRequire = (spec) => {
   throw new Error(`客户端模块只允许 require("react")，实际请求了 "${spec}"`);
 };
 
-let mod = null;
+// `var` 而不是 `let`：`check()`（在它之前定义）里要读它做「每条用例前清场」。
+// `let` 在 TDZ 里，`check` 早于这一行执行时连 `typeof` 都会抛 ReferenceError。
+var mod = null;
 console.log('\n[2] factory(require) 的返回值');
 await check('factory 不抛错并返回 exports', () => {
   mod = captured.factory(fakeRequire);
@@ -373,7 +384,11 @@ await check('点某一台 → 换**那一台**的票，框的地址里只有票�
   back.props.onClick();
   box.harness.runEffects();   // 回到名单那一层：名单的 effect 重新读一遍
   await settlePanel();
-  assert.equal(byType(box.tree, 'iframe').length, 0, '回到名单就不该还嵌着那一台');
+  // 2026-10-19 **保活**：回到名单时那一屏**不再卸载**，只是藏起来（切回来秒开，
+  // 不走一遍「取票 + 重新加载」）。所以这里断言的是"还在"，不再是"没了"。
+  // 真正会卸载它的只有「退出这一屏」（`resetRemoteSession`）。
+  assert.equal(byType(box.tree, 'iframe').length, 1,
+    '保活：那一屏留在 DOM 里（切回来不用重新加载），只是藏在名单后面');
   assert.ok(panelRow(box, PANEL_FAR.id), '名单又回来了（这一屏没离开）');
   box.harness.unmount();
 });
@@ -2313,7 +2328,9 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
     });
     assert.equal(layoutCalls.length, atPanel, '这一下只上一层：不许切面板');
     const onList = await drawPanel();
-    assert.equal(byType(onList.tree, 'iframe').length, 0, '退回名单就不该还嵌着那一台');
+    // 2026-10-19 **保活**（同上）：退回名单不卸载那一屏，只藏起来。
+    assert.equal(byType(onList.tree, 'iframe').length, 1,
+      '保活：退回名单时那一屏留在 DOM 里，只是藏起来了');
     assert.match(textOf(onList.tree), /书房那台/, '退回的是名单那一层');
     onScreen.harness.unmount();
     onList.harness.unmount();
