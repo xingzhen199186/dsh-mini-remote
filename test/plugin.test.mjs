@@ -4196,11 +4196,15 @@ test('自检：该回答的那几样一样不缺（版本 / 进程 / 接口 / �
     '/mini-remote/remote-access', '/mini-remote/devices', '/mini-remote/devices/rename',
     '/mini-remote/devices/revoke', '/mini-remote/pair', '/mini-remote/remotes',
     '/mini-remote/remotes/add', '/mini-remote/remotes/window', '/mini-remote/remotes/forget',
+    // 远程窗口里「挑目录 / 登记工作区」（2026-10-19 加）：面板在 dsh-app:// 里，而 A 的接口
+    // 没有 CORS，跨站直连会被拦——所以由宿主这三条转一手。
+    '/mini-remote/remotes/browse/roots', '/mini-remote/remotes/browse',
+    '/mini-remote/remotes/workspaces',
     '/mini-remote/selfcheck',
   ]) {
     assert.ok(paths.includes(want), `清单里少了 ${want}`)
   }
-  assert.equal(body.routes.length, 17, '十七条注册就报十七条（清单和注册同一处发生）')
+  assert.equal(body.routes.length, 20, '二十条注册就报二十条（清单和注册同一处发生）')
   assert.ok(body.routes.every((one) => one.mounted === true), '刚起来的这一份，条条都该是"在"')
 
   // ④ 开关：默认关
