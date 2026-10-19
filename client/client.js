@@ -156,6 +156,13 @@ window.__ModuleLoader__.load({
       },
       browseNote: { padding: '8px 10px', fontSize: 12, color: 'var(--dsw-alias-label-tertiary,#8b93a1)' },
       browseErr: { padding: '8px 10px', fontSize: 12, color: 'var(--dsw-alias-label-danger,#c62828)' },
+      // 「新建文件夹」那一行：输入框 + 建 + 取消。
+      browseMkdirRow: { display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px' },
+      browseInput: {
+        flex: '1 1 auto', minWidth: 0, padding: '6px 8px', fontSize: 13,
+        border: '1px solid var(--dsw-alias-border-l2,#e5e7eb)', borderRadius: 8,
+        background: 'var(--dsw-alias-bg-base,#fff)', color: 'inherit',
+      },
       // 框铺满面板：**父容器高度拿不准**（可能是定高，也可能是被内容撑开的），
       // 所以外层那一条给一个 320 的兜底高度，这一条自己 flex 撑满剩下的那一块。
       frameWrap: { position: 'relative', boxSizing: 'border-box', width: '100%', flex: '1 1 auto', minHeight: 320 },
@@ -2367,6 +2374,13 @@ window.__ModuleLoader__.load({
       var browseErrState = useState('');
       var browseErr = browseErrState[0];
       var setBrowseErr = browseErrState[1];
+      // 「新建文件夹」：输入框露不露、里面打的字。
+      var mkdirOpenState = useState(false);
+      var mkdirOpen = mkdirOpenState[0];
+      var setMkdirOpen = mkdirOpenState[1];
+      var mkdirNameState = useState('');
+      var mkdirName = mkdirNameState[0];
+      var setMkdirName = mkdirNameState[1];
 
       useEffect(function () {
         return subscribeRemote(function () { setPoke(function (n) { return n + 1; }); });
@@ -2566,6 +2580,33 @@ window.__ModuleLoader__.load({
           });
       }
 
+      /** 在当前这个目录下新建一个文件夹；建完刷新这一屏，让新文件夹当场看得见。 */
+      function remoteBrowseMkdir() {
+        var at = browseAt;
+        var name = String(mkdirName || '').trim();
+        if (!at || !name || browseBusy) return;
+        setBrowseBusy(true);
+        setBrowseErr('');
+        postJson('/mini-remote/remotes/browse/mkdir', { id: remoteId, path: at, name: name })
+          .then(function (r) {
+            var b = (r.body && typeof r.body === 'object') ? r.body : null;
+            if (!b || b.ok !== true) {
+              setBrowseBusy(false);
+              setBrowseErr((b && b.error) || ('建文件夹失败：服务返回了 HTTP ' + r.status + '。'));
+              return undefined;
+            }
+            setMkdirOpen(false);
+            setMkdirName('');
+            setBrowseBusy(false);
+            remoteBrowseTo(at);
+            return undefined;
+          })
+          .catch(function (err) {
+            setBrowseBusy(false);
+            setBrowseErr('建文件夹失败：' + ((err && err.message) || String(err)));
+          });
+      }
+
       function remoteScreen(name, inner, canAutoHide) {
         // 两个条件都得成立才收：这一屏允许（canAutoHide）且这台设备能悬停（HAS_HOVER）。
         var collapsible = Boolean(canAutoHide) && HAS_HOVER;
@@ -2653,6 +2694,34 @@ window.__ModuleLoader__.load({
                 onClick: function () { remoteBrowseTo(up); },
                 style: styles.browseRow,
               }, '← 上一级'));
+              rows.push(h('button', {
+                key: 'mkdir', type: 'button',
+                onClick: function () { setMkdirOpen(true); setMkdirName(''); },
+                style: styles.browseRow,
+              }, '＋ 新建文件夹'));
+              if (mkdirOpen) {
+                rows.push(h('div', { key: 'mkdirRow', style: styles.browseMkdirRow },
+                  h('input', {
+                    type: 'text',
+                    value: mkdirName,
+                    placeholder: '新文件夹的名字',
+                    autoComplete: 'off',
+                    onChange: function (e) { setMkdirName(e && e.target ? e.target.value : ''); },
+                    style: styles.browseInput,
+                  }),
+                  h('button', {
+                    type: 'button',
+                    disabled: browseBusy || !String(mkdirName || '').trim(),
+                    onClick: remoteBrowseMkdir,
+                    style: styles.btn,
+                  }, '建'),
+                  h('button', {
+                    type: 'button',
+                    onClick: function () { setMkdirOpen(false); setMkdirName(''); },
+                    style: styles.btn,
+                  }, '取消'),
+                ));
+              }
               rows.push(h('button', {
                 key: 'pick', type: 'button',
                 onClick: remoteBrowsePick,
