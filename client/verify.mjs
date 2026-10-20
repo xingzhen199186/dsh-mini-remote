@@ -641,12 +641,14 @@ await check('自动重取也没成：**第二次**到点才给人话 + 一个「
   await settlePanel();
   assert.equal(ticketAsks(box), 2,
     '**自动重取只有一次**：这里冒出第三张票，就是"每 20 秒自动重试"那种新的无界行为');
-  assert.equal(byType(box.tree, 'iframe').length, 0, '到点了：空白框要被换掉（不能永远挂在那儿）');
-  assert.match(textOf(box.tree), /一直没打开/, '要有那句人话');
-  assert.match(textOf(box.tree), /自动再试了一次/,
-    '走到这儿一定自动试过了：那句话要说得出这一趟，不然和用户真实等的时间对不上');
-  assert.ok(byType(box.tree, 'button').some((b) => textOf(b) === '再试一次'), '要给人一个下一步');
-  assert.match(textOf(box.tree), /← 返回列表/, '出错也不是死胡同');
+  // 2026-10-20 改了行为：**框不再被换掉**，改成在它上面叠一条提示。
+  // 理由：跨源读不到框里，`onLoad` 可能因为对面某个资源迟迟不完成而永不触发——那时
+  // 界面其实正常显示着，把它换成一句"一直没打开"才是真伤到用户的那一面。
+  // 所以这里断言的正好反过来：**框还在**，提示条也出来了。
+  assert.equal(byType(box.tree, 'iframe').length, 1,
+    '框要留着（我们判断不了它开没开，不能替用户把它删掉）');
+  assert.match(textOf(box.tree), /还没收到「加载完成」的信号/, '框上面要有一条提示');
+  assert.match(textOf(box.tree), /自动再试了一次|再试一次/, '提示里要给出下一步');
   await dropPanel(box);
 }));
 

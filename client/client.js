@@ -2357,6 +2357,16 @@ window.__ModuleLoader__.load({
       // 和立钟的那个 effect 隔着一次渲染——留在一个只属于那个 effect 的闭包里，`onLoad` 够不着。
       // 2026-10-17 修的就是这个：框加载好了，那个钟却还挂着，到点照样把正常的界面换掉。
       var stallTimerRef = useRef(null);
+      // **哪个地址已经成功加载过一次**（2026-10-20 补）。
+      //
+      // 2026-10-17 那次修的是"onLoad 时清掉那个钟"，但没修全：`onLoad` **一辈子只会响一次**，
+      // 而 effect 会因为 `remoteUrl` 变化**重新立钟**——新的那口钟没有任何 onLoad 来清它，
+      // 20 秒一到照样把已经好好显示着的界面换成「一直没打开」。用户的症状正是这个：
+      // 窗口先正常打开、过一会儿突然消失、跳回报错。
+      //
+      // 现在的口径：**同一个地址只要成功加载过，就不许再立钟**。记的是地址（不是布尔），
+      // 所以换了新票（新地址）时兜底照常工作——那时确实还没加载过。
+      var frameLoadedRef = useRef('');
       // 顶上那条横条现在是不是滑出来了（见 `remoteScreen`）。**只有"框正常显示 + 有悬停能力"
       // 时才可能收起**，其余状态它常驻——出错那一屏全靠它的「再试一次」。
       var barState = useState(false);
@@ -2840,6 +2850,12 @@ window.__ModuleLoader__.load({
       // "框里一个文档都没有"这一种；另外两种的出路是顶上那枚永远在的「再试一次」。
       useEffect(function () {
         if (!remoteId || !remoteUrl) return undefined;
+        // **这个地址已经成功加载过 → 不立钟**（2026-10-20，见 `frameLoadedRef` 那段）。
+        // 少这一条，`remoteUrl` 一变就重新立一口没人清的钟，20 秒后把好好的界面换掉。
+        if (frameLoadedRef.current === remoteUrl) {
+          setStalled(false);
+          return undefined;
+        }
         setStalled(false);
         stallTimerRef.current = setTimeout(function () {
           // **先自动重取一张票、再试一次（只这一次）**：票是一次性的、真机上 30 秒就作废，
@@ -2880,21 +2896,20 @@ window.__ModuleLoader__.load({
         if (!remoteUrl) {
           return remoteScreen(remoteName, h('div', { style: styles.panelMsg }, '正在向那台电脑换一张通行证…'));
         }
-        if (stalled) {
-          // 走到这儿一定已经自动重取过一次了（见上面那个钟里那一段）：把那一下说出来，
-          // 不然"等了 20 秒"这句话和用户真实等的时间对不上。
-          return remoteScreen(remoteName, remoteProblemPanel(remoteId, remoteName, {
-            revoked: false,
-            text: '那台电脑的界面一直没打开（等了 ' + Math.round(REMOTE_FRAME_WAIT_MS / 1000) + ' 秒没看到它，'
-              + '自动再试了一次还是没看到）。\n'
-              // 三个原因并列，**浏览器那一条不能省**：cookie 被拒的后果是静默的（框停在
-              // 「Loading plugins…」），用户只会去怀疑对面没开或网络不通，而修法完全不同。
-              + '可能是它刚重启、这会儿连不上；也可能是你这边的浏览器拦了跨站凭据'
-              + '（开了「阻止第三方 cookie」或严格隐私模式时常见——换一个浏览器试试）。\n'
-              + '点顶上那条横条里的「再试一次」换一张通行证再开一次。',
-          }));
-        }
+        // **不再把框换掉**（2026-10-20 改）：`stalled` 时只在框上面叠一条提示（见下面那段）。
+        //
+        // 原来的做法是把整个框替换成"一直没打开"+「再试一次」。问题在于：跨源读不到框里，
+        // **我们判断不了它到底开没开**——对面界面里只要有一个资源迟迟不完成，`onLoad` 就
+        // 永远不触发（跨源 iframe 的 load 要等它自己的文档加载完），于是**界面明明正常显示着，
+        // 20 秒一到却被我们换掉**。用户看到的就是「窗口先打开、过一会儿突然消失、跳回报错」。
+        //
+        // 现在留下来让人自己看：真白着，他一眼就知道，点「再试一次」；开着就继续用。
         return remoteScreen(remoteName, h('div', { style: styles.frameBox },
+          stalled
+            ? h('div', { style: styles.frameNote },
+              '等了 ' + Math.round(REMOTE_FRAME_WAIT_MS / 1000) + ' 秒还没收到「加载完成」的信号。'
+              + '如果下面一直白着，点顶上横条里的「再试一次」；看着正常就忽略这条。')
+            : null,
           // 重试那一次的说明条（见 REMOTE_AUTO_RETRY_TEXT）：框上面先顶一条，框照旧铺满下面。
           // 框 load 回来那一下它就收掉（见 onLoad）。
           remoteAutoRetry ? h('div', { style: styles.frameNote }, REMOTE_AUTO_RETRY_TEXT) : null,
@@ -2915,6 +2930,9 @@ window.__ModuleLoader__.load({
               onLoad: function () {
                 clearTimeout(stallTimerRef.current);
                 stallTimerRef.current = null;
+                // **记下"这个地址成功加载过"**（2026-10-20，见 `frameLoadedRef` 那段）：
+                // 之后同一个地址再触发 effect 也不会立钟，界面不会被一句错话盖掉。
+                frameLoadedRef.current = remoteUrl;
                 setStalled(false);
                 // 框真的回来了：那句"正在再试一次"就该收掉（见 remoteAutoRetry）。
                 if (remoteAutoRetry) {
