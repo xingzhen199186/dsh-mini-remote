@@ -3464,6 +3464,18 @@ test('执行轨迹·活气：思考和正文各走各的路，落盘即清，别
   assert.ok(!liveAll.some((f) => String(f.data.detail).includes('这是最终回答的正文')),
     '正文不许混进思考那条 detail（两条路分开）')
 
+  // **工具参数也流**（2026-10-21 用户要求补上）：`argumentsDelta` + 工具名，
+  // 前端拿它显示「正在调用 bash · ls -la …」那种半截命令。
+  stream({
+    agent,
+    frame: { type: 'chunk', chunk: { type: 'tool-call-delta', name: 'bash', argumentsDelta: '{"command":"ls -la', index: 2 } },
+  })
+  await new Promise((resolve) => setTimeout(resolve, 400))
+  const toolFrames = full.frames.filter((f) => f.name === 'trajectory-live' && f.data.kind === 'tool')
+  assert.equal(toolFrames.length, 1, '工具参数也要顺出来')
+  assert.ok(String(toolFrames[0].data.delta).includes('ls -la'), '参数走 delta')
+  assert.equal(toolFrames[0].data.name, 'bash', '要带工具名（前端才知道显示「正在调用 bash」）')
+
   // 落盘即清：这条思考变成真条目了，影子就散（找"思考那一路的清空帧"，不能按帧序号猜）
   feed(session, ev('turn/start', { turn: 1 }))
   feed(session, ev('assistant/message', {

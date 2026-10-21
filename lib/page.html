@@ -2290,6 +2290,13 @@
      * 所以关掉时服务端连正文帧都不发，是真省流量。
      */
     streaming: localStorage.getItem('dshMiniStreaming') === 'on',
+    /**
+     * **正在拼的那个工具调用**（2026-10-21）：`{ name, args }`。
+     * 模型一边写参数（JSON），轨迹的组头一边把半截命令/路径顺出来——
+     * 和 PC 上「正在调用 bash · ls -la …」那种感觉对齐。
+     * 落定（`tool/call` 进轨迹）时清空，由真条目接管。
+     */
+    liveTool: null,
     running: false,
     subagentsRunning: false,
     sessions: [],
@@ -2482,6 +2489,9 @@
     if (add.length) {
       state.trajectoryLive = '';
       state.live = '';
+      // 工具调用落定了（真条目已经进轨迹）：那半截参数该让位，否则标题行会一直挂着
+      // 一条已经执行完的命令。
+      state.liveTool = null;
     }
     var upd = Array.isArray(frame.update) ? frame.update : [];
     for (var k = 0; k < upd.length; k++) {
@@ -4406,6 +4416,25 @@
       text: first + '，' + labels.slice(1).join('，') + (order.length > 3 ? '等' : ''),
     };
   }
+  /**
+   * 工具调用**正在拼的那半截参数**，压成一行给人看（2026-10-21）。
+   *
+   * 参数是 JSON（`{"path":"I:\\…","content":"…"}`），原样贴在标题行上是一屏噪音。
+   * 这里只做两件事：**去掉键名和引号这类记号**、**留最后一截**——真正要看的是路径或命令
+   * 那一段，它总在尾巴上。宁可短、宁可糙，也不要把一整坨 JSON 端给用户。
+   */
+  function liveToolTail(args) {
+    var s = String(args || '');
+    if (!s) return '';
+    var tail = s
+      .replace(/"[a-z_]+"\s*:\s*/gi, '')   // 键名
+      .replace(/[[\]{}"]/g, '')            // 括号和引号
+      .replace(/\\n/g, ' ')                // 转义换行
+      .replace(/\s+/g, ' ')
+      .trim();
+    return tail.length > 120 ? '…' + tail.slice(-119) : tail;
+  }
+
   /** 组头的图标与标题：跑着是活动词（正在…），收官是组合标题。 */
   function trajGroupTitle(g) {
     if (g.state === 'running') {
@@ -4418,7 +4447,16 @@
       var kind = last && last.kind === 'tool' ? trajActivity(last.name || '') : 'thinking';
       // 活片段优先（正在想的那一句，随打字刷新，PC 的 label · detail 同款）；
       // 没有片段才退到条目自己的摘要。
-      var prose = state.trajectoryLive
+      //
+      // **2026-10-21 加一段**：模型正在拼工具参数时，把**半截命令**顺出来（流式开关
+      // 开着才有这个数据）。优先于思考片段——因为走到工具这一步，思考已经结束了。
+      var prose = '';
+      if (state.liveTool && (state.liveTool.args || state.liveTool.name)) {
+        kind = trajActivity(state.liveTool.name || '');
+        prose = liveToolTail(state.liveTool.args);
+      }
+      prose = prose
+        || state.trajectoryLive
         || (last && last.kind === 'think' ? trajFirstLine(last.output) : '');
       var plain = !prose && last ? (last.summary || '') : '';
       // 右边那半边是模型原话时走行内渲染：**加粗**、`代码` 要成样式，不是把记号原样贴在
@@ -5865,6 +5903,24 @@
           return;
         }
         state.live = (state.live || '') + frame.delta;
+        render();
+        return;
+      }
+      if (frame.kind === 'tool') {
+        // 工具参数那一路：**只有完整模式 + 流式开关开着**才用。
+        // 开关关着时服务端根本不会推（`?stream=1` 没带），这里是第二道闸，防着将来协议变化。
+        if (!state.streaming) return;
+        if (state.mode !== 'full') return;
+        if (typeof frame.delta !== 'string' || !frame.delta) {
+          if (state.liveTool) { state.liveTool = null; render(); }
+          return;
+        }
+        var prev = state.liveTool || { name: '', args: '' };
+        state.liveTool = {
+          // `name` 只在第一个 delta 上带，后面沿用记着的那个。
+          name: typeof frame.name === 'string' && frame.name ? frame.name : prev.name,
+          args: (prev.args || '') + frame.delta,
+        };
         render();
         return;
       }
