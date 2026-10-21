@@ -2009,6 +2009,29 @@
       从服务器发出去，不受浏览器这条规矩限制。
     -->
 
+    <!--
+      **流式输出**（2026-10-21 用户要求做成全局切换）。
+
+      开着：回答正文一个字一个字往外冒，跟你在这台电脑上看到的节奏一样。
+      关着：等整段落定再显示（原来的样子）。
+
+      **单帧模式不跟**（用户拍板）：那一屏就是"只看最终那一句"，字一个个往外冒反而毁掉它。
+      所以开到「单帧」时这里的开关是灰的（见 syncSeg 里那句 disabled）。
+
+      开关状态存本机，但它决定的是连上去要不要带 `stream=1`——**关掉时服务端连正文帧都不发**，
+      是真省流量，不是收到了再丢掉。
+    -->
+    <div class="row">
+      <div>
+        <div class="label">流式输出</div>
+        <div class="hint">回答一个字一个字地出来；关掉就等整段写完再显示</div>
+      </div>
+      <div class="seg" id="segStreaming">
+        <button data-streaming="on">开</button>
+        <button data-streaming="off">关</button>
+      </div>
+    </div>
+
     <div class="row">
       <div>
         <div class="label">提示音与震动</div>
@@ -2257,6 +2280,16 @@
     // 锁屏也能提醒（系统通知）。默认关着——它要用户主动点一下才会申请权限，
     // 不能替他决定。明文连接下这一项永远是空转的，见下面「锁屏也能提醒」那一段。
     notify: localStorage.getItem('dshMiniNotify') === 'on',
+    /**
+     * **流式开关**（2026-10-21，用户要求做成全局切换）：开着时回答正文一个字一个字往外冒，
+     * 关着时等整段落定再显示（就是原来的样子）。
+     *
+     * 默认**关**：先保住现在的观感，想试的人自己去设置页开。
+     * **单帧模式不跟**（用户拍板）——那一屏就是"只看最终那一句"，流式反而毁掉它。
+     * 开关状态存在本机（和主题、字号、声音一样），但它决定的是连上去要不要带 `stream=1`，
+     * 所以关掉时服务端连正文帧都不发，是真省流量。
+     */
+    streaming: localStorage.getItem('dshMiniStreaming') === 'on',
     running: false,
     subagentsRunning: false,
     sessions: [],
@@ -2444,7 +2477,12 @@
       }
     }
     // 真条目进来了：活片段让位（服务端也会喊清，这里兜一道——影子不许盖住落定的字）。
-    if (add.length) state.trajectoryLive = '';
+    // 2026-10-21：正文那一路（`state.live`）同一个道理——落定的字到了，流式的影子必须撤，
+    // 否则屏幕上会出现"同一段话两遍"（影子一遍、真条目一遍）。
+    if (add.length) {
+      state.trajectoryLive = '';
+      state.live = '';
+    }
     var upd = Array.isArray(frame.update) ? frame.update : [];
     for (var k = 0; k < upd.length; k++) {
       var patch = upd[k];
@@ -4597,7 +4635,11 @@
     if ('latest' in snap) state.latest = snap.latest;
     // 正在流出来的那一段。服务端只在自己决定要显示之后才写它，所以这里是空字符串
     // 不代表模型没在写，只代表「还不到显示的时候」。
-    if ('live' in snap) state.live = snap.live || '';
+    //
+    // **2026-10-21 加一个前提**：流式开关开着时，这一段由 `trajectory-live` 的增量自己拼
+    // （见那个 `kind: 'text'` 分支），快照里那个 `live` 是另一套东西（服务端按整段写的），
+    // 照旧覆盖会把刚拼上去的字清掉、只剩最后一小截。落定由 `trajectory` 帧负责清，不靠这里。
+    if ('live' in snap && !state.streaming) state.live = snap.live || '';
     // 模型此刻的自言自语（鲸鱼娘的台词）。null = 这会儿没话说，气泡回到该姿势自己的词条。
     if ('thought' in snap) state.thought = snap.thought || null;
     if (snap.history) state.history = snap.history;
@@ -5770,9 +5812,12 @@
     // clientId 每条连接都带（订阅的 POST 靠它认出这条流）；full=1 只在「完整」模式带，
     // 服务端见到就自动把这条连接订上轨迹——断线重连沿用同一个地址，重新订上由服务端
     // 自己完成，客户端不用再握手一次。
+    // **`stream=1`（2026-10-21）** = 「这台设备的流式开关是开的，正文也给我推」。
+    // 不带它就一个正文帧都收不到——关掉流式**真的省流量**，不是前端收到了再丢掉。
     // **地址里不带令牌**（2026-10-16 第二步）：同源的 EventSource 会带上设备 cookie。
     es = new EventSource('/mini/api/stream?clientId=' + encodeURIComponent(clientId)
-      + (state.mode === 'full' ? '&full=1' : ''));
+      + (state.mode === 'full' ? '&full=1' : '')
+      + (state.streaming && state.mode !== 'minimal' ? '&stream=1' : ''));
 
     es.addEventListener('open', function () {
       state.connected = true;
@@ -5802,11 +5847,28 @@
     });
     // 活片段帧（2026-10-04 用户解禁：完整模式要「正在想的片段一点点顺出来」）。
     // 只进完整模式的轨迹组头；聊天/单帧、鲸鱼娘气泡一个字节都不碰。
+    //
+    // **2026-10-21 起多了一路正文**（`kind: 'text'`，配合设置页那个「流式」开关）：
+    // 服务端把那一段新攒的字放在 `delta` 里推过来，这里**累加到 `state.live`**——
+    // 也就是聊天与完整两个模式共用的那个「正在流出来的回答」槽位（`liveBlock` 渲染它）。
+    // 落定帧（`trajectory`）一到就清空，由真条目接管，绝不把影子留在屏幕上。
     es.addEventListener('trajectory-live', function (e) {
       var frame;
       try { frame = JSON.parse(e.data); } catch (err) { return; }
-      if (state.mode !== 'full') return;
       if (frame.sessionId && state.boundSessionId && frame.sessionId !== state.boundSessionId) return;
+      if (frame.kind === 'text') {
+        // 正文那一路：**单帧模式不跟**（用户 2026-10-21 拍板），所以这里先挡掉。
+        if (state.mode === 'minimal') return;
+        if (typeof frame.delta !== 'string' || !frame.delta) {
+          // 空 delta = 服务端说「这一段写完了，别留残留」。
+          if (state.live) { state.live = ''; render(); }
+          return;
+        }
+        state.live = (state.live || '') + frame.delta;
+        render();
+        return;
+      }
+      if (state.mode !== 'full') return;
       state.trajectoryLive = typeof frame.detail === 'string' ? frame.detail : '';
       render();
     });
@@ -7340,6 +7402,28 @@
     var meta = document.querySelector('meta[name="theme-color"]');
     if (meta) meta.setAttribute('content', use === 'light' ? '#eaf3fc' : '#0a0f16');
   }
+  // ---------------- 流式输出（开 / 关） ----------------
+  //
+  // 关着时和以前一模一样（等整段落定）；开着时正文一个字一个字冒出来（见 trajectory-live
+  // 那一段的 `kind: 'text'` 分支）。
+  //
+  // **切完要重连一次**：`stream=1` 是在建立连接时带上的，服务端据此决定这条连接要不要
+  // 收正文帧。就地改 state 不够——那条已经连着的流不知道你要改了。
+  Array.prototype.forEach.call($('segStreaming').children, function (btn) {
+    btn.addEventListener('click', function () {
+      if (state.mode === 'minimal') return;   // 单帧不跟，按钮是灰的
+      var want = btn.dataset.streaming === 'on';
+      if (want === state.streaming) return;
+      state.streaming = want;
+      localStorage.setItem('dshMiniStreaming', want ? 'on' : 'off');
+      // 关掉时把屏幕上可能残留的流式影子撤掉，不然会停在半句话上直到下一条消息。
+      if (!want) state.live = '';
+      syncSeg();
+      render();
+      connect();                              // 重连：让 stream=1 生效/失效
+    });
+  });
+
   Array.prototype.forEach.call($('segTheme').children, function (btn) {
     btn.addEventListener('click', function () {
       state.theme = btn.dataset.theme;
@@ -7374,6 +7458,12 @@
   function syncSeg() {
     Array.prototype.forEach.call($('segMode').children, function (b) {
       b.classList.toggle('active', b.dataset.mode === state.mode);
+    });
+    Array.prototype.forEach.call($('segStreaming').children, function (b) {
+      b.classList.toggle('active', (b.dataset.streaming === 'on') === state.streaming);
+      // 单帧模式不跟流式（用户 2026-10-21 拍板）：那一屏只看最终那一句，
+      // 开关在这里灰掉，但**不改存的值**——切回聊天/完整它还是你上次的选择。
+      b.disabled = state.mode === 'minimal';
     });
     Array.prototype.forEach.call($('segSound').children, function (b) {
       b.classList.toggle('active', (b.dataset.sound === 'on') === state.sound);
