@@ -3423,7 +3423,7 @@ test('执行轨迹：切回聊天模式就停推，重连带上 full=1 自己就
 // （reasoning-delta）；回答正文（text-delta）照旧等落定；聊天那条连接一个字节都不收；
 // 落盘即清——活片段只是「还没落定」的影子，落定的字才留得下来。
 
-test('执行轨迹·活气：思考片段逐字顺出来，回答正文一个字都不流、落盘即清', async (t) => {
+test('执行轨迹·活气：思考和正文各走各的路，落盘即清，别的连接一个字节都不收', async (t) => {
   const p = await bootPlugin()
   t.after(p.stop)
   await bindSession(p, 'sess-1')
@@ -3432,10 +3432,13 @@ test('执行轨迹·活气：思考片段逐字顺出来，回答正文一个字
   const stream = p.handlers.get('agent/assistant-stream')
   const feed = p.handlers.get('session/event')
 
-  const full = await openTraceStream(`${p.base}/mini/api/stream?token=${p.token}&full=1&clientId=phone`)
+  const full = await openTraceStream(`${p.base}/mini/api/stream?token=${p.token}&full=1&stream=1&clientId=phone`)
   const chat = await openTraceStream(`${p.base}/mini/api/stream?token=${p.token}&clientId=chat`)
+  // 只订轨迹、**没开流式**的那条（开关关着的设备就是这条）：思考照收，正文一个字节都不该来。
+  const quiet = await openTraceStream(`${p.base}/mini/api/stream?token=${p.token}&full=1&clientId=quiet`)
   await waitFrames(full, 'state', 1)
   await waitFrames(chat, 'state', 1)
+  await waitFrames(quiet, 'state', 1)
 
   stream({ agent, frame: { type: 'start' } })
   stream({ agent, frame: { type: 'chunk', chunk: { type: 'reasoning-delta', text: '先看看仓库结构' } } })
@@ -3448,27 +3451,42 @@ test('执行轨迹·活气：思考片段逐字顺出来，回答正文一个字
   const two = await waitFrames(full, 'trajectory-live', 2)
   assert.ok(String(two[1].detail).includes('然后决定从哪儿下手'), '片段跟着打字走')
 
-  // 回答正文不外泄：text-delta 再多也不进片段
-  stream({ agent, frame: { type: 'chunk', chunk: { type: 'text-delta', text: '这是最终回答的正文' } } })
+  // **回答正文也流了**（2026-10-21 加流式开关，配合手机页那个总开关）。
+  // 但它**走另一条路**：`kind: 'text'` + `delta`，**绝不混进思考那条 `detail`**。
+  // 两条分开的理由是它们的节流和粒度完全不同——思考是「压成一行瞄一眼」，正文要一个字一个字追。
+  stream({ agent, frame: { type: 'chunk', chunk: { type: 'text-delta', text: '这是最终回答的正文', index: 1 } } })
   await new Promise((resolve) => setTimeout(resolve, 400))
-  const leaked = full.frames.filter((f) => f.name === 'trajectory-live')
-    .some((f) => String(f.data.detail).includes('最终回答的正文'))
-  assert.ok(!leaked, '回答正文一个字都不许进活片段')
+  const liveAll = full.frames.filter((f) => f.name === 'trajectory-live')
+  const textFrames = liveAll.filter((f) => f.data.kind === 'text')
+  assert.equal(textFrames.length, 1, '正文要顺出来，而且是增量帧')
+  assert.ok(String(textFrames[0].data.delta).includes('这是最终回答的正文'), '正文走 delta')
+  assert.equal(textFrames[0].data.blockIndex, 1, '要带块编号，前端才知道往哪个块上贴')
+  assert.ok(!liveAll.some((f) => String(f.data.detail).includes('这是最终回答的正文')),
+    '正文不许混进思考那条 detail（两条路分开）')
 
-  // 落盘即清：这条思考变成真条目了，影子就散
+  // 落盘即清：这条思考变成真条目了，影子就散（找"思考那一路的清空帧"，不能按帧序号猜）
   feed(session, ev('turn/start', { turn: 1 }))
   feed(session, ev('assistant/message', {
     turn: 1,
     step: 1,
     message: { content: [{ type: 'reasoning', text: '先看看仓库结构，然后决定从哪儿下手' }] },
   }))
-  const frames = await waitFrames(full, 'trajectory-live', 3)
-  assert.equal(String(frames[2].detail), '', '条目落盘就把活片段清掉')
+  await new Promise((resolve) => setTimeout(resolve, 300))
+  const clearedReasoning = full.frames.filter((f) => f.name === 'trajectory-live')
+    .some((f) => f.data.kind === 'reasoning' && String(f.data.detail) === '')
+  assert.ok(clearedReasoning, '条目落盘就把思考那段活片段清掉')
 
   // 聊天那条连接：一个字节都不收
   await new Promise((resolve) => setTimeout(resolve, 200))
   assert.equal(chat.frames.filter((f) => f.name === 'trajectory-live').length, 0,
     '没声明完整模式的连接，活片段也不收')
+  // **开关关着的那条（只订轨迹、没带 stream=1）**：思考收得到，正文一个字节都没有。
+  // 这条守的是"关掉流式就不花那份流量"——分开两批订阅的全部意义就在这里。
+  assert.ok(quiet.frames.some((f) => f.name === 'trajectory-live' && f.data.kind === 'reasoning'),
+    '思考照收（它本来就是完整模式的能力）')
+  assert.equal(quiet.frames.filter((f) => f.name === 'trajectory-live' && f.data.kind === 'text').length, 0,
+    '没开流式：正文帧一个都不许来')
+  await quiet.reader.cancel()
   await chat.reader.cancel()
   await full.reader.cancel()
 })
