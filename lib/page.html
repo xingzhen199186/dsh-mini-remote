@@ -310,6 +310,22 @@
   .bubble.assistant { margin-right: auto; background: var(--panel); border: 1px solid var(--line); }
   .bubble a { color: var(--ice); }
   .bubble .meta { display: block; margin-top: 6px; font-size: 11px; color: var(--muted); }
+  /* ---- 长指令气泡：默认折叠，点「展开」看全文（2026-10-22） ----
+     参考 DeepSeek 安卓端的 MessageOverflowButton：用户自己发的话太长时，不拿它把整屏撑满，
+     先露开头几行，想看再展开。它不改变任何落点规则——贴底还是贴底，只是那条指令本身变短。 */
+  .bubble-text { display: block; }
+  .bubble-text.clamped { max-height: 13.6em; overflow: hidden; position: relative; }
+  .bubble-text.clamped::after {
+    content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 2.4em;
+    background: linear-gradient(to bottom, transparent, var(--panel-2));
+    pointer-events: none;
+  }
+  .bubble-more {
+    display: block; margin: 2px 0 0; padding: 0; border: 0; background: none;
+    color: var(--ice); font: inherit; font-size: 12px; line-height: 1.4;
+    cursor: pointer;
+  }
+  .bubble-more:active { opacity: .7; }
   /* 「已停止」标签：被按停的那一轮，手机上收到的只是**已经吐出来的那半句**。
      不标出来的话，它看着就像模型答崩了。 */
   .stopped {
@@ -3880,6 +3896,16 @@
     el.classList.toggle('hide', !chatNoteVisible());
   }
 
+  /** 这一条用户消息是不是长到该折叠。按字数与行数估，手机宽度下 240 字约十几行。 */
+  function isLongUserText(text) {
+    var s = text || '';
+    if (s.length > 240) return true;
+    return s.split('\n').length > 9;
+  }
+
+  /** 展开过的用户消息（键 = 会话 + 时间戳）。重画时靠它把「收起」状态留住。 */
+  var expandedUserMsgs = Object.create(null);
+
   /**
    * 一条消息的 HTML。从 renderChat 的逐条循环里提出来：完整模式要把每轮的过程组
    * **穿插进这串消息的原位**（renderFull → trajInterleave），聊天模式直接按顺序拼——
@@ -3901,7 +3927,18 @@
     if (m.role === 'user') {
       // 自己的指令：仍然是气泡，靠右。自己敲的是纯文本，不走 markdown——
       // 不然打几个星号就变样了。
-      return '<div class="bubble user">' + linkify(m.text)
+      // 长指令先折起来：露开头几行 + 一个「展开」，不让它把整屏撑满。
+      var key = (state.boundSessionId || '') + '|' + (m.timestamp || 0);
+      var longText = isLongUserText(m.text);
+      var expanded = !!expandedUserMsgs[key];
+      var body = '<div class="bubble-text'
+        + (longText && !expanded ? ' clamped' : '') + '">' + linkify(m.text) + '</div>';
+      var more = longText
+        ? '<button class="bubble-more" type="button" data-more="' + escapeHtml(key)
+          + '" aria-expanded="' + (expanded ? 'true' : 'false') + '">'
+          + (expanded ? '收起' : '展开') + '</button>'
+        : '';
+      return '<div class="bubble user">' + body + more
         + '<span class="meta">' + stopped + timeLabel(m.timestamp) + copyBtn + '</span></div>';
     }
     // AI 的回答：**不套气泡**（用户要求「参考单帧模式那样」）。
@@ -8210,6 +8247,20 @@
   //   在明文 HTTP 下那个接口是 undefined，点了什么都不会发生；而且它会和
   //   新加的按钮打架，所以换成显式按钮。）
   replyEl.addEventListener('click', function (e) {
+    // 长指令气泡的「展开 / 收起」：只动这一块，不重画整串历史。
+    var more = e.target && e.target.closest ? e.target.closest('.bubble-more') : null;
+    if (more) {
+      var key = more.getAttribute('data-more') || '';
+      var text = more.parentNode && more.parentNode.querySelector
+        ? more.parentNode.querySelector('.bubble-text') : null;
+      if (!text) return;
+      var expanded = more.getAttribute('aria-expanded') !== 'true';
+      more.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+      more.textContent = expanded ? '收起' : '展开';
+      text.classList.toggle('clamped', !expanded);
+      if (expanded) expandedUserMsgs[key] = true; else delete expandedUserMsgs[key];
+      return;
+    }
     var btn = e.target && e.target.closest ? e.target.closest('.copy') : null;
     if (!btn) return;
     e.preventDefault();

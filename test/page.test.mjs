@@ -123,6 +123,28 @@ test('聊天模式里，自己发的指令也有复制按钮', () => {
   assert.equal(n, 2, `两条气泡各一个复制按钮，实际 ${n} 个`)
 })
 
+test('长指令气泡默认折叠，带一个「展开」按钮', () => {
+  // 2026-10-22：参考 DeepSeek 安卓端的长用户消息折叠。长指令不再把整屏撑满，
+  // 先露开头几行，想看全文再展开；落点规则不变（还是贴底）。
+  const out = renderChatWith({
+    running: false,
+    history: [{ role: 'user', text: '长'.repeat(300), timestamp: 1 }],
+  })
+  assert.match(out, /class="bubble-text clamped"/, '长指令正文要有折叠类')
+  assert.match(out, /class="bubble-more"/, '长指令要带展开按钮')
+  assert.match(out, />展开</, '按钮文案是「展开」')
+  assert.match(out, /data-more="[^"]+"/, '按钮要带一个稳定的键')
+})
+
+test('短指令不折叠，也不长展开按钮', () => {
+  const out = renderChatWith({
+    running: false,
+    history: [{ role: 'user', text: '好，继续。', timestamp: 1 }],
+  })
+  assert.ok(!out.includes('bubble-more'), '短指令不该冒出展开按钮')
+  assert.ok(!out.includes('bubble-text clamped'), '短指令不该被折叠')
+})
+
 test('指令里的引号不会把 data-copy 属性提前闭合', () => {
   const out = renderChatWith({
     running: false,
