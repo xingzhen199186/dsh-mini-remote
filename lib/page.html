@@ -2562,6 +2562,21 @@
   }
 
   /**
+   * 正文流式的订阅侧动作：**连接建早了/建晚了，就补一次重连。**
+   *
+   * 两个真会走到的岔口：
+   *   ① 页面在「单帧」里打开（默认），之后切到「聊天 / 完整」——旧连接没带 `stream=1`，
+   *      不重连就永远收不到正文帧（2026-10-22 真机复现：开关明明显示「开」，回答仍整段出现）；
+   *   ② 开关本来就存着「开」，点它一下不会改值——原来的提前 return 把重连也一起跳过了。
+   * 只有「想要的」和「连接上真带的」不一致才重连，避免每点一下都重来。
+   */
+  function syncStreamSubscription() {
+    if (!state.entered) return;
+    var want = state.streaming && state.mode !== 'minimal';
+    if (want !== streamSubscribed) connect();
+  }
+
+  /**
    * 模式开关的订阅侧动作，跟着「显示模式」按钮走：
    *
    * - 切到「完整」：连流时没带 `?full=1`（连流那一刻不是完整模式）就得补一次
@@ -5842,6 +5857,14 @@
   }
   /** 服务端此刻认作「订了轨迹」的那个身份；空串 = 没订（切换模式的开关拿它判断）。 */
   var subscribedClientId = '';
+  /**
+   * 这条活连接**建的时候有没有带 `stream=1`**（2026-10-22）。
+   *
+   * 不能只用 `state.streaming` 判断：开关开着，但连接是在「单帧」模式下建的、
+   * 或者是在切模式之前建的，它照样收不到正文帧。这里记的是「连上时真带了没有」，
+   * 和当前想要的比一比，不一样就重连。
+   */
+  var streamSubscribed = false;
   var es = null;
   function connect() {
     if (es) { try { es.close(); } catch (e) {} es = null; }
@@ -5853,9 +5876,12 @@
     // **`stream=1`（2026-10-21）** = 「这台设备的流式开关是开的，正文也给我推」。
     // 不带它就一个正文帧都收不到——关掉流式**真的省流量**，不是前端收到了再丢掉。
     // **地址里不带令牌**（2026-10-16 第二步）：同源的 EventSource 会带上设备 cookie。
+    // 「这一条连接该不该收正文帧」在建流这一刻定死；切模式 / 开关状态变了都要重连一次。
+    var streamWanted = state.streaming && state.mode !== 'minimal';
+    streamSubscribed = streamWanted;
     es = new EventSource('/mini/api/stream?clientId=' + encodeURIComponent(clientId)
       + (state.mode === 'full' ? '&full=1' : '')
-      + (state.streaming && state.mode !== 'minimal' ? '&stream=1' : ''));
+      + (streamWanted ? '&stream=1' : ''));
 
     es.addEventListener('open', function () {
       state.connected = true;
@@ -6015,6 +6041,11 @@
           }
         ]);
       }
+      // **落定的回答到了，流式的影子让位**（2026-10-22）。块结束时服务端会补发最后一截
+      // 尾巴、并且**不再紧跟一个空帧**（那样会把刚补的字一起抹掉），清屏的责任在这里：
+      // 先把 live 清掉再画，屏幕上只留真正的回答，不会出现「同一段话两遍」。
+      state.live = '';
+      state.liveTool = null;
       setRunning(false);
       render();
       if (!document.hidden) {
@@ -7431,6 +7462,8 @@
       render();
       // 切到「完整」：订上并把已有的过程拉下来；切走：退订、停推。
       syncTrajectorySubscription();
+      // 离开「单帧」时正文流式才成立：连接是在单帧里建的就没带 stream=1，这里补一次重连。
+      syncStreamSubscription();
     });
   });
   Array.prototype.forEach.call($('segSound').children, function (btn) {
@@ -7469,14 +7502,18 @@
     btn.addEventListener('click', function () {
       if (state.mode === 'minimal') return;   // 单帧不跟，按钮是灰的
       var want = btn.dataset.streaming === 'on';
-      if (want === state.streaming) return;
-      state.streaming = want;
-      localStorage.setItem('dshMiniStreaming', want ? 'on' : 'off');
-      // 关掉时把屏幕上可能残留的流式影子撤掉，不然会停在半句话上直到下一条消息。
-      if (!want) state.live = '';
-      syncSeg();
-      render();
-      connect();                              // 重连：让 stream=1 生效/失效
+      if (want !== state.streaming) {
+        state.streaming = want;
+        localStorage.setItem('dshMiniStreaming', want ? 'on' : 'off');
+        // 关掉时把屏幕上可能残留的流式影子撤掉，不然会停在半句话上直到下一条消息。
+        if (!want) state.live = '';
+        syncSeg();
+        render();
+      }
+      // **值没变也要对一次订阅**（2026-10-22）：开关本来就存着「开」，但连接是在
+      // 单帧里建的、没带 stream=1——点一下等于「重连一次」，不然它会一直显示「开」
+      // 却一个正文帧都收不到。已经对上了就什么都不做。
+      syncStreamSubscription();
     });
   });
 

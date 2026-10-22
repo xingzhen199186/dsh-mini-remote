@@ -2220,8 +2220,8 @@ const ss = html.indexOf(SS)
 const se = html.indexOf(SE)
 assert.ok(ss > 0 && se > ss, `找不到 SSE 那一段的锚点（${SS}）`)
 
-function feedReply(payload, { mode = 'minimal', history = [] } = {}) {
-  const state = { entered: true, mode, history, connected: false, running: true }
+function feedReply(payload, { mode = 'minimal', history = [], live = '' } = {}) {
+  const state = { entered: true, mode, history, connected: false, running: true, live, liveTool: null }
   const els = {}
   let source = null
   class FakeEventSource {
@@ -2272,6 +2272,18 @@ test('SSE 实时推来的回复也要带上 interrupted（不能只有刷新才�
   assert.equal(ok.state.latest.interrupted, false, '正常推送不该带标记')
   assert.equal(ok.state.history.length, 0, '单帧模式不往 history 里塞')
   assert.deepEqual(ok.calls, [false], '收到回复要把「正在执行」收掉')
+})
+
+test('SSE 推来的回复落定时，流式影子要让位（否则同一段话会显示两遍）', () => {
+  // 2026-10-22：块结束补发最后一截尾巴后，服务端**不再紧跟一个空帧**（会把补的字一起
+  // 抹掉），清屏的责任挪到这条 reply 上。漏了它，流式那段会和落定的回答并排出现。
+  const done = feedReply(
+    { text: '完整回答', sessionId: 's1', timestamp: 21 },
+    { mode: 'chat', live: '完整回' },
+  )
+  assert.equal(done.state.live, '', 'reply 一到，影子必须清掉')
+  assert.equal(done.state.liveTool, null, '工具参数那半截也一并让位')
+  assert.equal(done.state.history.filter((m) => m.role === 'assistant').length, 1, '只留落定的那条')
 })
 
 // ---------------------------------------------------------------------------
@@ -4969,14 +4981,15 @@ test('三档切换接线：minimal↔chat↔full 来回切，提示语跟着换�
   const store = {}
   const localStorage = { setItem(k, v) { store[k] = v }, getItem(k) { return store[k] } }
   const state = { mode: 'minimal' }
-  const calls = { render: 0, syncTraj: 0, syncSeg: 0 }
+  const calls = { render: 0, syncTraj: 0, syncSeg: 0, syncStream: 0 }
   // eslint-disable-next-line no-new-func
-  new Function('state', '$', 'localStorage', 'syncSeg', 'render', 'syncTrajectorySubscription',
+  new Function('state', '$', 'localStorage', 'syncSeg', 'render', 'syncTrajectorySubscription', 'syncStreamSubscription',
     `${html.slice(idx[2], idx[3])}\n${html.slice(idx[0], idx[1])}\n`)(
     state, $, localStorage,
     () => { calls.syncSeg += 1 },
     () => { calls.render += 1 },
     () => { calls.syncTraj += 1 },
+    () => { calls.syncStream += 1 },
   )
 
   const click = (m) => btns.find((b) => b.dataset.mode === m).click()
@@ -4990,8 +5003,8 @@ test('三档切换接线：minimal↔chat↔full 来回切，提示语跟着换�
   click('full'); click('chat'); click('full')
   assert.equal(state.mode, 'full', '来回切不卡壳')
   assert.equal(store.dshMiniMode, 'full', '每次都落盘')
-  assert.deepEqual(calls, { render: 6, syncTraj: 6, syncSeg: 6 },
-    '每切一次都要重画、重同步按钮和轨迹订阅（缺一样就是真机上的死档位）')
+  assert.deepEqual(calls, { render: 6, syncTraj: 6, syncSeg: 6, syncStream: 6 },
+    '每切一次都要重画、重同步按钮、轨迹订阅和正文流订阅（缺一样就是真机上的死档位）')
 })
 
 // ---------------------------------------------------------------------------

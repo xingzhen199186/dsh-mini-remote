@@ -3464,6 +3464,18 @@ test('执行轨迹·活气：思考和正文各走各的路，落盘即清，别
   assert.ok(!liveAll.some((f) => String(f.data.detail).includes('这是最终回答的正文')),
     '正文不许混进思考那条 detail（两条路分开）')
 
+  // **块结束时要把节流里攒着的尾巴补发出去**（2026-10-22 真机 e2e 抓到的：
+  // 三个 delta 同毫秒到达时只发出第一个字，剩下被 block-end 的清场一起清掉）。
+  stream({ agent, frame: { type: 'chunk', chunk: { type: 'text-delta', text: '，还有一句', index: 1 } } })
+  stream({ agent, frame: { type: 'chunk', chunk: { type: 'text-delta', text: '，最后一句', index: 1 } } })
+  stream({ agent, frame: { type: 'chunk', chunk: { type: 'block-end', index: 1 } } })
+  await new Promise((resolve) => setTimeout(resolve, 300))
+  const joinedText = full.frames
+    .filter((f) => f.name === 'trajectory-live' && f.data.kind === 'text')
+    .map((f) => String(f.data.delta || ''))
+    .join('')
+  assert.ok(joinedText.includes('最后一句'), '块结束时节流里攒着的尾巴也要发出去，不能丢')
+
   // **工具参数也流**（2026-10-21 用户要求补上）：`argumentsDelta` + 工具名，
   // 前端拿它显示「正在调用 bash · ls -la …」那种半截命令。
   stream({
