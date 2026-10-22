@@ -440,7 +440,15 @@
   /* 和最终答案**刻意画得不一样**：上面一条虚线、末尾一个闪动的竖条、没有复制按钮。
      三样都在说同一句话——「这不是最终答案，还会变」。等答案落定整块被换掉。 */
   .live {
-    margin-top: 18px; padding-top: 14px;
+    position: relative;
+    margin-top: 18px;
+    /* 虚线**不占高度**：挂在文字上方 14px 的位置（::before）。原来它是 border-top +
+       padding-top:14px，于是流式块的第一行比落定回答的第一行低 14px，落定瞬间会往上
+       跳一下（2026-10-22 真机）。现在两边的第一行在同一个高度上，落定不跳。 */
+  }
+  .live::before {
+    content: '';
+    position: absolute; left: 0; right: 0; top: -14px;
     border-top: 1px dashed var(--line);
   }
   .live .md > *:last-child::after {
@@ -3781,6 +3789,26 @@
   }
 
   /**
+   * 「对齐开头」到底对齐谁：**正文第一行**，不是外面那层容器。
+   *
+   * 流式那段把虚线移到不占高度的 ::before 上，第一行和落定回答的第一行在同一高度；
+   * 这条函数保证两边量的都是**正文第一行**，而不是外面那层容器。2026-10-22 真机报的
+   * 「落定第一行往上跳 14px」就是按容器顶量出来的。
+   *
+   * 用户气泡没有 `.md`，它自己的内边距就是文字位置，直接返回气泡本身；
+   * 被按停的回答前面有「已停止」那条，要让它露出来，不能只锚正文。
+   */
+  function firstContentLine(el) {
+    if (!el || typeof el.querySelector !== 'function') return el;
+    if (el.classList && el.classList.contains('bubble')) return el;
+    var first = el.firstElementChild;
+    if (first && first.classList && first.classList.contains('reply-bar')) return first;
+    var md = el.querySelector('.md');
+    if (!md) return el;
+    return md.firstElementChild || md;
+  }
+
+  /**
    * 把某一块的**开头**对齐到视野顶部（聊天模式用，见 renderChat）。
    *
    * 用两个矩形的差值算，不用 `offsetTop`：`main` 上没有 `position: relative`，
@@ -3790,9 +3818,10 @@
    * 不留缝的话回答的第一行会顶在屏幕最上沿，看着像被切掉了。
    */
   function pinToTop(el) {
-    if (!el || typeof el.getBoundingClientRect !== 'function') return;
+    var line = firstContentLine(el);
+    if (!line || typeof line.getBoundingClientRect !== 'function') return;
     if (typeof mainEl.getBoundingClientRect !== 'function') return;
-    var gap = el.getBoundingClientRect().top - mainEl.getBoundingClientRect().top;
+    var gap = line.getBoundingClientRect().top - mainEl.getBoundingClientRect().top;
     // 这里**不用**为顶上那颗「往上滑看更早的」让高度：对齐开头只在「他本来就在底部」
     // 的时候做（见 scrollChat），而那时候那颗提示是收着的（见 chatNoteVisible）——
     // 让高度反而会凭空多出一段空白。
@@ -4032,33 +4061,6 @@
   var pinnedAnswerKey = '';
 
   /**
-   * 这一轮**助手侧内容的第一块**：从最后那条回答往回退，只跨紧挨着它的过程组
-   * 与轨迹说明（trajInterleave 把组插在**该轮第一个回答之前**，见那里的落点 a），
-   * 退不动就停在哪儿。
-   *
-   * 为什么「完整」模式要多退这一步：用户 2026-10-08 报的——单帧和聊天停在回答的开头
-   * 是对的，完整模式照做就错了。回答前面还有这一轮的执行轨迹，把回答的开头顶到屏幕
-   * 最上沿，等于把那串过程整个推到屏幕上方：他落定那一刻看到的不是这一轮的开头，
-   * 而是轨迹的尾巴接着正文。停在这一轮的头上，才是从他要读的地方读起。
-   *
-   * **用户自己发的那条指令不算**：他刚敲过，不用再读一遍；要读的是助手这一侧。
-   * 所以往回走只认过程组和那句「这份轨迹不是全部」的说明，碰到别的节点
-   * （`.bubble.user`、`.cmd`、子智能体卡片、页面上那几条说明）就停——一轮的边界
-   * 本来就在那儿。这也顺带保证了**这一轮没有过程**时原样返回那条回答：完整模式
-   * 退化成聊天模式的样子，不会跑到上一轮的轨迹上去。
-   */
-  function trajRunHead(saidEl) {
-    var node = saidEl;
-    for (;;) {
-      var prev = node.previousElementSibling;
-      if (!prev || !prev.classList) break;
-      if (!prev.classList.contains('traj-group') && !prev.classList.contains('traj-note')) break;
-      node = prev;
-    }
-    return node;
-  }
-
-  /**
    * 聊天模式的滚动：**回答的开头才是要读的地方，不是末尾。**
    *
    * 用户 2026-09-24 提的：「聊天模式下，回答出现时，页面也应该停留在回答的开头
@@ -4069,13 +4071,13 @@
    *
    * 回答分两个阶段，各对齐一次（记号记在 pinnedAnswerKey 里）：
    *
-   *   · **正在流**（live 非空）——对齐 `.live` 的开头，之后**不再跟底部**。
+   *   · **正在流**（live 非空）——对齐 `.live` 的**正文第一行**，之后**不再跟底部**。
    *     这是关键的一条：流式每秒重画好几次，要是继续黏底，用户刚滚到开头
    *     就被拽回末尾，等于没改。
    *
-   *   · **落定**（timestamp 变了）——对齐最后那条 `.said` 的开头，
-   *     让最终版从第一行开始读。（**完整**模式再往前退到这一轮的头上，
-   *     理由见 trajRunHead：那一轮的过程组就排在回答前面。）
+   *   · **落定**（timestamp 变了）——对齐最后那条 `.said` 的**正文第一行**，
+   *     让最终版从第一行开始读。完整模式也一样（2026-10-22 用户拍板，取代
+   *     2026-10-08「退回这一轮过程开头」那条：现在停在正文第一行，过程组会被推到上方）。
    *
    * 为什么要记 key、而不是「每次都对齐」：用户往下读的时候，每次重画都把他拽回
    * 开头，比不对齐还烦人。这一点和单帧模式里 scrolledReplyAt 的道理是一样的。
@@ -4104,9 +4106,7 @@
       } else if (replyEl.querySelectorAll) {
         var saids = replyEl.querySelectorAll('.said');
         target = saids.length ? saids[saids.length - 1] : null;
-        // 「完整」模式要停的是**这一轮的头上**，不是这条回答的头上（见 trajRunHead）。
-        // 「正在流」那一路不对齐这里：用户看的就是刚流出来的那段本身。
-        if (target && state.mode === 'full') target = trajRunHead(target);
+        // 完整模式也停在正文第一行：过程组留在上方，不把回答顶下去（2026-10-22 用户拍板）。
       }
       pinToTop(target);
       return;
@@ -4720,6 +4720,45 @@
     if (el.classList && el.classList.toggle) {
       el.classList.toggle('streaming', Boolean(state.live) && state.mode !== 'minimal');
     }
+  }
+
+  /**
+   * 刚发出去的那条指令：等它回显到页面里，再决定落点（2026-10-22 用户拍板）。
+   *
+   * 短指令贴底（贴着输入框，符合「发完就看下一句」的习惯）；长指令如果第一行已经被
+   * 顶出视野，就把它拉回顶部——否则用户看到的是自己消息的**末尾**，还得往上翻才知道
+   * 自己刚发了什么。气泡要等服务端回显才进 DOM，所以发送后轮询一小会儿，不在没渲染
+   * 的时候瞎算高度。
+   */
+  var sentBubble = null;
+
+  function lastUserBubble() {
+    if (!replyEl.querySelectorAll) return null;
+    var all = replyEl.querySelectorAll('.bubble.user');
+    return all.length ? all[all.length - 1] : null;
+  }
+
+  function pinSentInstruction() {
+    if (!sentBubble) return false;
+    var b = lastUserBubble();
+    if (!b) return false;
+    // 回显可能晚到：文字对不上就先不动，等下一轮。
+    if ((b.textContent || '').indexOf(sentBubble.text) < 0) return false;
+    sentBubble = null;
+    var mainTop = mainEl.getBoundingClientRect ? mainEl.getBoundingClientRect().top : 0;
+    var top = b.getBoundingClientRect().top;
+    // 第一行已经跑到视野上方 = 长指令；否则保持贴底，短指令不折腾。
+    if (top < mainTop + 12) pinToTop(b);
+    return true;
+  }
+
+  function scheduleSentPin() {
+    var tries = 0;
+    (function tick() {
+      if (!sentBubble) return;
+      if (pinSentInstruction()) return;
+      if (++tries < 30) setTimeout(tick, 50);
+    })();
   }
 
   function render() {
@@ -5998,6 +6037,8 @@
           if (state.live) { state.live = ''; render(); }
           return;
         }
+        // 正文已经开始：发送落点交给 scrollChat，别再回头把指令拉上来（两条会打架）。
+        sentBubble = null;
         state.streamReceived = true;
         state.live = (state.live || '') + frame.delta;
         // 只换流式那一块，别每 60 毫秒重拼整串历史（见 paintLive 的说明）。
@@ -6119,6 +6160,7 @@
       state.live = '';
       state.liveTool = null;
       state.streamReceived = false;
+      sentBubble = null;
       setRunning(false);
       render();
       if (!document.hidden) {
@@ -6689,6 +6731,12 @@
     var shown = files.length
       ? text + (text ? '\n' : '') + '📎 ' + files.map(function (f) { return f.name; }).join('、')
       : text;
+
+    // 发送后的落点：短指令贴底，长指令等回显后把第一行拉回顶部（见 pinSentInstruction）。
+    if (state.mode !== 'minimal') {
+      sentBubble = { text: shown, at: Date.now() };
+      scheduleSentPin();
+    }
 
     if (state.mode === 'minimal') {
       // 上一条回答**留着**，由 renderMinimal 在它下面加一条「正在执行」。

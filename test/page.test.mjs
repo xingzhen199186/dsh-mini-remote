@@ -1761,6 +1761,9 @@ function buildSend({ running = false, serverSays = { ok: true }, rejects = false
     escapeHtml: md.escapeHtml,
     MAX_UPLOAD: 50 * 1024 * 1024,
     currentTrajectoryTurn: () => null, // 测试桩：没有轨迹数据时返回 null
+    // 发送后的落点：send 只负责记下这条并喊一声，真正的判断在函数外（另有用例）。
+    sentBubble: null,
+    scheduleSentPin: () => {},
     api: (path, opts) => {
       calls.push({ path, opts })
       return rejects ? Promise.reject(new Error('发不出去')) : Promise.resolve(serverSays)
@@ -2236,7 +2239,7 @@ function feedReply(payload, { mode = 'minimal', history = [], live = '', frames 
   const build = new Function(
     'state', 'EventSource', 'document', 'encodeURIComponent', '$',
     'setStatus', 'showGate', 'updateStatusUI', 'applySnapshot', 'render',
-    'setRunning', 'playDing', 'buzz', 'paintLive',
+    'setRunning', 'playDing', 'buzz', 'paintLive', 'sentBubble',
     `${html.slice(ss, se)}\nreturn connect;`,
   )
   build(
@@ -2251,7 +2254,7 @@ function feedReply(payload, { mode = 'minimal', history = [], live = '', frames 
     })),
     () => {}, () => {}, () => {}, () => {}, () => {},
     (v) => { calls.push(v); state.running = v }, () => {}, () => {},
-    () => { paints += 1 },
+    () => { paints += 1 }, null,
   )()
   for (const frame of frames) source.fire('trajectory-live', frame)
   source.fire('reply', payload)
@@ -2825,16 +2828,12 @@ test('聊天模式：他自己翻上去看历史时，回答来了也不动他',
 })
 
 /**
- * 「完整」模式落定时对齐到哪：**这一轮助手侧内容的第一块**，不是最后那条回答的开头。
+ * 「完整」模式落定时对齐到哪：**最后那条回答的正文第一行**。
  *
- * 用户 2026-10-08 报的：完整模式落定后，最终总结的开头被顶到屏幕上沿，于是这一轮的
- * 执行轨迹（trajInterleave 把组插在**该轮第一个回答之前**，见那里的落点 a）被整个推到
- * 屏幕上方——要读的那串过程看不见。单帧、聊天那两条是对的，不许跟着动。
- *
- * 这里跑的是 scrollChat 那一段（完整模式怎么渲染由 trajHarness 那批测试管），所以
- * replyEl 的树是手搭的、形状照完整模式渲染出来的样子摆：一轮 = 用户气泡 / 轨迹说明 /
- * 过程组 / 回答，轮与轮之间由用户气泡划开。替身复刻的只有三样 —— classList.contains、
- * previousElementSibling、矩形 top —— 「往回退到这一轮的头」这件事只能靠它们量出来。
+ * 2026-10-08 原来定的是「这一轮助手侧的第一块（轨迹起点）」，2026-10-22 用户改口：
+ * 落定要停在正文第一行，过程组留在上方。这里跑的是 scrollChat 那一段（完整模式怎么
+ * 渲染由 trajHarness 那批测试管），所以 replyEl 的树是手搭的、形状照完整模式渲染出来
+ * 的样子摆：一轮 = 用户气泡 / 轨迹说明 / 过程组 / 回答，轮与轮之间由用户气泡划开。
  */
 function fullPinRunner({ classes, tops, mode = 'full', scrollTop = 1990, scrollHeight = 2000 }) {
   const nodes = classes.map((cls, i) => ({
@@ -2869,29 +2868,29 @@ function fullPinRunner({ classes, tops, mode = 'full', scrollTop = 1990, scrollH
   return { render: build(state, replyEl, mainEl, () => '12:00'), state, mainEl, replyEl }
 }
 
-test('完整模式：回答落定时对齐这一轮助手侧的第一块（轨迹起点），不是回答开头', () => {
+test('完整模式：回答落定时也停在最后那条回答的开头（不再退回轨迹起点）', () => {
   // 这一轮的形状：上一轮的回答 → 用户气泡 → 轨迹说明 → 过程组 → 这一轮的回答。
   const classes = ['bubble user', 'said', 'bubble user', 'traj-note', 'traj-group', 'said']
   const tops = [100, 300, 500, 700, 900, 1200]
 
   const full = fullPinRunner({ classes, tops, mode: 'full' })
   full.render()
-  assert.equal(full.mainEl.scrollTop, 1990 + 700 - 12,
-    '完整模式要停在轨迹说明 / 过程组的头上：那才是这一轮助手侧的第一块')
+  assert.equal(full.mainEl.scrollTop, 1990 + 1200 - 12,
+    '完整模式也停在最后那条回答的开头：过程组留在上方')
 
-  // 同一份记录换聊天模式：仍停在最后那条回答的开头 —— 两套口径不许互相串。
+  // 同一份记录换聊天模式：同样停在最后那条回答的开头 —— 两套口径一致。
   const chat = fullPinRunner({ classes, tops, mode: 'chat' })
   chat.render()
   assert.equal(chat.mainEl.scrollTop, 1990 + 1200 - 12, '聊天模式一个字都不许动')
 })
 
-test('完整模式：这一轮没有过程时退化成和聊天一样，不往上一轮跑', () => {
+test('完整模式：这一轮没有过程时和聊天一样，不往上一轮跑', () => {
   const classes = ['bubble user', 'said', 'bubble user', 'said']
   const tops = [100, 300, 500, 900]
   const full = fullPinRunner({ classes, tops, mode: 'full' })
   full.render()
   assert.equal(full.mainEl.scrollTop, 1990 + 900 - 12,
-    '没有过程组可退，就落回最后那条回答的开头（和聊天一模一样）')
+    '最后一轮的回答在 900：停在它的开头（和聊天一模一样）')
 })
 
 test('完整模式：翻上去看历史时不动他；同一条回答只对齐一次', () => {
@@ -2903,7 +2902,7 @@ test('完整模式：翻上去看历史时不动他；同一条回答只对齐�
 
   const at = fullPinRunner({ classes, tops, mode: 'full' })
   at.render()
-  assert.equal(at.mainEl.scrollTop, 1990 + 700 - 12, '在底部跟着看：落定那一下对齐到轨迹开始')
+  assert.equal(at.mainEl.scrollTop, 1990 + 1200 - 12, '在底部跟着看：落定那一下对齐到正文第一行')
   at.mainEl.scrollTop = 120
   at.render()
   assert.equal(at.mainEl.scrollTop, 120, '同一条回答只对齐一次，别反复弹回开头')
@@ -3081,6 +3080,105 @@ test('滑到最下面读内容时，那句「往上滑看更早的」不许露�
   // 中间地带（离顶远、又没到底）也不露：那句提示只在够得着顶部时有意义。
   p.scrollTo(600).scrolled()
   assert.ok(p.noteHidden(), '离顶远了就不该再挂着')
+})
+
+test('发送后的落点：长指令把第一行拉回顶部，短指令保持贴底', () => {
+  // 2026-10-22 用户拍板：短指令贴底；长指令如果第一行已经被顶出视野，就拉回顶部。
+  // 气泡要等回显才进 DOM，所以这里验的是「气泡已经在 DOM 之后」那一步的判断。
+  const a = html.indexOf('var sentBubble = null;')
+  const b = html.indexOf('function scheduleSentPin')
+  assert.ok(a > 0 && b > a, '找不到 sentBubble / scheduleSentPin')
+  // eslint-disable-next-line no-new-func
+  const build = new Function('replyEl', 'mainEl', 'pinToTop',
+    `${html.slice(a, b)}\nreturn { pinSentInstruction, setSent: (v) => { sentBubble = v } };`)
+  const pinned = []
+  const pinToTop = (el) => pinned.push(el)
+  const mainEl = { getBoundingClientRect: () => ({ top: 0 }) }
+  const bubble = (text, top) => ({ textContent: text, getBoundingClientRect: () => ({ top }) })
+  let current = bubble('短指令', 500)
+  const replyEl = { querySelectorAll: (sel) => (sel === '.bubble.user' ? [current] : []) }
+  const api = build(replyEl, mainEl, pinToTop)
+  const run = (text, top) => {
+    current = bubble(text, top)
+    api.setSent({ text })
+    return api.pinSentInstruction()
+  }
+
+  assert.equal(run('短指令', 500), true, '短指令：气泡已经在视野里，处理完就行')
+  assert.equal(pinned.length, 0, '短指令保持贴底，不许动')
+
+  assert.equal(run('这是一条很长的指令', -80), true, '长指令：第一行已被顶出视野')
+  assert.equal(pinned.length, 1, '长指令要把气泡拉回顶部')
+  assert.equal(pinned[0], current, '拉的是这一条气泡')
+
+  // 回显还没到（文字对不上）：这次不动，也不把 sentBubble 丢掉，下一轮还能继续等。
+  current = bubble('上一条旧消息', -80)
+  api.setSent({ text: '还没回显的那条' })
+  assert.equal(api.pinSentInstruction(), false, '文字对不上就当还没回显')
+  assert.equal(pinned.length, 1, '没确认之前不许动')
+  current = bubble('还没回显的那条', -80)
+  assert.equal(api.pinSentInstruction(), true, '下一轮对上了再处理')
+  assert.equal(pinned.length, 2, '对上了才拉回顶部')
+})
+
+test('对齐开头按键正文第一行算，不按容器：流式和落定的落点一致', () => {
+  // 2026-10-22 真机：落定瞬间第一行会往上跳 14px（当时流式块有 14px 上内边距）。
+  // 现在虚线移到不占高度的 ::before 上；这条钉住「量的是第一行」，不是容器顶。
+  const a = html.indexOf('function firstContentLine')
+  const b = html.indexOf('function pinToTop')
+  const c = html.indexOf('\n  }', b)
+  assert.ok(a > 0 && b > a && c > b, '找不到 firstContentLine / pinToTop')
+  // eslint-disable-next-line no-new-func
+  const build = new Function('mainEl',
+    `${html.slice(a, c + 4)}\nreturn { firstContentLine, pinToTop };`)
+  const mainEl = {
+    scrollTop: 1000,
+    getBoundingClientRect: () => ({ top: 0 }),
+  }
+  const { firstContentLine, pinToTop } = build(mainEl)
+
+  const line = (top) => ({ getBoundingClientRect: () => ({ top }) })
+  // .live：虚线不占高度，容器顶和第一行都在 800
+  const live = {
+    firstElementChild: { classList: { contains: () => false } },
+    classList: { contains: () => false },
+    querySelector: (sel) => (sel === '.md' ? { firstElementChild: line(800) } : null),
+    getBoundingClientRect: () => ({ top: 800 }),
+  }
+  pinToTop(live)
+  assert.equal(mainEl.scrollTop, 1000 + 800 - 12, '流式也要对齐正文第一行（800）')
+
+  // .said：容器和第一行都在 600（没有内边距）
+  mainEl.scrollTop = 1000
+  const said = {
+    firstElementChild: { classList: { contains: () => false } },
+    classList: { contains: () => false },
+    querySelector: (sel) => (sel === '.md' ? { firstElementChild: line(600) } : null),
+    getBoundingClientRect: () => ({ top: 600 }),
+  }
+  pinToTop(said)
+  assert.equal(mainEl.scrollTop, 1000 + 600 - 12, '落定要对齐正文第一行')
+
+  // 用户气泡没有 .md：量气泡自己，别把 meta 那行当第一行
+  mainEl.scrollTop = 1000
+  const bubble = {
+    firstElementChild: { classList: { contains: () => false } },
+    classList: { contains: (c) => c === 'bubble' },
+    querySelector: () => ({ firstElementChild: line(900) }),
+    getBoundingClientRect: () => ({ top: 600 }),
+  }
+  pinToTop(bubble)
+  assert.equal(mainEl.scrollTop, 1000 + 600 - 12, '用户气泡按气泡本身对齐')
+
+  // 被按停的回答：先露「已停止」那条
+  mainEl.scrollTop = 1000
+  const stopped = {
+    firstElementChild: { classList: { contains: (c) => c === 'reply-bar' }, getBoundingClientRect: () => ({ top: 600 }) },
+    classList: { contains: () => false },
+    querySelector: (sel) => (sel === '.md' ? { firstElementChild: line(640) } : null),
+    getBoundingClientRect: () => ({ top: 600 }),
+  }
+  assert.equal(firstContentLine(stopped), stopped.firstElementChild, '已停止那条要优先露出来')
 })
 
 test('内容只比一屏高一点点时，在底部同样不许露——「在底部」是独立的一条判据', () => {
