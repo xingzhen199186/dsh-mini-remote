@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createAgentClient, normalizeRoots, resolveInside, pairAgent } from '../lib/agent-client.js'
@@ -44,7 +44,23 @@ test('B 端只读：list 和 read 都走授权目录，read 支持行窗口', ()
     assert.equal(read.truncated, true)
 
     assert.throws(() => client.execute({ op: 'read', args: { path: '../outside.txt' } }), /不在 B 端授权/)
-    assert.throws(() => client.execute({ op: 'write', args: { path: 'a.txt', content: 'x' } }), /不支持/)
+    assert.throws(() => client.execute({ op: 'write', args: { path: 'a.txt', content: 'x' } }), /没有授予写文件权限/)
+  } finally {
+    f.cleanup()
+  }
+})
+
+test('B 端写文件：只有 allowWrite=true 才落盘，越界一律拒绝', () => {
+  const f = fixture()
+  try {
+    const writer = createAgentClient({
+      url: 'http://example.test', token: 't', roots: [f.root], allowWrite: true,
+      fetchImpl: async () => { throw new Error('不该联网') },
+    })
+    const out = writer.execute({ op: 'write', args: { path: 'a.txt', content: '新的内容' } })
+    assert.equal(out.bytes, 12)
+    assert.equal(readFileSync(join(f.root, 'a.txt'), 'utf8'), '新的内容')
+    assert.throws(() => writer.execute({ op: 'write', args: { path: '../outside.txt', content: 'x' } }), /不在 B 端授权/)
   } finally {
     f.cleanup()
   }

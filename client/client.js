@@ -58,6 +58,7 @@ window.__ModuleLoader__.load({
     var AGENT_REVOKE_PATH = '/mini-remote/agent-revoke';
     var B_AGENT_PAIR_PATH = '/mini-remote/b-agent/pair';
     var B_AGENT_MODE_PATH = '/mini-remote/b-agent/mode';
+    var B_AGENT_OPTIONS_PATH = '/mini-remote/b-agent/options';
     // 「设备名册」那三条（宿主侧路由，只允许本机调用，见 lib/index.js）：
     //   GET  /mini-remote/devices        → { ok:true, devices:[{id,name,kind,createdAt,lastSeen}] }
     //   POST /mini-remote/devices/rename → { id, name } → { ok:true, device }
@@ -592,6 +593,9 @@ window.__ModuleLoader__.load({
       var bErrState = useState(null);
       var bError = bErrState[0];
       var setBError = bErrState[1];
+      var bWriteState = useState(false);
+      var bAllowWrite = bWriteState[0];
+      var setBAllowWrite = bWriteState[1];
 
       // 添加那一块：`null` = 收着；一个草稿 = 摊开着（三个框 + 一次确认）。
       var addState = useState(null);
@@ -637,6 +641,7 @@ window.__ModuleLoader__.load({
               if (r.body.bAgent) {
                 setBUrl(r.body.bAgent.url || '');
                 setBRoots((r.body.bAgent.roots || []).join('\n'));
+                setBAllowWrite(Boolean(r.body.bAgent.allowWrite));
               }
             } else setFailure('读不到配对信息：这台电脑上的服务返回了 HTTP ' + r.status + '。');
           })
@@ -1249,7 +1254,7 @@ window.__ModuleLoader__.load({
         fetch(B_AGENT_PAIR_PATH, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ url: bUrl, code: bCode, roots: bRoots }),
+          body: JSON.stringify({ url: bUrl, code: bCode, roots: bRoots, allowWrite: bAllowWrite }),
         })
           .then(function (res) {
             return res.json().then(
@@ -1299,6 +1304,38 @@ window.__ModuleLoader__.load({
           })
           .catch(function (err) {
             setBError('切换失败：' + ((err && err.message) || String(err)));
+          })
+          .then(function () { setBusy(false); });
+      };
+
+      /** B 端执行端：写文件权限。 */
+      var setBAgentWrite = function (enabled) {
+        if (busy) return;
+        setBusy(true);
+        setBError(null);
+        setBAllowWrite(Boolean(enabled));
+        fetch(B_AGENT_OPTIONS_PATH, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ allowWrite: Boolean(enabled) }),
+        })
+          .then(function (res) {
+            return res.json().then(
+              function (body) { return { status: res.status, body: body }; },
+              function () { return { status: res.status, body: null }; },
+            );
+          })
+          .then(function (r) {
+            if (r.body && r.body.ok && r.body.bAgent) {
+              setInfo(function (prev) { return Object.assign({}, prev || {}, { bAgent: r.body.bAgent }); });
+              setBAllowWrite(Boolean(r.body.bAgent.allowWrite));
+              if (r.body.bAgent.error) setBError(r.body.bAgent.error);
+            } else {
+              setBError((r.body && r.body.error) || ('切换写文件失败：HTTP ' + r.status));
+            }
+          })
+          .catch(function (err) {
+            setBError('切换写文件失败：' + ((err && err.message) || String(err)));
           })
           .then(function () { setBusy(false); });
       };
@@ -1473,6 +1510,8 @@ window.__ModuleLoader__.load({
           setUrl: setBUrl,
           setCode: setBCode,
           setRoots: setBRoots,
+          allowWrite: bAllowWrite,
+          setWrite: setBAgentWrite,
           error: bError,
           busy: busy,
         }, {
@@ -2395,10 +2434,19 @@ window.__ModuleLoader__.load({
           style: Object.assign({}, styles.input, { minHeight: 72, width: '100%', resize: 'vertical' }),
           onChange: function (e) { a.setRoots(e.target.value); },
         }),
+        h('label', { style: styles.toggleRow },
+          h('input', {
+            type: 'checkbox',
+            checked: Boolean(a && a.allowWrite),
+            disabled: Boolean(a && a.busy),
+            onChange: function (e) { a.setWrite(e.target.checked); },
+          }),
+          h('span', null, '允许 A 写这些文件夹'),
+        ),
         h('div', { style: { marginTop: 10 } },
           h('button', { type: 'button', style: styles.btn, disabled: Boolean(a && a.busy), onClick: a.pair }, '配对并开启'),
         ),
-        h('div', { style: styles.warn }, '开了之后，A 的 AI 能读你授权的文件夹（这一版只读）。不要授权整个盘；写文件和命令还没开。'),
+        h('div', { style: styles.warn }, '开了之后，A 的 AI 能读写你授权的文件夹；执行命令还没开。不要授权整个盘。'),
       );
     }
 
