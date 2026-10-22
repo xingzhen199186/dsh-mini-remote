@@ -6029,6 +6029,37 @@ test('回到底部浮标：单帧模式下不出现，多帧往上翻照旧出�
   assert.doesNotThrow(() => run({ mode: 'minimal', atBottomNow: false, withEl: false }))
 })
 
+test('回到底部浮标：正文还在流时挂 .streaming，流一停就摘掉', () => {
+  // 2026-10-22 用户要求：正文流式生成时，浮标外绕一圈流光。它只该在流的时候转，
+  // 落定/清空之后必须摘掉，否则会一直转、看着像永远没写完。
+  const i = html.indexOf('function paintToBottom')
+  const close = html.indexOf('\n  }', i)
+  assert.ok(i > 0 && close > i, '找不到 paintToBottom')
+  // eslint-disable-next-line no-new-func
+  const build = new Function('$', 'atBottom', 'state',
+    `${html.slice(i, close + 4)}\nreturn paintToBottom;`)
+
+  const classes = new Set()
+  const btn = {
+    hidden: false,
+    classList: {
+      toggle(name, on) { if (on) classes.add(name); else classes.delete(name) },
+    },
+  }
+  const state = { mode: 'chat', live: '正在写' }
+  build(() => btn, () => false, state)()
+  assert.ok(classes.has('streaming'), '正文在流时要挂 streaming')
+
+  state.live = ''
+  build(() => btn, () => false, state)()
+  assert.ok(!classes.has('streaming'), '正文流完/清空后要摘掉')
+
+  state.live = '又开始了'
+  state.mode = 'minimal'
+  build(() => btn, () => false, state)()
+  assert.ok(!classes.has('streaming'), '单帧不跟流式，也不该挂这个环')
+})
+
 // ---------------------------------------------------------------------------
 // 手机导航栏：会话条目的执行功能（2026-10-09）
 //

@@ -1716,8 +1716,11 @@
        （因为它不是 display:none），opacity 老老实实是 0，所以一露出来就是 0→1 的淡入，
        不需要 `@starting-style` 去给一个起点。
 
-       最后一句：这里只有 `transition`，没有关键帧、没有 animation——
-       它是一颗按钮，不是一段表演（`test/ui.test.mjs` 里那条护栏就是钉这个的）。 */
+       最后一句：淡入淡出只用 `transition`，按钮本身上下不动。
+       **2026-10-22 用户点名加了一个例外**：正文流式生成时，圆外绕一圈流光
+       （`.to-bottom.streaming::after`，见下），那是「内容还在长」的状态指示，
+       不是按钮在表演；`state.live` 一空就摘类，动画随之停。
+       `test/ui.test.mjs` 里那条护栏已按这个例外收紧：只许这一个 ringSpin。 */
     transition: opacity .13s ease, visibility .13s;
     opacity: 1; visibility: visible;
   }
@@ -1754,6 +1757,31 @@
      版式一个像素都没动：槽高是 0，按钮靠 margin-top 负的自身高度挂在槽线上方，
      这两个状态里它的盒子一样大，所以不产生任何位移。 */
   .to-bottom[hidden] { opacity: 0; visibility: hidden; pointer-events: none; }
+  /* ---- 2026-10-22：正文流式生成时，圆外绕一圈流光 ---- */
+  /* 用户原话：「在正文流式生成时，移动端页面那个一键到最底部的图标，做一个圆圈流光打转的效果，
+     代表内容在生成。」它不是按钮在表演，而是一个**状态指示**：脚本只按 `state.live` 加/摘
+     `.streaming`，流一停动画就跟着停。
+     做法：conic-gradient 做一段「亮、其余透明」的彗尾，再用 mask 把中间挖空，只留 2px 的环；
+     颜色全部来自现成的 --ice（深浅两套主题各看各的），不写死色值。
+     `inset:-2px` 是往圆外扩一圈（31 → 35），不参与版式；::before 的 49 热区一个字没动。 */
+  .to-bottom.streaming::after {
+    content: ''; position: absolute; inset: -2px; border-radius: 999px;
+    background: conic-gradient(from 0deg,
+      transparent 0deg 210deg,
+      color-mix(in srgb, var(--ice) 30%, transparent) 250deg,
+      var(--ice) 320deg,
+      color-mix(in srgb, var(--ice) 65%, var(--fg)) 345deg,
+      transparent 360deg);
+    -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 1px));
+            mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 1px));
+    animation: ringSpin 1.1s linear infinite;
+    pointer-events: none;
+  }
+  @keyframes ringSpin { to { transform: rotate(360deg); } }
+  /* 减少动效时别转：留一圈静止的淡光，仍然能看出「还在生成」。 */
+  @media (prefers-reduced-motion: reduce) {
+    .to-bottom.streaming::after { animation: none; opacity: .65; }
+  }
   /* 箭头等比缩：10.3 × 31/27 = 11.8。占圆的比例和 27、38 那两轮一样，不空也不挤。 */
   .to-bottom svg { width: 11.8px; height: 11.8px; }
 </style>
@@ -4687,6 +4715,11 @@
     var el = $('toBottom');
     if (!el) return;
     el.hidden = atBottom() || state.mode === 'minimal';
+    // 正文还在流：给圆外挂一圈流光（只是状态指示，不改显隐、不改位置）。
+    // 页面测试里的替身不一定有 classList，取不到就静静跳过。
+    if (el.classList && el.classList.toggle) {
+      el.classList.toggle('streaming', Boolean(state.live) && state.mode !== 'minimal');
+    }
   }
 
   function render() {

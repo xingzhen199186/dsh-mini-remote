@@ -37,7 +37,7 @@ test('圆角只有 2px / 999px / 50% 三档，没有中间值', () => {
   assert.deepEqual(bad, [], `圆角出现了规格外的档位：${JSON.stringify(bad)}`)
 })
 
-test('动效只剩这六种关键帧：光标、立绘翻帧（两套）、上传游动、进度条逐格推进、跑着的行扫光', () => {
+test('动效只剩这几类关键帧：光标、立绘翻帧（两套）、上传游动、进度条逐格推进、跑着的行扫光、流式浮标流光', () => {
   // 第四个是 2026-09-27 补回来的：进度条原来是静止的，用户实机看着像卡住了。
   // 它动的只有位置、宽度写死，所以不违背"别表演"那条——原委写在 page.html 的注释里。
   // 第五个（poseFlip6，2026-09-29）**不是新动效**：冲刺那张立绘从 2 帧变 6 帧，
@@ -50,9 +50,10 @@ test('动效只剩这六种关键帧：光标、立绘翻帧（两套）、上�
   // 原来那个转圈不合理（转圈是"物件在转"的语汇，用在活物身上像标本被转着看），
   // 改成"原地游动"。它同样是**状态指示**（只挂上传中的按钮），不是"界面在表演"；
   // 参数是用户审核过的（上下各 1.5px、±4 度、1.8 秒），减少动效时不动。
-  // **它顶掉了 spin**：转圈只有那一处在用，换掉之后 spin 就是死代码，一并删了。
+  // 第八个（ringSpin，2026-10-22）用户点名加的：正文流式生成时，回到底部那颗浮标的圆外
+  // 绕一圈流光（只挂 .streaming，state.live 一空就停）。它同样是状态指示，不是界面表演。
   const names = [...css.matchAll(/@keyframes\s+([A-Za-z0-9_-]+)/g)].map((m) => m[1]).sort()
-  assert.deepEqual(names, ['barStep', 'caret', 'poseFlip', 'poseFlip6', 'shimSweep', 'subagent-spin', 'whaleSwim'],
+  assert.deepEqual(names, ['barStep', 'caret', 'poseFlip', 'poseFlip6', 'ringSpin', 'shimSweep', 'subagent-spin', 'whaleSwim'],
     '只允许这些：子智能体运行状态需要一个明确的入口动效，上传中的按钮需要"它在动"的表示，'
     + '跑着的行需要一道扫光，其余都是"界面在表演"')
 })
@@ -404,9 +405,9 @@ test('统一操作面板：指令行沿用菜单那一套，名字说明不溢�
  *
  * 这里钉的是它在**视觉规格**上的边界：不新造颜色令牌（造了就得在浅色主题里再写一份，
  * 漏一边就有元素在那个主题下隐身）、不碰那两个稀缺的强调色、圆角只用现成那一档、
- * 不加动效（全页的关键帧白名单也管着）。位置交给 CSS 的 sticky——脚本一个像素都不碰。
+ * 只在流式生成时加一圈流光（状态指示；全页的关键帧白名单也管着）。位置交给 CSS 的 sticky——脚本一个像素都不碰。
  */
-test('回到底部浮标：不新造令牌、不放强调色、圆角走 999px 那一档、不加动效', () => {
+test('回到底部浮标：不新造令牌、不放强调色、圆角走 999px 那一档、只在流式时加一圈流光', () => {
   const from = css.indexOf('/* ---------- 「回到底部」浮标')
   assert.ok(from > 0, '找不到回到底部浮标那段样式，锚点变了先修测试')
   const block = css.slice(from)
@@ -418,7 +419,12 @@ test('回到底部浮标：不新造令牌、不放强调色、圆角走 999px �
   for (const m of block.matchAll(/border-radius:\s*([^;]+);/g)) {
     assert.equal(m[1].trim(), '999px', `浮标只许用 999px 那一档（圆形）：${m[1].trim()}`)
   }
-  assert.ok(!/@keyframes|animation:/.test(block), '浮标不许带动效（它是一颗按钮，不是一段表演）')
+  const btnRule = block.match(/\.to-bottom\s*\{([^}]*)\}/)[1]
+  assert.ok(!/animation:/.test(btnRule), '按钮本身不带动效（它是一颗按钮，不是一段表演）')
+  assert.match(block, /\.to-bottom\.streaming::after\s*\{[^}]*animation:\s*ringSpin/,
+    '流式时的流光只挂在 .streaming::after 上')
+  const keyframes = [...block.matchAll(/@keyframes\s+([A-Za-z0-9_-]+)/g)].map((m) => m[1])
+  assert.deepEqual(keyframes, ['ringSpin'], '浮标那段只许有 ringSpin 这一个关键帧（状态指示）')
 
   // 位置全靠 sticky 贴着滚动口的下沿：这样 main 的下沿（= 输入区那一摞的上沿）
   // 一变，它自己跟着让位，不需要脚本去算输入框有多高。
@@ -600,5 +606,11 @@ test('回到底部浮标：出现与消失各一段 130ms 的淡入淡出，不�
 
   // ④ 只淡，不缩不弹：过渡列表里除了 opacity / visibility 不许有别的（尤其是 transform）。
   assert.ok(!/transform/.test(btn), '不许加缩放弹跳，这里只做克制的一次透明度过渡')
-  assert.ok(!/animation:|@keyframes/.test(block), '淡入淡出用 transition，不用关键帧')
+  const anims = [...block.matchAll(/animation:\s*([^;]+);/g)].map((m) => m[1].trim())
+    .filter((a) => a !== 'none')
+  assert.deepEqual(anims, ['ringSpin 1.1s linear infinite'],
+    '只有流式时的圆环在转；按钮本身的淡入淡出仍用 transition')
+  assert.ok(!/animation:/.test(btn), '按钮本身不带动效')
+  assert.match(block, /prefers-reduced-motion[^}]*\.to-bottom\.streaming::after\s*\{[^}]*animation:\s*none/,
+    '减少动效时圆环要停转')
 })
