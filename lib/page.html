@@ -4722,45 +4722,6 @@
     }
   }
 
-  /**
-   * 刚发出去的那条指令：等它回显到页面里，再决定落点（2026-10-22 用户拍板）。
-   *
-   * 短指令贴底（贴着输入框，符合「发完就看下一句」的习惯）；长指令如果第一行已经被
-   * 顶出视野，就把它拉回顶部——否则用户看到的是自己消息的**末尾**，还得往上翻才知道
-   * 自己刚发了什么。气泡要等服务端回显才进 DOM，所以发送后轮询一小会儿，不在没渲染
-   * 的时候瞎算高度。
-   */
-  var sentBubble = null;
-
-  function lastUserBubble() {
-    if (!replyEl.querySelectorAll) return null;
-    var all = replyEl.querySelectorAll('.bubble.user');
-    return all.length ? all[all.length - 1] : null;
-  }
-
-  function pinSentInstruction() {
-    if (!sentBubble) return false;
-    var b = lastUserBubble();
-    if (!b) return false;
-    // 回显可能晚到：文字对不上就先不动，等下一轮。
-    if ((b.textContent || '').indexOf(sentBubble.text) < 0) return false;
-    sentBubble = null;
-    var mainTop = mainEl.getBoundingClientRect ? mainEl.getBoundingClientRect().top : 0;
-    var top = b.getBoundingClientRect().top;
-    // 第一行已经跑到视野上方 = 长指令；否则保持贴底，短指令不折腾。
-    if (top < mainTop + 12) pinToTop(b);
-    return true;
-  }
-
-  function scheduleSentPin() {
-    var tries = 0;
-    (function tick() {
-      if (!sentBubble) return;
-      if (pinSentInstruction()) return;
-      if (++tries < 30) setTimeout(tick, 50);
-    })();
-  }
-
   function render() {
     $('hintMode').textContent = modeHint();
       if (state.mode === 'full') renderFull(); else if (state.mode === 'chat') renderChat(); else renderMinimal();
@@ -6037,8 +5998,6 @@
           if (state.live) { state.live = ''; render(); }
           return;
         }
-        // 正文已经开始：发送落点交给 scrollChat，别再回头把指令拉上来（两条会打架）。
-        sentBubble = null;
         state.streamReceived = true;
         state.live = (state.live || '') + frame.delta;
         // 只换流式那一块，别每 60 毫秒重拼整串历史（见 paintLive 的说明）。
@@ -6160,7 +6119,6 @@
       state.live = '';
       state.liveTool = null;
       state.streamReceived = false;
-      sentBubble = null;
       setRunning(false);
       render();
       if (!document.hidden) {
@@ -6731,12 +6689,6 @@
     var shown = files.length
       ? text + (text ? '\n' : '') + '📎 ' + files.map(function (f) { return f.name; }).join('、')
       : text;
-
-    // 发送后的落点：短指令贴底，长指令等回显后把第一行拉回顶部（见 pinSentInstruction）。
-    if (state.mode !== 'minimal') {
-      sentBubble = { text: shown, at: Date.now() };
-      scheduleSentPin();
-    }
 
     if (state.mode === 'minimal') {
       // 上一条回答**留着**，由 renderMinimal 在它下面加一条「正在执行」。

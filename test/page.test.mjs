@@ -1761,9 +1761,6 @@ function buildSend({ running = false, serverSays = { ok: true }, rejects = false
     escapeHtml: md.escapeHtml,
     MAX_UPLOAD: 50 * 1024 * 1024,
     currentTrajectoryTurn: () => null, // 测试桩：没有轨迹数据时返回 null
-    // 发送后的落点：send 只负责记下这条并喊一声，真正的判断在函数外（另有用例）。
-    sentBubble: null,
-    scheduleSentPin: () => {},
     api: (path, opts) => {
       calls.push({ path, opts })
       return rejects ? Promise.reject(new Error('发不出去')) : Promise.resolve(serverSays)
@@ -2239,7 +2236,7 @@ function feedReply(payload, { mode = 'minimal', history = [], live = '', frames 
   const build = new Function(
     'state', 'EventSource', 'document', 'encodeURIComponent', '$',
     'setStatus', 'showGate', 'updateStatusUI', 'applySnapshot', 'render',
-    'setRunning', 'playDing', 'buzz', 'paintLive', 'sentBubble',
+    'setRunning', 'playDing', 'buzz', 'paintLive',
     `${html.slice(ss, se)}\nreturn connect;`,
   )
   build(
@@ -2254,7 +2251,7 @@ function feedReply(payload, { mode = 'minimal', history = [], live = '', frames 
     })),
     () => {}, () => {}, () => {}, () => {}, () => {},
     (v) => { calls.push(v); state.running = v }, () => {}, () => {},
-    () => { paints += 1 }, null,
+    () => { paints += 1 },
   )()
   for (const frame of frames) source.fire('trajectory-live', frame)
   source.fire('reply', payload)
@@ -3080,45 +3077,6 @@ test('滑到最下面读内容时，那句「往上滑看更早的」不许露�
   // 中间地带（离顶远、又没到底）也不露：那句提示只在够得着顶部时有意义。
   p.scrollTo(600).scrolled()
   assert.ok(p.noteHidden(), '离顶远了就不该再挂着')
-})
-
-test('发送后的落点：长指令把第一行拉回顶部，短指令保持贴底', () => {
-  // 2026-10-22 用户拍板：短指令贴底；长指令如果第一行已经被顶出视野，就拉回顶部。
-  // 气泡要等回显才进 DOM，所以这里验的是「气泡已经在 DOM 之后」那一步的判断。
-  const a = html.indexOf('var sentBubble = null;')
-  const b = html.indexOf('function scheduleSentPin')
-  assert.ok(a > 0 && b > a, '找不到 sentBubble / scheduleSentPin')
-  // eslint-disable-next-line no-new-func
-  const build = new Function('replyEl', 'mainEl', 'pinToTop',
-    `${html.slice(a, b)}\nreturn { pinSentInstruction, setSent: (v) => { sentBubble = v } };`)
-  const pinned = []
-  const pinToTop = (el) => pinned.push(el)
-  const mainEl = { getBoundingClientRect: () => ({ top: 0 }) }
-  const bubble = (text, top) => ({ textContent: text, getBoundingClientRect: () => ({ top }) })
-  let current = bubble('短指令', 500)
-  const replyEl = { querySelectorAll: (sel) => (sel === '.bubble.user' ? [current] : []) }
-  const api = build(replyEl, mainEl, pinToTop)
-  const run = (text, top) => {
-    current = bubble(text, top)
-    api.setSent({ text })
-    return api.pinSentInstruction()
-  }
-
-  assert.equal(run('短指令', 500), true, '短指令：气泡已经在视野里，处理完就行')
-  assert.equal(pinned.length, 0, '短指令保持贴底，不许动')
-
-  assert.equal(run('这是一条很长的指令', -80), true, '长指令：第一行已被顶出视野')
-  assert.equal(pinned.length, 1, '长指令要把气泡拉回顶部')
-  assert.equal(pinned[0], current, '拉的是这一条气泡')
-
-  // 回显还没到（文字对不上）：这次不动，也不把 sentBubble 丢掉，下一轮还能继续等。
-  current = bubble('上一条旧消息', -80)
-  api.setSent({ text: '还没回显的那条' })
-  assert.equal(api.pinSentInstruction(), false, '文字对不上就当还没回显')
-  assert.equal(pinned.length, 1, '没确认之前不许动')
-  current = bubble('还没回显的那条', -80)
-  assert.equal(api.pinSentInstruction(), true, '下一轮对上了再处理')
-  assert.equal(pinned.length, 2, '对上了才拉回顶部')
 })
 
 test('对齐开头按键正文第一行算，不按容器：流式和落定的落点一致', () => {
