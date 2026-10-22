@@ -2466,7 +2466,7 @@ test('声明成 volatile 的字段只有那两个：能兑现的才标', async (
     '多标一个是谎话（DSH 就不再重载，而我们手里还是旧值），少标一个就白白多重载一次')
 
   assert.deepEqual(Object.keys(dict).sort(),
-    ['allowRemoteComputers', 'bindAddress', 'defaultMode', 'feishu', 'maxHistory', 'notify', 'port', 'token', 'tunnel'],
+    ['allowAgent', 'allowRemoteComputers', 'bindAddress', 'defaultMode', 'feishu', 'maxHistory', 'notify', 'port', 'token', 'tunnel'],
     '每个设置都该在声明里露面，否则标准通道看不见它')
   // 飞书那一块**故意不标 volatile**：它的长连接是拿 appId/appSecret 建的，改了凭据
   // 就得把连接整个换掉，"就地改一个值"兑现不了。上面那条 volatile 清单因此不该有它。
