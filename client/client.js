@@ -56,6 +56,8 @@ window.__ModuleLoader__.load({
     var AGENT_ACCESS_PATH = '/mini-remote/agent-access';
     var AGENT_CODE_PATH = '/mini-remote/agent-pair-code';
     var AGENT_REVOKE_PATH = '/mini-remote/agent-revoke';
+    var B_AGENT_PAIR_PATH = '/mini-remote/b-agent/pair';
+    var B_AGENT_MODE_PATH = '/mini-remote/b-agent/mode';
     // 「设备名册」那三条（宿主侧路由，只允许本机调用，见 lib/index.js）：
     //   GET  /mini-remote/devices        → { ok:true, devices:[{id,name,kind,createdAt,lastSeen}] }
     //   POST /mini-remote/devices/rename → { id, name } → { ok:true, device }
@@ -577,6 +579,19 @@ window.__ModuleLoader__.load({
       var agentErrState = useState(null);
       var agentError = agentErrState[0];
       var setAgentError = agentErrState[1];
+      // B 端执行端（这一侧）：地址、配对码、授权目录草稿 + 错误。
+      var bUrlState = useState('');
+      var bUrl = bUrlState[0];
+      var setBUrl = bUrlState[1];
+      var bCodeState = useState('');
+      var bCode = bCodeState[0];
+      var setBCode = bCodeState[1];
+      var bRootsState = useState('');
+      var bRoots = bRootsState[0];
+      var setBRoots = bRootsState[1];
+      var bErrState = useState(null);
+      var bError = bErrState[0];
+      var setBError = bErrState[1];
 
       // 添加那一块：`null` = 收着；一个草稿 = 摊开着（三个框 + 一次确认）。
       var addState = useState(null);
@@ -617,8 +632,13 @@ window.__ModuleLoader__.load({
           })
           .then(function (r) {
             if (!alive) return;
-            if (r.body && typeof r.body === 'object') setInfo(r.body);
-            else setFailure('读不到配对信息：这台电脑上的服务返回了 HTTP ' + r.status + '。');
+            if (r.body && typeof r.body === 'object') {
+              setInfo(r.body);
+              if (r.body.bAgent) {
+                setBUrl(r.body.bAgent.url || '');
+                setBRoots((r.body.bAgent.roots || []).join('\n'));
+              }
+            } else setFailure('读不到配对信息：这台电脑上的服务返回了 HTTP ' + r.status + '。');
           })
           .catch(function (err) {
             if (!alive) return;
@@ -1221,6 +1241,68 @@ window.__ModuleLoader__.load({
           .then(function () { setBusy(false); });
       };
 
+      /** B 端执行端：配对并开启。 */
+      var pairBAgent = function () {
+        if (busy) return;
+        setBusy(true);
+        setBError(null);
+        fetch(B_AGENT_PAIR_PATH, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ url: bUrl, code: bCode, roots: bRoots }),
+        })
+          .then(function (res) {
+            return res.json().then(
+              function (body) { return { status: res.status, body: body }; },
+              function () { return { status: res.status, body: null }; },
+            );
+          })
+          .then(function (r) {
+            if (r.body && r.body.ok && r.body.bAgent) {
+              setInfo(function (prev) { return Object.assign({}, prev || {}, { bAgent: r.body.bAgent }); });
+              setBCode('');
+              setBUrl(r.body.bAgent.url || bUrl);
+              setBRoots((r.body.bAgent.roots || []).join('\n'));
+            } else {
+              setBError((r.body && r.body.error) || ('配对失败：HTTP ' + r.status));
+            }
+          })
+          .catch(function (err) {
+            setBError('配对失败：' + ((err && err.message) || String(err)));
+          })
+          .then(function () { setBusy(false); });
+      };
+
+      /** B 端执行端：开/关。 */
+      var toggleBAgent = function (enabled) {
+        if (busy) return;
+        setBusy(true);
+        setBError(null);
+        fetch(B_AGENT_MODE_PATH, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ enabled: enabled }),
+        })
+          .then(function (res) {
+            return res.json().then(
+              function (body) { return { status: res.status, body: body }; },
+              function () { return { status: res.status, body: null }; },
+            );
+          })
+          .then(function (r) {
+            if (r.body && r.body.ok && r.body.bAgent) {
+              setInfo(function (prev) { return Object.assign({}, prev || {}, { bAgent: r.body.bAgent }); });
+              if (r.body.bAgent.error) setBError(r.body.bAgent.error);
+            } else {
+              setBError((r.body && r.body.error) || ('切换失败：HTTP ' + r.status));
+            }
+          })
+          .catch(function (err) {
+            setBError('切换失败：' + ((err && err.message) || String(err)));
+          })
+          .then(function () { setBusy(false); });
+      };
+
       /**
        * 开/关 Tailscale 的 HTTPS 地址。
        *
@@ -1382,6 +1464,18 @@ window.__ModuleLoader__.load({
             } catch (err) { return ''; }
           })(),
         }, {
+          // B 端这一侧：作为执行端。地址/码/目录都是本机草稿，token 永远不回显。
+          toggle: toggleBAgent,
+          pair: pairBAgent,
+          url: bUrl,
+          code: bCode,
+          roots: bRoots,
+          setUrl: setBUrl,
+          setCode: setBCode,
+          setRoots: setBRoots,
+          error: bError,
+          busy: busy,
+        }, {
           // 「其他电脑」那一块：名单 + 添加 + 两个动作，以及只属于那一块的两句话
           // （读名单失败的原因、断开之后那句"对面还留着"）。
           list: remotes,
@@ -1411,7 +1505,7 @@ window.__ModuleLoader__.load({
       );
     }
 
-    function content(info, failure, copied, copy, busy, toggle, pwd, serve, feishu, dev, remote, agent, rmt, self) {
+    function content(info, failure, copied, copy, busy, toggle, pwd, serve, feishu, dev, remote, agent, bAgent, rmt, self) {
       if (failure) return h('div', { style: styles.error }, failure);
       if (!info) return h('div', { style: styles.loading }, '正在读取配对信息…');
 
@@ -1450,6 +1544,7 @@ window.__ModuleLoader__.load({
       // 用户先在名单里看见一台不认识的电脑，才在上方找到那个总开关。
       if (info.remote && remote) blocks.push(remoteBlock(info.remote, busy, remote.toggle));
       if (info.agent && agent) blocks.push(agentBlock(info.agent, agent));
+      if (info.bAgent && bAgent) blocks.push(bAgentBlock(info.bAgent, bAgent));
       if (dev && (dev.list !== null || dev.error)) blocks.push(devicesBlock(dev));
       // 「其他电脑」那一块：**排在「设备」后面**。两块说的是相反的两件事——上面那份是
       // "谁进得来"（别人连我这台），这一份是"我连得上谁"（我从这台去连别人）。顺序上先
@@ -2250,6 +2345,60 @@ window.__ModuleLoader__.load({
             : h('div', { style: styles.muted, marginTop: 10 }, '还没有 B 端连过来。'))
           : null,
         on ? h('div', { style: styles.warn }, 'B 端只拿文件读取（这一版只读）；写文件和命令还没开。那台电脑上的授权目录由它自己选，A 不能替它扩大。') : null,
+      );
+    }
+
+    /**
+     * B 端这一侧的「作为执行端」（2026-10-22）。和 A 端那块是两件事：
+     * 这块是把自己的电脑交出去，所以地址、配对码、授权目录都在这一页填，
+     * A 端不能替它填。
+     */
+    function bAgentBlock(st, a) {
+      var on = Boolean(st && st.mode);
+      var status = st && st.connected ? '已连上 A，等待任务。' : (st && st.error ? st.error : '还没连上 A。');
+      return h('div', { key: 'bAgent', style: styles.block },
+        h('div', { style: styles.entryTitle }, '作为 B 端执行端'),
+        h('div', { style: styles.muted }, '把这台电脑交给家里那台 A：只接收文件和命令任务，不把 A 的会话和插件搬过来。目录和权限由这一页本地给。'),
+        h('label', { style: styles.toggleRow },
+          h('input', {
+            type: 'checkbox',
+            checked: on,
+            disabled: Boolean(a && a.busy),
+            onChange: function (e) { a.toggle(e.target.checked); },
+          }),
+          h('span', null, on ? '已开启' : '开启'),
+        ),
+        h('div', { style: on ? styles.detail : styles.muted }, status),
+        a && a.error ? h('div', { style: styles.warn }, a.error) : null,
+        h('div', { style: styles.muted, marginTop: 10 }, 'A 的地址（例如 http://100.x.x.x:3090）'),
+        h('input', {
+          value: a ? a.url : '',
+          spellCheck: false,
+          placeholder: 'http://…:3090',
+          style: styles.input,
+          onChange: function (e) { a.setUrl(e.target.value); },
+        }),
+        h('div', { style: styles.muted, marginTop: 10 }, 'A 端设置页生成的 6 位配对码'),
+        h('input', {
+          value: a ? a.code : '',
+          inputMode: 'numeric',
+          maxLength: 6,
+          placeholder: '6 位数字',
+          style: styles.input,
+          onChange: function (e) { a.setCode(e.target.value); },
+        }),
+        h('div', { style: styles.muted, marginTop: 10 }, '授权给 A 的文件夹，一行一个'),
+        h('textarea', {
+          value: a ? a.roots : '',
+          spellCheck: false,
+          placeholder: 'D:\\work\nD:\\资料',
+          style: Object.assign({}, styles.input, { minHeight: 72, width: '100%', resize: 'vertical' }),
+          onChange: function (e) { a.setRoots(e.target.value); },
+        }),
+        h('div', { style: { marginTop: 10 } },
+          h('button', { type: 'button', style: styles.btn, disabled: Boolean(a && a.busy), onClick: a.pair }, '配对并开启'),
+        ),
+        h('div', { style: styles.warn }, '开了之后，A 的 AI 能读你授权的文件夹（这一版只读）。不要授权整个盘；写文件和命令还没开。'),
       );
     }
 
