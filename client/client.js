@@ -596,6 +596,9 @@ window.__ModuleLoader__.load({
       var bWriteState = useState(false);
       var bAllowWrite = bWriteState[0];
       var setBAllowWrite = bWriteState[1];
+      var bShellState = useState(false);
+      var bAllowShell = bShellState[0];
+      var setBAllowShell = bShellState[1];
 
       // 添加那一块：`null` = 收着；一个草稿 = 摊开着（三个框 + 一次确认）。
       var addState = useState(null);
@@ -642,6 +645,7 @@ window.__ModuleLoader__.load({
                 setBUrl(r.body.bAgent.url || '');
                 setBRoots((r.body.bAgent.roots || []).join('\n'));
                 setBAllowWrite(Boolean(r.body.bAgent.allowWrite));
+                setBAllowShell(Boolean(r.body.bAgent.allowShell));
               }
             } else setFailure('读不到配对信息：这台电脑上的服务返回了 HTTP ' + r.status + '。');
           })
@@ -1254,7 +1258,7 @@ window.__ModuleLoader__.load({
         fetch(B_AGENT_PAIR_PATH, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ url: bUrl, code: bCode, roots: bRoots, allowWrite: bAllowWrite }),
+          body: JSON.stringify({ url: bUrl, code: bCode, roots: bRoots, allowWrite: bAllowWrite, allowShell: bAllowShell }),
         })
           .then(function (res) {
             return res.json().then(
@@ -1336,6 +1340,38 @@ window.__ModuleLoader__.load({
           })
           .catch(function (err) {
             setBError('切换写文件失败：' + ((err && err.message) || String(err)));
+          })
+          .then(function () { setBusy(false); });
+      };
+
+      /** B 端执行端：执行命令权限。 */
+      var setBAgentShell = function (enabled) {
+        if (busy) return;
+        setBusy(true);
+        setBError(null);
+        setBAllowShell(Boolean(enabled));
+        fetch(B_AGENT_OPTIONS_PATH, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ allowShell: Boolean(enabled) }),
+        })
+          .then(function (res) {
+            return res.json().then(
+              function (body) { return { status: res.status, body: body }; },
+              function () { return { status: res.status, body: null }; },
+            );
+          })
+          .then(function (r) {
+            if (r.body && r.body.ok && r.body.bAgent) {
+              setInfo(function (prev) { return Object.assign({}, prev || {}, { bAgent: r.body.bAgent }); });
+              setBAllowShell(Boolean(r.body.bAgent.allowShell));
+              if (r.body.bAgent.error) setBError(r.body.bAgent.error);
+            } else {
+              setBError((r.body && r.body.error) || ('切换执行命令失败：HTTP ' + r.status));
+            }
+          })
+          .catch(function (err) {
+            setBError('切换执行命令失败：' + ((err && err.message) || String(err)));
           })
           .then(function () { setBusy(false); });
       };
@@ -1512,6 +1548,8 @@ window.__ModuleLoader__.load({
           setRoots: setBRoots,
           allowWrite: bAllowWrite,
           setWrite: setBAgentWrite,
+          allowShell: bAllowShell,
+          setShell: setBAgentShell,
           error: bError,
           busy: busy,
         }, {
@@ -2443,6 +2481,16 @@ window.__ModuleLoader__.load({
           }),
           h('span', null, '允许 A 写这些文件夹'),
         ),
+        h('label', { style: styles.toggleRow },
+          h('input', {
+            type: 'checkbox',
+            checked: Boolean(a && a.allowShell),
+            disabled: Boolean(a && a.busy),
+            onChange: function (e) { a.setShell(e.target.checked); },
+          }),
+          h('span', null, '允许 A 在这台电脑上执行命令'),
+        ),
+        h('div', { style: styles.warn }, '执行命令等于把整台电脑交给 A（不只是授权目录）。默认关；确认你信得过这台 A 再打开。'),
         h('div', { style: { marginTop: 10 } },
           h('button', { type: 'button', style: styles.btn, disabled: Boolean(a && a.busy), onClick: a.pair }, '配对并开启'),
         ),

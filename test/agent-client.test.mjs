@@ -66,6 +66,29 @@ test('B 端写文件：只有 allowWrite=true 才落盘，越界一律拒绝', (
   }
 })
 
+test('B 端命令：没有 allowShell 就不许跑；开了以后只默认在授权目录里跑', async () => {
+  const f = fixture()
+  try {
+    const denied = createAgentClient({
+      url: 'http://example.test', token: 't', roots: [f.root], allowShell: false,
+      fetchImpl: async () => { throw new Error('不该联网') },
+    })
+    await assert.rejects(denied.execute({ op: 'shell', args: { command: 'echo x' } }), /没有授予执行命令权限/)
+
+    const allowed = createAgentClient({
+      url: 'http://example.test', token: 't', roots: [f.root], allowShell: true,
+      fetchImpl: async () => { throw new Error('不该联网') },
+    })
+    const out = await allowed.execute({ op: 'shell', args: { command: 'echo dsh-shell-ok' } })
+    assert.equal(out.code, 0)
+    assert.match(out.stdout, /dsh-shell-ok/)
+    assert.equal(out.cwd, f.root)
+    await assert.rejects(allowed.execute({ op: 'shell', args: { command: 'echo x', cwd: '../' } }), /不在 B 端授权/)
+  } finally {
+    f.cleanup()
+  }
+})
+
 test('配对请求只把授权摘要交给 A，不交 token；A 返回的 token 才是长期凭据', async () => {
   const f = fixture()
   try {
