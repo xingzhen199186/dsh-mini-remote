@@ -4079,6 +4079,10 @@
    *     让最终版从第一行开始读。完整模式也一样（2026-10-22 用户拍板，取代
    *     2026-10-08「退回这一轮过程开头」那条：现在停在正文第一行，过程组会被推到上方）。
    *
+   *   · 人已经停在上一轮回答附近、离底部不到一屏，也算「跟着看」：会动他。
+   *     如果新回答短到顶不上去（滚到底也到不了第一行），按 2026-10-22 用户口径
+   *     **直接贴底**，而不是停在上一轮的开头。离底部还远（在翻旧记录）仍旧不碰。
+   *
    * 为什么要记 key、而不是「每次都对齐」：用户往下读的时候，每次重画都把他拽回
    * 开头，比不对齐还烦人。这一点和单帧模式里 scrolledReplyAt 的道理是一样的。
    */
@@ -4099,7 +4103,11 @@
       //
       // 注意 stick 是**改 innerHTML 之前**问的（见 atBottom 的注释），
       // 所以它答的是「他刚才在不在底部」，正是这里要问的。
-      if (!stick) return;
+      // 「离底部不到一屏」也算跟着看：用户报的正是「停在上一轮回答开头」这个位置，
+      // 他不是在翻很远的历史。远于一屏仍旧不碰（2026-09-22 那条不打扰规则）。
+      var view = mainEl.clientHeight || 0;
+      var nearEnd = view > 0 && (mainEl.scrollHeight - mainEl.scrollTop - view) < view;
+      if (!stick && !nearEnd) return;
       var target = null;
       if (liveNow) {
         target = replyEl.querySelector ? replyEl.querySelector('.live') : null;
@@ -4108,7 +4116,17 @@
         target = saids.length ? saids[saids.length - 1] : null;
         // 完整模式也停在正文第一行：过程组留在上方，不把回答顶下去（2026-10-22 用户拍板）。
       }
+      // 先算这一下「顶不顶得上去」：回答太短时，滚到底也到不了第一行。
+      // 2026-10-22 用户指的特定情况就是这种——不要停在上一轮的开头，直接贴底。
+      var line = firstContentLine(target);
+      var lineTop = line && typeof line.getBoundingClientRect === 'function'
+        ? line.getBoundingClientRect().top : 0;
+      var mainTop = mainEl.getBoundingClientRect ? mainEl.getBoundingClientRect().top : 0;
+      var desired = lineTop - mainTop - 12;
+      var maxScroll = mainEl.scrollHeight - view;
+      var canPin = !!line && view > 0 && (mainEl.scrollTop + desired <= maxScroll + 1);
       pinToTop(target);
+      if (!stick && !canPin) mainEl.scrollTop = mainEl.scrollHeight;
       return;
     }
     // 没有新回答的时候照旧黏底（历史重排、切会话、用户自己发指令这些），

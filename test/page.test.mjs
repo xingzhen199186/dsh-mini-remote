@@ -2727,7 +2727,7 @@ test('回答对象没有 timestamp 时也不跳——没有判据就不动', () 
  */
 function chatRunner({
   latest, live, history = [], scrollTop = 0, scrollHeight = 2000,
-  liveTop = 800, saidTop = 600, mainTop = 0,
+  liveTop = 800, saidTop = 600, mainTop = 0, clientHeight = 0,
 } = {}) {
   // 假的 replyEl：querySelector / querySelectorAll 靠扫 innerHTML 里的 class 字符串，
   // 不真去解析 HTML——够用，而且渲染细节变了也不会误红。
@@ -2748,7 +2748,7 @@ function chatRunner({
   }
   const mainEl = {
     classList: { remove() {} },
-    scrollTop, scrollHeight, clientHeight: 0,
+    scrollTop, scrollHeight, clientHeight,
     getBoundingClientRect: () => ({ top: mainTop }),
   }
   const state = { mode: 'chat', history, live: live || '', latest, boundSessionId: 's1' }
@@ -2761,6 +2761,49 @@ function chatRunner({
   )
   return { render: build(state, replyEl, mainEl, () => '12:00'), state, mainEl, replyEl }
 }
+
+test('短回答落定、人停在上一轮回答附近：直接贴底', () => {
+  // 2026-10-22 用户报的特定情况：生成完了没跳到这次回答开头，而是停在上一轮开头。
+  // 原因是回答太短，顶不到上方；用户口径是这种时候直接贴底。
+  const r = chatRunner({
+    latest: { text: '短答案。', timestamp: 9 },
+    history: [
+      { role: 'user', text: '问一句', timestamp: 8 },
+      { role: 'assistant', text: '短答案。', timestamp: 9 },
+    ],
+    scrollTop: 600, scrollHeight: 2000, clientHeight: 722, saidTop: 900,
+  })
+  r.render()
+  assert.equal(r.mainEl.scrollTop, 2000, '短回答顶不上去，就直接贴底，别停在上一轮')
+})
+
+test('顶得上去时仍对齐回答第一行，不贴底', () => {
+  // 同样是「落定时人不在底部、但离底部不到一屏」，这次回答第一行够得着：
+  // 该对齐回答开头，不能一股脑贴底。690 - 12 = 678 是目标位置；max 是 1278。
+  const r = chatRunner({
+    latest: { text: '一段回答。', timestamp: 9 },
+    history: [
+      { role: 'user', text: '问一句', timestamp: 8 },
+      { role: 'assistant', text: '一段回答。', timestamp: 9 },
+    ],
+    scrollTop: 600, scrollHeight: 2000, clientHeight: 722, saidTop: 690,
+  })
+  r.render()
+  assert.equal(r.mainEl.scrollTop, 1278, '够得着就停在回答第一行（被最大滚动距离卡住也在位）')
+})
+
+test('离底部还远、在翻旧记录时：短回答落定也不拽人', () => {
+  const r = chatRunner({
+    latest: { text: '短答案。', timestamp: 9 },
+    history: [
+      { role: 'user', text: '问一句', timestamp: 8 },
+      { role: 'assistant', text: '短答案。', timestamp: 9 },
+    ],
+    scrollTop: 100, scrollHeight: 2000, clientHeight: 722, saidTop: 900,
+  })
+  r.render()
+  assert.equal(r.mainEl.scrollTop, 100, '翻旧记录时仍旧不打扰（2026-09-22 那条）')
+})
 
 test('聊天模式：没有新回答时照旧黏底（重排、切会话不该乱动）', () => {
   // 没有 latest、没有 live —— 也就是「什么都没新来」，这时候维持原样：
