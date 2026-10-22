@@ -53,6 +53,9 @@ window.__ModuleLoader__.load({
     // 它收 `{ enabled }`，回的也是整份配对信息（和公网那个开关同形状）。
     // 关着的时候，配对和跨机取票两条路由一条都不接——这是用户能读懂的"关"。
     var REMOTE_ACCESS_PATH = '/mini-remote/remote-access';
+    var AGENT_ACCESS_PATH = '/mini-remote/agent-access';
+    var AGENT_CODE_PATH = '/mini-remote/agent-pair-code';
+    var AGENT_REVOKE_PATH = '/mini-remote/agent-revoke';
     // 「设备名册」那三条（宿主侧路由，只允许本机调用，见 lib/index.js）：
     //   GET  /mini-remote/devices        → { ok:true, devices:[{id,name,kind,createdAt,lastSeen}] }
     //   POST /mini-remote/devices/rename → { id, name } → { ok:true, device }
@@ -567,6 +570,14 @@ window.__ModuleLoader__.load({
       var remoteNoteState = useState(null);
       var remoteNote = remoteNoteState[0];
       var setRemoteNote = remoteNoteState[1];
+      // B 端执行：配对码 + 这一块的错误。名单在 info.agent 里跟配对信息一起下来。
+      var agentCodeState = useState(null);
+      var agentCode = agentCodeState[0];
+      var setAgentCode = agentCodeState[1];
+      var agentErrState = useState(null);
+      var agentError = agentErrState[0];
+      var setAgentError = agentErrState[1];
+
       // 添加那一块：`null` = 收着；一个草稿 = 摊开着（三个框 + 一次确认）。
       var addState = useState(null);
       var addDraft = addState[0];
@@ -1136,6 +1147,80 @@ window.__ModuleLoader__.load({
           .then(function () { setBusy(false); });
       };
 
+      /** B 端执行总开关。 */
+      var toggleAgentAccess = function (enabled) {
+        if (busy) return;
+        setBusy(true);
+        setAgentError(null);
+        fetch(AGENT_ACCESS_PATH, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ enabled: enabled }),
+        })
+          .then(function (res) {
+            return res.json().then(
+              function (body) { return { status: res.status, body: body }; },
+              function () { return { status: res.status, body: null }; },
+            );
+          })
+          .then(function (r) {
+            if (r.body && typeof r.body === 'object') { setInfo(r.body); setFailure(null); }
+            else setAgentError('切换「允许 B 端执行」失败：服务返回了 HTTP ' + r.status + '。');
+          })
+          .catch(function (err) {
+            setAgentError('切换「允许 B 端执行」失败：' + ((err && err.message) || String(err)));
+          })
+          .then(function () { setBusy(false); });
+      };
+
+      /** 生成一次性配对码。 */
+      var makeAgentCode = function () {
+        if (busy) return;
+        setBusy(true);
+        setAgentError(null);
+        fetch(AGENT_CODE_PATH, { method: 'POST' })
+          .then(function (res) {
+            return res.json().then(
+              function (body) { return { status: res.status, body: body }; },
+              function () { return { status: res.status, body: null }; },
+            );
+          })
+          .then(function (r) {
+            if (r.body && r.body.ok) setAgentCode(r.body);
+            else setAgentError((r.body && r.body.error) || ('生成配对码失败：HTTP ' + r.status));
+          })
+          .catch(function (err) {
+            setAgentError('生成配对码失败：' + ((err && err.message) || String(err)));
+          })
+          .then(function () { setBusy(false); });
+      };
+
+      /** 撤销一台 B 端。 */
+      var revokeAgent = function (id) {
+        if (busy) return;
+        setBusy(true);
+        setAgentError(null);
+        fetch(AGENT_REVOKE_PATH, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ id: id }),
+        })
+          .then(function (res) {
+            return res.json().then(
+              function (body) { return { status: res.status, body: body }; },
+              function () { return { status: res.status, body: null }; },
+            );
+          })
+          .then(function (r) {
+            if (r.body && typeof r.body === 'object' && r.body.agents) { setInfo(r.body); setFailure(null); }
+            else setAgentError((r.body && r.body.error) || ('撤销失败：HTTP ' + r.status));
+          })
+          .catch(function (err) {
+            setAgentError('撤销失败：' + ((err && err.message) || String(err)));
+          })
+          .then(function () { setBusy(false); });
+      };
+
       /**
        * 开/关 Tailscale 的 HTTPS 地址。
        *
@@ -1282,6 +1367,21 @@ window.__ModuleLoader__.load({
           // 对象传：状态在 `info.remote` 里跟配对信息一起下来，动作就是上面那个 POST。
           toggle: toggleRemoteAccess,
         }, {
+          // B 端执行：开关 + 配对码 + 名单/撤销。地址取第一条手机地址的源，
+          // 因为 B 的 agent 路由和手机服务在同一个服务器上。
+          toggle: toggleAgentAccess,
+          makeCode: makeAgentCode,
+          revoke: revokeAgent,
+          code: agentCode,
+          error: agentError,
+          busy: busy,
+          url: (function () {
+            try {
+              var first = info && info.entries && info.entries[0];
+              return first && first.url ? new URL(first.url).origin : '';
+            } catch (err) { return ''; }
+          })(),
+        }, {
           // 「其他电脑」那一块：名单 + 添加 + 两个动作，以及只属于那一块的两句话
           // （读名单失败的原因、断开之后那句"对面还留着"）。
           list: remotes,
@@ -1311,7 +1411,7 @@ window.__ModuleLoader__.load({
       );
     }
 
-    function content(info, failure, copied, copy, busy, toggle, pwd, serve, feishu, dev, remote, rmt, self) {
+    function content(info, failure, copied, copy, busy, toggle, pwd, serve, feishu, dev, remote, agent, rmt, self) {
       if (failure) return h('div', { style: styles.error }, failure);
       if (!info) return h('div', { style: styles.loading }, '正在读取配对信息…');
 
@@ -1349,6 +1449,7 @@ window.__ModuleLoader__.load({
       // "许不许别的电脑连过来"，下面是"已经连过来的有哪几台"。顺序反过来的话，
       // 用户先在名单里看见一台不认识的电脑，才在上方找到那个总开关。
       if (info.remote && remote) blocks.push(remoteBlock(info.remote, busy, remote.toggle));
+      if (info.agent && agent) blocks.push(agentBlock(info.agent, agent));
       if (dev && (dev.list !== null || dev.error)) blocks.push(devicesBlock(dev));
       // 「其他电脑」那一块：**排在「设备」后面**。两块说的是相反的两件事——上面那份是
       // "谁进得来"（别人连我这台），这一份是"我连得上谁"（我从这台去连别人）。顺序上先
@@ -2103,6 +2204,52 @@ window.__ModuleLoader__.load({
           ? '已开启。别的电脑现在连得进来——不想让哪一台进，就在下面的名单里把它撤销。'
           : '没开（默认）。别的电脑连不进来，连配对也不受理——这台电脑现在只接受本机和手机。'),
         on ? h('div', { style: styles.warn }, '那台电脑拿到的是你这台电脑的完整界面：会话记录、模型设置、插件都在里面。只给你信得过的电脑开。') : null,
+      );
+    }
+
+    /**
+     * B 端执行那一块（2026-10-22）。
+     *
+     * A 端只做三件事：总开关、发配对码、看名单/撤销。文件夹和读写权限由 B 端本地给，
+     * 这里**不提供**“替 B 选目录”的入口——那等于 A 能替 B 扩大权限。
+     */
+    function agentBlock(st, a) {
+      var on = Boolean(st && st.allowed);
+      var agents = Array.isArray(st && st.agents) ? st.agents : [];
+      var code = a && a.code;
+      return h('div', { key: 'agent', style: styles.block },
+        h('div', { style: styles.entryTitle }, 'B 端执行'),
+        h('div', { style: styles.muted }, '让外面那台 B 端电脑只装这一个插件，把文件任务交给它；会话、模型和 A 的其它插件仍留在家里。'),
+        h('label', { style: styles.toggleRow },
+          h('input', {
+            type: 'checkbox',
+            checked: on,
+            disabled: Boolean(a && a.busy),
+            onChange: function (e) { a.toggle(e.target.checked); },
+          }),
+          h('span', null, on ? '已开启' : '开启'),
+        ),
+        h('div', { style: styles.muted }, on
+          ? '已开启。生成一个配对码，让 B 端在它自己的设置页里输入；配对后这里会出现那台电脑。'
+          : '没开（默认）。B 端连不进来，也拿不到任何文件任务。'),
+        on && a && a.url ? h('div', { style: styles.detail }, 'B 端要填的地址：' + a.url) : null,
+        on ? h('div', { style: { display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' } },
+          h('button', { type: 'button', style: styles.btn, disabled: Boolean(a && a.busy), onClick: a.makeCode }, '生成配对码'),
+          code && code.ok ? h('span', { style: styles.detail }, '配对码：' + code.code + '（10 分钟内有效）') : null,
+        ) : null,
+        a && a.error ? h('div', { style: styles.warn }, a.error) : null,
+        on
+          ? (agents.length
+            ? h('div', null, agents.map(function (one) {
+              return h('div', { key: one.id, style: { marginTop: 12, paddingTop: 10, borderTop: '1px solid var(--dsw-alias-border-subtle, #ddd)' } },
+                h('div', null, (one.name || 'B 端电脑') + ' · ' + (one.online ? '在线' : '离线')),
+                h('div', { style: styles.muted }, '授权目录：' + ((one.roots && one.roots.length) ? one.roots.join('、') : '（没报）')),
+                h('button', { type: 'button', style: styles.btn, disabled: Boolean(a && a.busy), onClick: function () { a.revoke(one.id); } }, '撤销'),
+              );
+            }))
+            : h('div', { style: styles.muted, marginTop: 10 }, '还没有 B 端连过来。'))
+          : null,
+        on ? h('div', { style: styles.warn }, 'B 端只拿文件读取（这一版只读）；写文件和命令还没开。那台电脑上的授权目录由它自己选，A 不能替它扩大。') : null,
       );
     }
 
