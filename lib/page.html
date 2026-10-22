@@ -2291,6 +2291,15 @@
      */
     streaming: localStorage.getItem('dshMiniStreaming') === 'on',
     /**
+     * **这一轮是不是真的收到过正文增量**（2026-10-22）。
+     *
+     * `state.streaming` 只是本机的开关偏好；连接上到底订没订上、帧有没有来，只有收到
+     * 正文帧才算数。加这个记号是为了防止一种误伤：开关状态和连接状态短暂不一致时，
+     * 一条 `state` 快照会把刚流出来的字按 `snap.live` 抹掉（快照那条是另一套旧机制，
+     * 恒为空），用户看到的就是「流了一下，内容消失」。收到过正文帧就以帧为准。
+     */
+    streamReceived: false,
+    /**
      * **正在拼的那个工具调用**（2026-10-21）：`{ name, args }`。
      * 模型一边写参数（JSON），轨迹的组头一边把半截命令/路径顺出来——
      * 和 PC 上「正在调用 bash · ls -la …」那种感觉对齐。
@@ -2484,14 +2493,23 @@
       }
     }
     // 真条目进来了：活片段让位（服务端也会喊清，这里兜一道——影子不许盖住落定的字）。
-    // 2026-10-21：正文那一路（`state.live`）同一个道理——落定的字到了，流式的影子必须撤，
-    // 否则屏幕上会出现"同一段话两遍"（影子一遍、真条目一遍）。
     if (add.length) {
       state.trajectoryLive = '';
-      state.live = '';
-      // 工具调用落定了（真条目已经进轨迹）：那半截参数该让位，否则标题行会一直挂着
-      // 一条已经执行完的命令。
-      state.liveTool = null;
+      // **只有 think 条目时不要撤正文**（2026-10-22 真机）：
+      // 思考落定不代表回答落定。最终回答那一步通常带 reasoning，落定时会先来一条
+      // think 条目；原来这里见 add 就清 `state.live`，屏幕上的正文会先消失一下，
+      // 等 reply 到了再整段出现——看起来就是「流了一下，内容没了，然后全文蹦出来」。
+      // 旁白（say）和工具（tool）落定时才让位：那两样才是「过程结束了」的信号。
+      var onlyThink = true;
+      for (var ai = 0; ai < add.length; ai += 1) {
+        if (!add[ai] || add[ai].kind !== 'think') { onlyThink = false; break; }
+      }
+      if (!onlyThink) {
+        state.live = '';
+        // 工具调用落定了（真条目已经进轨迹）：那半截参数该让位，否则标题行会一直挂着
+        // 一条已经执行完的命令。
+        state.liveTool = null;
+      }
     }
     var upd = Array.isArray(frame.update) ? frame.update : [];
     for (var k = 0; k < upd.length; k++) {
@@ -4683,6 +4701,24 @@
     paintToBottom();
   }
 
+  /**
+   * 只重画「正在流」那一块，不重画整串聊天（2026-10-22 真机）。
+   *
+   * 为什么非拆不可：正文每 60 毫秒来一帧，原来每一帧都走完整 `render()` ——手机要把
+   * 整串历史重新拼一遍 HTML、重新算布局。主线程一旦跟不上，用户只看得见开头几帧，
+   * 后面的字还在队列里排队；等落定的 `reply` 一到，整段回答一次性替换上来——看起来
+   * 就是「流了一下，内容消失，然后全文蹦出来」。
+   *
+   * 这里只换 `.live .md` 的 innerHTML。第一次还没有 `.live` 时仍走完整 render（那一趟
+   * 负责把块建出来并滚到它开头）；之后每帧都只碰这一小块。清空/落定/换模式仍走完整
+   * render，别让这条快路把别的状态带偏。
+   */
+  function paintLive() {
+    var md = replyEl.querySelector ? replyEl.querySelector('.live .md') : null;
+    if (!md) { render(); return; }
+    md.innerHTML = mdToHtml(state.live || '');
+  }
+
   function applySnapshot(snap) {
     if (!snap) return;
     if ('latest' in snap) state.latest = snap.latest;
@@ -4692,7 +4728,7 @@
     // **2026-10-21 加一个前提**：流式开关开着时，这一段由 `trajectory-live` 的增量自己拼
     // （见那个 `kind: 'text'` 分支），快照里那个 `live` 是另一套东西（服务端按整段写的），
     // 照旧覆盖会把刚拼上去的字清掉、只剩最后一小截。落定由 `trajectory` 帧负责清，不靠这里。
-    if ('live' in snap && !state.streaming) state.live = snap.live || '';
+    if ('live' in snap && !state.streaming && !state.streamReceived) state.live = snap.live || '';
     // 模型此刻的自言自语（鲸鱼娘的台词）。null = 这会儿没话说，气泡回到该姿势自己的词条。
     if ('thought' in snap) state.thought = snap.thought || null;
     if (snap.history) state.history = snap.history;
@@ -5925,11 +5961,14 @@
         if (state.mode === 'minimal') return;
         if (typeof frame.delta !== 'string' || !frame.delta) {
           // 空 delta = 服务端说「这一段写完了，别留残留」。
+          state.streamReceived = false;
           if (state.live) { state.live = ''; render(); }
           return;
         }
+        state.streamReceived = true;
         state.live = (state.live || '') + frame.delta;
-        render();
+        // 只换流式那一块，别每 60 毫秒重拼整串历史（见 paintLive 的说明）。
+        paintLive();
         return;
       }
       if (frame.kind === 'tool') {
@@ -6046,6 +6085,7 @@
       // 先把 live 清掉再画，屏幕上只留真正的回答，不会出现「同一段话两遍」。
       state.live = '';
       state.liveTool = null;
+      state.streamReceived = false;
       setRunning(false);
       render();
       if (!document.hidden) {

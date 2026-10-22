@@ -2220,10 +2220,11 @@ const ss = html.indexOf(SS)
 const se = html.indexOf(SE)
 assert.ok(ss > 0 && se > ss, `找不到 SSE 那一段的锚点（${SS}）`)
 
-function feedReply(payload, { mode = 'minimal', history = [], live = '' } = {}) {
+function feedReply(payload, { mode = 'minimal', history = [], live = '', frames = [] } = {}) {
   const state = { entered: true, mode, history, connected: false, running: true, live, liveTool: null }
   const els = {}
   let source = null
+  let paints = 0
   class FakeEventSource {
     constructor(url) { this.url = url; this._on = {}; source = this }
     addEventListener(type, fn) { (this._on[type] || (this._on[type] = [])).push(fn) }
@@ -2235,7 +2236,7 @@ function feedReply(payload, { mode = 'minimal', history = [], live = '' } = {}) 
   const build = new Function(
     'state', 'EventSource', 'document', 'encodeURIComponent', '$',
     'setStatus', 'showGate', 'updateStatusUI', 'applySnapshot', 'render',
-    'setRunning', 'playDing', 'buzz',
+    'setRunning', 'playDing', 'buzz', 'paintLive',
     `${html.slice(ss, se)}\nreturn connect;`,
   )
   build(
@@ -2250,9 +2251,11 @@ function feedReply(payload, { mode = 'minimal', history = [], live = '' } = {}) 
     })),
     () => {}, () => {}, () => {}, () => {}, () => {},
     (v) => { calls.push(v); state.running = v }, () => {}, () => {},
+    () => { paints += 1 },
   )()
+  for (const frame of frames) source.fire('trajectory-live', frame)
   source.fire('reply', payload)
-  return { state, calls }
+  return { state, calls, paints }
 }
 
 test('SSE 实时推来的回复也要带上 interrupted（不能只有刷新才有）', () => {
@@ -2272,6 +2275,16 @@ test('SSE 实时推来的回复也要带上 interrupted（不能只有刷新才�
   assert.equal(ok.state.latest.interrupted, false, '正常推送不该带标记')
   assert.equal(ok.state.history.length, 0, '单帧模式不往 history 里塞')
   assert.deepEqual(ok.calls, [false], '收到回复要把「正在执行」收掉')
+})
+
+test('正文增量只重画流式那一块，不重拼整串历史', () => {
+  // 2026-10-22 真机：每 60 毫秒重拼整串聊天，手机主线程跟不上，只看得见开头几帧，
+  // 然后落定的回答整段替换上来。这条钉住快路：正文增量走 paintLive，不走 render。
+  const r = feedReply(
+    { text: '完整回答', sessionId: 's1', timestamp: 22 },
+    { mode: 'chat', frames: [{ sessionId: 's1', kind: 'text', delta: '流' }] },
+  )
+  assert.equal(r.paints, 1, '正文增量要交给 paintLive 只画那一块')
 })
 
 test('SSE 推来的回复落定时，流式影子要让位（否则同一段话会显示两遍）', () => {
@@ -5107,6 +5120,52 @@ test('完整模式：活片段挂在跑着的组头（正在分析请求 · 片�
   h.state.mode = 'full'
   h.render()
   assert.match(h.replyEl.innerHTML, /正在分析请求 · 先看看仓库结构/, '回到完整模式照旧有')
+})
+
+/**
+ * 单独把 applyTrajectoryFrame 切出来跑：它定义在 renderFull 之前，trajHarness 那段
+ * 从 renderFull 开始，够不到它。这里只给它四个依赖，验「什么条目落定才撤正文影子」。
+ */
+function trajFrameHarness() {
+  const START_AT = 'function applyTrajectoryFrame'
+  const END_AT = 'function receiveTrajectoryFrame'
+  const a = html.indexOf(START_AT)
+  const b = html.indexOf(END_AT)
+  assert.ok(a > 0, `在 page.html 里找不到锚点「${START_AT}」`)
+  assert.ok(b > a, `在 page.html 里找不到锚点「${END_AT}」`)
+  const state = { trajectoryEpoch: '', trajectorySeq: 0, trajectory: [], mode: 'full', live: '', liveTool: null, trajectoryLive: '' }
+  const group = { turn: 1, state: 'running', reason: null, entries: [] }
+  // eslint-disable-next-line no-new-func
+  const build = new Function('state', 'trajectoryKeyOf', 'patchTrajectoryEntry', 'requestTrajectory',
+    `${html.slice(a, b)}\nreturn applyTrajectoryFrame;`)
+  return {
+    state,
+    apply: build(state, () => group, () => {}, () => {}),
+  }
+}
+
+test('完整模式：think 落定不撤正文，say / tool 落定才让位', () => {
+  // 2026-10-22 真机：最终回答那一步通常带 reasoning，落定时先来一条 think 条目；
+  // 原来见 add 就清 state.live，屏幕上的正文会先消失一下，等 reply 到了再整段出现。
+  const h = trajFrameHarness()
+  h.state.trajectoryEpoch = 'e1'
+  h.state.live = '正文还在流'
+  let seq = 0
+  const frameOf = (kind) => ({
+    epoch: 'e1', seq: ++seq, sessionId: 's1', turn: 1,
+    add: [{
+      id: 'entry-' + kind, turn: 1, step: 1, kind,
+      name: kind === 'tool' ? 'bash' : null, args: null, summary: null,
+      output: '内容', state: 'ok', timestamp: 1,
+    }],
+    update: [], state: 'running', reason: null,
+  })
+
+  assert.equal(h.apply(frameOf('think')), true)
+  assert.equal(h.state.live, '正文还在流', '思考落定不代表回答落定，正文影子必须留着')
+
+  h.apply(frameOf('tool'))
+  assert.equal(h.state.live, '', '工具条目录定了，正文影子才让位')
 })
 
 test('完整模式：组头右侧的活片段走 markdown 渲染，记号不许原样端出来', () => {
