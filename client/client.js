@@ -70,6 +70,7 @@ window.__ModuleLoader__.load({
     //   POST /mini-remote/devices/revoke → { id }       → { ok:true, id, dropped }
     // **回执里永远没有 keyHash、也没有凭据本身**——名册那份东西只在电脑上、只在服务端。
     var DEVICES_PATH = '/mini-remote/devices';
+    var DEVICES_CLEANUP_PATH = '/mini-remote/devices/cleanup';
     var DEVICE_RENAME_PATH = '/mini-remote/devices/rename';
     var DEVICE_REVOKE_PATH = '/mini-remote/devices/revoke';
     // 「我能连的电脑」那四条（**B 侧**：这台电脑连得上去哪几台别的电脑。宿主侧路由，
@@ -565,6 +566,15 @@ window.__ModuleLoader__.load({
       var confirmState = useState(null);
       var confirming = confirmState[0];
       var setConfirming = confirmState[1];
+      var devicesOpenState = useState(true);
+      var devicesOpen = devicesOpenState[0];
+      var setDevicesOpen = devicesOpenState[1];
+      var cleanupAskState = useState(false);
+      var cleanupAsk = cleanupAskState[0];
+      var setCleanupAsk = cleanupAskState[1];
+      var cleanupNoteState = useState(null);
+      var cleanupNote = cleanupNoteState[0];
+      var setCleanupNote = cleanupNoteState[1];
       // 「其他电脑」那一块（跨机第三步的界面）：我连得上哪几台电脑。名单从宿主那份来
       // （`GET /mini-remote/remotes`），动作两条——添加、断开（断开要二次确认）。
       // 「点这一行」和「重连」是同一件事：去宿主那儿换一张票（见 fetchRemoteTicket）。
@@ -801,6 +811,31 @@ window.__ModuleLoader__.load({
         loadSelfcheck();
         return undefined;
       }, [info]);
+
+      /** 清理 30 天未使用的设备；结果用一句话报给用户。 */
+      var cleanupOldDevices = function () {
+        if (busy) return;
+        setBusy(true);
+        setDevicesError(null);
+        setCleanupNote(null);
+        fetch(DEVICES_CLEANUP_PATH, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })
+          .then(function (res) {
+            return res.json().then(
+              function (body) { return { status: res.status, body: body }; },
+              function () { return { status: res.status, body: null }; },
+            );
+          })
+          .then(function (r) {
+            if (!r.body || !r.body.ok) throw new Error((r.body && r.body.error) || ('清理失败：HTTP ' + r.status));
+            setCleanupAsk(false);
+            setCleanupNote(r.body.removed > 0
+              ? ('清掉了 ' + r.body.removed + ' 台 30 天没用过的设备。')
+              : '没有 30 天没用过的设备，名单没动。');
+            return loadDevices();
+          })
+          .catch(function (err) { setDevicesError((err && err.message) || String(err)); })
+          .then(function () { setBusy(false); });
+      };
 
       /**
        * 一次 POST + 解析 JSON 的短写法。
@@ -1845,6 +1880,13 @@ window.__ModuleLoader__.load({
           askRevoke: function (id) { setRenaming(null); setDevicesError(null); setConfirming(id); },
           cancelRevoke: function () { setConfirming(null); },
           revoke: revokeDevice,
+          open: devicesOpen,
+          toggleOpen: function () { setDevicesOpen(function (v) { return !v; }); },
+          cleanupAsk: cleanupAsk,
+          askCleanup: function () { setCleanupAsk(true); setCleanupNote(null); },
+          cancelCleanup: function () { setCleanupAsk(false); },
+          cleanup: cleanupOldDevices,
+          cleanupNote: cleanupNote,
         }, {
           // 跨机那个总开关（2026-10-16 第二步）。和 serve/feishu/dev 一样摊平成一个
           // 对象传：状态在 `info.remote` 里跟配对信息一起下来，动作就是上面那个 POST。
@@ -2105,14 +2147,32 @@ window.__ModuleLoader__.load({
         );
       });
 
+      var open = Boolean(d.open);
+      var cleanup = Boolean(d.cleanupAsk);
       return h('div', { key: 'devices', style: styles.block },
-        h('div', { style: styles.entryTitle }, '设备'),
-        h('div', { style: styles.muted },
-          '每一台手机第一次扫码进来时会自动登记，之后不用再扫码。撤销之后，那台设备要重新扫码才能再用。'),
+        h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' } },
+          h('div', { style: Object.assign({}, styles.entryTitle, { margin: 0 }) }, '设备' + (list.length ? '（' + list.length + '）' : '')),
+          h('button', { type: 'button', style: styles.btn, onClick: d.toggleOpen }, open ? '收起' : '展开'),
+          open && list.length
+            ? h('button', { type: 'button', style: styles.btn, onClick: d.askCleanup }, '清理 30 天未使用')
+            : null,
+        ),
+        open ? h('div', { style: styles.muted },
+          '每一台手机第一次扫码进来时会自动登记，之后不用再扫码。撤销之后，那台设备要重新扫码才能再用。') : null,
         d.error ? h('div', { style: styles.error }, d.error) : null,
-        rows.length
-          ? h('div', null, rows)
-          : (d.error ? null : h('div', { style: styles.muted, marginTop: 10 }, '这台电脑上还没有登记过的设备。')),
+        d.cleanupNote ? h('div', { style: styles.detail }, d.cleanupNote) : null,
+        cleanup ? h('div', null,
+          h('div', { style: styles.warn }, '只删最近使用和创建都早于 30 天的设备；最近 30 天用过的不动。撤销后那些设备要重新扫码。'),
+          h('div', { style: { display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' } },
+            h('button', { type: 'button', style: styles.btn, disabled: Boolean(d.busy), onClick: d.cleanup }, d.busy ? '清理中…' : '确认清理'),
+            h('button', { type: 'button', style: styles.btn, disabled: Boolean(d.busy), onClick: d.cancelCleanup }, '取消'),
+          ),
+        ) : null,
+        open
+          ? (rows.length
+            ? h('div', null, rows)
+            : (d.error ? null : h('div', { style: styles.muted, marginTop: 10 }, '这台电脑上还没有登记过的设备。')))
+          : null,
       );
     }
 
