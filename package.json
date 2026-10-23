@@ -9,7 +9,8 @@
       "default": "./lib/index.js"
     },
     "./client": "./client/client.js",
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./b-agent-preset": "./lib/b-agent-preset.js"
   },
   "files": [
     "lib",
