@@ -3165,7 +3165,7 @@ window.__ModuleLoader__.load({
 
       return h('div', { key: 'bProject', style: styles.block },
         h('div', { style: styles.entryTitle }, 'B 项目'),
-        h('div', { style: styles.muted }, '将 B 端目录登记为 A 的工作区；A 仅保存路径映射，不复制文件。'),
+        h('div', { style: styles.muted }, '将 B 端目录登记为 A 的工作区；A 仅保存路径映射，不复制文件；打开项目后自动切到 B 端执行。'),
         connected ? null : h('div', { style: styles.warn }, 'B 端现在没连上；先把上面「作为 B 端执行端」配对并开启。'),
         list,
         h('div', { style: styles.detail, marginTop: 14 }, '新建 B 项目'),
