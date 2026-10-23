@@ -15,13 +15,19 @@ function harness() {
       return { path: 'C:\\work\\a.txt', content: '甲', offset: 1, totalLines: 1, truncated: false }
     },
   }
-  return { ctx, hub, defs, calls }
+  const subagents = {
+    list: () => ['spawn'],
+    getProvider: () => ({ capabilities: { agentPreset: true } }),
+    startActivation: async (spec) => { calls.push({ op: 'subagent', spec }); return { childId: 'child-1' } },
+  }
+  ctx.get = (name) => (name === 'subagents' ? subagents : undefined)
+  return { ctx, hub, defs, calls, subagents }
 }
 
 test('B 端工具只注册 b_ 前缀的新工具，不碰本地 read/list', async () => {
   const h = harness()
   await registerAgentTools(h.ctx, { hub: h.hub, defineTool: (d) => d })
-  assert.deepEqual([...h.defs.keys()].sort(), ['b_list', 'b_read', 'b_shell', 'b_write'])
+  assert.deepEqual([...h.defs.keys()].sort(), ['b_list', 'b_read', 'b_shell', 'b_subagent', 'b_write'])
   assert.equal(h.defs.has('read'), false)
   assert.equal(h.defs.has('list'), false)
 })
@@ -48,6 +54,14 @@ test('b_list / b_read 通过 hub 转给 B，并把结果整理成模型可读文
   assert.match(shell, /退出码：0/)
   assert.match(shell, /甲/)
   assert.equal(h.calls[3].op, 'shell')
+
+  const sub = await h.defs.get('b_subagent').execute({ prompt: '去 B 写文件', description: 'B 测试' }, { agent: { id: 'parent' }, signal: null })
+  assert.match(sub, /child-1/)
+  const spec = h.calls[4].spec
+  assert.equal(spec.provider, 'spawn')
+  assert.equal(spec.request.agentPreset, 'b-agent')
+  assert.equal(spec.request.parent.id, 'parent')
+  assert.equal(spec.request.prompt[0].text, '去 B 写文件')
 })
 
 test('真实的 @deepseek-ai/dsh-tools 能加载并注册四个工具', async () => {
@@ -56,5 +70,5 @@ test('真实的 @deepseek-ai/dsh-tools 能加载并注册四个工具', async ()
   const defs = []
   const ctx = { tools: { register: (d) => { defs.push(d); return () => {} } } }
   await registerAgentTools(ctx, { hub: { call: async () => ({}) }, log: console })
-  assert.deepEqual(defs.map((d) => d.name).sort(), ['b_list', 'b_read', 'b_shell', 'b_write'])
+  assert.deepEqual(defs.map((d) => d.name).sort(), ['b_list', 'b_read', 'b_shell', 'b_subagent', 'b_write'])
 })
