@@ -6,10 +6,10 @@ test('B 端预设声明混合策略：B 工具 + A 非物理工具，本地物�
   assert.equal(B_AGENT_PRESET.id, 'b-agent')
   assert.equal(B_AGENT_PRESET.name, 'B 端执行')
   assert.deepEqual(B_AGENT_PRESET.plugins.map((p) => p.name), ['dsh-mini-remote/b-agent-preset'])
-  for (const name of ['read', 'write', 'edit', 'glob', 'grep', 'bash', 'terminal_open', 'run_code', 'subagent', 'subagent_fork', 'subagent_claude_code', 'ralph', 'task_board_run']) {
+  for (const name of ['read', 'write', 'edit', 'glob', 'grep', 'bash', 'terminal_open', 'subagent', 'subagent_fork', 'subagent_claude_code', 'ralph', 'task_board_run']) {
     assert.ok(B_AGENT_BLOCKED_TOOLS.includes(name), `${name} 应该被禁止`)
   }
-  for (const name of ['b_read', 'b_shell', 'b_subagent', 'web_call', 'browser_call', 'generate_image', 'session_search', 'schedule_create', 'ask_advisors']) {
+  for (const name of ['b_read', 'b_shell', 'b_subagent', 'web_call', 'browser_call', 'generate_image', 'session_search', 'schedule_create', 'ask_advisors', 'run_code']) {
     assert.equal(B_AGENT_BLOCKED_TOOLS.includes(name), false, `${name} 不该被禁止`)
   }
 })
