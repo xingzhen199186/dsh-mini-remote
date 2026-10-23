@@ -5,7 +5,7 @@ import { B_AGENT_BLOCKED_TOOLS, B_AGENT_PRESET, apply } from '../lib/b-agent-pre
 test('B 端预设声明混合策略：B 工具 + A 非物理工具，本地物理工具列入禁止名单', () => {
   assert.equal(B_AGENT_PRESET.id, 'b-agent')
   assert.equal(B_AGENT_PRESET.name, 'B 端执行')
-  assert.deepEqual(B_AGENT_PRESET.plugins.map((p) => p.name), ['dsh-mini-remote/b-agent-preset'])
+  assert.deepEqual(B_AGENT_PRESET.plugins.map((p) => p.name), ['dsh-mini-remote/b-agent-preset', 'dsh-mini-remote/b-agent-schedule'])
   for (const name of ['read', 'write', 'edit', 'glob', 'grep', 'bash', 'terminal_open', 'subagent', 'subagent_fork', 'subagent_claude_code', 'ralph', 'task_board_run']) {
     assert.ok(B_AGENT_BLOCKED_TOOLS.includes(name), `${name} 应该被禁止`)
   }

@@ -10,7 +10,8 @@
     },
     "./client": "./client/client.js",
     "./package.json": "./package.json",
-    "./b-agent-preset": "./lib/b-agent-preset.js"
+    "./b-agent-preset": "./lib/b-agent-preset.js",
+    "./b-agent-schedule": "./lib/b-agent-schedule.js"
   },
   "files": [
     "lib",
