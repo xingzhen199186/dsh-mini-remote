@@ -1364,6 +1364,7 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
     const text = feishuSel().text;
     assert.match(text, /配置指引/, '飞书这一块里要有那份指引的开关');
     assert.match(text, /六步/, '要写明是「飞书后台六步」，不然用户不知道这是给谁看的');
+    assert.match(text, /首次配置需在飞书开放平台完成六步。/, '收起时留一句事实性摘要，让人知道展开后是什么');
     // 按只可能出现在正文里的句子查，不按「事件与回调」这种别处也提过的词查。
     assert.doesNotMatch(text, /仅我可见/, '默认收起：正文不该摊在页面上');
     assert.doesNotMatch(text, /im:message:receive_as_bot/);
@@ -1379,6 +1380,7 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
     guideBtn().props.onClick();
     await tick();
     const text = feishuSel().text;
+    assert.doesNotMatch(text, /首次配置需在飞书开放平台完成六步。/, '展开之后那句摘要收起来，正文上场');
     assert.match(text, /事件与回调/, '第二步要说清在哪儿设成长连接');
     assert.match(text, /添加应用能力/, '建应用那一步要写清去哪里加机器人能力，漏了这步飞书里搜不到机器人');
     assert.match(text, /漏了这步，飞书里搜不到它/, '漏加的后果要写在动作旁边，不能只说「要加」');

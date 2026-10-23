@@ -2589,6 +2589,9 @@ window.__ModuleLoader__.load({
         fs.error ? h('div', { style: styles.error }, fs.error) : null,
         // 后台那六步：**默认收起**。配过一次的人不用再看，摊开着只会把要填的几个框挤下去；
         // 第一次配的人被飞书后台绕住时，这里是他唯一不用另开文档的地方。
+        // 收起时留一句事实性摘要，让人知道展开后是什么。
+        fs.guideOpen ? null : h('div', { style: Object.assign({}, styles.muted, { marginTop: 12 }) },
+          '首次配置需在飞书开放平台完成六步。'),
         h('div', { style: { marginTop: 12 } },
           h('button', { type: 'button', onClick: fs.toggleGuide, style: styles.btn },
             fs.guideOpen ? '收起配置指引' : '配置指引（飞书后台六步）'),
