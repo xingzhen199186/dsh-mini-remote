@@ -1446,6 +1446,17 @@ window.__ModuleLoader__.load({
       var newBProjectSession = function (project) {
         if (!project || busy) return;
         setBProjectError(null);
+        // 优先走官方界面服务：它建会话和打开会话是一条动作，空会话不会“藏在名单里”。
+        if (uiWorkspaceFace && typeof uiWorkspaceFace.startSession === 'function') {
+          try {
+            uiWorkspaceFace.startSession(project.workspaceId, { agentPreset: 'b-agent' });
+            if (typeof close === 'function') close();
+            return;
+          } catch (err) {
+            setBProjectError((err && err.message) || String(err));
+            return;
+          }
+        }
         setBusy(true);
         fetch(B_PROJECT_SESSION_PATH, {
           method: 'POST',
@@ -3958,6 +3969,7 @@ window.__ModuleLoader__.load({
     // 壳没有开关式的第二态：同一个 id 再选一次就是原值写入，画面不会变——这就是
     // 「点了没反应」的机制。所以退出那一下只能我们自己接。
     var layoutFace = null;        // 官方布局服务 ctx.layout；壳还没装配好时是 null
+    var uiWorkspaceFace = null;   // 官方会话/工作区界面服务 ctx.uiWorkspace
     var panelBeforeRemote = null; // 进远程窗口之前选中的面板；null = 会话视图（官方默认）
 
     // 我们那枚图标身上的记号。认「这一条是不是我们那一条」用 DOM 认，不认标题文字
@@ -4056,6 +4068,9 @@ window.__ModuleLoader__.load({
       // 那两枚函数都是空操作。没有 ctx.inject 的极简假壳（比如离线校验里的那个替身）
       // 直接跳过这一段：图标照画、照常被壳选中，只是没有「再点一次退出」。
       if (typeof ctx.inject === 'function') {
+        ctx.inject(['uiWorkspace'], function (scope) {
+          uiWorkspaceFace = scope.uiWorkspace || null;
+        });
         ctx.inject(['layout'], function (scope) {
           var layout = scope.layout;
           if (!layout || !layout.panelInfo) return;
