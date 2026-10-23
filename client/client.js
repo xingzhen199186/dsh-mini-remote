@@ -2885,6 +2885,7 @@ window.__ModuleLoader__.load({
           }, '新建 B 项目'),
         ),
         h('div', { style: styles.warn }, 'B 上这个目录不存在时，需要 B 先打开「允许 A 建目录、移动、复制、删除」；A 只建门牌，不复制文件。'),
+        h('div', { style: styles.detail }, '建好后去 DSH 工作区列表找「B · 项目名」；没出现就刷新一下。打开后如果没自动切到「B 端执行」，手动选一次。'),
       );
     }
 
