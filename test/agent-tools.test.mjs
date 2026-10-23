@@ -49,3 +49,12 @@ test('b_list / b_read 通过 hub 转给 B，并把结果整理成模型可读文
   assert.match(shell, /甲/)
   assert.equal(h.calls[3].op, 'shell')
 })
+
+test('真实的 @deepseek-ai/dsh-tools 能加载并注册四个工具', async () => {
+  // 这一条专门防「软链插件按真实路径解析、仓库里没有 dsh-tools」那个坑：
+  // 桩对象能过，真实 defineTool 过不了，上一版就是被桩测漏掉的。
+  const defs = []
+  const ctx = { tools: { register: (d) => { defs.push(d); return () => {} } } }
+  await registerAgentTools(ctx, { hub: { call: async () => ({}) }, log: console })
+  assert.deepEqual(defs.map((d) => d.name).sort(), ['b_list', 'b_read', 'b_shell', 'b_write'])
+})
