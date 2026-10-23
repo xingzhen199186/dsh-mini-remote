@@ -1446,17 +1446,6 @@ window.__ModuleLoader__.load({
       var newBProjectSession = function (project) {
         if (!project || busy) return;
         setBProjectError(null);
-        // 优先走官方界面服务：它建会话和打开会话是一条动作，空会话不会“藏在名单里”。
-        if (uiWorkspaceFace && typeof uiWorkspaceFace.startSession === 'function') {
-          try {
-            uiWorkspaceFace.startSession(project.workspaceId, { agentPreset: 'b-agent' });
-            if (typeof close === 'function') close();
-            return;
-          } catch (err) {
-            setBProjectError((err && err.message) || String(err));
-            return;
-          }
-        }
         setBusy(true);
         fetch(B_PROJECT_SESSION_PATH, {
           method: 'POST',
@@ -1467,6 +1456,15 @@ window.__ModuleLoader__.load({
           .then(function (body) {
             if (!body || !body.ok) throw new Error((body && body.error) || '建不了 B 会话');
             setBProjectCreated({ projectId: project.id, sessionId: body.sessionId });
+            // 创建和打开分两步：服务端只建，客户端拿 id 再打开。直接 startSession
+            // 在这个宿主上会把 DSH 带崩，拆开更稳。
+            if (uiWorkspaceFace && typeof uiWorkspaceFace.openSession === 'function') {
+              try {
+                uiWorkspaceFace.openSession(body.sessionId);
+              } catch (err) {
+                setBProjectError('会话建好了，但打开失败：' + ((err && err.message) || String(err)));
+              }
+            }
           })
           .catch(function (err) { setBProjectError((err && err.message) || String(err)); })
           .then(function () { setBusy(false); });
