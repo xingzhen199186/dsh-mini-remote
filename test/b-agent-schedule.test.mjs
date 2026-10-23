@@ -24,8 +24,10 @@ function harness() {
     },
   }
   const ctx = {
-    get: (name) => (name === 'schedule' ? schedule : undefined),
     tools: { register: (d) => { defs.set(d.name, d) } },
+    inject: (names, cb) => {
+      if (names.includes('schedule')) cb({ ...ctx, schedule })
+    },
   }
   return { ctx, defs, calls, schedule }
 }
