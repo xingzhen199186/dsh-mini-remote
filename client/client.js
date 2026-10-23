@@ -57,6 +57,7 @@ window.__ModuleLoader__.load({
     var AGENT_LIST_PATH = '/mini-remote/agent-list';
     var B_PROJECTS_PATH = '/mini-remote/b-projects';
     var B_PROJECT_PATH = '/mini-remote/b-project';
+    var B_BROWSE_PATH = '/mini-remote/b-browse';
     var AGENT_CODE_PATH = '/mini-remote/agent-pair-code';
     var AGENT_REVOKE_PATH = '/mini-remote/agent-revoke';
     var B_AGENT_PAIR_PATH = '/mini-remote/b-agent/pair';
@@ -626,6 +627,10 @@ window.__ModuleLoader__.load({
       var bProjectRemoveState = useState(null);
       var bProjectRemoving = bProjectRemoveState[0];
       var setBProjectRemoving = bProjectRemoveState[1];
+      // 新建 B 项目时挑 B 上的文件夹（和远程窗口挑 A 路径那套同一个思路）。
+      var bBrowseState = useState(null);
+      var bBrowse = bBrowseState[0];
+      var setBBrowse = bBrowseState[1];
 
       // 添加那一块：`null` = 收着；一个草稿 = 摊开着（三个框 + 一次确认）。
       var addState = useState(null);
@@ -1343,6 +1348,96 @@ window.__ModuleLoader__.load({
           });
       };
 
+      function joinBPath(base, name) {
+        var s = String(base || '').replace(/[\\/]+$/, '');
+        var n = String(name || '').replace(/^[\\/]+/, '');
+        return s ? (s + '\\' + n) : n;
+      }
+
+      /** 新建 B 项目时，从 B 的授权根开始挑文件夹。 */
+      var openBBrowse = function () {
+        setBProjectError(null);
+        setBBrowse({ open: true, path: '', roots: [], entries: [], error: null, busy: true, mkdirOpen: false, mkdirName: '' });
+        fetch(B_BROWSE_PATH)
+          .then(function (res) { return res.json(); })
+          .then(function (body) {
+            if (!body || !body.ok) throw new Error((body && body.error) || '列不出 B 的目录');
+            setBBrowse({
+              open: true, path: '', roots: body.roots || [], entries: [],
+              error: null, busy: false, mkdirOpen: false, mkdirName: '',
+            });
+          })
+          .catch(function (err) {
+            setBBrowse({
+              open: true, path: '', roots: [], entries: [],
+              error: (err && err.message) || String(err), busy: false, mkdirOpen: false, mkdirName: '',
+            });
+          });
+      };
+
+      /** 进入 B 上的某个目录。 */
+      var browseBTo = function (path) {
+        setBBrowse(function (cur) {
+          return Object.assign({}, cur || {}, { path: path, busy: true, error: null, entries: [], mkdirOpen: false });
+        });
+        fetch(B_BROWSE_PATH + '?path=' + encodeURIComponent(path))
+          .then(function (res) { return res.json(); })
+          .then(function (body) {
+            if (!body || !body.ok) throw new Error((body && body.error) || '列不出这个目录');
+            setBBrowse(function (cur) {
+              return Object.assign({}, cur || {}, {
+                open: true, path: body.path || path, roots: body.roots || [],
+                entries: body.entries || [], error: null, busy: false, mkdirOpen: false,
+              });
+            });
+          })
+          .catch(function (err) {
+            setBBrowse(function (cur) {
+              return Object.assign({}, cur || {}, {
+                open: true, path: path, entries: [], error: (err && err.message) || String(err), busy: false,
+              });
+            });
+          });
+      };
+
+      var closeBBrowse = function () { setBBrowse(null); };
+
+      var chooseBBrowse = function () {
+        if (!bBrowse || !bBrowse.path) return;
+        setBProjectRoot(bBrowse.path);
+        setBBrowse(null);
+      };
+
+      var setBBrowseMkdir = function (open) {
+        setBBrowse(function (cur) { return Object.assign({}, cur || {}, { mkdirOpen: open, mkdirName: open ? (cur && cur.mkdirName) || '' : '' }); });
+      };
+
+      var setBBrowseName = function (name) {
+        setBBrowse(function (cur) { return Object.assign({}, cur || {}, { mkdirName: name }); });
+      };
+
+      /** 在 B 的当前目录下建一个新文件夹，然后进去。 */
+      var mkdirBBrowse = function () {
+        if (!bBrowse || !bBrowse.path || !String(bBrowse.mkdirName || '').trim()) return;
+        var target = joinBPath(bBrowse.path, String(bBrowse.mkdirName).trim());
+        setBBrowse(function (cur) { return Object.assign({}, cur || {}, { busy: true, error: null }); });
+        fetch(B_BROWSE_PATH, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ path: target }),
+        })
+          .then(function (res) { return res.json(); })
+          .then(function (body) {
+            if (!body || !body.ok) throw new Error((body && body.error) || '建不了文件夹');
+            browseBTo(target);
+          })
+          .catch(function (err) {
+            setBBrowse(function (cur) {
+              return Object.assign({}, cur || {}, { busy: false, error: (err && err.message) || String(err) });
+            });
+          });
+      };
+
       /** 打开一个 B 项目的文件面板，默认从项目根开始。 */
       var openBProject = function (project) {
         if (!project) return;
@@ -1785,6 +1880,14 @@ window.__ModuleLoader__.load({
           open: openBProject,
           enter: enterBProjectDir,
           read: readBProjectFile,
+          browse: bBrowse,
+          openBrowse: openBBrowse,
+          browseTo: browseBTo,
+          closeBrowse: closeBBrowse,
+          chooseBrowse: chooseBBrowse,
+          setBrowseMkdir: setBBrowseMkdir,
+          setBrowseName: setBBrowseName,
+          mkdirBrowse: mkdirBBrowse,
         }, {
           // 「其他电脑」那一块：名单 + 添加 + 两个动作，以及只属于那一块的两句话
           // （读名单失败的原因、断开之后那句"对面还留着"）。
@@ -2861,6 +2964,78 @@ window.__ModuleLoader__.load({
         }))
         : h('div', { style: styles.muted, marginTop: 10 }, '还没有 B 项目。');
 
+      var browseModal = null;
+      if (a.browse && a.browse.open) {
+        var b = a.browse;
+        var browseRows = [];
+        if (b.error) browseRows.push(h('div', { key: 'err', style: styles.browseErr }, b.error));
+        if (b.busy) {
+          browseRows.push(h('div', { key: 'busy', style: styles.browseNote }, '正在读 B…'));
+        } else if (!b.path) {
+          browseRows.push(h('div', { key: 'note', style: styles.browseNote }, '挑一个 B 上的目录。'));
+          (b.roots || []).forEach(function (root, i) {
+            browseRows.push(h('button', {
+              key: 'r' + i, type: 'button', style: styles.browseRow,
+              onClick: function () { a.browseTo(root); },
+            }, root));
+          });
+          if (!(b.roots || []).length) {
+            browseRows.push(h('div', { key: 'none', style: styles.browseNote }, 'B 端没有报授权目录，先在 B 设置里加一行。'));
+          }
+        } else {
+          browseRows.push(h('div', { key: 'path', style: styles.browseNote }, b.path));
+          browseRows.push(h('button', {
+            key: 'up', type: 'button', style: styles.browseRow,
+            onClick: function () { var p = parentOf(b.path); a.browseTo(p); },
+          }, '← 上一级'));
+          browseRows.push(h('button', {
+            key: 'pick', type: 'button',
+            style: Object.assign({}, styles.browseRow, { fontWeight: '600' }),
+            onClick: a.chooseBrowse,
+          }, '就选这个目录'));
+          (b.entries || []).filter(function (e) { return e.type === 'dir'; }).forEach(function (e, i) {
+            browseRows.push(h('button', {
+              key: 'd' + i, type: 'button', style: styles.browseRow,
+              onClick: function () { a.browseTo(joinB(b.path, e.name)); },
+            }, '📁 ' + e.name));
+          });
+          if (!(b.entries || []).some(function (e) { return e.type === 'dir'; })) {
+            browseRows.push(h('div', { key: 'empty', style: styles.browseNote }, '这个目录下面没有子目录。'));
+          }
+          browseRows.push(h('button', {
+            key: 'mkdir', type: 'button', style: styles.browseRow,
+            onClick: function () { a.setBrowseMkdir(!b.mkdirOpen); },
+          }, '＋ 新建文件夹'));
+          if (b.mkdirOpen) {
+            browseRows.push(h('div', { key: 'mkdirRow', style: styles.browseMkdirRow },
+              h('input', {
+                type: 'text', value: b.mkdirName || '', placeholder: '新文件夹的名字',
+                autoComplete: 'off', style: styles.browseInput,
+                onChange: function (e) { a.setBrowseName(e && e.target ? e.target.value : ''); },
+              }),
+              h('button', {
+                type: 'button', style: styles.btn,
+                disabled: Boolean(b.busy) || !String(b.mkdirName || '').trim(),
+                onClick: a.mkdirBrowse,
+              }, '建'),
+              h('button', {
+                type: 'button', style: styles.btn,
+                onClick: function () { a.setBrowseMkdir(false); },
+              }, '取消'),
+            ));
+          }
+        }
+        browseModal = h('div', { key: 'browse', style: styles.browseOverlay },
+          h('div', { style: styles.browseSheet },
+            h('div', { style: styles.browseHead },
+              h('div', { style: styles.browseTitle }, '选择 B 上的文件夹'),
+              h('button', { type: 'button', style: styles.btn, onClick: a.closeBrowse }, '关闭'),
+            ),
+            h('div', { style: styles.browseBody }, browseRows),
+          ),
+        );
+      }
+
       return h('div', { key: 'bProject', style: styles.block },
         h('div', { style: styles.entryTitle }, 'B 项目'),
         h('div', { style: styles.muted }, '给 B 的一个真实目录建一个门牌：A 的工作区列表里会出现「B · 项目名」，打开后默认在 B 的模式下干活。真实文件始终在 B。'),
@@ -2877,6 +3052,13 @@ window.__ModuleLoader__.load({
           style: styles.input,
           onChange: function (e) { a.setRoot(e.target.value); },
         }),
+        h('div', { style: { marginTop: 8 } },
+          h('button', {
+            type: 'button', style: styles.btn,
+            disabled: !connected,
+            onClick: a.openBrowse,
+          }, '选择 B 文件夹'),
+        ),
         a.error ? h('div', { style: styles.warn }, a.error) : null,
         h('div', { style: { marginTop: 10 } },
           h('button', {
@@ -2887,6 +3069,7 @@ window.__ModuleLoader__.load({
         ),
         h('div', { style: styles.warn }, 'B 上这个目录不存在时，需要 B 先打开「允许 A 建目录、移动、复制、删除」；A 只建门牌，不复制文件。'),
         h('div', { style: styles.detail }, '建好后去 DSH 工作区列表找「B · 项目名」；没出现就刷新一下。打开后如果没自动切到「B 端执行」，手动选一次。'),
+        browseModal,
       );
     }
 

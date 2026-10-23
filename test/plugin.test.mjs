@@ -4243,12 +4243,12 @@ test('自检：该回答的那几样一样不缺（版本 / 进程 / 接口 / �
     '/mini-remote/remotes/browse/roots', '/mini-remote/remotes/browse',
     '/mini-remote/remotes/browse/mkdir',
     '/mini-remote/remotes/workspaces',
-    '/mini-remote/b-projects', '/mini-remote/b-project',
+    '/mini-remote/b-projects', '/mini-remote/b-project', '/mini-remote/b-browse',
     '/mini-remote/selfcheck',
   ]) {
     assert.ok(paths.includes(want), `清单里少了 ${want}`)
   }
-  assert.equal(body.routes.length, 31, '三十一条注册就报三十一条（清单和注册同一处发生）')
+  assert.equal(body.routes.length, 32, '三十二条注册就报三十二条（清单和注册同一处发生）')
   assert.ok(body.routes.every((one) => one.mounted === true), '刚起来的这一份，条条都该是"在"')
 
   // ④ 开关：默认关
@@ -4495,4 +4495,11 @@ test('B 项目路由：本机列出空名单；B 没连上时新建给明确错�
   const denied = fakeRes()
   await route.handler(fakeReq('192.168.1.50'), denied)
   assert.equal(denied.out.status, 403, 'B 项目只能在本机设置页里改')
+
+  const picker = p.routes.get('/mini-remote/b-browse')
+  assert.ok(picker, 'B 文件夹选择器路由要挂上')
+  const pickerRes = fakeRes()
+  await picker.handler(fakeReq('127.0.0.1'), pickerRes)
+  assert.equal(pickerRes.out.status, 400)
+  assert.match(JSON.parse(pickerRes.out.body).error, /B 端还没有连上/)
 })
