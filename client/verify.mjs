@@ -69,6 +69,17 @@ function walk(node, out = []) {
 
 const byType = (tree, type) => walk(tree).filter((node) => node.type === type);
 
+/** 展开设置页的一个分组；已经展开时什么都不做。所有分组用例共用这一个动作。 */
+const expandSettingsGroup = async (tree, key) => {
+  const group = walk(tree).find((n) => n && n.props && n.props.key === 'group-' + key);
+  assert.ok(group, `设置页应有分组 group-${key}`);
+  const button = byType(group, 'button').find((b) => textOf(b) === '展开');
+  if (button) {
+    button.props.onClick();
+    await tick();
+  }
+};
+
 /**
  * 最小 React 替身 + 最小渲染循环。
  * createElement 返回普通对象；useState 真的能改状态并触发重渲染；
@@ -1274,7 +1285,7 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
     };
   };
 
-  const mount8 = async (payload) => {
+  const mount8 = async (payload, expand = true) => {
     const h = useHarness();
     posted8 = [];
     postReply8 = undefined;
@@ -1291,12 +1302,19 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
     await tick();     // 信息到了 → 重渲染，rerun 一次让草稿填进来
     h.runEffects();
     await tick();
+    if (expand) await expandSettingsGroup(tree8, 'feishu');
   };
 
   await check('飞书默认关着：开关未选中，两个名单空着时给出「怎么拿到自己 id」的那条路', async () => {
     await mount8(withFeishu(Object.assign({}, FEISHU, {
       enabled: false, running: false, connected: false, hasSecret: false, appId: '', openIds: '',
-    })));
+    })), false);
+    const collapsed = walk(tree8).find((n) => n && n.props && n.props.key === 'group-feishu');
+    assert.ok(collapsed, '飞书组要在');
+    assert.equal(byType(collapsed, 'input').filter((n) => n.props.type === 'checkbox').length, 0,
+      '默认收起：飞书开关和表单不摊在页面上');
+    assert.ok(byType(collapsed, 'button').some((b) => textOf(b) === '展开'), '收起时保留展开入口');
+    await expandSettingsGroup(tree8, 'feishu');
     const sel = feishuSel();
     assert.equal(sel.box.length, 1, '这一块该有一个开关');
     assert.equal(sel.box[0].props.checked, false, '默认是关的，不许自己偷偷连出去');
@@ -2644,6 +2662,11 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
   await tick();
 
   await check('有 B 项目时设置页不白屏，项目块和 B 文件入口都在', async () => {
+    const collapsed = walk(tree).find((n) => n && n.props && n.props.key === 'group-agent');
+    assert.ok(collapsed, 'B 端协作组要在');
+    assert.doesNotMatch(textOf(collapsed), /B 项目/, 'B 端协作默认收起，项目块不摊在页面上');
+    assert.ok(byType(collapsed, 'button').some((b) => textOf(b) === '展开'), '收起时保留展开入口');
+    await expandSettingsGroup(tree, 'agent');
     const text = textOf(tree);
     assert.match(text, /B 项目/);
     assert.match(text, /B · 测试项目/);

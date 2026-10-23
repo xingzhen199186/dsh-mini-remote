@@ -572,6 +572,17 @@ window.__ModuleLoader__.load({
       var guideState = useState(false);
       var guideOpen = guideState[0];
       var setGuideOpen = guideState[1];
+      // 页面分组的展开状态：外部访问默认展开；B 端协作、飞书默认收起。
+      // 只留在本次设置页会话里，不持久化，也不做异常自动展开。
+      var externalGroupState = useState(true);
+      var externalGroupOpen = externalGroupState[0];
+      var setExternalGroupOpen = externalGroupState[1];
+      var agentGroupState = useState(false);
+      var agentGroupOpen = agentGroupState[0];
+      var setAgentGroupOpen = agentGroupState[1];
+      var feishuGroupState = useState(false);
+      var feishuGroupOpen = feishuGroupState[0];
+      var setFeishuGroupOpen = feishuGroupState[1];
       // 设备名册（第三步）：服务端那份名单、读不到时的原因，以及"正在改名"和
       // "正在二次确认撤销"这两个**一次只可能有一处**的状态。
       // 两个都存 id，不存整条记录——记录会随每次刷新变，存下来就会拿着一份旧名字去改。
@@ -2012,63 +2023,92 @@ window.__ModuleLoader__.load({
           open: selfOpen,
           toggle: function () { setSelfOpen(function (v) { return !v; }); },
           reload: loadSelfcheck,
+        }, {
+          externalOpen: externalGroupOpen,
+          toggleExternal: function () { setExternalGroupOpen(function (v) { return !v; }); },
+          agentOpen: agentGroupOpen,
+          toggleAgent: function () { setAgentGroupOpen(function (v) { return !v; }); },
+          feishuOpen: feishuGroupOpen,
+          toggleFeishu: function () { setFeishuGroupOpen(function (v) { return !v; }); },
         }),
       );
     }
 
-    function content(info, failure, copied, copy, busy, toggle, pwd, serve, feishu, dev, remote, agent, bAgent, bProject, rmt, self) {
+    function content(info, failure, copied, copy, busy, toggle, pwd, serve, feishu, dev, remote, agent, bAgent, bProject, rmt, self, groups) {
       if (failure) return h('div', { style: styles.error }, failure);
       if (!info) return h('div', { style: styles.loading }, '正在读取配对信息…');
 
-      var blocks = [];
+      var mobile = [];
+      var external = [];
+      var computers = [];
+      var agentGroup = [];
+      var feishuGroup = [];
       if (info.ok === false) {
-        blocks.push(h('div', { key: 'err', style: styles.error }, info.error || '读取配对信息失败。'));
+        mobile.push(h('div', { key: 'err', style: styles.error }, info.error || '读取配对信息失败。'));
       } else {
         var entries = Array.isArray(info.entries) ? info.entries : [];
         if (!entries.length) {
-          blocks.push(h('div', { key: 'none', style: styles.muted }, '这台电脑暂时没有手机能连上的地址。'));
+          mobile.push(h('div', { key: 'none', style: styles.muted }, '这台电脑暂时没有手机能连上的地址。'));
         } else {
-          // 三条（或更多）连接方式是一组：上面加一个组标题，条目标题用次级样式。
-          blocks.push(h('div', { key: 'conn', style: Object.assign({}, styles.entryTitle, { marginTop: 24 }) }, '连接方式'));
-          for (var i = 0; i < entries.length; i += 1) blocks.push(entryBlock(entries[i], i, copied, copy));
+          mobile.push(h('div', { key: 'conn', style: Object.assign({}, styles.entryTitle, { marginTop: 24 }) }, '连接方式'));
+          for (var i = 0; i < entries.length; i += 1) mobile.push(entryBlock(entries[i], i, copied, copy));
         }
         // 密码紧跟在那几条二维码后面：它是这些链接背后的钥匙，放在一起才讲得通。
-        if (typeof info.token === 'string' && info.token) blocks.push(passwordBlock(info, copied, copy, pwd));
+        if (typeof info.token === 'string' && info.token) mobile.push(passwordBlock(info, copied, copy, pwd));
       }
       // Tailscale 那一行：**没探到的时候也要出现**。原来它是直接不显示的，
       // 用户看到的不是「你没有 Tailscale」，而是「这里什么都没有」——他不知道
       // 自己缺了什么，也就不会去装。而他恰恰是最需要这条路的人。
-      if (info.tailscale) blocks.push(tailscaleBlock(info.tailscale));
+      if (info.tailscale) external.push(tailscaleBlock(info.tailscale));
       // 出错时也要把开关露出来：不然「隧道起不来」会让整个面板变成一条报错，
       // 用户连关掉它的地方都找不到。
-      if (info.tunnel) blocks.push(tunnelBlock(info.tunnel, busy, toggle));
+      if (info.tunnel) external.push(tunnelBlock(info.tunnel, busy, toggle));
       // HTTPS 那一块：**不管配对信息成功还是失败都要出现**。失败时尤其要出现——
       // tailnet 没开 Serve 的时候，用户需要的正是那条开启链接，而那时候面板上
       // 其它东西多半也在报错，正好是他最需要指路的时候。
-      if (info.serve || serve.error) blocks.push(serveBlock(info.serve, serve, busy));
+      if (info.serve || serve.error) external.push(serveBlock(info.serve, serve, busy));
       // 飞书那一块：**只要服务端带了 feishu 就出现**（成功、失败、服务还没起来那几条
       // 路径上都带着它）。它是独立的一条通路，手机服务有没有起来都不该拦着用户改它。
-      if (info.feishu) blocks.push(feishuBlock(info.feishu, feishu));
-      // 设备那一块：**放在最后**。它是"谁进得来"的账本，改名/撤销都在这里；
-      // 名单还没读到（服务端没给 / 读失败）而报错也没有时，整块不出现——
-      // 不摆一个空壳，也不把上面几块的位置动一寸。
-      // 跨机那个总开关**紧挨在名单前面**：这两块说的是同一件事的两半——上面是
-      // "许不许别的电脑连过来"，下面是"已经连过来的有哪几台"。顺序反过来的话，
-      // 用户先在名单里看见一台不认识的电脑，才在上方找到那个总开关。
-      if (info.remote && remote) blocks.push(remoteBlock(info.remote, busy, remote.toggle));
-      if (info.agent && agent) blocks.push(agentBlock(info.agent, agent));
-      if (info.bAgent && bAgent) blocks.push(bAgentBlock(info.bAgent, bAgent));
-      if (info.agent && bProject && info.agent.allowed) blocks.push(bProjectBlock(info.agent, bProject));
-      if (dev && (dev.list !== null || dev.error)) blocks.push(devicesBlock(dev));
-      // 「其他电脑」那一块：**排在「设备」后面**。两块说的是相反的两件事——上面那份是
-      // "谁进得来"（别人连我这台），这一份是"我连得上谁"（我从这台去连别人）。顺序上先
-      // 说别人进来的（那是权限边界，也是这一页的主语），再说我出去的。
-      if (rmt && (rmt.list !== null || rmt.error)) blocks.push(remotesBlock(rmt));
-      // 「自检」那一块：**永远排在最末**，而且只要服务端答了话（或者答不上话但说清了
-      // 原因）就出现。它是这一页的"体检报告"——不抢前面那些要操作的位置，
-      // 但也不能因为"读不到"而整块消失（那正好是最需要它的时候）。
-      if (self) blocks.push(selfcheckBlock(self));
-      return h('div', null, blocks);
+      // 草稿还没填好时 feishuBlock 返回 null：不摆一个只有标题的空组。
+      var feishuNode = info.feishu ? feishuBlock(info.feishu, feishu) : null;
+      if (feishuNode) feishuGroup.push(feishuNode);
+      // 「电脑与设备」：先说谁可以连进来，再列已经登记的设备，最后是本机可以连谁。
+      if (info.remote && remote) computers.push(remoteBlock(info.remote, busy, remote.toggle));
+      if (dev && (dev.list !== null || dev.error)) computers.push(devicesBlock(dev));
+      if (rmt && (rmt.list !== null || rmt.error)) computers.push(remotesBlock(rmt));
+      // 「B 端协作」：A 侧总开关与配对、B 侧执行端、B 项目，保持这个内部顺序。
+      if (info.agent && agent) agentGroup.push(agentBlock(info.agent, agent));
+      if (info.bAgent && bAgent) agentGroup.push(bAgentBlock(info.bAgent, bAgent));
+      if (info.agent && bProject && info.agent.allowed) agentGroup.push(bProjectBlock(info.agent, bProject));
+
+      return h('div', null, [
+        settingsGroup('mobile', '手机连接', true, null, mobile),
+        settingsGroup('external', '外部访问', groups.externalOpen, groups.toggleExternal, external),
+        settingsGroup('computers', '电脑与设备', true, null, computers),
+        settingsGroup('agent', 'B 端协作', groups.agentOpen, groups.toggleAgent, agentGroup),
+        settingsGroup('feishu', '飞书', groups.feishuOpen, groups.toggleFeishu, feishuGroup, true),
+        // 自检沿用自身的展开/收起，不再套一层组折叠；永远排在最末。
+        self ? selfcheckBlock(self) : null,
+      ]);
+    }
+
+    /**
+     * 设置页的组壳：只加标题和折叠按钮，各区块内部结构与 key 原样保留。
+     * 单区块组展开时复用区块自己的标题，不在组壳上重复显示同一个标题。
+     */
+    function settingsGroup(key, title, open, toggle, children, single) {
+      if (!children.length) return null;
+      return h('div', { key: 'group-' + key, style: { marginTop: 24 } },
+        h('div', { style: { display: 'flex', alignItems: 'center', gap: 8 } },
+          single && open ? null : h('div', { style: styles.entryTitle }, title),
+          toggle ? h('button', {
+            type: 'button',
+            onClick: toggle,
+            style: Object.assign({}, styles.btn, { marginLeft: 'auto' }),
+          }, open ? '收起' : '展开') : null,
+        ),
+        open ? h('div', null, children) : null,
+      );
     }
 
     /** 时间戳 → 「2026-10-16 14:20」。取不到（0/坏值）回 null，由调用方去说「还没有记录」。 */
