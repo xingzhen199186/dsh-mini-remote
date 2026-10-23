@@ -2586,6 +2586,55 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
   });
 }
 
+
+// 4i. B 项目：真实信息里同时有 agent + bAgent 时，项目面板不能把整页渲染打崩
+{
+  console.log('\n[4i] B 项目面板');
+
+  const B_AGENT_OK = {
+    allowed: true,
+    agents: [],
+    projects: [{ id: 'p1', name: '测试项目', bRoot: 'D:\\work\\测试', workspaceId: 'w1', aPath: 'C:\\door' }],
+    presetRegistered: true,
+    presetError: null,
+  };
+  const B_SIDE_OK = {
+    mode: true, connected: true, url: 'http://127.0.0.1:3090',
+    roots: ['D:\\work'], allowWrite: true, allowShell: false, allowManage: true,
+    lastPollAt: Date.now(), lastError: null, error: null,
+  };
+  const PAYLOAD = {
+    ok: true, port: 3090, token: TOKEN,
+    entries: [{ kind: 'lan', label: '内网', hint: '手机连同一个 Wi-Fi 时用这个', url: URL_LAN, qr: QR }],
+    tunnel: null, serve: null, feishu: null, remote: { allowed: false },
+    agent: B_AGENT_OK, bAgent: B_SIDE_OK,
+  };
+
+  const hh = useHarness();
+  let tree = null;
+  hh.onUpdate(() => { tree = hh.draw(Comp, { close: function () {} }); });
+  setGlobal('fetch', async (url) => {
+    if (url === '/mini-remote/agent-list') return jsonResponse(200, { ok: true, agent: B_AGENT_OK });
+    if (url === '/mini-remote/devices') return jsonResponse(200, { ok: true, devices: [] });
+    if (url === '/mini-remote/remotes') return jsonResponse(200, { ok: true, remotes: [] });
+    return jsonResponse(200, PAYLOAD);
+  });
+  tree = hh.draw(Comp, { close: function () {} });
+  hh.runEffects();
+  await tick();
+  hh.runEffects();
+  await tick();
+
+  await check('有 B 项目时设置页不白屏，项目块和 B 文件入口都在', async () => {
+    const text = textOf(tree);
+    assert.match(text, /B 项目/);
+    assert.match(text, /B · 测试项目/);
+    assert.match(text, /浏览 B 文件/);
+    assert.match(text, /D:\\work\\测试/);
+  });
+  hh.unmount();
+}
+
 // ---------------------------------------------------------------- 结果
 
 console.log(`\n通过 ${passed} 项，失败 ${failures.length} 项。`);

@@ -1769,6 +1769,7 @@ window.__ModuleLoader__.load({
         }, {
           // B 项目：门牌列表、新建、移除、B 文件面板。
           projects: (info && info.agent && info.agent.projects) || [],
+          connected: Boolean(info && info.bAgent && info.bAgent.connected),
           name: bProjectName,
           root: bProjectRoot,
           setName: setBProjectName,
@@ -2776,7 +2777,7 @@ window.__ModuleLoader__.load({
      */
     function bProjectBlock(st, a) {
       var projects = Array.isArray(a && a.projects) ? a.projects : [];
-      var connected = Boolean(info && info.bAgent && info.bAgent.connected);
+      var connected = Boolean(a && a.connected);
       var view = a && a.view;
 
       function joinB(base, name) {
