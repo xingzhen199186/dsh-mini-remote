@@ -2740,7 +2740,7 @@ window.__ModuleLoader__.load({
 
       return h('div', { key: 'serve', style: styles.block },
         h('div', { style: styles.entryTitle }, 'HTTPS 地址（Tailscale）'),
-        h('div', { style: styles.muted }, '和上面那条 Tailscale 是同一台电脑，区别只在连接加不加密。地址好记，也不用写端口。'),
+        h('div', { style: styles.muted }, '与上方 Tailscale 是同一台电脑的同一服务，区别仅在连接是否加密；地址无需端口。'),
         h('label', { style: styles.toggleRow },
           h('input', {
             type: 'checkbox',
@@ -2814,8 +2814,7 @@ window.__ModuleLoader__.load({
       var on = Boolean(st && st.allowed);
       return h('div', { key: 'remote', style: styles.block },
         h('div', { style: styles.entryTitle }, '允许别的电脑连接'),
-        h('div', { style: styles.muted }, '打开之后，另一台电脑可以用这台电脑上的密码配一次对，'
-          + '以后就能从那边打开你这台电脑的「电脑端界面」。'),
+        h('div', { style: styles.muted }, '开启后，其他电脑可凭本机密码配对，远程打开本机的电脑端界面。'),
         h('label', { style: styles.toggleRow },
           h('input', {
             type: 'checkbox',
@@ -2827,7 +2826,7 @@ window.__ModuleLoader__.load({
         ),
         h('div', { style: styles.muted }, on
           ? '已开启。别的电脑现在连得进来——不想让哪一台进，就在下面的名单里把它撤销。'
-          : '没开（默认）。别的电脑连不进来，连配对也不受理——这台电脑现在只接受本机和手机。'),
+          : '未开启（默认）。其他电脑无法连接，配对请求也不受理。'),
         on ? h('div', { style: styles.warn }, '那台电脑拿到的是你这台电脑的完整界面：会话记录、模型设置、插件都在里面。只给你信得过的电脑开。') : null,
       );
     }
@@ -3203,13 +3202,13 @@ window.__ModuleLoader__.load({
       var working = Boolean(busy || tunnel.starting);
       var status;
       if (working) status = '正在打开…第一次要先下载一个 50MB 左右的组件，可能要等一会儿。';
-      else if (tunnel.up) status = '已开启。上面那条「公网」就是出门用的地址。刚打开的话等半分钟再扫——Cloudflare 要先把这个域名公布出去。';
+      else if (tunnel.up) status = '已开启。上方「公网」即外部访问地址；首次开启约需 30 秒，域名生效后再扫码。';
       // 「一直没拿到地址」和「拿到过、后来断了」是两回事：前者多半还在等，后者得重开一次。
       // 合成一句「还没拿到公网地址」的话，第二种情况的用户会一直等下去。
       else if (enabled) status = tunnel.error
         ? '开着，但公网那边连不上。手机现在走这条路会打不开——下面那段就是它说的话。'
         : '已开启，但还没拿到公网地址。';
-      else status = '没开。手机不连家里 Wi-Fi 的时候就进不来（除非装了 Tailscale）。';
+      else status = '未开启。手机与电脑不在同一网络时无法连接。';
 
       return h('div', { key: 'tunnel', style: styles.block },
         h('div', { style: styles.entryTitle }, '公网访问'),
@@ -3228,7 +3227,7 @@ window.__ModuleLoader__.load({
         h('div', { style: enabled && tunnel.error ? styles.detail : styles.muted }, status),
         // cloudflared 的原始报错，多行原文照登——排查时这就是全部线索。
         enabled && tunnel.error ? h('div', { style: styles.detail }, tunnel.error) : null,
-        enabled ? h('div', { style: styles.muted }, '这个地址每次重启 DSH 都会换一个，换了之后回来重新扫一下码。') : null,
+        enabled ? h('div', { style: styles.muted }, '每次重启 DSH 后地址会变化，需重新扫码。') : null,
         enabled ? h('div', { style: styles.warn }, '开着的时候这个服务就挂在公网上了。密码仍然是唯一的门，别把地址或二维码发出去。') : null,
       );
     }

@@ -955,7 +955,7 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
     assert.equal(boxes[0].props.checked, false);
     const text = textOf(tree6);
     assert.match(text, /公网访问/);
-    assert.match(text, /手机不连家里 Wi-Fi 的时候就进不来/);
+    assert.match(text, /手机与电脑不在同一网络时无法连接/);
   });
 
   await check('公网开着且有地址时：开关选中，提示去看「公网」那条', async () => {
@@ -963,8 +963,8 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
     const boxes = byType(tree6, 'input').filter((n) => n.props.type === 'checkbox');
     assert.equal(boxes[0].props.checked, true);
     const text = textOf(tree6);
-    assert.match(text, /上面那条「公网」/);
-    assert.match(text, /每次重启 DSH 都会换一个/, '要提前说清楚地址会变');
+    assert.match(text, /上方「公网」即外部访问地址/);
+    assert.match(text, /每次重启 DSH 后地址会变化，需重新扫码。/, '要提前说清楚地址会变');
     assert.match(text, /挂在公网上/, '开了要提醒它现在暴露在公网');
   });
 
@@ -1714,8 +1714,8 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
     assert.equal(boxes[0].props.checked, false, '默认是关的');
     const text = textOf(block);
     assert.match(text, /允许别的电脑连接/);
-    assert.match(text, /没开（默认）/, '要写明这是默认状态');
-    assert.match(text, /连配对也不受理/, '"关"是一个整体状态，得说清它关的是什么');
+    assert.match(text, /未开启（默认）/, '要写明这是默认状态');
+    assert.match(text, /配对请求也不受理/, '"关"是一个整体状态，得说清它关的是什么');
   });
 
   await check('开着时：选中，并且把那句风险摆出来（那台电脑拿到的是完整界面）', async () => {
