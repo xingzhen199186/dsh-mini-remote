@@ -63,3 +63,22 @@ test('A/B 真实 HTTP 闭环：配对 → 只读 → 写 → 命令', async () =
     rmSync(base, { recursive: true, force: true })
   }
 })
+
+test('配对码尝试：同一来源一分钟超过 10 次就 429', async () => {
+  const hub = createAgentHub({ enabled: () => true })
+  const srv = createServer((req, res) => {
+    hub.handle(req, res, new URL(req.url || '/', 'http://localhost').pathname)
+  })
+  await new Promise((r) => srv.listen(0, '127.0.0.1', r))
+  const url = `http://127.0.0.1:${srv.address().port}/mini-remote/agent/pair`
+  try {
+    for (let i = 0; i < 10; i += 1) {
+      const res = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"code":"000000"}' })
+      assert.equal(res.status, 403, `第 ${i + 1} 次应是错码`)
+    }
+    const blocked = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"code":"000000"}' })
+    assert.equal(blocked.status, 429)
+  } finally {
+    await new Promise((r) => srv.close(r))
+  }
+})

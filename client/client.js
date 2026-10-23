@@ -54,6 +54,7 @@ window.__ModuleLoader__.load({
     // 关着的时候，配对和跨机取票两条路由一条都不接——这是用户能读懂的"关"。
     var REMOTE_ACCESS_PATH = '/mini-remote/remote-access';
     var AGENT_ACCESS_PATH = '/mini-remote/agent-access';
+    var AGENT_LIST_PATH = '/mini-remote/agent-list';
     var AGENT_CODE_PATH = '/mini-remote/agent-pair-code';
     var AGENT_REVOKE_PATH = '/mini-remote/agent-revoke';
     var B_AGENT_PAIR_PATH = '/mini-remote/b-agent/pair';
@@ -580,6 +581,9 @@ window.__ModuleLoader__.load({
       var agentErrState = useState(null);
       var agentError = agentErrState[0];
       var setAgentError = agentErrState[1];
+      var agentConfirmState = useState(null);
+      var agentConfirming = agentConfirmState[0];
+      var setAgentConfirming = agentConfirmState[1];
       // B 端执行端（这一侧）：地址、配对码、授权目录草稿 + 错误。
       var bUrlState = useState('');
       var bUrl = bUrlState[0];
@@ -659,6 +663,26 @@ window.__ModuleLoader__.load({
           });
         return function () { alive = false; };
       }, []);
+
+      // B 端名单自动刷新：B 刚配对完，用户不刷新页面也能看见它上线/掉线。
+      useEffect(function () {
+        var allowed = Boolean(info && info.agent && info.agent.allowed);
+        if (!allowed) return undefined;
+        var alive = true;
+        var tick = function () {
+          fetch(AGENT_LIST_PATH)
+            .then(function (res) { return res.json(); })
+            .then(function (body) {
+              if (!alive || !body || !body.ok || !body.agent) return;
+              setInfo(function (prev) {
+                return prev ? Object.assign({}, prev, { agent: body.agent }) : prev;
+              });
+            })
+            .catch(function () { /* 页面里静默失败，下一轮再试 */ });
+        };
+        var timer = setInterval(tick, 5000);
+        return function () { alive = false; clearInterval(timer); };
+      }, [Boolean(info && info.agent && info.agent.allowed)]);
 
       // 「已复制」只停留一会儿，然后自己变回「复制」。
       useEffect(function () {
@@ -1228,11 +1252,20 @@ window.__ModuleLoader__.load({
           .then(function () { setBusy(false); });
       };
 
+      /** 撤销一台 B 端：先进入二次确认。 */
+      var askAgentRevoke = function (id) {
+        if (busy) return;
+        setAgentError(null);
+        setAgentConfirming(id);
+      };
+      var cancelAgentRevoke = function () { setAgentConfirming(null); };
+
       /** 撤销一台 B 端。 */
       var revokeAgent = function (id) {
         if (busy) return;
         setBusy(true);
         setAgentError(null);
+        setAgentConfirming(null);
         fetch(AGENT_REVOKE_PATH, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
@@ -1563,14 +1596,25 @@ window.__ModuleLoader__.load({
           toggle: toggleAgentAccess,
           makeCode: makeAgentCode,
           revoke: revokeAgent,
+          askRevoke: askAgentRevoke,
+          cancelRevoke: cancelAgentRevoke,
+          confirming: agentConfirming,
           code: agentCode,
           error: agentError,
           busy: busy,
-          url: (function () {
-            try {
-              var first = info && info.entries && info.entries[0];
-              return first && first.url ? new URL(first.url).origin : '';
-            } catch (err) { return ''; }
+          urls: (function () {
+            var seen = {};
+            var out = [];
+            var entries = info && Array.isArray(info.entries) ? info.entries : [];
+            entries.forEach(function (entry) {
+              try {
+                var origin = entry && entry.url ? new URL(entry.url).origin : '';
+                if (!origin || seen[origin]) return;
+                seen[origin] = true;
+                out.push({ label: entry.label || entry.kind || '地址', url: origin });
+              } catch (err) { /* 跳过坏地址 */ }
+            });
+            return out;
           })(),
         }, {
           // B 端这一侧：作为执行端。地址/码/目录都是本机草稿，token 永远不回显。
@@ -2427,6 +2471,13 @@ window.__ModuleLoader__.load({
       var on = Boolean(st && st.allowed);
       var agents = Array.isArray(st && st.agents) ? st.agents : [];
       var code = a && a.code;
+      var urls = Array.isArray(a && a.urls) ? a.urls : [];
+      var presetLine = null;
+      if (on) {
+        if (st.presetError) presetLine = h('div', { style: styles.warn }, 'B 端预设没注册成功：' + st.presetError);
+        else if (st.presetRegistered) presetLine = h('div', { style: styles.detail }, 'B 端预设已注册。新会话里可以选「B 端执行」。');
+        else presetLine = h('div', { style: styles.muted }, 'B 端预设还在注册；如果一直这样，重启 DSH 后再看。');
+      }
       return h('div', { key: 'agent', style: styles.block },
         h('div', { style: styles.entryTitle }, 'B 端执行'),
         h('div', { style: styles.muted }, '让外面那台 B 端电脑只装这一个插件，把文件任务交给它；会话、模型和 A 的其它插件仍留在家里。'),
@@ -2442,7 +2493,13 @@ window.__ModuleLoader__.load({
         h('div', { style: styles.muted }, on
           ? '已开启。生成一个配对码，让 B 端在它自己的设置页里输入；配对后这里会出现那台电脑。'
           : '没开（默认）。B 端连不进来，也拿不到任何文件任务。'),
-        on && a && a.url ? h('div', { style: styles.detail }, 'B 端要填的地址：' + a.url) : null,
+        on ? presetLine : null,
+        on ? h('div', { style: styles.muted, marginTop: 10 }, 'B 端要填的地址（选一条 B 能访问的）：') : null,
+        on && urls.length
+          ? h('div', null, urls.map(function (one) {
+            return h('div', { key: one.url, style: styles.detail }, one.label + '：' + one.url);
+          }))
+          : (on ? h('div', { style: styles.warn }, '现在没有可用的地址；先确认手机服务已经起来，或者先配好手机那条路。') : null),
         on ? h('div', { style: { display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' } },
           h('button', { type: 'button', style: styles.btn, disabled: Boolean(a && a.busy), onClick: a.makeCode }, '生成配对码'),
           code && code.ok ? h('span', { style: styles.detail }, '配对码：' + code.code + '（10 分钟内有效）') : null,
@@ -2451,15 +2508,24 @@ window.__ModuleLoader__.load({
         on
           ? (agents.length
             ? h('div', null, agents.map(function (one) {
+              var confirming = a && a.confirming === one.id;
               return h('div', { key: one.id, style: { marginTop: 12, paddingTop: 10, borderTop: '1px solid var(--dsw-alias-border-subtle, #ddd)' } },
                 h('div', null, (one.name || 'B 端电脑') + ' · ' + (one.online ? '在线' : '离线')),
                 h('div', { style: styles.muted }, '授权目录：' + ((one.roots && one.roots.length) ? one.roots.join('、') : '（没报）')),
-                h('button', { type: 'button', style: styles.btn, disabled: Boolean(a && a.busy), onClick: function () { a.revoke(one.id); } }, '撤销'),
+                confirming
+                  ? h('div', null,
+                    h('div', { style: styles.warn }, '撤销后，这台 B 端要重新生成配对码才能再连。确定吗？'),
+                    h('div', { style: { display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' } },
+                      h('button', { type: 'button', style: styles.btn, disabled: Boolean(a && a.busy), onClick: function () { a.revoke(one.id); } }, '确认撤销'),
+                      h('button', { type: 'button', style: styles.btn, disabled: Boolean(a && a.busy), onClick: a.cancelRevoke }, '取消'),
+                    ),
+                  )
+                  : h('button', { type: 'button', style: styles.btn, disabled: Boolean(a && a.busy), onClick: function () { a.askRevoke(one.id); } }, '撤销'),
               );
             }))
             : h('div', { style: styles.muted, marginTop: 10 }, '还没有 B 端连过来。'))
           : null,
-        on ? h('div', { style: styles.warn }, 'B 端只拿文件读取（这一版只读）；写文件和命令还没开。那台电脑上的授权目录由它自己选，A 不能替它扩大。') : null,
+        on ? h('div', { style: styles.warn }, 'B 端有文件读、写、文件夹管理、命令和终端；每项由 B 自己开。删除/移动的 confirm 是模型层二次确认，不是人工审批；真正的授权是 B 上的开关。') : null,
       );
     }
 
@@ -2470,6 +2536,9 @@ window.__ModuleLoader__.load({
      */
     function bAgentBlock(st, a) {
       var on = Boolean(st && st.mode);
+      var pollText = st && st.lastPollAt
+        ? ('最近成功轮询：' + Math.max(0, Math.round((Date.now() - st.lastPollAt) / 1000)) + ' 秒前')
+        : '还没有成功轮询';
       var status = st && st.connected ? '已连上 A，等待任务。' : (st && st.error ? st.error : '还没连上 A。');
       return h('div', { key: 'bAgent', style: styles.block },
         h('div', { style: styles.entryTitle }, '作为 B 端执行端'),
@@ -2484,6 +2553,8 @@ window.__ModuleLoader__.load({
           h('span', null, on ? '已开启' : '开启'),
         ),
         h('div', { style: on ? styles.detail : styles.muted }, status),
+        h('div', { style: styles.muted }, pollText),
+        st && st.lastError ? h('div', { style: styles.detail }, '最后一次错误：' + st.lastError) : null,
         a && a.error ? h('div', { style: styles.warn }, a.error) : null,
         h('div', { style: styles.muted, marginTop: 10 }, 'A 的地址（例如 http://100.x.x.x:3090）'),
         h('input', {
@@ -2542,6 +2613,7 @@ window.__ModuleLoader__.load({
           h('button', { type: 'button', style: styles.btn, disabled: Boolean(a && a.busy), onClick: a.pair }, '配对并开启'),
         ),
         h('div', { style: styles.warn }, '开了之后，A 的 AI 能读写你授权的文件夹；执行命令还没开。不要授权整个盘。'),
+        h('div', { style: styles.warn }, '删除/移动会要求模型带 confirm，这是模型层的二次确认，不是人工审批；真正的授权是你上面的开关。'),
       );
     }
 
