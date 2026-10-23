@@ -3208,7 +3208,7 @@ window.__ModuleLoader__.load({
       else if (enabled) status = tunnel.error
         ? '开着，但公网那边连不上。手机现在走这条路会打不开——下面那段就是它说的话。'
         : '已开启，但还没拿到公网地址。';
-      else status = '未开启。手机与电脑不在同一网络时无法连接。';
+      else status = '未开启。手机与电脑不在同一网络时无法连接；可改用 Tailscale。';
 
       return h('div', { key: 'tunnel', style: styles.block },
         h('div', { style: styles.entryTitle }, '公网访问'),

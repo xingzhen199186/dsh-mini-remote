@@ -955,7 +955,7 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
     assert.equal(boxes[0].props.checked, false);
     const text = textOf(tree6);
     assert.match(text, /公网访问/);
-    assert.match(text, /手机与电脑不在同一网络时无法连接/);
+    assert.match(text, /手机与电脑不在同一网络时无法连接；可改用 Tailscale。/);
   });
 
   await check('公网开着且有地址时：开关选中，提示去看「公网」那条', async () => {
