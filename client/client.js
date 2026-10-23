@@ -2182,11 +2182,11 @@ window.__ModuleLoader__.load({
             : null,
         ),
         open ? h('div', { style: styles.muted },
-          '每一台手机第一次扫码进来时会自动登记，之后不用再扫码。撤销之后，那台设备要重新扫码才能再用。') : null,
+          '设备首次扫码时自动登记，之后无需重复扫码；撤销后需重新扫码。') : null,
         d.error ? h('div', { style: styles.error }, d.error) : null,
         d.cleanupNote ? h('div', { style: styles.detail }, d.cleanupNote) : null,
         cleanup ? h('div', null,
-          h('div', { style: styles.warn }, '只删最近使用和创建都早于 30 天的设备；最近 30 天用过的不动。撤销后那些设备要重新扫码。'),
+          h('div', { style: styles.warn }, '仅清理创建时间和最近使用时间均早于 30 天的设备；清理后需重新扫码。'),
           h('div', { style: { display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' } },
             h('button', { type: 'button', style: styles.btnDanger, disabled: Boolean(d.busy), onClick: d.cleanup }, d.busy ? '清理中…' : '确认清理'),
             h('button', { type: 'button', style: styles.btn, disabled: Boolean(d.busy), onClick: d.cancelCleanup }, '取消'),
@@ -2853,7 +2853,7 @@ window.__ModuleLoader__.load({
       }
       return h('div', { key: 'agent', style: styles.block },
         h('div', { style: styles.entryTitle }, 'B 端执行'),
-        h('div', { style: styles.muted }, '让外面那台 B 端电脑只装这一个插件，把文件任务交给它；会话、模型和 A 的其它插件仍留在家里。'),
+        h('div', { style: styles.muted }, 'B 端只需安装本插件即可执行文件任务；会话、模型与其他插件仍保留在 A 端。'),
         h('label', { style: styles.toggleRow },
           h('input', {
             type: 'checkbox',
@@ -2915,7 +2915,7 @@ window.__ModuleLoader__.load({
       var status = st && st.connected ? '已连上 A，等待任务。' : (st && st.error ? st.error : '还没连上 A。');
       return h('div', { key: 'bAgent', style: styles.block },
         h('div', { style: styles.entryTitle }, '作为 B 端执行端'),
-        h('div', { style: styles.muted }, '把这台电脑交给家里那台 A：只接收文件和命令任务，不把 A 的会话和插件搬过来。目录和权限由这一页本地给。'),
+        h('div', { style: styles.muted }, '允许 A 向本机下发文件与命令任务。A 的会话和插件不会同步到本机；授权目录与权限仅在本页设置。'),
         h('label', { style: styles.toggleRow },
           h('input', {
             type: 'checkbox',
@@ -2972,7 +2972,7 @@ window.__ModuleLoader__.load({
           }),
           h('span', null, '允许 A 在这台电脑上执行命令'),
         ),
-        h('div', { style: styles.warn }, '执行命令等于把整台电脑交给 A（不只是授权目录）。默认关；确认你信得过这台 A 再打开。'),
+        h('div', { style: styles.warn }, '开启后，A 可在本机执行命令，影响范围不限于授权目录。默认关闭。'),
         h('label', { style: styles.toggleRow },
           h('input', {
             type: 'checkbox',
@@ -3165,7 +3165,7 @@ window.__ModuleLoader__.load({
 
       return h('div', { key: 'bProject', style: styles.block },
         h('div', { style: styles.entryTitle }, 'B 项目'),
-        h('div', { style: styles.muted }, '给 B 的一个真实目录建一个门牌：A 的工作区列表里会出现「B · 项目名」，打开后默认在 B 的模式下干活。真实文件始终在 B。'),
+        h('div', { style: styles.muted }, '将 B 端目录登记为 A 的工作区；A 仅保存路径映射，不复制文件。'),
         connected ? null : h('div', { style: styles.warn }, 'B 端现在没连上；先把上面「作为 B 端执行端」配对并开启。'),
         list,
         h('div', { style: styles.detail, marginTop: 14 }, '新建 B 项目'),
