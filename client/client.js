@@ -58,6 +58,7 @@ window.__ModuleLoader__.load({
     var B_PROJECTS_PATH = '/mini-remote/b-projects';
     var B_PROJECT_PATH = '/mini-remote/b-project';
     var B_BROWSE_PATH = '/mini-remote/b-browse';
+    var B_PROJECT_SESSION_PATH = '/mini-remote/b-project/new-session';
     var AGENT_CODE_PATH = '/mini-remote/agent-pair-code';
     var AGENT_REVOKE_PATH = '/mini-remote/agent-revoke';
     var B_AGENT_PAIR_PATH = '/mini-remote/b-agent/pair';
@@ -631,6 +632,9 @@ window.__ModuleLoader__.load({
       var bBrowseState = useState(null);
       var bBrowse = bBrowseState[0];
       var setBBrowse = bBrowseState[1];
+      var bProjectCreatedState = useState(null);
+      var bProjectCreated = bProjectCreatedState[0];
+      var setBProjectCreated = bProjectCreatedState[1];
 
       // 添加那一块：`null` = 收着；一个草稿 = 摊开着（三个框 + 一次确认）。
       var addState = useState(null);
@@ -1438,6 +1442,25 @@ window.__ModuleLoader__.load({
           });
       };
 
+      /** 在 B 项目里新建会话：创建时就带 b-agent，避免先建默认模式再切的问题。 */
+      var newBProjectSession = function (project) {
+        if (!project || busy) return;
+        setBProjectError(null);
+        setBusy(true);
+        fetch(B_PROJECT_SESSION_PATH, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ id: project.id }),
+        })
+          .then(function (res) { return res.json(); })
+          .then(function (body) {
+            if (!body || !body.ok) throw new Error((body && body.error) || '建不了 B 会话');
+            setBProjectCreated({ projectId: project.id, sessionId: body.sessionId });
+          })
+          .catch(function (err) { setBProjectError((err && err.message) || String(err)); })
+          .then(function () { setBusy(false); });
+      };
+
       /** 打开一个 B 项目的文件面板，默认从项目根开始。 */
       var openBProject = function (project) {
         if (!project) return;
@@ -1888,6 +1911,8 @@ window.__ModuleLoader__.load({
           setBrowseMkdir: setBBrowseMkdir,
           setBrowseName: setBBrowseName,
           mkdirBrowse: mkdirBBrowse,
+          created: bProjectCreated,
+          newSession: newBProjectSession,
         }, {
           // 「其他电脑」那一块：名单 + 添加 + 两个动作，以及只属于那一块的两句话
           // （读名单失败的原因、断开之后那句"对面还留着"）。
@@ -2957,9 +2982,18 @@ window.__ModuleLoader__.load({
                 ),
               )
               : h('div', { style: { display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' } },
+                h('button', {
+                  type: 'button', style: styles.btn,
+                  disabled: Boolean(a.busy),
+                  onClick: function () { a.newSession(p); },
+                }, '新建 B 会话'),
                 h('button', { type: 'button', style: styles.btn, onClick: function () { a.open(p); } }, '浏览 B 文件'),
                 h('button', { type: 'button', style: styles.btn, onClick: function () { a.setRemoving(p.id); } }, '移除'),
               ),
+            a.created && a.created.projectId === p.id
+              ? h('div', { style: styles.detail },
+                '已建好 B 会话（' + a.created.sessionId + '）。去左侧「B · ' + (p.name || '项目') + '」里打开它；这条会话从创建起就是 B 预设，不会经过 run_code。')
+              : null,
           );
         }))
         : h('div', { style: styles.muted, marginTop: 10 }, '还没有 B 项目。');
