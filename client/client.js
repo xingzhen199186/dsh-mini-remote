@@ -1864,7 +1864,7 @@ window.__ModuleLoader__.load({
         }, {
           // B 项目：门牌列表、新建、移除、B 文件面板。
           projects: (info && info.agent && info.agent.projects) || [],
-          connected: Boolean(info && info.bAgent && info.bAgent.connected),
+          connected: Boolean(info && info.agent && Array.isArray(info.agent.agents) && info.agent.agents.some(function (one) { return one && one.online; })),
           name: bProjectName,
           root: bProjectRoot,
           setName: setBProjectName,

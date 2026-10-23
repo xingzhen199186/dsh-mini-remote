@@ -2593,7 +2593,7 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
 
   const B_AGENT_OK = {
     allowed: true,
-    agents: [],
+    agents: [{ id: 'a1', name: 'B 端电脑', online: true }],
     projects: [{ id: 'p1', name: '测试项目', bRoot: 'D:\\work\\测试', workspaceId: 'w1', aPath: 'C:\\door' }],
     presetRegistered: true,
     presetError: null,
@@ -2630,6 +2630,7 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
     assert.match(text, /B 项目/);
     assert.match(text, /B · 测试项目/);
     assert.match(text, /浏览 B 文件/);
+    assert.match(text, /选择 B 文件夹/);
     assert.match(text, /D:\\work\\测试/);
   });
   hh.unmount();
