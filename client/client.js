@@ -606,6 +606,8 @@ window.__ModuleLoader__.load({
       var bManageState = useState(false);
       var bAllowManage = bManageState[0];
       var setBAllowManage = bManageState[1];
+      // 按钮点下去到 React 重渲染之间还有一小段；用 ref 挡住同一瞬间的第二次点击。
+      var bPairingRef = useRef(false);
 
       // 添加那一块：`null` = 收着；一个草稿 = 摊开着（三个框 + 一次确认）。
       var addState = useState(null);
@@ -1289,7 +1291,8 @@ window.__ModuleLoader__.load({
 
       /** B 端执行端：配对并开启。 */
       var pairBAgent = function () {
-        if (busy) return;
+        if (busy || bPairingRef.current) return;
+        bPairingRef.current = true;
         setBusy(true);
         setBError(null);
         fetch(B_AGENT_PAIR_PATH, {
@@ -1316,7 +1319,10 @@ window.__ModuleLoader__.load({
           .catch(function (err) {
             setBError('配对失败：' + ((err && err.message) || String(err)));
           })
-          .then(function () { setBusy(false); });
+          .then(function () {
+            bPairingRef.current = false;
+            setBusy(false);
+          });
       };
 
       /** B 端执行端：开/关。 */
