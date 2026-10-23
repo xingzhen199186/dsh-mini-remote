@@ -94,7 +94,7 @@ test('配对请求只把授权摘要交给 A，不交 token；A 返回的 token 
   try {
     let seen = null
     const out = await pairAgent({
-      url: 'http://example.test/', code: '123456', name: 'B', platform: 'win32', roots: [f.root],
+      url: 'http://example.test/', code: '123456', name: 'B', platform: 'win32', roots: [f.root], machineId: 'm-1',
       fetchImpl: async (url, init) => {
         seen = { url, body: JSON.parse(init.body) }
         return new Response(JSON.stringify({ ok: true, agentId: 'a1', token: 'long-token' }), { status: 200 })
@@ -104,6 +104,7 @@ test('配对请求只把授权摘要交给 A，不交 token；A 返回的 token 
     assert.equal(out.token, 'long-token')
     assert.equal(seen.url, 'http://example.test/mini-remote/agent/pair')
     assert.deepEqual(seen.body.roots, [f.root])
+    assert.equal(seen.body.machineId, 'm-1')
     assert.equal('token' in seen.body, false, '配对请求里不该有 token')
   } finally {
     f.cleanup()

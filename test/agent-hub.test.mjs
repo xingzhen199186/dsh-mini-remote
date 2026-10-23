@@ -102,3 +102,29 @@ test('多台 B 在线时不指定 agent 会拒绝，指定了才走那一台', a
   assert.equal(await pending, 'a')
   assert.equal(await hub.poll(b, 0), null, '另一台不该拿到这台的任务')
 })
+
+test('同一台 B 用稳定 machineId 重新配对：复用原记录，旧 token 失效', () => {
+  const t = tempDir()
+  try {
+    const hub = createAgentHub({ file: join(t.dir, 'agents.json'), enabled: () => true })
+    const first = hub.issuePairCode()
+    const oldPair = hub.pair({ code: first.code, name: 'B 端电脑', platform: 'win32', roots: ['I:\\old'], machineId: 'machine-1' })
+    assert.equal(oldPair.ok, true)
+    assert.equal(oldPair.reused, undefined)
+    assert.equal(hub.list().length, 1)
+
+    const second = hub.issuePairCode()
+    const newPair = hub.pair({ code: second.code, name: 'B 端电脑（新）', platform: 'win32', roots: ['I:\\new'], machineId: 'machine-1' })
+    assert.equal(newPair.ok, true)
+    assert.equal(newPair.reused, true)
+    assert.equal(newPair.agentId, oldPair.agentId, '还是同一条记录')
+    assert.equal(hub.list().length, 1, '不能多出一条')
+    assert.equal(hub.authenticate(oldPair.token), null, '旧 token 要立刻失效')
+    const current = hub.authenticate(newPair.token)
+    assert.ok(current)
+    assert.equal(current.name, 'B 端电脑（新）')
+    assert.equal(current.roots[0], 'I:\\new')
+  } finally {
+    t.cleanup()
+  }
+})
