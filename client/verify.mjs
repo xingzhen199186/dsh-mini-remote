@@ -772,7 +772,7 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
   });
   await check('顶部两句说明都在', () => {
     const text = textOf(tree);
-    assert.match(text, /手机扫码即可连接，密码已编入二维码，无需手动输入。/);
+    assert.match(text, /手机扫码即可连接，密码已编入二维码。/);
     assert.match(text, /本页包含连接密码，请勿截图或转发。/);
   });
   await check('HTTP 403 + {ok:false,error} → 显示 error 原文', async () => {
@@ -824,11 +824,11 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
     assert.doesNotMatch(text, /正在读取配对信息…/);
   });
 
-  await check('二维码渲染成 <img src={entry.qr}>（宽 180）', () => {
+  await check('二维码渲染成 <img src={entry.qr}>（宽 160）', () => {
     const imgs = byType(tree, 'img');
     assert.equal(imgs.length, 1, '有 qr 的只有一条，qr:null 的那条应退化成文字');
     assert.equal(imgs[0].props.src, QR);
-    assert.equal(imgs[0].props.style.width, 180);
+    assert.equal(imgs[0].props.style.width, 160);
   });
 
   await check('两条 URL 都在只读 <input> 里，不是纯文本 div', () => {

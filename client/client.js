@@ -106,11 +106,14 @@ window.__ModuleLoader__.load({
       error: { color: 'var(--dsw-alias-state-error-primary,#dc2626)', fontSize: 13, lineHeight: 1.6, marginTop: 12 },
       block: { marginTop: 24 },
       entryTitle: { fontWeight: 600, fontSize: 14, lineHeight: 1.5 },
+      // 连接方式条目（内网/Tailscale/公网…）的次级标题：组→项两级，和区块标题拉开。
+      entryTitleSub: { fontWeight: 500, fontSize: 13, lineHeight: 1.5 },
       link: { color: 'var(--dsw-alias-brand-primary,#2563eb)', fontSize: 12, textDecoration: 'underline', display: 'inline-block', marginTop: 4 },
       entryRow: { display: 'flex', alignItems: 'flex-start', gap: 14, marginTop: 10, flexWrap: 'wrap' },
-      qr: { width: 180, height: 180, flex: 'none', borderRadius: 10, border: '1px solid var(--dsw-alias-border-l2,#e5e7eb)', background: '#fff' },
-      qrFallback: { width: 180, minHeight: 180, flex: 'none', boxSizing: 'border-box', padding: 12, borderRadius: 10, border: '1px dashed var(--dsw-alias-border-l3,#d1d5db)', color: 'var(--dsw-alias-label-tertiary,#8b93a1)', fontSize: 12, lineHeight: 1.5 },
-      urlCol: { flex: '1 1 220px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 8 },
+      qr: { width: 160, height: 160, flex: 'none', borderRadius: 10, border: '1px solid var(--dsw-alias-border-l2,#e5e7eb)', background: '#fff' },
+      qrFallback: { width: 160, minHeight: 160, flex: 'none', boxSizing: 'border-box', padding: 12, borderRadius: 10, border: '1px dashed var(--dsw-alias-border-l3,#d1d5db)', color: 'var(--dsw-alias-label-tertiary,#8b93a1)', fontSize: 12, lineHeight: 1.5 },
+      // 地址与「复制」同一行：输入框 flex 伸展（下限 180，再窄就换行），按钮贴住它。
+      urlCol: { flex: '1 1 220px', minWidth: 0, display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
       input: { font: 'inherit', width: '100%', boxSizing: 'border-box', fontSize: 13, padding: '7px 10px', borderRadius: 8, border: '1px solid var(--dsw-alias-border-l2,#e5e7eb)', background: 'var(--dsw-alias-bg-base,#fff)', color: 'var(--dsw-alias-label-primary,inherit)' },
       btn: { font: 'inherit', cursor: 'pointer', alignSelf: 'flex-start', height: 32, padding: '0 14px', borderRadius: 8, fontSize: 13, border: '1px solid var(--dsw-alias-button-ghost-active-border,var(--dsw-alias-border-l2,#d1d5db))', background: 'var(--dsw-alias-bg-layer-1,#fff)', color: 'var(--dsw-alias-label-primary,inherit)' },
       toggleRow: { display: 'flex', alignItems: 'center', gap: 8, marginTop: 10, fontSize: 13, cursor: 'pointer' },
@@ -1858,7 +1861,7 @@ window.__ModuleLoader__.load({
 
       return h('div', { style: styles.card },
         h('div', { style: styles.title }, '手机遥控'),
-        h('div', { style: styles.muted }, '手机扫码即可连接，密码已编入二维码，无需手动输入。'),
+        h('div', { style: styles.muted }, '手机扫码即可连接，密码已编入二维码。'),
         h('div', { style: styles.warn }, '本页包含连接密码，请勿截图或转发。'),
         content(info, failure, copied, copy, busy, toggleTunnel, {
           showPwd: showPwd,
@@ -2025,6 +2028,8 @@ window.__ModuleLoader__.load({
         if (!entries.length) {
           blocks.push(h('div', { key: 'none', style: styles.muted }, '这台电脑暂时没有手机能连上的地址。'));
         } else {
+          // 三条（或更多）连接方式是一组：上面加一个组标题，条目标题用次级样式。
+          blocks.push(h('div', { key: 'conn', style: Object.assign({}, styles.entryTitle, { marginTop: 24 }) }, '连接方式'));
           for (var i = 0; i < entries.length; i += 1) blocks.push(entryBlock(entries[i], i, copied, copy));
         }
         // 密码紧跟在那几条二维码后面：它是这些链接背后的钥匙，放在一起才讲得通。
@@ -3223,7 +3228,7 @@ window.__ModuleLoader__.load({
         h('div', { style: enabled && tunnel.error ? styles.detail : styles.muted }, status),
         // cloudflared 的原始报错，多行原文照登——排查时这就是全部线索。
         enabled && tunnel.error ? h('div', { style: styles.detail }, tunnel.error) : null,
-        enabled ? h('div', { style: styles.warn }, '这个地址每次重启 DSH 都会换一个，换了之后回来重新扫一下码。') : null,
+        enabled ? h('div', { style: styles.muted }, '这个地址每次重启 DSH 都会换一个，换了之后回来重新扫一下码。') : null,
         enabled ? h('div', { style: styles.warn }, '开着的时候这个服务就挂在公网上了。密码仍然是唯一的门，别把地址或二维码发出去。') : null,
       );
     }
@@ -3242,7 +3247,7 @@ window.__ModuleLoader__.load({
       var pending = typeof info.pendingToken === 'string' ? info.pendingToken : '';
       return h('div', { key: 'password', style: styles.block },
         h('div', { style: styles.entryTitle }, '密码'),
-        h('div', { style: styles.muted }, '手机扫码时已经带着它了，不用手输。它就是这道门的钥匙——别截图发出去。'),
+        h('div', { style: styles.muted }, '当前连接密码，扫码时自动携带；也可在此查看或更换。'),
         h('div', { style: { display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' } },
           h('input', {
             readOnly: true,
@@ -3289,7 +3294,7 @@ window.__ModuleLoader__.load({
       var url = typeof entry.url === 'string' ? entry.url : '';
       var done = url !== '' && copied === url;
       return h('div', { key: entry.kind || String(index), style: styles.block },
-        h('div', { style: styles.entryTitle }, entry.label || entry.kind || '手机'),
+        h('div', { style: styles.entryTitleSub }, entry.label || entry.kind || '手机'),
         entry.hint ? h('div', { style: styles.muted }, entry.hint) : null,
         h('div', { style: styles.entryRow },
           // host 侧二维码画不出来时给的是 null，退化成只显示链接。
@@ -3300,10 +3305,12 @@ window.__ModuleLoader__.load({
             h('input', {
               readOnly: true,
               value: url,
+              // 地址带着 token，单行放不下会截断；悬停给全文。
+              title: url,
               spellCheck: false,
               // 点一下就把整条地址选中，方便直接 Ctrl+C。
               onFocus: function (e) { try { e.target.select(); } catch (err) { /* 忽略 */ } },
-              style: styles.monoInput,
+              style: Object.assign({}, styles.monoInput, { flex: '1 1 180px', width: 'auto', minWidth: 180 }),
             }),
             h('button', { type: 'button', onClick: function () { copy(url); }, style: styles.btn }, done ? '已复制' : '复制'),
           ),
