@@ -772,8 +772,8 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
   });
   await check('顶部两句说明都在', () => {
     const text = textOf(tree);
-    assert.match(text, /手机扫码就能用，不用输密码——密码已经编在二维码里了。/);
-    assert.match(text, /这个页面带着密码，别截图发出去。/);
+    assert.match(text, /手机扫码即可连接，密码已编入二维码，无需手动输入。/);
+    assert.match(text, /本页包含连接密码，请勿截图或转发。/);
   });
   await check('HTTP 403 + {ok:false,error} → 显示 error 原文', async () => {
     resolveFetch(jsonResponse(403, { ok: false, error: '配对信息只能在这台电脑上看。' }));
@@ -2428,12 +2428,16 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
 
   await check('摘要一行说清：插件版本 · 进程何时起的 · 接口几条在', async () => {
     const st = await mountSelfcheck(jsonResponse(200, SELF_OK));
+    const collapsed = textOf(selfBlockOf(st.tree));
+    assert.match(collapsed, /自检/);
+    assert.match(collapsed, /插件版本 0\.2\.1/);
+    assert.match(collapsed, /宿主进程启动于 2026-10-17 17:16/);
+    assert.match(collapsed, /接口一共 3 条，都在/);
+    // 默认收起：细节不许摊在页面上，点「展开自检」才出来
+    assert.doesNotMatch(collapsed, /插件文件最后改动于/, '默认收起：细节不该摊在页面上');
+    buttonIn(selfBlockOf(st.tree), '展开自检').props.onClick();
+    await tick();
     const text = textOf(selfBlockOf(st.tree));
-    assert.match(text, /自检/);
-    assert.match(text, /插件版本 0\.2\.1/);
-    assert.match(text, /宿主进程启动于 2026-10-17 17:16/);
-    assert.match(text, /接口一共 3 条，都在/);
-    // 展开的那些细节也都在（默认展开）
     assert.match(text, /插件文件最后改动于：2026-10-17 17:10（lib\/index\.js）/);
     assert.match(text, /「允许别的电脑连接」：关（默认关）/);
     assert.match(text, /在听端口 3090，绑了 127\.0\.0\.1、192\.168\.1\.5/);
@@ -2451,7 +2455,7 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
   await check('一句人话的说明：这块只给本机看、里面没有密码', async () => {
     const st = await mountSelfcheck(jsonResponse(200, SELF_OK));
     const text = textOf(selfBlockOf(st.tree));
-    assert.match(text, /这一块只给这台电脑看（只有本机能读），里面没有一个字是密码或密钥。/);
+    assert.match(text, /仅本机可读取，不包含密码或密钥。/);
     st.harness.unmount();
   });
 
@@ -2466,17 +2470,21 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
       process: Object.assign({}, SELF_OK.process, { startedAtMs: AT(17, 17, 16) }),
     });
     const st = await mountSelfcheck(jsonResponse(200, stale));
-    const block = selfBlockOf(st.tree);
-    assert.match(textOf(block), /这台电脑的插件可能不是最新的，重启 DSH 才会加载新版本。/,
-      '进程比代码旧时，那句话必须在');
-    // 收起整块：**那句警告不许跟着藏起来**（要用户先点开才能看见，等于把它藏起来）
-    buttonIn(block, '收起自检').props.onClick();
-    await tick();
+    // 默认就是收起态：**那句警告不许被藏起来**（要用户先点开才能看见，等于把它藏起来）
     const collapsed = selfBlockOf(st.tree);
     assert.match(textOf(collapsed), /这台电脑的插件可能不是最新的，重启 DSH 才会加载新版本。/,
-      '收起之后那句警告还得在');
+      '收起（默认）时那句话必须在');
     assert.doesNotMatch(textOf(collapsed), /插件文件最后改动于/, '收起的是那些细节');
     assert.match(textOf(collapsed), /接口/, '摘要那一行照旧在');
+    // 展开：细节出来
+    buttonIn(selfBlockOf(st.tree), '展开自检').props.onClick();
+    await tick();
+    assert.match(textOf(selfBlockOf(st.tree)), /插件文件最后改动于/, '展开之后细节要在');
+    // 再收起：警告照旧在
+    buttonIn(selfBlockOf(st.tree), '收起自检').props.onClick();
+    await tick();
+    assert.match(textOf(selfBlockOf(st.tree)), /这台电脑的插件可能不是最新的，重启 DSH 才会加载新版本。/,
+      '再收起之后那句警告还得在');
     st.harness.unmount();
   });
 
@@ -2488,6 +2496,8 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
       ],
     });
     const st = await mountSelfcheck(jsonResponse(200, partial));
+    buttonIn(selfBlockOf(st.tree), '展开自检').props.onClick();
+    await tick();
     const text = textOf(selfBlockOf(st.tree));
     assert.match(text, /接口一共 2 条，其中 1 条不在/);
     assert.match(text, /\/mini-remote\/devices\/revoke/);
@@ -2503,8 +2513,10 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
       ],
     });
     const st = await mountSelfcheck(jsonResponse(200, withErrors));
+    assert.match(textOf(selfBlockOf(st.tree)), /最近出错 2 条/, '摘要（收起态）就要说清有几条');
+    buttonIn(selfBlockOf(st.tree), '展开自检').props.onClick();
+    await tick();
     const text = textOf(selfBlockOf(st.tree));
-    assert.match(text, /最近出错 2 条/, '摘要要说清有几条');
     assert.match(text, /连不上那台电脑/, '最新那一条要摆出来');
     assert.match(text, /公网访问没起来/, '第二条也在（五条以内全列）');
     assert.match(text, /不落盘、重启就清空/, '要告诉用户这不是日志，别拿它当历史记录找');
@@ -2518,10 +2530,12 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
       })),
     });
     const st = await mountSelfcheck(jsonResponse(200, many));
+    assert.match(textOf(selfBlockOf(st.tree)), /最近出错 8 条/);
+    buttonIn(selfBlockOf(st.tree), '展开自检').props.onClick();
+    await tick();
     const text = textOf(selfBlockOf(st.tree));
-    assert.match(text, /最近出错 8 条/);
     assert.match(text, /还有 3 条/);
-    assert.doesNotMatch(text, /第 6 条错误/, '第六条起不摆出来，否则默认展开的一屏全是错误');
+    assert.doesNotMatch(text, /第 6 条错误/, '第六条起不摆出来，否则展开后一屏全是错误');
     st.harness.unmount();
   });
 
@@ -2552,6 +2566,8 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
       dataDir: 'C:\\Users\\me\\.dsh\\dsh-mini-remote',
       rosters: { devices: null, remotes: null },
     }));
+    buttonIn(selfBlockOf(st.tree), '展开自检').props.onClick();
+    await tick();
     const tree = selfBlockOf(st.tree);
     const text = textOf(tree);
     assert.match(text, /插件版本 未知/);

@@ -98,21 +98,21 @@ window.__ModuleLoader__.load({
     // 颜色走 DSH 主题变量（真名前缀是 --dsw-alias-，深浅色自动跟随）。
     // 每个变量都带一个浅色兜底值，变量缺失时界面仍然可读。
     var styles = {
-      card: { background: 'var(--dsw-alias-bg-layer-1,#fff)', border: '1px solid var(--dsw-alias-border-l2,#e5e7eb)', borderRadius: 12, padding: '16px 20px', maxWidth: 560 },
-      title: { fontWeight: 600, fontSize: 13, marginBottom: 4 },
-      muted: { color: 'var(--dsw-alias-label-tertiary,#8b93a1)', fontSize: 12, lineHeight: 1.5 },
+      card: { background: 'var(--dsw-alias-bg-layer-1,#fff)', border: '1px solid var(--dsw-alias-border-l2,#e5e7eb)', borderRadius: 12, padding: '20px 24px', width: '100%', maxWidth: 640, boxSizing: 'border-box' },
+      title: { fontWeight: 600, fontSize: 16, lineHeight: 1.4, marginBottom: 4 },
+      muted: { color: 'var(--dsw-alias-label-tertiary,#8b93a1)', fontSize: 12, lineHeight: 1.6 },
       warn: { color: 'var(--dsw-alias-state-warn-primary,#b45309)', fontSize: 12, lineHeight: 1.5, marginTop: 4 },
       loading: { color: 'var(--dsw-alias-label-tertiary,#8b93a1)', fontSize: 13, marginTop: 12 },
       error: { color: 'var(--dsw-alias-state-error-primary,#dc2626)', fontSize: 13, lineHeight: 1.6, marginTop: 12 },
-      block: { borderTop: '1px solid var(--dsw-alias-border-l2,#e5e7eb)', marginTop: 16, paddingTop: 16 },
-      entryTitle: { fontWeight: 600, fontSize: 13 },
+      block: { marginTop: 24 },
+      entryTitle: { fontWeight: 600, fontSize: 14, lineHeight: 1.5 },
       link: { color: 'var(--dsw-alias-brand-primary,#2563eb)', fontSize: 12, textDecoration: 'underline', display: 'inline-block', marginTop: 4 },
       entryRow: { display: 'flex', alignItems: 'flex-start', gap: 14, marginTop: 10, flexWrap: 'wrap' },
       qr: { width: 180, height: 180, flex: 'none', borderRadius: 10, border: '1px solid var(--dsw-alias-border-l2,#e5e7eb)', background: '#fff' },
       qrFallback: { width: 180, minHeight: 180, flex: 'none', boxSizing: 'border-box', padding: 12, borderRadius: 10, border: '1px dashed var(--dsw-alias-border-l3,#d1d5db)', color: 'var(--dsw-alias-label-tertiary,#8b93a1)', fontSize: 12, lineHeight: 1.5 },
       urlCol: { flex: '1 1 220px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 8 },
-      input: { font: 'inherit', width: '100%', boxSizing: 'border-box', fontFamily: 'ui-monospace,Menlo,monospace', fontSize: 12, padding: '7px 9px', borderRadius: 8, border: '1px solid var(--dsw-alias-border-l2,#e5e7eb)', background: 'var(--dsw-alias-bg-base,#fff)', color: 'var(--dsw-alias-label-primary,inherit)' },
-      btn: { font: 'inherit', cursor: 'pointer', alignSelf: 'flex-start', height: 30, padding: '0 14px', borderRadius: 999, fontSize: 12, border: '1px solid var(--dsw-alias-button-ghost-active-border,var(--dsw-alias-border-l2,#d1d5db))', background: 'var(--dsw-alias-bg-layer-1,#fff)', color: 'var(--dsw-alias-label-primary,inherit)' },
+      input: { font: 'inherit', width: '100%', boxSizing: 'border-box', fontSize: 13, padding: '7px 10px', borderRadius: 8, border: '1px solid var(--dsw-alias-border-l2,#e5e7eb)', background: 'var(--dsw-alias-bg-base,#fff)', color: 'var(--dsw-alias-label-primary,inherit)' },
+      btn: { font: 'inherit', cursor: 'pointer', alignSelf: 'flex-start', height: 32, padding: '0 14px', borderRadius: 8, fontSize: 13, border: '1px solid var(--dsw-alias-button-ghost-active-border,var(--dsw-alias-border-l2,#d1d5db))', background: 'var(--dsw-alias-bg-layer-1,#fff)', color: 'var(--dsw-alias-label-primary,inherit)' },
       toggleRow: { display: 'flex', alignItems: 'center', gap: 8, marginTop: 10, fontSize: 13, cursor: 'pointer' },
       // cloudflared 的报错是多行原文，换行要留住，否则一长条读不了。
       detail: { color: 'var(--dsw-alias-state-warn-primary,#b45309)', fontSize: 12, lineHeight: 1.6, marginTop: 6, whiteSpace: 'pre-wrap', wordBreak: 'break-word' },
@@ -206,6 +206,24 @@ window.__ModuleLoader__.load({
       // 一长条路径和十几个接口名用正文那套字读起来分不清，而它们就是要一眼扫过去的。
       code: { fontFamily: 'ui-monospace,Menlo,monospace', fontSize: 12, lineHeight: 1.7, marginTop: 4, whiteSpace: 'pre-wrap', wordBreak: 'break-all', color: 'var(--dsw-alias-label-tertiary,#8b93a1)' },
     };
+
+    // 按钮的两个变体：**主操作**（实心品牌色）和**危险操作**（红字红边）。
+    // 只换观感，标签和禁用逻辑不动。
+    styles.btnPrimary = Object.assign({}, styles.btn, {
+      background: 'var(--dsw-alias-brand-primary,#2563eb)',
+      border: '1px solid var(--dsw-alias-brand-primary,#2563eb)',
+      color: '#fff',
+    });
+    styles.btnDanger = Object.assign({}, styles.btn, {
+      border: '1px solid var(--dsw-alias-state-error-primary,#dc2626)',
+      color: 'var(--dsw-alias-state-error-primary,#dc2626)',
+    });
+    // 等宽输入框：只给地址、口令、配对码、文件路径这类要逐字符核对的内容。
+    // 名字、飞书配置这类普通文本用 styles.input（正文字体）。
+    styles.monoInput = Object.assign({}, styles.input, {
+      fontFamily: 'ui-monospace,Menlo,monospace',
+      fontSize: 12,
+    });
 
     // —— 跨机 · 「其他电脑」这一块的**状态**（2026-10-16 跨机第三步的界面）。
     //
@@ -666,9 +684,10 @@ window.__ModuleLoader__.load({
       var selfErrState = useState(null);
       var selfError = selfErrState[0];
       var setSelfError = selfErrState[1];
-      // 默认展开：这一块是"出问题时才来看"的，进来了就该直接看见那几行，
-      // 而不是先点一下。内容不长（十来行），不会把上面要操作的几块挤走。
-      var selfOpenState = useState(true);
+      // 默认收起：这一块是"出问题时才来看"的体检报告，收起时只留摘要一行、
+      // 错误、进程过期警告和「重新自检」——正常时它就安静地占一行；
+      // 要看接口清单和路径那些细节，点「展开自检」。
+      var selfOpenState = useState(false);
       var selfOpen = selfOpenState[0];
       var setSelfOpen = selfOpenState[1];
 
@@ -1839,8 +1858,8 @@ window.__ModuleLoader__.load({
 
       return h('div', { style: styles.card },
         h('div', { style: styles.title }, '手机遥控'),
-        h('div', { style: styles.muted }, '手机扫码就能用，不用输密码——密码已经编在二维码里了。'),
-        h('div', { style: styles.warn }, '这个页面带着密码，别截图发出去。'),
+        h('div', { style: styles.muted }, '手机扫码即可连接，密码已编入二维码，无需手动输入。'),
+        h('div', { style: styles.warn }, '本页包含连接密码，请勿截图或转发。'),
         content(info, failure, copied, copy, busy, toggleTunnel, {
           showPwd: showPwd,
           setShowPwd: setShowPwd,
@@ -2138,7 +2157,7 @@ window.__ModuleLoader__.load({
           asking ? h('div', { style: styles.deviceConfirm },
             h('div', { style: styles.warn }, '撤销后，这台设备要重新扫码才能再用。'),
             h('button', {
-              type: 'button', disabled: Boolean(d.busy), onClick: function () { d.revoke(one.id); }, style: styles.btn,
+              type: 'button', disabled: Boolean(d.busy), onClick: function () { d.revoke(one.id); }, style: styles.btnDanger,
             }, d.busy ? '撤销中…' : '确认撤销'),
             h('button', {
               type: 'button', disabled: Boolean(d.busy), onClick: function () { d.cancelRevoke(); }, style: styles.btn,
@@ -2164,7 +2183,7 @@ window.__ModuleLoader__.load({
         cleanup ? h('div', null,
           h('div', { style: styles.warn }, '只删最近使用和创建都早于 30 天的设备；最近 30 天用过的不动。撤销后那些设备要重新扫码。'),
           h('div', { style: { display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' } },
-            h('button', { type: 'button', style: styles.btn, disabled: Boolean(d.busy), onClick: d.cleanup }, d.busy ? '清理中…' : '确认清理'),
+            h('button', { type: 'button', style: styles.btnDanger, disabled: Boolean(d.busy), onClick: d.cleanup }, d.busy ? '清理中…' : '确认清理'),
             h('button', { type: 'button', style: styles.btn, disabled: Boolean(d.busy), onClick: d.cancelCleanup }, '取消'),
           ),
         ) : null,
@@ -2258,7 +2277,7 @@ window.__ModuleLoader__.load({
             h('div', { style: styles.warn }, '断开之后，这台电脑就不再连它了：这条记录和本地存的那枚凭据一起删掉。'
               + '对面那台电脑上还留着「这台电脑」这条记录——要彻底收回，得去它那边撤销那一台。'),
             h('button', {
-              type: 'button', disabled: Boolean(r.busy), onClick: function () { r.forget(one.id); }, style: styles.btn,
+              type: 'button', disabled: Boolean(r.busy), onClick: function () { r.forget(one.id); }, style: styles.btnDanger,
             }, r.busy ? '断开中…' : '确认断开'),
             h('button', {
               type: 'button', disabled: Boolean(r.busy), onClick: function () { r.cancelForget(); }, style: styles.btn,
@@ -2272,10 +2291,10 @@ window.__ModuleLoader__.load({
       var addUi = r.add ? h('div', null,
         field('那台电脑的地址（它「手机遥控」页那条，不带 /mini）', r.add.baseUrl, 'http://…', function (v) {
           r.setAddDraft(Object.assign({}, r.add, { baseUrl: v }));
-        }, 'text'),
+        }, 'text', true),
         field('那台电脑的口令（在它的「手机遥控」设置里复制）', r.add.token, '', function (v) {
           r.setAddDraft(Object.assign({}, r.add, { token: v }));
-        }, 'password'),
+        }, 'password', true),
         field('给它起个名字（可留空，留空就用地址当名字）', r.add.name, '', function (v) {
           r.setAddDraft(Object.assign({}, r.add, { name: v }));
         }, 'text'),
@@ -2292,10 +2311,8 @@ window.__ModuleLoader__.load({
 
       return h('div', { key: 'remotes', style: styles.block },
         h('div', { style: styles.entryTitle }, '其他电脑'),
-        h('div', { style: styles.muted }, '这台电脑连得上去的别的电脑。配对过一台之后，点它那一行就能'
-          + '在这儿打开它的界面——和上面那份名单正好相反：上面是「谁进得来」，这里是「我连得上谁」。'),
-        h('div', { style: styles.warn }, '要连的那台电脑得先把它的「允许别的电脑连接」打开，'
-          + '而且两边要能在网络上互相够到（同一个 Wi-Fi、或者同一条 Tailscale 网络）。'),
+        h('div', { style: styles.muted }, '本机可以连接的电脑。配对完成后，点击某一台即可在「远程窗口」面板中打开它的界面。'),
+        h('div', { style: styles.warn }, '对方电脑需先开启「允许别的电脑连接」，且双方网络可达（同一局域网或同一 Tailscale 网络）。'),
         r.error ? h('div', { style: Object.assign({}, styles.error, styles.say) }, r.error) : null,
         // 断开之后宿主给的那句话：说清"对面还留着"（最容易留下的误会）。
         r.note ? h('div', { style: Object.assign({}, styles.muted, styles.say) }, r.note) : null,
@@ -2392,7 +2409,7 @@ window.__ModuleLoader__.load({
         // = 宿主是旧版"那一条，它是这一块最有用的一句话）。
         return h('div', { key: 'selfcheck', style: styles.block },
           h('div', { style: styles.entryTitle }, '自检'),
-          h('div', { style: styles.muted }, '这一块只给这台电脑看（只有本机能读），里面没有一个字是密码或密钥。'),
+          h('div', { style: styles.muted }, '仅本机可读取，不包含密码或密钥。'),
           h('div', { style: Object.assign({}, styles.error, styles.say) },
             sc.error || '正在自检…'),
           h('div', { style: { marginTop: 12 } },
@@ -2469,7 +2486,7 @@ window.__ModuleLoader__.load({
 
       return h('div', { key: 'selfcheck', style: styles.block },
         h('div', { style: styles.entryTitle }, '自检'),
-        h('div', { style: styles.muted }, '这一块只给这台电脑看（只有本机能读），里面没有一个字是密码或密钥。'),
+        h('div', { style: styles.muted }, '仅本机可读取，不包含密码或密钥。'),
         alert,
         summary,
         sc.error ? h('div', { style: Object.assign({}, styles.error, styles.say) }, sc.error) : null,
@@ -2560,7 +2577,7 @@ window.__ModuleLoader__.load({
             type: 'button',
             disabled: Boolean(fs.busy) || !changed,
             onClick: fs.save,
-            style: styles.btn,
+            style: styles.btnPrimary,
           }, fs.busy ? '保存中…' : '保存'),
         ),
         // 失败才留一行，并写清是哪一环出的问题。
@@ -2654,8 +2671,8 @@ window.__ModuleLoader__.load({
       return h('div', { key: 'guide' }, out);
     }
 
-    /** 飞书那一块的一个输入行。标签在上、输入框在下，和这一页其它地方一致。 */
-    function field(label, value, placeholder, onChange, type) {
+    /** 一个输入行：标签在上、输入框在下。mono = true 时用等宽字体（地址/口令这类逐字符核对的内容）。 */
+    function field(label, value, placeholder, onChange, type, mono) {
       return h('div', { key: label, style: { marginTop: 10 } },
         h('div', { style: styles.muted }, label),
         h('input', {
@@ -2665,7 +2682,7 @@ window.__ModuleLoader__.load({
           spellCheck: false,
           autoComplete: 'off',
           onChange: function (e) { onChange(e.target.value); },
-          style: Object.assign({}, styles.input, { marginTop: 4 }),
+          style: Object.assign({}, mono ? styles.monoInput : styles.input, { marginTop: 4 }),
         }),
       );
     }
@@ -2865,7 +2882,7 @@ window.__ModuleLoader__.load({
                   ? h('div', null,
                     h('div', { style: styles.warn }, '撤销后，这台 B 端要重新生成配对码才能再连。确定吗？'),
                     h('div', { style: { display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' } },
-                      h('button', { type: 'button', style: styles.btn, disabled: Boolean(a && a.busy), onClick: function () { a.revoke(one.id); } }, '确认撤销'),
+                      h('button', { type: 'button', style: styles.btnDanger, disabled: Boolean(a && a.busy), onClick: function () { a.revoke(one.id); } }, '确认撤销'),
                       h('button', { type: 'button', style: styles.btn, disabled: Boolean(a && a.busy), onClick: a.cancelRevoke }, '取消'),
                     ),
                   )
@@ -2910,7 +2927,7 @@ window.__ModuleLoader__.load({
           value: a ? a.url : '',
           spellCheck: false,
           placeholder: 'http://…:3090',
-          style: styles.input,
+          style: styles.monoInput,
           onChange: function (e) { a.setUrl(e.target.value); },
         }),
         h('div', { style: styles.muted, marginTop: 10 }, 'A 端设置页生成的 6 位配对码'),
@@ -2919,7 +2936,7 @@ window.__ModuleLoader__.load({
           inputMode: 'numeric',
           maxLength: 6,
           placeholder: '6 位数字',
-          style: styles.input,
+          style: styles.monoInput,
           onChange: function (e) { a.setCode(e.target.value); },
         }),
         h('div', { style: styles.muted, marginTop: 10 }, '授权给 A 的文件夹，一行一个'),
@@ -2927,7 +2944,7 @@ window.__ModuleLoader__.load({
           value: a ? a.roots : '',
           spellCheck: false,
           placeholder: 'D:\\work\nD:\\资料',
-          style: Object.assign({}, styles.input, { minHeight: 72, width: '100%', resize: 'vertical' }),
+          style: Object.assign({}, styles.monoInput, { minHeight: 72, width: '100%', resize: 'vertical' }),
           onChange: function (e) { a.setRoots(e.target.value); },
         }),
         h('label', { style: styles.toggleRow },
@@ -2959,7 +2976,7 @@ window.__ModuleLoader__.load({
           h('span', null, '允许 A 建目录、移动、复制、删除'),
         ),
         h('div', { style: { marginTop: 10 } },
-          h('button', { type: 'button', style: styles.btn, disabled: Boolean(a && a.busy), onClick: a.pair }, '配对并开启'),
+          h('button', { type: 'button', style: styles.btnPrimary, disabled: Boolean(a && a.busy), onClick: a.pair }, '配对并开启'),
         ),
         h('div', { style: styles.warn }, '开了之后，A 的 AI 能读写你授权的文件夹；执行命令还没开。不要授权整个盘。'),
         h('div', { style: styles.warn }, '删除/移动会要求模型带 confirm，这是模型层的二次确认，不是人工审批；真正的授权是你上面的开关。'),
@@ -3046,7 +3063,7 @@ window.__ModuleLoader__.load({
               ? h('div', null,
                 h('div', { style: styles.warn }, '只删 A 上的门牌和工作区，B 的真实文件不动。确定吗？'),
                 h('div', { style: { display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' } },
-                  h('button', { type: 'button', style: styles.btn, disabled: Boolean(a.busy), onClick: function () { a.remove(p.id); } }, '确认移除'),
+                  h('button', { type: 'button', style: styles.btnDanger, disabled: Boolean(a.busy), onClick: function () { a.remove(p.id); } }, '确认移除'),
                   h('button', { type: 'button', style: styles.btn, disabled: Boolean(a.busy), onClick: function () { a.setRemoving(null); } }, '取消'),
                 ),
               )
@@ -3152,7 +3169,7 @@ window.__ModuleLoader__.load({
         }),
         h('input', {
           value: a.root, spellCheck: false, placeholder: 'B 上的完整目录，例如 D:\\work\\我的项目',
-          style: styles.input,
+          style: styles.monoInput,
           onChange: function (e) { a.setRoot(e.target.value); },
         }),
         h('div', { style: { marginTop: 8 } },
@@ -3165,7 +3182,7 @@ window.__ModuleLoader__.load({
         a.error ? h('div', { style: styles.warn }, a.error) : null,
         h('div', { style: { marginTop: 10 } },
           h('button', {
-            type: 'button', style: styles.btn,
+            type: 'button', style: styles.btnPrimary,
             disabled: Boolean(a.busy) || !a.name.trim() || !a.root.trim() || !connected,
             onClick: a.create,
           }, '新建 B 项目'),
@@ -3233,7 +3250,7 @@ window.__ModuleLoader__.load({
             spellCheck: false,
             // 点一下全选：想复制走的时候不用一格一格拖。
             onFocus: function (e) { try { e.target.select(); } catch (err) { /* 忽略 */ } },
-            style: Object.assign({}, styles.input, { flex: '1 1 240px', width: 'auto' }),
+            style: Object.assign({}, styles.monoInput, { flex: '1 1 240px', width: 'auto' }),
           }),
           h('button', {
             type: 'button',
@@ -3255,13 +3272,13 @@ window.__ModuleLoader__.load({
             placeholder: '想一个自己记得住的',
             spellCheck: false,
             onChange: function (e) { pwd.setDraft(e.target.value); },
-            style: Object.assign({}, styles.input, { flex: '1 1 240px', width: 'auto' }),
+            style: Object.assign({}, styles.monoInput, { flex: '1 1 240px', width: 'auto' }),
           }),
           h('button', {
             type: 'button',
             disabled: Boolean(pwd.busy),
             onClick: pwd.savePassword,
-            style: styles.btn,
+            style: styles.btnPrimary,
           }, pwd.busy ? '保存中…' : '保存'),
         ),
         pwd.pwdError ? h('div', { style: styles.error }, pwd.pwdError) : null,
@@ -3286,7 +3303,7 @@ window.__ModuleLoader__.load({
               spellCheck: false,
               // 点一下就把整条地址选中，方便直接 Ctrl+C。
               onFocus: function (e) { try { e.target.select(); } catch (err) { /* 忽略 */ } },
-              style: styles.input,
+              style: styles.monoInput,
             }),
             h('button', { type: 'button', onClick: function () { copy(url); }, style: styles.btn }, done ? '已复制' : '复制'),
           ),
