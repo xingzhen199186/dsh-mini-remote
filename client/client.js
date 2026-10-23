@@ -55,6 +55,8 @@ window.__ModuleLoader__.load({
     var REMOTE_ACCESS_PATH = '/mini-remote/remote-access';
     var AGENT_ACCESS_PATH = '/mini-remote/agent-access';
     var AGENT_LIST_PATH = '/mini-remote/agent-list';
+    var B_PROJECTS_PATH = '/mini-remote/b-projects';
+    var B_PROJECT_PATH = '/mini-remote/b-project';
     var AGENT_CODE_PATH = '/mini-remote/agent-pair-code';
     var AGENT_REVOKE_PATH = '/mini-remote/agent-revoke';
     var B_AGENT_PAIR_PATH = '/mini-remote/b-agent/pair';
@@ -608,6 +610,22 @@ window.__ModuleLoader__.load({
       var setBAllowManage = bManageState[1];
       // 按钮点下去到 React 重渲染之间还有一小段；用 ref 挡住同一瞬间的第二次点击。
       var bPairingRef = useRef(false);
+      // B 项目：门牌列表 + 新建表单 + 当前打开的文件面板。
+      var bProjectNameState = useState('');
+      var bProjectName = bProjectNameState[0];
+      var setBProjectName = bProjectNameState[1];
+      var bProjectRootState = useState('');
+      var bProjectRoot = bProjectRootState[0];
+      var setBProjectRoot = bProjectRootState[1];
+      var bProjectErrorState = useState(null);
+      var bProjectError = bProjectErrorState[0];
+      var setBProjectError = bProjectErrorState[1];
+      var bProjectViewState = useState(null);
+      var bProjectView = bProjectViewState[0];
+      var setBProjectView = bProjectViewState[1];
+      var bProjectRemoveState = useState(null);
+      var bProjectRemoving = bProjectRemoveState[0];
+      var setBProjectRemoving = bProjectRemoveState[1];
 
       // 添加那一块：`null` = 收着；一个草稿 = 摊开着（三个框 + 一次确认）。
       var addState = useState(null);
@@ -1325,6 +1343,114 @@ window.__ModuleLoader__.load({
           });
       };
 
+      /** 打开一个 B 项目的文件面板，默认从项目根开始。 */
+      var openBProject = function (project) {
+        if (!project) return;
+        setBProjectError(null);
+        setBProjectView({ project: project, path: project.bRoot, entries: [], file: null, error: null, loading: true });
+        fetch(B_PROJECT_PATH + '?action=list&id=' + encodeURIComponent(project.id))
+          .then(function (res) { return res.json(); })
+          .then(function (body) {
+            if (!body || !body.ok) throw new Error((body && body.error) || '列不出 B 的文件');
+            setBProjectView({
+              project: project, path: body.listing.path || project.bRoot,
+              entries: body.listing.entries || [], file: null, error: null, loading: false,
+            });
+          })
+          .catch(function (err) {
+            setBProjectView({
+              project: project, path: project.bRoot, entries: [], file: null,
+              error: (err && err.message) || String(err), loading: false,
+            });
+          });
+      };
+
+      /** 在 B 项目里进入子目录。 */
+      var enterBProjectDir = function (dirPath) {
+        var view = bProjectView;
+        if (!view) return;
+        setBProjectView(Object.assign({}, view, { path: dirPath, file: null, error: null, loading: true, entries: [] }));
+        fetch(B_PROJECT_PATH + '?action=list&id=' + encodeURIComponent(view.project.id) + '&path=' + encodeURIComponent(dirPath))
+          .then(function (res) { return res.json(); })
+          .then(function (body) {
+            if (!body || !body.ok) throw new Error((body && body.error) || '列不出这个目录');
+            setBProjectView({
+              project: view.project, path: body.listing.path || dirPath,
+              entries: body.listing.entries || [], file: null, error: null, loading: false,
+            });
+          })
+          .catch(function (err) {
+            setBProjectView(Object.assign({}, view, { path: dirPath, entries: [], file: null, loading: false, error: (err && err.message) || String(err) }));
+          });
+      };
+
+      /** 读一个 B 项目的文本文件。 */
+      var readBProjectFile = function (filePath) {
+        var view = bProjectView;
+        if (!view) return;
+        setBProjectView(Object.assign({}, view, { file: null, error: null, loading: true }));
+        fetch(B_PROJECT_PATH + '?action=read&id=' + encodeURIComponent(view.project.id) + '&path=' + encodeURIComponent(filePath))
+          .then(function (res) { return res.json(); })
+          .then(function (body) {
+            if (!body || !body.ok) throw new Error((body && body.error) || '读不了这个文件');
+            setBProjectView({
+              project: view.project, path: view.path, entries: view.entries,
+              file: body.file, error: null, loading: false,
+            });
+          })
+          .catch(function (err) {
+            setBProjectView(Object.assign({}, view, { file: null, loading: false, error: (err && err.message) || String(err) }));
+          });
+      };
+
+      /** 新建 B 项目：A 建门牌 + 工作区，B 建真实目录。 */
+      var createBProject = function () {
+        if (busy) return;
+        setBProjectError(null);
+        setBusy(true);
+        fetch(B_PROJECTS_PATH, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ name: bProjectName, bRoot: bProjectRoot }),
+        })
+          .then(function (res) { return res.json(); })
+          .then(function (body) {
+            if (!body || !body.ok) throw new Error((body && body.error) || '建不了 B 项目');
+            setInfo(function (prev) {
+              if (!prev || !prev.agent) return prev;
+              return Object.assign({}, prev, { agent: Object.assign({}, prev.agent, { projects: body.projects || [] }) });
+            });
+            setBProjectName('');
+            setBProjectRoot('');
+          })
+          .catch(function (err) { setBProjectError((err && err.message) || String(err)); })
+          .then(function () { setBusy(false); });
+      };
+
+      /** 移除 B 项目：只删 A 的门牌和工作区，不动 B 的文件。 */
+      var removeBProject = function (id) {
+        if (busy) return;
+        setBProjectError(null);
+        setBusy(true);
+        setBProjectRemoving(null);
+        fetch(B_PROJECTS_PATH, {
+          method: 'DELETE',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ id: id }),
+        })
+          .then(function (res) { return res.json(); })
+          .then(function (body) {
+            if (!body || !body.ok) throw new Error((body && body.error) || '移除失败');
+            setInfo(function (prev) {
+              if (!prev || !prev.agent) return prev;
+              return Object.assign({}, prev, { agent: Object.assign({}, prev.agent, { projects: body.projects || [] }) });
+            });
+            setBProjectView(function (view) { return view && view.project && view.project.id === id ? null : view; });
+          })
+          .catch(function (err) { setBProjectError((err && err.message) || String(err)); })
+          .then(function () { setBusy(false); });
+      };
+
       /** B 端执行端：开/关。 */
       var toggleBAgent = function (enabled) {
         if (busy) return;
@@ -1641,6 +1767,24 @@ window.__ModuleLoader__.load({
           error: bError,
           busy: busy,
         }, {
+          // B 项目：门牌列表、新建、移除、B 文件面板。
+          projects: (info && info.agent && info.agent.projects) || [],
+          name: bProjectName,
+          root: bProjectRoot,
+          setName: setBProjectName,
+          setRoot: setBProjectRoot,
+          error: bProjectError,
+          busy: busy,
+          view: bProjectView,
+          setView: setBProjectView,
+          removing: bProjectRemoving,
+          setRemoving: setBProjectRemoving,
+          create: createBProject,
+          remove: removeBProject,
+          open: openBProject,
+          enter: enterBProjectDir,
+          read: readBProjectFile,
+        }, {
           // 「其他电脑」那一块：名单 + 添加 + 两个动作，以及只属于那一块的两句话
           // （读名单失败的原因、断开之后那句"对面还留着"）。
           list: remotes,
@@ -1670,7 +1814,7 @@ window.__ModuleLoader__.load({
       );
     }
 
-    function content(info, failure, copied, copy, busy, toggle, pwd, serve, feishu, dev, remote, agent, bAgent, rmt, self) {
+    function content(info, failure, copied, copy, busy, toggle, pwd, serve, feishu, dev, remote, agent, bAgent, bProject, rmt, self) {
       if (failure) return h('div', { style: styles.error }, failure);
       if (!info) return h('div', { style: styles.loading }, '正在读取配对信息…');
 
@@ -1710,6 +1854,7 @@ window.__ModuleLoader__.load({
       if (info.remote && remote) blocks.push(remoteBlock(info.remote, busy, remote.toggle));
       if (info.agent && agent) blocks.push(agentBlock(info.agent, agent));
       if (info.bAgent && bAgent) blocks.push(bAgentBlock(info.bAgent, bAgent));
+      if (info.agent && bProject && info.agent.allowed) blocks.push(bProjectBlock(info.agent, bProject));
       if (dev && (dev.list !== null || dev.error)) blocks.push(devicesBlock(dev));
       // 「其他电脑」那一块：**排在「设备」后面**。两块说的是相反的两件事——上面那份是
       // "谁进得来"（别人连我这台），这一份是"我连得上谁"（我从这台去连别人）。顺序上先
@@ -2620,6 +2765,126 @@ window.__ModuleLoader__.load({
         ),
         h('div', { style: styles.warn }, '开了之后，A 的 AI 能读写你授权的文件夹；执行命令还没开。不要授权整个盘。'),
         h('div', { style: styles.warn }, '删除/移动会要求模型带 confirm，这是模型层的二次确认，不是人工审批；真正的授权是你上面的开关。'),
+      );
+    }
+
+    /**
+     * B 项目：A 上只放「门牌」，真实文件在 B。
+     *
+     * 这一块同时承担两件事：建/删项目，和看 B 的真实文件。原生工作区里看到的是
+     * A 的占位目录，所以文件不能靠原生树，得在这里列。
+     */
+    function bProjectBlock(st, a) {
+      var projects = Array.isArray(a && a.projects) ? a.projects : [];
+      var connected = Boolean(info && info.bAgent && info.bAgent.connected);
+      var view = a && a.view;
+
+      function joinB(base, name) {
+        var s = String(base || '').replace(/[\\/]+$/, '');
+        return s ? (s + '\\' + name) : name;
+      }
+      function parentOf(p) {
+        var s = String(p || '').replace(/[\\/]+$/, '');
+        var i = Math.max(s.lastIndexOf('\\'), s.lastIndexOf('/'));
+        return i > 0 ? s.slice(0, i) : s;
+      }
+      function fileSize(n) {
+        var v = Number(n);
+        if (!isFinite(v)) return '-';
+        if (v < 1024) return v + 'B';
+        if (v < 1024 * 1024) return Math.round(v / 1024) + 'KB';
+        return Math.round(v / 1024 / 1024) + 'MB';
+      }
+
+      if (view) {
+        var rows = [];
+        var atRoot = String(view.path).toLowerCase() === String(view.project.bRoot).toLowerCase();
+        if (!atRoot) {
+          rows.push(h('button', {
+            key: '..', type: 'button', style: styles.btn,
+            onClick: function () { a.enter(parentOf(view.path)); },
+          }, '.. 上一级'));
+        }
+        (view.entries || []).forEach(function (e) {
+          var full = joinB(view.path, e.name);
+          var isDir = e.type === 'dir';
+          rows.push(h('button', {
+            key: full, type: 'button', style: styles.browseRow,
+            onClick: function () { if (isDir) a.enter(full); else a.read(full); },
+          },
+            h('span', null, (isDir ? '📁 ' : '📄 ') + e.name),
+            h('span', { style: styles.muted }, isDir ? '目录' : fileSize(e.size)),
+          ));
+        });
+
+        return h('div', { key: 'bProject', style: styles.block },
+          h('div', { style: styles.entryTitle }, 'B 项目文件 · ' + (view.project.name || 'B 项目')),
+          h('div', { style: styles.muted }, view.path),
+          h('div', { style: { display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 10 } },
+            h('button', { type: 'button', style: styles.btn, onClick: function () { a.open(view.project); } }, '刷新'),
+            h('button', { type: 'button', style: styles.btn, onClick: function () { if (view.file) a.read(view.file.path); } }, '重读文件'),
+            h('button', { type: 'button', style: styles.btn, onClick: function () { a.setView(null); } }, '收起文件面板'),
+          ),
+          view.loading ? h('div', { style: styles.muted }, '正在读 B…') : null,
+          view.error ? h('div', { style: styles.warn }, view.error) : null,
+          view.file
+            ? h('div', null,
+              h('div', { style: styles.detail }, view.file.path),
+              h('pre', { style: styles.code }, view.file.content || '（空文件）'),
+            )
+            : null,
+          view.file ? null : h('div', { style: { marginTop: 8 } }, rows.length ? rows : h('div', { style: styles.muted }, '这个目录是空的。')),
+          h('div', { style: styles.warn }, '这里改的是 B 的真实文件；A 上的原生文件树看到的是门牌占位目录，不是 B 的内容。'),
+        );
+      }
+
+      var list = projects.length
+        ? h('div', null, projects.map(function (p) {
+          var confirming = a.removing === p.id;
+          return h('div', { key: p.id, style: { marginTop: 12, paddingTop: 10, borderTop: '1px solid var(--dsw-alias-border-subtle, #ddd)' } },
+            h('div', null, 'B · ' + (p.name || 'B 项目')),
+            h('div', { style: styles.muted }, p.bRoot),
+            confirming
+              ? h('div', null,
+                h('div', { style: styles.warn }, '只删 A 上的门牌和工作区，B 的真实文件不动。确定吗？'),
+                h('div', { style: { display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' } },
+                  h('button', { type: 'button', style: styles.btn, disabled: Boolean(a.busy), onClick: function () { a.remove(p.id); } }, '确认移除'),
+                  h('button', { type: 'button', style: styles.btn, disabled: Boolean(a.busy), onClick: function () { a.setRemoving(null); } }, '取消'),
+                ),
+              )
+              : h('div', { style: { display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' } },
+                h('button', { type: 'button', style: styles.btn, onClick: function () { a.open(p); } }, '浏览 B 文件'),
+                h('button', { type: 'button', style: styles.btn, onClick: function () { a.setRemoving(p.id); } }, '移除'),
+              ),
+          );
+        }))
+        : h('div', { style: styles.muted, marginTop: 10 }, '还没有 B 项目。');
+
+      return h('div', { key: 'bProject', style: styles.block },
+        h('div', { style: styles.entryTitle }, 'B 项目'),
+        h('div', { style: styles.muted }, '给 B 的一个真实目录建一个门牌：A 的工作区列表里会出现「B · 项目名」，打开后默认在 B 的模式下干活。真实文件始终在 B。'),
+        connected ? null : h('div', { style: styles.warn }, 'B 端现在没连上；先把上面「作为 B 端执行端」配对并开启。'),
+        list,
+        h('div', { style: styles.detail, marginTop: 14 }, '新建 B 项目'),
+        h('input', {
+          value: a.name, spellCheck: false, placeholder: '项目名，例如 我的项目',
+          style: styles.input,
+          onChange: function (e) { a.setName(e.target.value); },
+        }),
+        h('input', {
+          value: a.root, spellCheck: false, placeholder: 'B 上的完整目录，例如 D:\\work\\我的项目',
+          style: styles.input,
+          onChange: function (e) { a.setRoot(e.target.value); },
+        }),
+        a.error ? h('div', { style: styles.warn }, a.error) : null,
+        h('div', { style: { marginTop: 10 } },
+          h('button', {
+            type: 'button', style: styles.btn,
+            disabled: Boolean(a.busy) || !a.name.trim() || !a.root.trim() || !connected,
+            onClick: a.create,
+          }, '新建 B 项目'),
+        ),
+        h('div', { style: styles.warn }, 'B 上这个目录不存在时，需要 B 先打开「允许 A 建目录、移动、复制、删除」；A 只建门牌，不复制文件。'),
       );
     }
 

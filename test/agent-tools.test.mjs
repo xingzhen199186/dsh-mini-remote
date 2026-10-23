@@ -72,3 +72,25 @@ test('真实的 @deepseek-ai/dsh-tools 能加载并注册四个工具', async ()
   await registerAgentTools(ctx, { hub: { call: async () => ({}) }, log: console })
   assert.deepEqual(defs.map((d) => d.name).sort(), ['b_copy', 'b_delete', 'b_glob', 'b_grep', 'b_list', 'b_mkdir', 'b_move', 'b_read', 'b_shell', 'b_subagent', 'b_terminal_close', 'b_terminal_list', 'b_terminal_open', 'b_terminal_read', 'b_terminal_send', 'b_write'])
 })
+
+test('B 项目会话：不写路径默认项目根，相对路径拼到根下，项目外绝对路径拒绝', async () => {
+  const h = harness()
+  await registerAgentTools(h.ctx, {
+    hub: h.hub,
+    defineTool: (d) => d,
+    projectRootFor: (exec) => (exec && exec.agent && exec.agent.id === 's1' ? 'D:\\work\\项目' : undefined),
+  })
+  const exec = { agent: { id: 's1' }, signal: null }
+  await h.defs.get('b_list').execute({}, exec)
+  assert.equal(h.calls[0].args.path, 'D:\\work\\项目')
+  await h.defs.get('b_read').execute({ path: 'src\\a.txt' }, exec)
+  assert.equal(h.calls[1].args.path, 'D:\\work\\项目\\src\\a.txt')
+  await h.defs.get('b_read').execute({ path: 'D:\\work\\项目\\b.txt' }, exec)
+  assert.equal(h.calls[2].args.path, 'D:\\work\\项目\\b.txt')
+  await assert.rejects(() => h.defs.get('b_read').execute({ path: 'D:\\work\\别处\\a.txt' }, exec), /项目根目录内/)
+  await h.defs.get('b_shell').execute({ command: 'dir' }, exec)
+  assert.equal(h.calls[3].args.cwd, 'D:\\work\\项目')
+  await h.defs.get('b_copy').execute({ from: 'a.txt', to: 'b.txt', confirm: true }, exec)
+  assert.equal(h.calls[4].args.from, 'D:\\work\\项目\\a.txt')
+  assert.equal(h.calls[4].args.to, 'D:\\work\\项目\\b.txt')
+})

@@ -4243,11 +4243,12 @@ test('自检：该回答的那几样一样不缺（版本 / 进程 / 接口 / �
     '/mini-remote/remotes/browse/roots', '/mini-remote/remotes/browse',
     '/mini-remote/remotes/browse/mkdir',
     '/mini-remote/remotes/workspaces',
+    '/mini-remote/b-projects', '/mini-remote/b-project',
     '/mini-remote/selfcheck',
   ]) {
     assert.ok(paths.includes(want), `清单里少了 ${want}`)
   }
-  assert.equal(body.routes.length, 29, '二十九条注册就报二十九条（清单和注册同一处发生）')
+  assert.equal(body.routes.length, 31, '三十一条注册就报三十一条（清单和注册同一处发生）')
   assert.ok(body.routes.every((one) => one.mounted === true), '刚起来的这一份，条条都该是"在"')
 
   // ④ 开关：默认关
