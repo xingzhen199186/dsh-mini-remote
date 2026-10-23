@@ -4472,3 +4472,27 @@ test('自检：跨机连不上会留痕（这条路以前完全不留痕）', as
 })
 
 
+
+test('B 项目路由：本机列出空名单；B 没连上时新建给明确错误', async (t) => {
+  const p = await bootPlugin({ config: { allowAgent: true, agentMode: false } })
+  t.after(p.stop)
+  const route = p.routes.get('/mini-remote/b-projects')
+  assert.ok(route, 'B 项目路由要挂上')
+
+  const listed = fakeRes()
+  await route.handler(fakeReq('127.0.0.1'), listed)
+  assert.equal(listed.out.status, 200)
+  assert.deepEqual(JSON.parse(listed.out.body).projects, [])
+
+  const created = fakeRes()
+  await route.handler(fakeReq('127.0.0.1', {
+    method: 'POST',
+    body: JSON.stringify({ name: '测试项目', bRoot: 'D:\\work\\测试' }),
+  }), created)
+  assert.equal(created.out.status, 400)
+  assert.match(JSON.parse(created.out.body).error, /B 端还没有连上/)
+
+  const denied = fakeRes()
+  await route.handler(fakeReq('192.168.1.50'), denied)
+  assert.equal(denied.out.status, 403, 'B 项目只能在本机设置页里改')
+})
