@@ -27,7 +27,7 @@ function harness() {
 test('B 端工具只注册 b_ 前缀的新工具，不碰本地 read/list', async () => {
   const h = harness()
   await registerAgentTools(h.ctx, { hub: h.hub, defineTool: (d) => d })
-  assert.deepEqual([...h.defs.keys()].sort(), ['b_list', 'b_read', 'b_shell', 'b_subagent', 'b_write'])
+  assert.deepEqual([...h.defs.keys()].sort(), ['b_copy', 'b_delete', 'b_glob', 'b_grep', 'b_list', 'b_mkdir', 'b_move', 'b_read', 'b_shell', 'b_subagent', 'b_terminal_close', 'b_terminal_list', 'b_terminal_open', 'b_terminal_read', 'b_terminal_send', 'b_write'])
   assert.equal(h.defs.has('read'), false)
   assert.equal(h.defs.has('list'), false)
 })
@@ -70,5 +70,5 @@ test('真实的 @deepseek-ai/dsh-tools 能加载并注册四个工具', async ()
   const defs = []
   const ctx = { tools: { register: (d) => { defs.push(d); return () => {} } } }
   await registerAgentTools(ctx, { hub: { call: async () => ({}) }, log: console })
-  assert.deepEqual(defs.map((d) => d.name).sort(), ['b_list', 'b_read', 'b_shell', 'b_subagent', 'b_write'])
+  assert.deepEqual(defs.map((d) => d.name).sort(), ['b_copy', 'b_delete', 'b_glob', 'b_grep', 'b_list', 'b_mkdir', 'b_move', 'b_read', 'b_shell', 'b_subagent', 'b_terminal_close', 'b_terminal_list', 'b_terminal_open', 'b_terminal_read', 'b_terminal_send', 'b_write'])
 })
