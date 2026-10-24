@@ -32,7 +32,7 @@
 
 ---
 
-**Minimal Remote** adapts to a wide range of usage scenarios: when away from the computer, operate the DSH on this computer through the mobile web interface; on another computer, open this computer's complete DSH interface through Remote Window. Cross-computer tasks let A's DSH operate on B's files and commands within granted limits, avoiding reinstalling and configuring DSH and its plugins on the second computer.
+**Minimal Remote** adapts to a wide range of usage scenarios: when away from the computer, operate the DSH on this computer through the mobile web interface; on another computer, operate the core computer's complete DSH interface through Remote Window, and configure A/B cross-computer tasks, where A's DSH operates on B's files and commands within granted limits, avoiding reinstalling and configuring DSH and its plugins on the second computer.
 
 ## Overview
 
