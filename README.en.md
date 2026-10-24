@@ -22,6 +22,7 @@
   <a href="#preview">Preview</a> ·
   <a href="#installation">Installation</a> ·
   <a href="#phone-connection-and-use">Phone Connection</a> ·
+  <a href="#pc-remote-window">Remote Window</a> ·
   <a href="#using-computer-b-from-computer-a">Using B from A</a> ·
   <a href="#b-projects">B Projects</a> ·
   <a href="#remote-settings">Remote Settings</a> ·
@@ -43,7 +44,7 @@
 - 🗂️ **Mobile session management**: Rename, pin, archive, or fork a session, with indicators for pending approvals and unanswered questions.
 - 🖥️ **Use Computer B from Computer A**: The conversation and model stay on A. Within A's conversation, only `b_*` tools operate on B; B locally decides its authorized directories, write access, folder management, and command permission.
 - 🗂️ **B Projects**: Register a real B directory as a workspace entry on A, with a B file panel and a project-specific **New B Session** action.
-- 💻 **Remote Window**: Embed this computer's complete DSH interface in another computer's DSH desktop. This is a separate feature from the A-to-B file workflow; see **Remote Settings**.
+- 💻 **Remote Window**: Embed this computer's complete DSH interface in another computer's DSH desktop. This is a separate feature from the A-to-B file workflow; see **PC Remote Window**.
 - 💬 **Bidirectional Feishu remote**: Text exchange, question and approval replies, and `/会话` switching through the Feishu WebSocket long connection.
 - 🔒 **Device-level access control**: Phones and computers are registered separately and can be revoked individually. Pairing data is readable only on the host, and passphrase attempts are rate-limited. High-privilege features and public exposure still carry material risks and do not constitute a public-deployment security guarantee.
 
@@ -215,6 +216,54 @@ Steps:
 > 1. **This is a permission switch, not a cosmetic preference.** Enabling it extends the current access credential from the phone page to the entire desktop management plane, including model configuration, credentials, plugin installation, and session history. It is off by default and requires two confirmations.
 > 2. The embedded view is the original desktop interface, adapted for narrow phone screens and unchanged in a PC browser. Disabling the switch removes access to the complete interface.
 
+## PC Remote Window
+
+Remote Window opens Computer A's complete DSH interface directly inside Computer B's DSH desktop. There is no need to switch between browser windows or use a remote-desktop tool. It is for viewing and operating A's interface, not for the A-to-B file and command workflow described below.
+
+### How it works
+
+1. On B, click **Remote Window** in the DSH desktop sidebar. The main panel lists the computers already paired with B.
+2. Click a row to embed A's complete DSH interface in the current panel.
+3. The top bar contains **← Back to list**, the current computer name, and **Try again**. While the interface is healthy, the bar hides automatically and reappears when the pointer reaches the top edge. It remains visible while connecting, after an error, or whenever the interface has not opened.
+4. Click **Remote Window** in the sidebar again to exit and return to the previous panel. The top bar also provides a way back to the list.
+
+### Security boundaries
+
+- When the window opens, A issues a **one-time ticket valid for 30 seconds and redeemable once**. The access passphrase and long-lived credentials never enter the browser.
+- Cross-site embedding is denied by default and allowed only for a page carrying a valid ticket.
+- After A revokes B in its device list, B's already-open window fails on its next request.
+- Restarting DSH on A invalidates the existing ticket. Click Remote Window again to obtain a new one.
+- Remote Window exposes A's complete management plane, including conversations, model configuration, and plugin management. Enable **Allow other computers to connect** only for trusted computers.
+
+### Act as A (the computer being viewed)
+
+1. Open **Settings** → **Remote Settings** → **Computers & Devices** and enable **Allow other computers to connect**. It is off by default; while off, A rejects both pairing and ticket requests.
+2. Copy the access passphrase under **Phone Connection** so B can pair with A.
+
+### Act as B (the connecting computer)
+
+1. Open **Settings** → **Remote Settings** → **Computers & Devices** → **Other computers**, then click **Add a computer**.
+2. Enter A's address and access passphrase, and give the computer a recognizable name. If the name is left blank, the address is used instead.
+3. Click **Confirm add**. A's **Devices** list gains a record for B, and B's **Other computers** list gains a record for A.
+4. Click that row, or select A through **Remote Window** in the sidebar.
+
+**Other computers** and **Devices** describe opposite directions: **Devices** records which computers may connect to this machine, while **Other computers** records which computers this machine may connect to. Disconnecting an **Other computers** entry removes only the local record; it does not revoke A's authorization for B.
+
+### Which address to enter
+
+- Use a connection address from A's **Remote Settings** page, **without `/mini` or any trailing parameters**. Do not use the address that opens A's DSH interface on A itself.
+- A cross-machine address must use `https://`. Loopback addresses `127.0.0.1`, `localhost`, and `[::1]` are exceptions and may use `http://` for local testing.
+- Tailscale HTTPS is recommended. On A, enable **HTTPS address (Tailscale)** under **External Access**, then enter `https://<machine>.<tailnet>.ts.net` on B. No port is needed, and the address is more stable.
+- The public tunnel address changes after every DSH restart and is not suitable as a stable cross-machine entry.
+
+### How to confirm success
+
+After B clicks A in the list, the panel should show **A's complete DSH interface**, not a blank page or a frame stuck at `Loading plugins…`. If the frame is blank or never finishes loading, use **Troubleshooting** to check the address, ticket, and Tailscale Serve configuration.
+
+### How to revoke access
+
+On A, open **Settings** → **Remote Settings** → **Computers & Devices** → **Devices**, find B, then click **Revoke** and confirm. Revocation takes effect immediately: B's already-open window is rejected on its next request, and B must pair again before it can reconnect.
+
 ## Using Computer B from Computer A
 
 This workflow differs from both the phone page and Remote Window: **Computer A runs the conversation and model, and its Agent operates on real files on Computer B through `b_*` tools.** Both computers must have this plugin installed.
@@ -367,36 +416,7 @@ Collapsing a group changes only what is visible in the current settings session.
 - **Clean up 30-day unused**: Removes only records whose creation time **and** last-used time are both older than 30 days. Duplicate devices seen within the last 30 days are not removed and must be checked manually. Removed devices must scan again.
 - **Other computers**: Lists computers this machine can connect to, the opposite direction from **Devices**. **Devices** answers who may connect to this machine; **Other computers** answers which machines this one can reach. Disconnecting an **Other computers** entry removes only the local record; the other computer retains its authorization until the corresponding device is revoked there.
 
-#### Remote Window: Viewing A from B
-
-Remote Window is for **interface viewing and operation**: it opens A's complete interface inside B's DSH desktop. It is the opposite direction from **Using Computer B from Computer A** and is not file synchronization.
-
-**Basic use**
-
-1. On A, enable **Allow other computers to connect**. It is off by default; while off, neither pairing nor ticket issuance is accepted.
-2. On B, open **Settings** → **Remote Settings** → **Computers & Devices** → **Other computers** and click **Add a computer**.
-3. Enter A's address and passphrase. Use a connection address from A's **Remote Settings** page, without `/mini` or trailing parameters.
-4. Click **Confirm add**, then click the new row in the list.
-5. In the DSH desktop sidebar, click **Remote Window** and select the paired computer. Click the sidebar entry again to leave the view.
-
-While the interface is healthy, the top bar hides automatically and appears when the pointer reaches the top edge. It contains **← Back to list**, the current computer name, and **Try again**. It remains visible while connecting, after an error, and whenever the interface has not opened.
-
-**Address requirements**
-
-- A cross-machine address **must use `https://`**. When adding the computer on B, a non-loopback `http://` address is rejected immediately because the browser drops the window-session credential on an unencrypted connection, leaving a blank frame.
-- Loopback addresses `127.0.0.1`, `localhost`, and `[::1]` are exceptions and may use `http://` for local testing.
-- Tailscale is recommended: enable **HTTPS address (Tailscale)** on A and enter `https://<machine>.<tailnet>.ts.net` on B. No port is needed.
-- The public tunnel address changes on every restart and is not suitable as a stable cross-machine entry.
-
-**Security boundaries**
-
-- Opening a Remote Window makes A issue a one-time ticket valid for 30 seconds and redeemable once. The access passphrase and long-lived credentials never enter the browser.
-- Cross-site embedding is denied by default and allowed only for a page carrying a valid ticket.
-- After A revokes that computer, an already-open window fails on its next request; no disconnect is required.
-- Restarting DSH on A invalidates the window's pass. Click again to obtain a new ticket.
-- Remote Window displays A's complete interface, including conversations, model configuration, and plugin management. Enable it only for trusted computers.
-
-**How to confirm Remote Window works**: The B list contains the A entry, and clicking it shows A's DSH interface instead of a blank page or `Loading plugins…`. If A revokes authorization, B's next request reports the revocation.
+For the complete Remote Window tutorial, address requirements, and security boundaries, see [PC Remote Window](#pc-remote-window).
 
 ---
 
