@@ -554,8 +554,6 @@ Checks:
 
 ## Security Boundaries
 
-These boundaries must not be omitted for brevity.
-
 ### Network exposure
 
 - LAN and ordinary Tailscale addresses use plain `http://`; other devices on the same network may observe traffic. The Tailscale HTTPS address provides an encrypted connection.
