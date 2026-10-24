@@ -670,6 +670,13 @@ window.__ModuleLoader__.load({
       var bProjectRemoveState = useState(null);
       var bProjectRemoving = bProjectRemoveState[0];
       var setBProjectRemoving = bProjectRemoveState[1];
+      // 新建表单的展开与创建中都是纯界面状态：收起保留草稿，成功才清空并收起。
+      var bProjectCreateOpenState = useState(false);
+      var bProjectCreateOpen = bProjectCreateOpenState[0];
+      var setBProjectCreateOpen = bProjectCreateOpenState[1];
+      var bProjectCreatingState = useState(false);
+      var bProjectCreating = bProjectCreatingState[0];
+      var setBProjectCreating = bProjectCreatingState[1];
       // 新建 B 项目时挑 B 上的文件夹（和远程窗口挑 A 路径那套同一个思路）。
       var bBrowseState = useState(null);
       var bBrowse = bBrowseState[0];
@@ -1603,6 +1610,7 @@ window.__ModuleLoader__.load({
         if (busy) return;
         setBProjectError(null);
         setBusy(true);
+        setBProjectCreating(true);
         fetch(B_PROJECTS_PATH, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
@@ -1617,9 +1625,13 @@ window.__ModuleLoader__.load({
             });
             setBProjectName('');
             setBProjectRoot('');
+            setBProjectCreateOpen(false);
           })
           .catch(function (err) { setBProjectError((err && err.message) || String(err)); })
-          .then(function () { setBusy(false); });
+          .then(function () {
+            setBProjectCreating(false);
+            setBusy(false);
+          });
       };
 
       /** 移除 B 项目：只删 A 的门牌和工作区，不动 B 的文件。 */
@@ -1983,6 +1995,9 @@ window.__ModuleLoader__.load({
           removing: bProjectRemoving,
           setRemoving: setBProjectRemoving,
           create: createBProject,
+          createOpen: bProjectCreateOpen,
+          setCreateOpen: setBProjectCreateOpen,
+          creating: bProjectCreating,
           remove: removeBProject,
           open: openBProject,
           enter: enterBProjectDir,
@@ -3081,6 +3096,7 @@ window.__ModuleLoader__.load({
 
         return h('div', { key: 'bProject', style: styles.block },
           h('div', { style: styles.entryTitle }, 'B 项目文件 · ' + (view.project.name || 'B 项目')),
+          a.error ? h('div', { style: Object.assign({}, styles.error, styles.say) }, a.error) : null,
           h('div', { style: styles.muted }, view.path),
           h('div', { style: { display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 10 } },
             h('button', { type: 'button', style: styles.btn, onClick: function () { a.open(view.project); } }, '刷新'),
@@ -3103,18 +3119,20 @@ window.__ModuleLoader__.load({
       var list = projects.length
         ? h('div', null, projects.map(function (p) {
           var confirming = a.removing === p.id;
-          return h('div', { key: p.id, style: { marginTop: 12, paddingTop: 10, borderTop: '1px solid var(--dsw-alias-border-subtle, #ddd)' } },
-            h('div', null, 'B · ' + (p.name || 'B 项目')),
-            h('div', { style: styles.muted }, p.bRoot),
+          return h('div', { key: p.id, style: styles.deviceRow },
+            h('div', { style: styles.deviceMain },
+              h('div', { style: styles.deviceName }, 'B · ' + (p.name || 'B 项目')),
+              h('div', { style: styles.remoteUrl }, p.bRoot),
+            ),
             confirming
-              ? h('div', null,
+              ? h('div', { style: styles.deviceConfirm },
                 h('div', { style: styles.warn }, '只删 A 上的门牌和工作区，B 的真实文件不动。确定吗？'),
-                h('div', { style: { display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' } },
+                h('div', { style: { display: 'flex', gap: 8, flexWrap: 'wrap' } },
                   h('button', { type: 'button', style: styles.btnDanger, disabled: Boolean(a.busy), onClick: function () { a.remove(p.id); } }, '确认移除'),
                   h('button', { type: 'button', style: styles.btn, disabled: Boolean(a.busy), onClick: function () { a.setRemoving(null); } }, '取消'),
                 ),
               )
-              : h('div', { style: { display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' } },
+              : h('div', { style: Object.assign({}, styles.deviceActs, { flexWrap: 'wrap' }) },
                 h('button', {
                   type: 'button', style: styles.btn,
                   disabled: Boolean(a.busy),
@@ -3124,7 +3142,7 @@ window.__ModuleLoader__.load({
                 h('button', { type: 'button', style: styles.btn, onClick: function () { a.setRemoving(p.id); } }, '移除'),
               ),
             a.created && a.created.projectId === p.id
-              ? h('div', { style: styles.detail },
+              ? h('div', { style: Object.assign({}, styles.detail, styles.deviceConfirm) },
                 '已建好 B 会话（' + a.created.sessionId + '）。去左侧「B · ' + (p.name || '项目') + '」里打开它；这条会话从创建起就是 B 预设，不会经过 run_code。')
               : null,
           );
@@ -3135,9 +3153,11 @@ window.__ModuleLoader__.load({
       if (a.browse && a.browse.open) {
         var b = a.browse;
         var browseRows = [];
-        if (b.error) browseRows.push(h('div', { key: 'err', style: styles.browseErr }, b.error));
+        // 加载、失败、空目录是三种互斥状态：不能出现“报错 + 没有子目录”。
         if (b.busy) {
           browseRows.push(h('div', { key: 'busy', style: styles.browseNote }, '正在读 B…'));
+        } else if (b.error) {
+          browseRows.push(h('div', { key: 'err', style: styles.browseErr }, b.error));
         } else if (!b.path) {
           browseRows.push(h('div', { key: 'note', style: styles.browseNote }, '挑一个 B 上的目录。'));
           (b.roots || []).forEach(function (root, i) {
@@ -3150,16 +3170,6 @@ window.__ModuleLoader__.load({
             browseRows.push(h('div', { key: 'none', style: styles.browseNote }, 'B 端没有报授权目录，先在 B 设置里加一行。'));
           }
         } else {
-          browseRows.push(h('div', { key: 'path', style: styles.browseNote }, b.path));
-          browseRows.push(h('button', {
-            key: 'up', type: 'button', style: styles.browseRow,
-            onClick: function () { var p = parentOf(b.path); a.browseTo(p); },
-          }, '← 上一级'));
-          browseRows.push(h('button', {
-            key: 'pick', type: 'button',
-            style: Object.assign({}, styles.browseRow, { fontWeight: '600' }),
-            onClick: a.chooseBrowse,
-          }, '就选这个目录'));
           (b.entries || []).filter(function (e) { return e.type === 'dir'; }).forEach(function (e, i) {
             browseRows.push(h('button', {
               key: 'd' + i, type: 'button', style: styles.browseRow,
@@ -3169,73 +3179,120 @@ window.__ModuleLoader__.load({
           if (!(b.entries || []).some(function (e) { return e.type === 'dir'; })) {
             browseRows.push(h('div', { key: 'empty', style: styles.browseNote }, '这个目录下面没有子目录。'));
           }
-          browseRows.push(h('button', {
-            key: 'mkdir', type: 'button', style: styles.browseRow,
-            onClick: function () { a.setBrowseMkdir(!b.mkdirOpen); },
-          }, '＋ 新建文件夹'));
-          if (b.mkdirOpen) {
-            browseRows.push(h('div', { key: 'mkdirRow', style: styles.browseMkdirRow },
-              h('input', {
-                type: 'text', value: b.mkdirName || '', placeholder: '新文件夹的名字',
-                autoComplete: 'off', style: styles.browseInput,
-                onChange: function (e) { a.setBrowseName(e && e.target ? e.target.value : ''); },
-              }),
-              h('button', {
-                type: 'button', style: styles.btn,
-                disabled: Boolean(b.busy) || !String(b.mkdirName || '').trim(),
-                onClick: a.mkdirBrowse,
-              }, '建'),
-              h('button', {
-                type: 'button', style: styles.btn,
-                onClick: function () { a.setBrowseMkdir(false); },
-              }, '取消'),
-            ));
-          }
         }
+
+        // 固定的“当前目录”栏：路径完整可见，「上一级」不再混在目录列表里。
+        var currentBar = b.path ? h('div', {
+          key: 'current',
+          style: { flex: 'none', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', padding: '8px 12px' },
+        },
+          h('div', { style: styles.muted }, '当前目录'),
+          h('div', { style: Object.assign({}, styles.remoteUrl, { flex: '1 1 220px', minWidth: 0 }) }, b.path),
+          h('button', {
+            type: 'button', style: styles.btn,
+            disabled: Boolean(b.busy),
+            onClick: function () { var p = parentOf(b.path); a.browseTo(p); },
+          }, '← 上一级'),
+        ) : null;
+
+        // 新建文件夹单独占一块，不与目录条目混在一起。
+        var mkdirArea = b.path && !b.busy && !b.error ? h('div', {
+          key: 'mkdirArea', style: { flex: 'none', padding: '0 8px 8px' },
+        },
+          h('button', {
+            type: 'button', style: styles.browseRow,
+            onClick: function () { a.setBrowseMkdir(!b.mkdirOpen); },
+          }, '＋ 新建文件夹'),
+          b.mkdirOpen ? h('div', { style: Object.assign({}, styles.browseMkdirRow, { flexWrap: 'wrap' }) },
+            h('input', {
+              type: 'text', value: b.mkdirName || '', placeholder: '新文件夹的名字',
+              autoComplete: 'off', style: styles.browseInput,
+              onChange: function (e) { a.setBrowseName(e && e.target ? e.target.value : ''); },
+            }),
+            h('button', {
+              type: 'button', style: styles.btn,
+              disabled: Boolean(b.busy) || !String(b.mkdirName || '').trim(),
+              onClick: a.mkdirBrowse,
+            }, '建'),
+            h('button', {
+              type: 'button', style: styles.btn,
+              onClick: function () { a.setBrowseMkdir(false); },
+            }, '取消'),
+          ) : null,
+        ) : null;
+
         browseModal = h('div', { key: 'browse', style: styles.browseOverlay },
           h('div', { style: styles.browseSheet },
             h('div', { style: styles.browseHead },
               h('div', { style: styles.browseTitle }, '选择 B 上的文件夹'),
               h('button', { type: 'button', style: styles.btn, onClick: a.closeBrowse }, '关闭'),
             ),
+            currentBar,
             h('div', { style: styles.browseBody }, browseRows),
+            mkdirArea,
+            // 固定确认区：完整路径在左，唯一主操作在右；加载或失败时不可确认。
+            h('div', { style: { flex: 'none', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', padding: '10px 12px' } },
+              h('div', { style: Object.assign({}, styles.remoteUrl, { flex: '1 1 220px', minWidth: 0 }) }, b.path || '尚未选择目录'),
+              h('button', {
+                type: 'button', style: styles.btnPrimary,
+                disabled: !b.path || Boolean(b.busy) || Boolean(b.error),
+                onClick: a.chooseBrowse,
+              }, '就选这个目录'),
+            ),
           ),
         );
       }
 
-      return h('div', { key: 'bProject', style: styles.block },
-        h('div', { style: styles.entryTitle }, 'B 项目'),
-        h('div', { style: styles.muted }, '将 B 端目录登记为 A 的工作区；A 仅保存路径映射，不复制文件；打开项目后自动切到 B 端执行。'),
-        connected ? null : h('div', { style: styles.warn }, 'B 端现在没连上；先把上面「作为 B 端执行端」配对并开启。'),
-        list,
-        h('div', { style: styles.detail, marginTop: 14 }, '新建 B 项目'),
-        h('input', {
-          value: a.name, spellCheck: false, placeholder: '项目名，例如 我的项目',
-          style: styles.input,
-          onChange: function (e) { a.setName(e.target.value); },
-        }),
-        h('input', {
-          value: a.root, spellCheck: false, placeholder: 'B 上的完整目录，例如 D:\\work\\我的项目',
-          style: styles.monoInput,
-          onChange: function (e) { a.setRoot(e.target.value); },
-        }),
-        h('div', { style: { marginTop: 8 } },
-          h('button', {
-            type: 'button', style: styles.btn,
-            disabled: !connected,
-            onClick: a.openBrowse,
-          }, '选择 B 文件夹'),
-        ),
-        a.error ? h('div', { style: styles.warn }, a.error) : null,
+      var createUi = a.createOpen ? h('div', { style: { marginTop: 12 } },
+        h('div', { style: styles.entryTitle }, '新建 B 项目'),
+        field('项目名称', a.name, '项目名，例如 我的项目', function (v) {
+          a.setName(v);
+        }, 'text'),
         h('div', { style: { marginTop: 10 } },
+          h('div', { style: styles.muted }, 'B 端目录'),
+          h('div', { style: { display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 4 } },
+            h('input', {
+              value: a.root, spellCheck: false, placeholder: 'B 上的完整目录，例如 D:\\work\\我的项目',
+              style: Object.assign({}, styles.monoInput, { flex: '1 1 240px', width: 'auto', minWidth: 180 }),
+              onChange: function (e) { a.setRoot(e.target.value); },
+            }),
+            h('button', {
+              type: 'button', style: styles.btn,
+              disabled: !connected,
+              onClick: a.openBrowse,
+            }, '选择 B 文件夹'),
+          ),
+        ),
+        h('div', { style: { marginTop: 12, display: 'flex', gap: 8, flexWrap: 'wrap' } },
           h('button', {
             type: 'button', style: styles.btnPrimary,
             disabled: Boolean(a.busy) || !a.name.trim() || !a.root.trim() || !connected,
             onClick: a.create,
-          }, '新建 B 项目'),
+          }, a.creating ? '创建中…' : '新建 B 项目'),
+          h('button', {
+            type: 'button', style: styles.btn,
+            disabled: Boolean(a.creating),
+            onClick: function () { a.setCreateOpen(false); },
+          }, '取消'),
         ),
         h('div', { style: styles.warn }, 'B 上这个目录不存在时，需要 B 先打开「允许 A 建目录、移动、复制、删除」；A 只建门牌，不复制文件。'),
         h('div', { style: styles.detail }, '建好后去 DSH 工作区列表找「B · 项目名」；没出现就刷新一下。打开后如果没自动切到「B 端执行」，手动选一次。'),
+      ) : h('div', { style: { marginTop: 12 } },
+        h('button', {
+          type: 'button', style: styles.btn,
+          disabled: !connected,
+          onClick: function () { a.setCreateOpen(true); },
+        }, '新建 B 项目'),
+      );
+
+      return h('div', { key: 'bProject', style: styles.block },
+        h('div', { style: styles.entryTitle }, 'B 项目'),
+        // 创建、移除、新建会话共用的错误都归到区块顶部，不冒充“创建失败”。
+        a.error ? h('div', { style: Object.assign({}, styles.error, styles.say) }, a.error) : null,
+        h('div', { style: styles.muted }, '将 B 端目录登记为 A 的工作区；A 仅保存路径映射，不复制文件；打开项目后自动切到 B 端执行。'),
+        connected ? null : h('div', { style: styles.warn }, 'B 端现在没连上；先把上面「作为 B 端执行端」配对并开启。'),
+        createUi,
+        list,
         browseModal,
       );
     }
