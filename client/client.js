@@ -598,7 +598,7 @@ window.__ModuleLoader__.load({
       var confirmState = useState(null);
       var confirming = confirmState[0];
       var setConfirming = confirmState[1];
-      var devicesOpenState = useState(true);
+      var devicesOpenState = useState(false);
       var devicesOpen = devicesOpenState[0];
       var setDevicesOpen = devicesOpenState[1];
       var cleanupAskState = useState(false);

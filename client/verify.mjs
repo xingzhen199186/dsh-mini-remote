@@ -1523,6 +1523,7 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
     await tick();
     hh.runEffects();   // 配对信息到了 → 读设备名单
     await tick();
+    await expandDevices(state.tree);
     return state;
   };
 
@@ -1531,6 +1532,15 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
    * 尾插、飞书那几块，位置会变；而 key='devices' 是这一块自己的记号。
    */
   const devicesBlockOf = (tree) => walk(tree).find((n) => n && n.props && n.props.key === 'devices');
+
+  /** 设备默认收起：现有用例都先展开再查名单，避免把“折叠”当成“没有设备”。 */
+  const expandDevices = async (tree) => {
+    const block = devicesBlockOf(tree);
+    const button = block && byType(block, 'button').find((b) => textOf(b) === '展开');
+    if (!button) return;
+    button.props.onClick();
+    await tick();
+  };
 
   const twoDevices = { ok: true, devices: [DEV_A, DEV_B] };
 
