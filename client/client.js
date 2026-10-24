@@ -1,4 +1,4 @@
-// dsh-mini-remote 网页客户端：在 DSH 设置页加一个「手机遥控」标签页。
+// dsh-mini-remote 网页客户端：在 DSH 设置页加一个「遥控设置」标签页。
 //
 // 手写，没有构建步骤：元素一律用 React.createElement 构造，样式全部内联。
 // 外层 window.__ModuleLoader__.load({ id, factory }) 的写法照抄 dsh-pocket
@@ -1074,7 +1074,7 @@ window.__ModuleLoader__.load({
         var text = String(raw || '').trim();
         if (!text) return null;   // 空地址有它自己那一句提示
         var m = /^([a-z][a-z0-9+.-]*):\/\//i.exec(text);
-        if (!m) return '地址要以 http:// 或 https:// 开头——就是那台电脑「手机遥控」页里那条。';
+        if (!m) return '地址要以 http:// 或 https:// 开头——就是那台电脑「遥控设置」页里那条。';
         var scheme = m[1].toLowerCase();
         if (scheme === 'https') return null;
         if (scheme !== 'http') return '只支持 http:// 和 https:// 两种地址。';
@@ -1096,7 +1096,7 @@ window.__ModuleLoader__.load({
         var baseUrl = (addDraft.baseUrl || '').trim();
         var token = (addDraft.token || '').trim();
         if (!baseUrl) {
-          setAddError('要填那台电脑的地址——就是它的「手机遥控」页那条（必须是 https://；'
+          setAddError('要填那台电脑的地址——就是它的「遥控设置」页那条（必须是 https://；'
             + '只有填本机回环地址时才可以用 http://）。不要带 /mini 和它后面的参数。');
           return;
         }
@@ -1106,7 +1106,7 @@ window.__ModuleLoader__.load({
           return;
         }
         if (!token) {
-          setAddError('要填那台电脑的口令（在它的「手机遥控」设置里能复制到）。');
+          setAddError('要填那台电脑的口令（在它的「遥控设置」里能复制到）。');
           return;
         }
         setAddError(null);
@@ -1883,7 +1883,7 @@ window.__ModuleLoader__.load({
       };
 
       return h('div', { style: styles.card },
-        h('div', { style: styles.title }, '手机遥控'),
+        h('div', { style: styles.title }, '遥控设置'),
         h('div', { style: styles.muted }, '手机扫码即可连接，密码已编入二维码。'),
         h('div', { style: styles.warn }, '本页包含连接密码，请勿截图或转发。'),
         content(info, failure, copied, copy, busy, toggleTunnel, {
@@ -2349,10 +2349,10 @@ window.__ModuleLoader__.load({
       // 添加那一块：两个框（地址、口令）+ 一个可选的名字，**一次确认**才发出去
       // （口令是密码性质的，打字打到一半就发一趟不合适）。口令打码，和别处一致。
       var addUi = r.add ? h('div', null,
-        field('那台电脑的地址（它「手机遥控」页那条，不带 /mini）', r.add.baseUrl, 'http://…', function (v) {
+        field('那台电脑的地址（它「遥控设置」页那条，不带 /mini）', r.add.baseUrl, 'http://…', function (v) {
           r.setAddDraft(Object.assign({}, r.add, { baseUrl: v }));
         }, 'text', true),
-        field('那台电脑的口令（在它的「手机遥控」设置里复制）', r.add.token, '', function (v) {
+        field('那台电脑的口令（在它的「遥控设置」里复制）', r.add.token, '', function (v) {
           r.setAddDraft(Object.assign({}, r.add, { token: v }));
         }, 'password', true),
         field('给它起个名字（可留空，留空就用地址当名字）', r.add.name, '', function (v) {
@@ -3485,7 +3485,7 @@ window.__ModuleLoader__.load({
      * ## 三种结局，一个转不完的圈都没有
      *
      *   · 读到了、有内容 → 一行一台（名字 + 地址 + 最近一次成功）；
-     *   · 读到了、一台也没有 → 「还没连过别的电脑。去『设置 → 手机遥控 → 其他电脑』里加一台。」；
+     *   · 读到了、一台也没有 → 「还没连过别的电脑。去『设置 → 遥控设置 → 其他电脑』里加一台。」；
      *   · 读不到 → 照登原因（和设置页那一块同一条口径：404/405 = 宿主是旧版，下一步重启 DSH）。
      *
      * "读不到"和"一台都没有"是两件事，**绝不能说成同一句**：把读失败说成"还没连过"，
@@ -3501,7 +3501,7 @@ window.__ModuleLoader__.load({
       if (list === null) return h('div', { style: styles.panelMsg }, '正在读取「其他电脑」名单…');
       if (!list.length) {
         return h('div', { style: styles.panelMsg },
-          h('div', null, '还没连过别的电脑。去『设置 → 手机遥控 → 其他电脑』里加一台。'),
+          h('div', null, '还没连过别的电脑。去『设置 → 遥控设置 → 其他电脑』里加一台。'),
           h('div', { style: { marginTop: 18 } }, again),
         );
       }
@@ -4304,7 +4304,7 @@ window.__ModuleLoader__.load({
             id: 'mini-remote',
             order: 2,
             // 传函数：外壳用 resolveSlotLabel 求值（字符串也支持），函数是更稳的那个。
-            label: () => '手机遥控',
+            label: () => '遥控设置',
           },
           MiniRemoteSettingsTab,
         );

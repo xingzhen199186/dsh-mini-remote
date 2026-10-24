@@ -355,7 +355,7 @@ await check('一台也没连过：那句人话（去设置里加一台）+ 一�
   const box = await mountPanel(remotesOk([]));
   const text = textOf(box.tree);
   assert.match(text, /还没连过别的电脑/);
-  assert.match(text, /设置 → 手机遥控 → 其他电脑/);
+  assert.match(text, /设置 → 遥控设置 → 其他电脑/);
   assert.ok(byType(box.tree, 'button').some((b) => textOf(b) === '重新读一遍'),
     '要给人一个"再看一眼"的入口（他可能刚在设置页里加完）');
   assert.equal(byType(box.tree, 'iframe').length, 0);
@@ -748,8 +748,8 @@ await check('def.order === 2', () => {
 await check('def.label 是函数（typeof === "function"）', () => {
   assert.equal(typeof entryOf('settings.section').def.label, 'function');
 });
-await check('def.label() === "手机遥控"', () => {
-  assert.equal(entryOf('settings.section').def.label(), '手机遥控');
+await check('def.label() === "遥控设置"', () => {
+  assert.equal(entryOf('settings.section').def.label(), '遥控设置');
 });
 await check('第二个参数是组件函数', () => {
   Comp = entryOf('settings.section').Comp;
@@ -2169,7 +2169,7 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
   await check('点「确认断开」才真发：POST 断开那条，成功之后重列名单 + 把宿主那句话摆出来', async () => {
     fresh();
     const NOTE = '已经从这台电脑的列表里移除了，本地存的那枚凭据也一起删了。\n'
-      + '那台电脑上还留着「这台电脑」那条记录——要彻底收回，得去它的「手机遥控」设置页里撤销那一台。';
+      + '那台电脑上还留着「这台电脑」那条记录——要彻底收回，得去它的「遥控设置」页里撤销那一台。';
     const st = await mountRemotes(
       [listOf([FAR])[0], { status: 200, body: { ok: true, remotes: [] } }],
       ({ url }) => (url === '/mini-remote/remotes/forget' ? { ok: true, id: FAR.id, note: NOTE } : { ok: true }),
@@ -2184,7 +2184,7 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
     const text = textOf(remotesBlockOf(st.tree));
     assert.doesNotMatch(text, /书房那台/, '断开的那台要从名单上消失');
     assert.match(text, /这台电脑还没连过别的电脑/);
-    assert.match(text, /要彻底收回，得去它的「手机遥控」设置页里撤销那一台/,
+    assert.match(text, /要彻底收回，得去它的「遥控设置」页里撤销那一台/,
       '宿主那句"对面还留着"要原样摆出来（最容易留下的误会）');
     st.harness.unmount();
   });
