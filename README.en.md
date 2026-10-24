@@ -43,6 +43,7 @@
 - 🐬 **Lightweight status feedback**: Key narration, elapsed time, and queued instructions are visible, while raw reasoning is kept out of the phone conversation.
 - 🗂️ **Mobile session management**: Rename, pin, archive, or fork a session, with indicators for pending approvals and unanswered questions.
 - 🖥️ **Use Computer B from Computer A**: Operate Computer B through A's DSH. The conversation and model stay on A; A reads or modifies B's files through `b_*` tools; B locally decides its authorized directories, write access, folder management, and command permission.
+- 🧭 **B-side Execution preset**: In a session using it, B is accessed only through `b_*` and A's local file and command tools are removed; a normal session keeps both.
 - 🗂️ **B Projects**: Register a real B directory as a workspace entry on A, with a B file panel and a project-specific **New B Session** action.
 - 💻 **Remote Window**: Embed this computer's complete DSH interface in another computer's DSH desktop. This is a separate feature from the A-to-B file workflow; see **PC Remote Window**.
 - 💬 **Bidirectional Feishu remote**: Text exchange, question and approval replies, and `/会话` switching through the Feishu WebSocket long connection.
@@ -278,6 +279,17 @@ A and B describe the direction of a cross-machine collaboration. They are not mu
 | **Computer B** | **A/B Collaboration** → **Act as B** | Accepts tasks from A and provides local file, folder, and command capabilities | Does not receive A's conversations or model; authorized directories, write access, folder management, and command permission are decided locally on B |
 
 **Key distinction**: Local tools in A's conversation — `read`, `write`, `edit`, `bash`, and similar — operate on **Computer A**. Only `b_list`, `b_read`, `b_write`, `b_shell`, and the other `b_*` tools operate on **Computer B**. When a task targets B, state the `b_*` tool and the B path explicitly.
+
+### Whether to use the "B-side Execution" preset
+
+The **B-side Execution** preset (agent preset id `b-agent`) separates B tasks from A's local files. You can select it when creating a session on A; a B project's **New B Session** uses it automatically, and `b_subagent` forces it for child agents. An ordinary `subagent` does not.
+
+- **With the preset**: A's local file and command tools (`read`, `write`, `edit`, `bash`, `terminal`, and similar) are removed or refused. B files, folders, and commands can only be reached through `b_*`. A's web, browser, image, session, schedule, team, and advisor tools remain. Use it for dedicated B tasks so the model cannot accidentally change A.
+- **Without the preset**: a normal A session keeps A's local tools and also has `b_*`. It can operate B, but without this isolation. Use it when you need to change A and B in the same turn, or only occasionally operate B and will keep paths and tools clear.
+
+A B project session refuses local file and command tools even if preset switching fails, but the cleaner path is the project-specific **New B Session**, which starts with the preset.
+
+**How to choose**: for B-only work, prefer **B-side Execution**; for mixed A+B work, use a normal session.
 
 ### First pairing and verification
 
