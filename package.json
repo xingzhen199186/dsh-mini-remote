@@ -83,8 +83,5 @@
   "dependencies": {
     "@larksuiteoapi/node-sdk": "^1.74.0",
     "qrcode": "^1.5.4"
-  },
-  "bin": {
-    "dsh-mini-remote-agent": "./lib/agent-cli.mjs"
   }
 }
