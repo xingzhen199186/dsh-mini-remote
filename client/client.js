@@ -2990,7 +2990,7 @@ window.__ModuleLoader__.load({
       var pollText = st && st.lastPollAt
         ? ('最近成功轮询：' + Math.max(0, Math.round((Date.now() - st.lastPollAt) / 1000)) + ' 秒前')
         : '还没有成功轮询';
-      var status = st && st.connected ? '已连上 A，等待任务。' : (st && st.error ? st.error : '还没连上 A。');
+      var status = st && st.connected ? '已连上 A，等待任务。' : (st && st.error ? st.error : '还没连上 A。（尝试 Ctrl+F5 强制刷新）');
       return h('div', { key: 'bAgent', style: styles.block },
         h('div', { style: styles.entryTitle }, '作为 B 端'),
         h('div', { style: styles.muted }, '接受 A 端电脑 DSH 操作。'),
