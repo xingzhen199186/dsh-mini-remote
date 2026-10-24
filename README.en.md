@@ -32,7 +32,7 @@
 
 ---
 
-**Minimal Remote** addresses two scenarios. First, when away from the computer, it shows progress and conclusions on a phone without flooding the small screen with intermediate steps. Second, it opens this computer's complete DSH interface on another computer (Remote Window); together with using Computer B from A's DSH, this avoids reinstalling and configuring DSH and its plugins on the second computer. For cross-computer work, A's DSH operates on B's files and commands within the granted limits; B does not receive A's conversations, model, or plugins.
+**Minimal Remote** covers two main scenarios: when away from the computer, view task progress and conclusions on a phone with less noise from intermediate steps; on another computer, open this computer's complete DSH interface through Remote Window. Cross-computer tasks let A's DSH operate on B's files and commands within granted limits, avoiding reinstalling and configuring DSH and its plugins on the second computer. A and B only indicate the direction of operation; B does not receive A's conversations, model, or plugins.
 
 ## Overview
 
