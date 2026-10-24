@@ -227,7 +227,7 @@ No window switching and no remote desktop: click **Remote Window** in the DSH de
 3. The top bar contains **← Back to list**, the current computer name, and **Try again**. While the interface is healthy, the bar hides automatically and reappears when the pointer reaches the top edge. It remains visible while connecting, after an error, or whenever the interface has not opened.
 4. Click **Remote Window** in the sidebar again to exit and return to the previous panel. The top bar also provides a way back to the list.
 
-### Security boundaries
+### Remote Window security
 
 - When the window opens, A issues a **one-time ticket valid for 30 seconds and redeemable once**. The access passphrase and long-lived credentials never enter the browser.
 - Cross-site embedding is denied by default and allowed only for a page carrying a valid ticket.
