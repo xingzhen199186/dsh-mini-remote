@@ -3,10 +3,10 @@
 # 极简遥控器 · dsh-mini-remote
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/promo.webp" alt="极简遥控器：手机按需查看指令、结论与执行过程" width="720" />
+  <img src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/promo.webp" alt="极简遥控器：手机上只留你的指令和它的结论，过程想看的时候再调出来" width="720" />
 </p>
 
-**DeepSeek Harness（DSH）的手机页面与 A/B 端协作插件：按需查看对话，在明确授权后跨电脑处理文件和命令。**
+**专为 DeepSeek Harness（DSH）用户打造的轻量级移动端遥控插件，解决外出离机时查看 Agent 运行状态与下发指令时界面冗余、注意力被大量中间过程绑架的痛点。**
 
 [![npm](https://img.shields.io/npm/v/dsh-mini-remote)](https://www.npmjs.com/package/dsh-mini-remote)
 [![Node.js](https://img.shields.io/badge/node-%5E22.19.0%20%7C%7C%20%3E%3D24.0.0-brightgreen)](https://nodejs.org/)

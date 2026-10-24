@@ -3,10 +3,10 @@
 # Minimal Remote · dsh-mini-remote
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/promo.webp" alt="Minimal Remote: instructions, conclusions, and execution details on demand" width="720" />
+  <img src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/promo.webp" alt="Minimal Remote: the phone keeps your instruction and its conclusion, and shows you the process only when you ask for it" width="720" />
 </p>
 
-**A phone interface and A/B collaboration plugin for DeepSeek Harness (DSH): review conversations on demand and, with explicit authorization, work with files and commands across computers.**
+**A lightweight mobile remote plugin crafted for DeepSeek Harness (DSH) users, resolving screen clutter and process fatigue when checking Agent status and dispatching instructions away from the desk.**
 
 [![npm](https://img.shields.io/npm/v/dsh-mini-remote)](https://www.npmjs.com/package/dsh-mini-remote)
 [![Node.js](https://img.shields.io/badge/node-%5E22.19.0%20%7C%7C%20%3E%3D24.0.0-brightgreen)](https://nodejs.org/)
