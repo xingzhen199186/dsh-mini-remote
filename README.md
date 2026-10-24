@@ -79,14 +79,6 @@
   <img width="290" alt="执行中（浅色）：同一次执行，鲸鱼娘正在跑、已计时 14 秒、排队中 1 条" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/running-light-phone.jpg" />
 </div>
 
-#### 远程窗口（桌面端）
-
-不用切窗口，也不用远程桌面：在 DSH 桌面端左侧栏点「远程窗口」，把另一台电脑的 DSH 界面直接嵌在主面板里。顶上一行是「← 返回列表 / 这是哪一台 / 再试一次」，界面正常显示时它会自动收起，鼠标碰一下屏幕顶部才滑出来。
-
-<div align="center">
-  <img width="720" alt="远程窗口：主面板里嵌着另一台电脑的 DSH 界面，左侧栏「远程窗口」为选中态" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/remote-window.png" />
-</div>
-
 ---
 
 ## 安装
@@ -219,6 +211,14 @@ http://192.168.1.2:3090/mini?token=xxxxxxxxxxxx
 ## PC 端远程窗口
 
 远程窗口用于在另一台电脑（B）的 DSH 桌面端直接打开核心电脑（A）的完整 DSH 界面，不必在浏览器窗口之间来回切换，也不必使用远程桌面。它用于查看和操作 A 的界面，与「A 端使用 B 端」中的文件和命令任务不是同一条路径。
+
+### 界面效果
+
+不用切窗口，也不用远程桌面：在 DSH 桌面端左侧栏点「远程窗口」，把另一台电脑的 DSH 界面直接嵌在主面板里。顶上一行是「← 返回列表 / 这是哪一台 / 再试一次」，界面正常显示时它会自动收起，鼠标碰一下屏幕顶部才滑出来。
+
+<div align="center">
+  <img width="720" alt="远程窗口：主面板里嵌着另一台电脑的 DSH 界面，左侧栏「远程窗口」为选中态" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/remote-window.png" />
+</div>
 
 ### 用起来是什么样
 

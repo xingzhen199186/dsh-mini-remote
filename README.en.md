@@ -79,14 +79,6 @@ During a task, the page shows the animated running state, an elapsed timer, and 
   <img width="290" alt="Running (light): the same run in the light theme, 14 seconds elapsed, one instruction queued" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/running-light-phone.jpg" />
 </div>
 
-#### Remote Window (desktop)
-
-No window switching and no remote desktop: click **Remote Window** in the DSH desktop sidebar to embed another computer's DSH interface in the main panel. The top bar shows **← Back to list**, the computer name, and **Try again**. It collapses automatically while the interface is healthy and slides out when the pointer reaches the top edge.
-
-<div align="center">
-  <img width="720" alt="Remote Window: another computer's DSH interface embedded in the main panel, with Remote Window selected in the left sidebar" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/remote-window.png" />
-</div>
-
 ---
 
 ## Installation
@@ -219,6 +211,14 @@ Steps:
 ## PC Remote Window
 
 Remote Window opens Computer A's complete DSH interface directly inside Computer B's DSH desktop. There is no need to switch between browser windows or use a remote-desktop tool. It is for viewing and operating A's interface, not for the A-to-B file and command workflow described below.
+
+### Interface
+
+No window switching and no remote desktop: click **Remote Window** in the DSH desktop sidebar to embed another computer's DSH interface in the main panel. The top bar shows **← Back to list**, the computer name, and **Try again**. It collapses automatically while the interface is healthy and slides out when the pointer reaches the top edge.
+
+<div align="center">
+  <img width="720" alt="Remote Window: another computer's DSH interface embedded in the main panel, with Remote Window selected in the left sidebar" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/remote-window.png" />
+</div>
 
 ### How it works
 
