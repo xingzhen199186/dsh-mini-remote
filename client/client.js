@@ -1326,10 +1326,10 @@ window.__ModuleLoader__.load({
           })
           .then(function (r) {
             if (r.body && typeof r.body === 'object') { setInfo(r.body); setFailure(null); }
-            else setAgentError('切换「允许 B 端执行」失败：服务返回了 HTTP ' + r.status + '。');
+            else setAgentError('切换「作为 A 端」失败：服务返回了 HTTP ' + r.status + '。');
           })
           .catch(function (err) {
-            setAgentError('切换「允许 B 端执行」失败：' + ((err && err.message) || String(err)));
+            setAgentError('切换「作为 A 端」失败：' + ((err && err.message) || String(err)));
           })
           .then(function () { setBusy(false); });
       };
@@ -2100,7 +2100,7 @@ window.__ModuleLoader__.load({
         settingsGroup('mobile', '手机连接', true, null, mobile),
         settingsGroup('external', '外部访问', groups.externalOpen, groups.toggleExternal, external),
         settingsGroup('computers', '电脑与设备', true, null, computers),
-        settingsGroup('agent', 'B 端协作', groups.agentOpen, groups.toggleAgent, agentGroup),
+        settingsGroup('agent', 'A/B 端协作', groups.agentOpen, groups.toggleAgent, agentGroup),
         settingsGroup('feishu', '飞书', groups.feishuOpen, groups.toggleFeishu, feishuGroup, true),
         // 自检沿用自身的展开/收起，不再套一层组折叠；永远排在最末。
         self ? selfcheckBlock(self) : null,
@@ -2907,8 +2907,9 @@ window.__ModuleLoader__.load({
         else presetLine = h('div', { style: styles.muted }, 'B 端预设还在注册；如果一直这样，重启 DSH 后再看。');
       }
       return h('div', { key: 'agent', style: styles.block },
-        h('div', { style: styles.entryTitle }, 'B 端执行'),
-        h('div', { style: styles.muted }, 'B 端只需安装本插件即可执行文件任务；会话、模型与其他插件仍保留在 A 端。'),
+        h('div', { style: styles.entryTitle }, '作为 A 端'),
+        h('div', { style: styles.muted }, '可让 A 端电脑的 DSH 写入、修改 B 端电脑。'),
+        h('div', { style: styles.muted }, 'B 端只需安装本插件；会话、模型与其他插件仍保留在 A 端。'),
         h('label', { style: styles.toggleRow },
           h('input', {
             type: 'checkbox',
@@ -2969,8 +2970,9 @@ window.__ModuleLoader__.load({
         : '还没有成功轮询';
       var status = st && st.connected ? '已连上 A，等待任务。' : (st && st.error ? st.error : '还没连上 A。');
       return h('div', { key: 'bAgent', style: styles.block },
-        h('div', { style: styles.entryTitle }, '作为 B 端执行端'),
-        h('div', { style: styles.muted }, '允许 A 向本机下发文件与命令任务。A 的会话和插件不会同步到本机；授权目录与权限仅在本页设置。'),
+        h('div', { style: styles.entryTitle }, '作为 B 端'),
+        h('div', { style: styles.muted }, '接受 A 端电脑 DSH 操作。'),
+        h('div', { style: styles.muted }, 'A 的会话和插件不会同步到本机；授权目录与权限仅在本页设置。'),
         h('label', { style: styles.toggleRow },
           h('input', {
             type: 'checkbox',
@@ -3290,7 +3292,7 @@ window.__ModuleLoader__.load({
         // 创建、移除、新建会话共用的错误都归到区块顶部，不冒充“创建失败”。
         a.error ? h('div', { style: Object.assign({}, styles.error, styles.say) }, a.error) : null,
         h('div', { style: styles.muted }, '将 B 端目录登记为 A 的工作区；A 仅保存路径映射，不复制文件；打开项目后自动切到 B 端执行。'),
-        connected ? null : h('div', { style: styles.warn }, 'B 端现在没连上；先把上面「作为 B 端执行端」配对并开启。'),
+        connected ? null : h('div', { style: styles.warn }, 'B 端现在没连上；先把上面「作为 B 端」配对并开启。'),
         createUi,
         list,
         browseModal,
