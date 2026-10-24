@@ -235,12 +235,12 @@ No window switching and no remote desktop: click **Remote Window** in the DSH de
 - Restarting DSH on A invalidates the existing ticket. Click Remote Window again to obtain a new one.
 - Remote Window exposes A's complete management plane, including conversations, model configuration, and plugin management. Enable **Allow other computers to connect** only for trusted computers.
 
-### Act as A (the computer being viewed)
+### The connected computer (A)
 
 1. Open **Settings** → **Remote Settings** → **Computers & Devices** and enable **Allow other computers to connect**. It is off by default; while off, A rejects both pairing and ticket requests.
 2. Copy the access passphrase under **Phone Connection** so B can pair with A.
 
-### Act as B (the connecting computer)
+### The connecting computer (B)
 
 1. Open **Settings** → **Remote Settings** → **Computers & Devices** → **Other computers**, then click **Add a computer**.
 2. Enter A's address and access passphrase, and give the computer a recognizable name. If the name is left blank, the address is used instead.
