@@ -61,6 +61,7 @@ window.__ModuleLoader__.load({
     var B_PROJECT_SESSION_PATH = '/mini-remote/b-project/new-session';
     var AGENT_CODE_PATH = '/mini-remote/agent-pair-code';
     var AGENT_REVOKE_PATH = '/mini-remote/agent-revoke';
+    var B_AGENT_STATUS_PATH = '/mini-remote/b-agent/status';
     var B_AGENT_PAIR_PATH = '/mini-remote/b-agent/pair';
     var B_AGENT_MODE_PATH = '/mini-remote/b-agent/mode';
     var B_AGENT_OPTIONS_PATH = '/mini-remote/b-agent/options';
@@ -762,6 +763,27 @@ window.__ModuleLoader__.load({
         var timer = setInterval(tick, 5000);
         return function () { alive = false; clearInterval(timer); };
       }, [Boolean(info && info.agent && info.agent.allowed)]);
+
+      // B 端执行端的状态也要自己刷新：配对响应只代表“那一刻”，
+      // 第一次轮询成功之前它会是“还没连上”；不刷新的话，B 页会一直停在旧快照。
+      useEffect(function () {
+        var hasB = Boolean(info && info.bAgent);
+        if (!hasB) return undefined;
+        var alive = true;
+        var tick = function () {
+          fetch(B_AGENT_STATUS_PATH)
+            .then(function (res) { return res.json(); })
+            .then(function (body) {
+              if (!alive || !body || !body.ok || !body.bAgent) return;
+              setInfo(function (prev) {
+                return prev ? Object.assign({}, prev, { bAgent: body.bAgent }) : prev;
+              });
+            })
+            .catch(function () { /* 静默失败，下一轮再试 */ });
+        };
+        var timer = setInterval(tick, 5000);
+        return function () { alive = false; clearInterval(timer); };
+      }, [Boolean(info && info.bAgent)]);
 
       // 「已复制」只停留一会儿，然后自己变回「复制」。
       useEffect(function () {
