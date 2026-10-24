@@ -42,7 +42,7 @@
 - 🌐 **Multiple connection routes**: LAN, Tailscale private networking with optional HTTPS, Cloudflare Tunnel, and Feishu long connection. Each route has a different network boundary; see **Security Boundaries**.
 - 🐬 **Lightweight status feedback**: Key narration, elapsed time, and queued instructions are visible, while raw reasoning is kept out of the phone conversation.
 - 🗂️ **Mobile session management**: Rename, pin, archive, or fork a session, with indicators for pending approvals and unanswered questions.
-- 🖥️ **Use Computer B from Computer A**: The conversation and model stay on A. Within A's conversation, only `b_*` tools operate on B; B locally decides its authorized directories, write access, folder management, and command permission.
+- 🖥️ **Use Computer B from Computer A**: Operate Computer B through A's DSH. The conversation and model stay on A; A reads or modifies B's files through `b_*` tools; B locally decides its authorized directories, write access, folder management, and command permission.
 - 🗂️ **B Projects**: Register a real B directory as a workspace entry on A, with a B file panel and a project-specific **New B Session** action.
 - 💻 **Remote Window**: Embed this computer's complete DSH interface in another computer's DSH desktop. This is a separate feature from the A-to-B file workflow; see **PC Remote Window**.
 - 💬 **Bidirectional Feishu remote**: Text exchange, question and approval replies, and `/会话` switching through the Feishu WebSocket long connection.
