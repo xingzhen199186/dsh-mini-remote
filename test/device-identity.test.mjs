@@ -421,3 +421,28 @@ test('第二步：没配设备名册时照旧递回令牌 cookie——不许把�
   })
   assert.equal(state.status, 200, '照旧进得来——这一档的行为一个字没变')
 })
+
+test('路径规范化：连续斜杠和编码点不能绕过页面门禁', async (t) => {
+  const { devices } = tempDevices()
+  const s = await boot({ devices })
+  t.after(s.close)
+
+  // 这些路径以前会被 URL 解析成 host=index.html、path=/，直接拿到 200；
+  // 现在必须先归一化到 /index.html，再走正常门禁（无凭据时至少不能是 200）。
+  // 生产环境有镜像时这里会是 401；最小测试外壳没有镜像，落到 404 同样安全。
+  for (const raw of [
+    '//index.html',
+    '///index.html',
+    '/%2e/index.html',
+    '/%2e%2e/index.html',
+    '/%2findex.html',
+  ]) {
+    const res = await fetch(`${s.base}${raw}`, { redirect: 'manual' })
+    assert.notEqual(res.status, 200, `${raw} 不该绕过页面门禁`)
+  }
+
+  // `//` 以前会让 URL 解析抛错变成 500；归一化后应按根路径处理，
+  // 至少不能再是 500。
+  const bare = await fetch(`${s.base}//`, { redirect: 'manual' })
+  assert.notEqual(bare.status, 500, '// 不能以 500 结束')
+})
