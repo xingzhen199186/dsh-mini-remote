@@ -4096,6 +4096,9 @@
    * 切到 `render()` 来跑聊天模式的，放前面就切不进来，一跑就是 ReferenceError。
    */
   var pinnedAnswerKey = '';
+  // 程序上次自动对齐后的位置。仍停在这里才算「跟着看」：长回答的开头离底部
+  // 可能超过一屏，单靠 nearEnd 会把它误当成在翻旧历史；用户滚走后则不继承。
+  var pinnedAnswerSpot = null;
 
   /**
    * 聊天模式的滚动：**回答的开头才是要读的地方，不是末尾。**
@@ -4129,6 +4132,9 @@
       ? 'live'
       : (state.latest && state.latest.timestamp ? 'done:' + state.latest.timestamp : '');
     if (newest && newest !== pinnedAnswerKey) {
+      var followsPinned = pinnedAnswerSpot
+        && pinnedAnswerSpot.key === pinnedAnswerKey
+        && Math.abs(mainEl.scrollTop - pinnedAnswerSpot.top) < 48;
       // 先记账，再决定动不动他。记完就不再重复处理这条回答——
       // 用户往下读的时候被反复拉回开头，比不对齐还烦人。
       pinnedAnswerKey = newest;
@@ -4144,7 +4150,10 @@
       // 他不是在翻很远的历史。远于一屏仍旧不碰（2026-09-22 那条不打扰规则）。
       var view = mainEl.clientHeight || 0;
       var nearEnd = view > 0 && (mainEl.scrollHeight - mainEl.scrollTop - view) < view;
-      if (!stick && !nearEnd) return;
+      if (!stick && !nearEnd && !followsPinned) {
+        pinnedAnswerSpot = null;
+        return;
+      }
       var target = null;
       if (liveNow) {
         target = replyEl.querySelector ? replyEl.querySelector('.live') : null;
@@ -4164,6 +4173,7 @@
       var canPin = !!line && view > 0 && (mainEl.scrollTop + desired <= maxScroll + 1);
       pinToTop(target);
       if (!stick && !canPin) mainEl.scrollTop = mainEl.scrollHeight;
+      if (line) pinnedAnswerSpot = { key: newest, top: mainEl.scrollTop };
       return;
     }
     // 没有新回答的时候照旧黏底（历史重排、切会话、用户自己发指令这些），

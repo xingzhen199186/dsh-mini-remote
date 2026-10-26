@@ -2784,6 +2784,113 @@ function chatRunner({
   return { render: build(state, replyEl, mainEl, () => '12:00'), state, mainEl, replyEl }
 }
 
+/**
+ * 连续几轮渲染用的假布局：矩形随 scrollTop 移动，scrollTop 也像真浏览器一样
+ * 夹到合法范围。layout 只在 innerHTML 重写时更新，保留「先量旧页、再换新页」的顺序。
+ */
+function chatSequenceRunner(layout) {
+  const state = { mode: 'chat', history: [], live: '', latest: null, boundSessionId: 's1' }
+  let geometry = { height: 0, saidTops: [], liveTop: 0 }
+  const mainEl = {
+    classList: { remove() {} }, clientHeight: 600, scrollHeight: 0, _scrollTop: 0,
+    get scrollTop() { return this._scrollTop },
+    set scrollTop(top) {
+      const max = Math.max(0, this.scrollHeight - this.clientHeight)
+      this._scrollTop = Math.max(0, Math.min(top, max))
+    },
+    getBoundingClientRect: () => ({ top: 0 }),
+  }
+  const node = (top) => ({
+    getBoundingClientRect: () => ({ top: top - mainEl.scrollTop }),
+  })
+  const replyEl = {
+    _html: '',
+    get innerHTML() { return this._html },
+    set innerHTML(value) { this._html = value; syncLayout() },
+    querySelector(sel) {
+      if (sel !== '.live' || !this._html.includes('class="live"')) return null
+      return node(geometry.liveTop)
+    },
+    querySelectorAll(sel) {
+      if (sel !== '.said') return []
+      const n = (this._html.match(/class="said"/g) || []).length
+      return Array.from({ length: n }, (_, i) => node(geometry.saidTops[i]))
+    },
+  }
+  function syncLayout() {
+    geometry = layout(state)
+    mainEl.scrollHeight = geometry.height
+    mainEl.scrollTop = mainEl.scrollTop
+  }
+  const lb = html.indexOf('function liveBlock')
+  assert.ok(lb > 0, '在 page.html 里找不到 liveBlock')
+  // eslint-disable-next-line no-new-func
+  const build = new Function(
+    'state', 'replyEl', 'mainEl', 'timeLabel',
+    `${html.slice(start, end)}\n${html.slice(lb, html.indexOf('function render()'))}\nreturn renderChat;`,
+  )
+  const render = build(state, replyEl, mainEl, () => '12:00')
+  syncLayout()
+  mainEl.scrollTop = mainEl.scrollHeight
+  return { state, mainEl, render }
+}
+
+test('上一轮较长时，新一轮从流式到落定仍跟着最新回答', () => {
+  for (const { finalHeight, expected, kind } of [
+    { finalHeight: 3400, expected: 2000 - 12, kind: '长回答对齐正文第一行' },
+    { finalHeight: 2200, expected: 2200 - 600, kind: '短回答顶不上去就贴底' },
+  ]) {
+    const previous = { role: 'assistant', text: '上一轮长回答', timestamp: 1 }
+    const latest = { role: 'assistant', text: '新一轮回答', timestamp: 2 }
+    const r = chatSequenceRunner((state) => {
+      const saids = state.history.filter((m) => m.role === 'assistant').length
+      return {
+        height: state.live ? 3200 : saids === 1 ? 1900 : finalHeight,
+        saidTops: saids === 1 ? [200] : [200, 2000],
+        liveTop: 2000,
+      }
+    })
+    r.state.history = [{ role: 'user', text: '上一轮', timestamp: 0 }, previous]
+    r.state.latest = previous
+    r.render()
+    assert.equal(r.mainEl.scrollTop, 200 - 12, '上一轮先由程序对齐到开头')
+
+    r.state.history = r.state.history.concat([{ role: 'user', text: '下一轮', timestamp: 1 }])
+    r.state.live = '新一轮正在生成'
+    r.render()
+    r.state.live = ''
+    r.state.latest = latest
+    r.state.history = r.state.history.concat([latest])
+    r.render()
+    assert.equal(r.mainEl.scrollTop, expected, `${kind}，不能留在上一轮开头`)
+  }
+})
+
+test('上一轮较长，但用户已经翻走：新一轮流式和落定都不拽人', () => {
+  const previous = { role: 'assistant', text: '上一轮长回答', timestamp: 1 }
+  const r = chatSequenceRunner((state) => {
+    const saids = state.history.filter((m) => m.role === 'assistant').length
+    return {
+      height: state.live || saids > 1 ? 3400 : 1900,
+      saidTops: saids === 1 ? [200] : [200, 2000],
+      liveTop: 2000,
+    }
+  })
+  r.state.history = [{ role: 'user', text: '上一轮', timestamp: 0 }, previous]
+  r.state.latest = previous
+  r.render()
+  r.mainEl.scrollTop = 0
+
+  r.state.history = r.state.history.concat([{ role: 'user', text: '下一轮', timestamp: 1 }])
+  r.state.live = '新一轮正在生成'
+  r.render()
+  r.state.live = ''
+  r.state.latest = { role: 'assistant', text: '新一轮回答', timestamp: 2 }
+  r.state.history = r.state.history.concat([r.state.latest])
+  r.render()
+  assert.equal(r.mainEl.scrollTop, 0, '翻旧历史的位置不能因新一轮到来而改变')
+})
+
 test('短回答落定、人停在上一轮回答附近：直接贴底', () => {
   // 2026-10-22 用户报的特定情况：生成完了没跳到这次回答开头，而是停在上一轮开头。
   // 原因是回答太短，顶不到上方；用户口径是这种时候直接贴底。
