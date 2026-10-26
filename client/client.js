@@ -3668,7 +3668,7 @@ window.__ModuleLoader__.load({
         ]],
       ];
 
-      var out = [h('div', { key: 'self-relay-guide-intro', style: styles.muted },
+      var out = [h('div', { key: 'self-relay-guide-intro', style: Object.assign({}, styles.muted, { marginTop: 12 }) },
         '按下面顺序做。第一次大约 10 分钟；命令和 relay-server/README.md 保持一致。')];
       for (var i = 0; i < sections.length; i += 1) {
         out.push(h('div', { key: 'self-relay-guide-' + i, style: Object.assign({}, styles.entryTitle, { marginTop: 12 }) }, sections[i][0]));
