@@ -966,7 +966,7 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
     assert.equal(boxes[0].props.checked, false);
     const text = textOf(tree6);
     assert.match(text, /公网访问/);
-    assert.match(text, /手机与电脑不在同一网络时无法连接；可改用 Tailscale。/);
+    assert.match(text, /手机与电脑不在同一网络时无法连接；可改用 Tailscale 或下面的固定地址。/);
   });
 
   await check('公网开着且有地址时：开关选中，提示去看「公网」那条', async () => {
@@ -1011,7 +1011,7 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
     await tick();
     assert.equal(posted.length, 1, '只该发一次请求');
     assert.equal(posted[0].url, '/mini-remote/tunnel');
-    assert.deepEqual(posted[0].body, { enabled: true });
+    assert.deepEqual(posted[0].body, { enabled: true, mode: 'quick' });
   });
 
   await check('关掉开关 → body 是 {enabled:false}', async () => {
@@ -1021,7 +1021,7 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
     box.props.onChange({ target: { checked: false } });
     await tick();
     assert.equal(posted.length, 1);
-    assert.deepEqual(posted[0].body, { enabled: false });
+    assert.deepEqual(posted[0].body, { enabled: false, mode: 'quick' });
   });
 
   await check('整块面板报错时，公网开关仍然露得出来', async () => {
@@ -1034,6 +1034,64 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
     assert.equal(boxes.length, 1, '报错时也得能点得动开关');
     assert.equal(boxes[0].props.checked, true);
     assert.match(textOf(tree6), /公网访问没起来/);
+  });
+}
+
+// 4d-2. Cloudflare 命名隧道：固定地址 + token
+{
+  const payload = {
+    ok: true,
+    port: 3090,
+    token: TOKEN,
+    entries: [{ kind: 'lan', label: '内网', hint: '手机连同一个 Wi-Fi 时用这个', url: URL_LAN, qr: QR }],
+    tunnel: {
+      enabled: true,
+      mode: 'named',
+      publicUrl: 'https://dsh.example.com',
+      hasToken: true,
+      up: true,
+      starting: false,
+      error: null,
+    },
+  };
+  const h7 = useHarness();
+  let tree7 = null;
+  const posted7 = [];
+  h7.onUpdate(() => { tree7 = h7.draw(Comp); });
+  setGlobal('fetch', async (url, init) => {
+    if (init && init.method === 'POST') {
+      posted7.push({ url, body: JSON.parse(init.body) });
+      return jsonResponse(200, payload);
+    }
+    return jsonResponse(200, payload);
+  });
+  tree7 = h7.draw(Comp);
+  h7.runEffects();
+  await tick();
+  h7.runEffects();
+  await tick();
+
+  await check('固定域名隧道：地址回填，保存时带 mode=named', async () => {
+    const text = textOf(tree7);
+    assert.match(text, /固定地址（Cloudflare 命名隧道）/);
+    const inputs = byType(tree7, 'input');
+    const urlInput = inputs.find((n) => n.props.value === 'https://dsh.example.com');
+    assert.ok(urlInput, '公网地址要回填');
+    const tokenInput = inputs.find((n) => n.props.type === 'password');
+    assert.ok(tokenInput, 'token 要用密码框');
+    assert.match(tokenInput.props.placeholder, /已经存过一份了，留空就不改动它/);
+    const saveBtn = byType(tree7, 'button').find((b) => textOf(b) === '保存并重启');
+    assert.ok(saveBtn, '命名隧道要有保存并重启');
+    saveBtn.props.onClick();
+    await tick();
+    assert.equal(posted7.length, 1);
+    assert.equal(posted7[0].url, '/mini-remote/tunnel');
+    assert.deepEqual(posted7[0].body, {
+      enabled: true,
+      mode: 'named',
+      namedToken: '',
+      publicUrl: 'https://dsh.example.com',
+    });
   });
 }
 

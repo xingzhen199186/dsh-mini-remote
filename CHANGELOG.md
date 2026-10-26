@@ -2,6 +2,14 @@
 
 本文件记录每个版本改了什么。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [未发布]
+
+### 新加的
+
+- **Cloudflare 固定域名**：公网访问新增命名隧道模式，填公网地址和 tunnel token 即可让插件管理 `cloudflared`；地址固定，DSH 重启后手机不用重新扫码。
+- token 走 `TUNNEL_TOKEN` 环境变量，不进入命令行参数；设置页读取时不回显。
+- 配对面板新增「公网（固定）」条目，和临时隧道、自建中继并列。
+
 ## [0.2.6] - 2026-10-26
 
 ### 新加的

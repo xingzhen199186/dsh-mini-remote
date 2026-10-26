@@ -675,6 +675,10 @@ window.__ModuleLoader__.load({
       var relayOpenState = useState(false);
       var relayOpen = relayOpenState[0];
       var setRelayOpen = relayOpenState[1];
+      // Cloudflare 命名隧道：固定域名 + token。token 不回显，留空表示沿用已保存的。
+      var namedTunnelState = useState({ token: '', publicUrl: '' });
+      var namedTunnel = namedTunnelState[0];
+      var setNamedTunnel = namedTunnelState[1];
       // 按钮点下去到 React 重渲染之间还有一小段；用 ref 挡住同一瞬间的第二次点击。
       var bPairingRef = useRef(false);
       // B 项目：门牌列表 + 新建表单 + 当前打开的文件面板。
@@ -845,6 +849,18 @@ window.__ModuleLoader__.load({
           publicHost: typeof r.publicHost === 'string' ? r.publicHost : '',
           transport: r.transport || 'wss',
           frpcPath: '',
+        });
+      }, [info]);
+
+      // 命名隧道：公网地址只在用户还没填的时候回填，token 永远从空开始。
+      // 不用「只填一次」的 ref：状态第一次到达时可能还没有 publicUrl，之后刷新
+      // 到了就该补上；但用户已经改过的地址不能被后台刷新抹掉。
+      useEffect(function () {
+        var t = info && info.tunnel;
+        if (!t) return;
+        setNamedTunnel(function (d) {
+          if (d.publicUrl) return d;
+          return Object.assign({}, d, { publicUrl: typeof t.publicUrl === 'string' ? t.publicUrl : '' });
         });
       }, [info]);
 
@@ -1345,13 +1361,13 @@ window.__ModuleLoader__.load({
 
       // 开/关公网访问。这个请求可能要等十几秒（第一次要下载 cloudflared），
       // 所以期间把开关禁掉，免得连点几次起出好几条隧道。
-      var toggleTunnel = function (enabled) {
+      var toggleTunnel = function (enabled, extra) {
         if (busy) return;
         setBusy(true);
         fetch(TUNNEL_PATH, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ enabled: enabled }),
+          body: JSON.stringify(Object.assign({ enabled: enabled }, extra || {})),
         })
           .then(function (res) {
             return res.json().then(
@@ -2155,11 +2171,16 @@ window.__ModuleLoader__.load({
           start: function () { runRelay('start'); },
           test: function () { runRelay('test'); },
           stop: function () { runRelay('stop'); },
+        }, {
+          token: namedTunnel.token,
+          publicUrl: namedTunnel.publicUrl,
+          setToken: function (v) { setNamedTunnel(function (d) { return Object.assign({}, d, { token: v }); }); },
+          setPublicUrl: function (v) { setNamedTunnel(function (d) { return Object.assign({}, d, { publicUrl: v }); }); },
         }),
       );
     }
 
-    function content(info, failure, copied, copy, busy, toggle, pwd, serve, feishu, dev, remote, agent, bAgent, bProject, rmt, self, groups, relay) {
+    function content(info, failure, copied, copy, busy, toggle, pwd, serve, feishu, dev, remote, agent, bAgent, bProject, rmt, self, groups, relay, named) {
       if (failure) return h('div', { style: styles.error }, failure);
       if (!info) return h('div', { style: styles.loading }, '正在读取配对信息…');
 
@@ -2187,7 +2208,16 @@ window.__ModuleLoader__.load({
       if (info.tailscale) external.push(tailscaleBlock(info.tailscale));
       // 出错时也要把开关露出来：不然「隧道起不来」会让整个面板变成一条报错，
       // 用户连关掉它的地方都找不到。
-      if (info.tunnel) external.push(tunnelBlock(info.tunnel, busy, toggle));
+      if (info.tunnel) external.push(tunnelBlock(info.tunnel, busy, toggle, {
+        token: named.token,
+        publicUrl: named.publicUrl,
+        setToken: named.setToken,
+        setPublicUrl: named.setPublicUrl,
+        save: function () {
+          toggle(true, { mode: 'named', namedToken: named.token, publicUrl: named.publicUrl });
+        },
+        stop: function () { toggle(false, { mode: 'named' }); },
+      }));
       if (info.selfRelay && relay) {
         external.push(selfRelayBlock({
           draft: relay.draft,
@@ -3719,38 +3749,70 @@ window.__ModuleLoader__.load({
       return h('div', { key: 'self-relay-guide' }, out);
     }
 
-    function tunnelBlock(tunnel, busy, toggle) {
-      var enabled = Boolean(tunnel.enabled);
+    function tunnelBlock(tunnel, busy, toggle, named) {
+      var namedActive = Boolean(tunnel.enabled && tunnel.mode === 'named');
+      var quickEnabled = Boolean(tunnel.enabled && !namedActive);
       var working = Boolean(busy || tunnel.starting);
-      var status;
-      if (working) status = '正在打开…第一次要先下载一个 50MB 左右的组件，可能要等一会儿。';
-      else if (tunnel.up) status = '已开启。上方「公网」即外部访问地址；首次开启约需 30 秒，域名生效后再扫码。';
-      // 「一直没拿到地址」和「拿到过、后来断了」是两回事：前者多半还在等，后者得重开一次。
-      // 合成一句「还没拿到公网地址」的话，第二种情况的用户会一直等下去。
-      else if (enabled) status = tunnel.error
+      var quickStatus;
+      if (working && !namedActive) quickStatus = '正在打开…第一次要先下载一个 50MB 左右的组件，可能要等一会儿。';
+      else if (namedActive) quickStatus = '当前使用下面的固定地址，临时隧道没有启用。';
+      else if (tunnel.up && quickEnabled) quickStatus = '已开启。上方「公网」即外部访问地址；首次开启约需 30 秒，域名生效后再扫码。';
+      else if (quickEnabled) quickStatus = tunnel.error
         ? '开着，但公网那边连不上。手机现在走这条路会打不开——下面那段就是它说的话。'
         : '已开启，但还没拿到公网地址。';
-      else status = '未开启。手机与电脑不在同一网络时无法连接；可改用 Tailscale。';
+      else quickStatus = '未开启。手机与电脑不在同一网络时无法连接；可改用 Tailscale 或下面的固定地址。';
+
+      var namedStatus;
+      if (working && namedActive) namedStatus = '正在连接 Cloudflare 固定隧道…';
+      else if (namedActive && tunnel.up) namedStatus = '已连接。手机用上面的固定地址，DSH 重启后也不用重新扫码。';
+      else if (namedActive) namedStatus = tunnel.error
+        ? '固定隧道开着，但公网那边连不上。下面那段是 cloudflared 的原话。'
+        : '固定隧道已开启，但还没连上 Cloudflare。';
+      else namedStatus = '未启用。需要先在 Cloudflare 创建命名隧道，把 Public Hostname 指向本机端口。';
 
       return h('div', { key: 'tunnel', style: styles.block },
         h('div', { style: styles.entryTitle }, '公网访问'),
         h('div', { style: styles.muted }, '不想装 Tailscale 的话就打开这个：走 Cloudflare 的免费隧道，手机在外面用流量也能连进来。'),
+        h('div', { style: Object.assign({}, styles.entryTitle, { marginTop: 14 }) }, '临时地址（快速隧道）'),
         h('label', { style: styles.toggleRow },
           h('input', {
             type: 'checkbox',
-            checked: enabled,
-            // starting 也要禁掉：那说明**别的地方**（另一个标签页）正在起隧道，
-            // 这时候再点一下会起出第二条。
-            disabled: Boolean(busy || tunnel.starting),
-            onChange: function (e) { toggle(e.target.checked); },
+            checked: quickEnabled,
+            disabled: Boolean(busy || tunnel.starting || namedActive),
+            onChange: function (e) { toggle(e.target.checked, { mode: 'quick' }); },
           }),
-          h('span', null, enabled ? '已开启' : '开启'),
+          h('span', null, quickEnabled ? '已开启' : '开启'),
         ),
-        h('div', { style: enabled && tunnel.error ? styles.detail : styles.muted }, status),
-        // cloudflared 的原始报错，多行原文照登——排查时这就是全部线索。
-        enabled && tunnel.error ? h('div', { style: styles.detail }, tunnel.error) : null,
-        enabled ? h('div', { style: styles.muted }, '每次重启 DSH 后地址会变化，需重新扫码。') : null,
-        enabled ? h('div', { style: styles.warn }, '开着的时候这个服务就挂在公网上了。密码仍然是唯一的门，别把地址或二维码发出去。') : null,
+        h('div', { style: quickEnabled && tunnel.error ? styles.detail : styles.muted }, quickStatus),
+        quickEnabled && tunnel.error ? h('div', { style: styles.detail }, tunnel.error) : null,
+        quickEnabled ? h('div', { style: styles.muted }, '每次重启 DSH 后地址会变化，需重新扫码。') : null,
+        quickEnabled ? h('div', { style: styles.warn }, '开着的时候这个服务就挂在公网上了。密码仍然是唯一的门，别把地址或二维码发出去。') : null,
+
+        h('div', { style: Object.assign({}, styles.entryTitle, { marginTop: 18 }) }, '固定地址（Cloudflare 命名隧道）'),
+        h('div', { style: styles.muted },
+          '在 Cloudflare Zero Trust 创建命名隧道，把 Public Hostname 指向 http://127.0.0.1:3090，再复制隧道 token 填到这里。地址固定，DSH 重启不用重新扫码。'),
+        field('公网地址', named.publicUrl, 'https://dsh.example.com', named.setPublicUrl, 'text', true),
+        field('隧道 token', named.token,
+          tunnel.hasToken ? '已经存过一份了，留空就不改动它' : '粘贴 cloudflared tunnel run --token 的值',
+          named.setToken, 'password', true),
+        h('div', { style: namedActive && tunnel.error ? styles.detail : styles.muted }, namedStatus),
+        namedActive && tunnel.error ? h('div', { style: styles.detail }, tunnel.error) : null,
+        h('div', { style: { marginTop: 10, display: 'flex', gap: 8, flexWrap: 'wrap' } },
+          h('button', {
+            type: 'button',
+            disabled: working,
+            style: styles.btnPrimary,
+            onClick: named.save,
+          }, working ? '处理中…' : (namedActive ? '保存并重启' : '保存并开启')),
+          h('button', {
+            type: 'button',
+            disabled: working || !namedActive,
+            style: styles.btn,
+            onClick: named.stop,
+          }, '停止'),
+        ),
+        namedActive ? h('div', { style: styles.warn },
+          '固定地址也经过 Cloudflare，Cloudflare 在边缘能看到明文；它不是端到端加密。别把地址或二维码发出去。') : null,
       );
     }
 

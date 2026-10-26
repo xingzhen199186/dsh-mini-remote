@@ -220,6 +220,25 @@ http://192.168.1.2:3090/mini?token=xxxxxxxxxxxx
 >
 > 服务器安装脚本不会自动修改已有的 Nginx；80/443 被占用时会退出。详细说明见 [relay-server/README.md](relay-server/README.md)。
 
+### Cloudflare 固定域名（自己的命名隧道）
+
+适合有 Cloudflare 账号和域名、希望公网地址固定、又不想自己维护服务器的用户。
+
+1. 在 Cloudflare Zero Trust 创建命名隧道，添加 Public Hostname，指向 `http://127.0.0.1:3090`；
+2. 复制隧道 token；
+3. 在 A 端「遥控设置」→「外部访问」→「公网访问」的「固定地址」里填：
+
+   ```text
+   公网地址：https://dsh.example.com
+   隧道 token：cloudflared tunnel run --token 的值
+   ```
+
+4. 点「保存并开启」。手机配对面板会出现「公网（固定）」，DSH 重启后地址不变。
+
+> token 通过 `TUNNEL_TOKEN` 环境变量传给 cloudflared，不放进命令行参数；读取设置时不回显。
+>
+> 这条路仍然经过 Cloudflare，Cloudflare 在边缘能看到明文，不是端到端加密；国内网络稳定性取决于 Cloudflare。
+
 ### 进阶设置：内嵌桌面端界面（手机或 PC 网页）
 
 手机页面也能在 PC 浏览器中打开，只是排版按手机屏幕设计。开启设置中的「进阶设置」后，可以在同一页面内使用完整的 DSH 电脑端界面，无需另外启动一个 `dsh web`。
@@ -445,8 +464,8 @@ A 端的原生文件树中是门牌占位目录，不是 B 端的文件内容。
 ### 手机连接与外部访问
 
 - 每条连接地址均显示 160×160 二维码，地址框与「复制」按钮在同一行。
-- 「手机连接」管理本机地址与访问口令；「外部访问」管理 Tailscale、Tailscale HTTPS 和 Cloudflare 公网隧道。
-- Tailscale 的 HTTPS 地址与普通 Tailscale 地址指向同一服务，区别仅在连接是否加密；公网隧道每次重启 DSH 后地址会变化。
+- 「手机连接」管理本机地址与访问口令；「外部访问」管理 Tailscale、Tailscale HTTPS、Cloudflare 临时隧道、Cloudflare 固定域名和自建中继。
+- Tailscale 的 HTTPS 地址与普通 Tailscale 地址指向同一服务，区别仅在连接是否加密；Cloudflare 临时隧道每次重启 DSH 后地址会变化，固定域名隧道不会。
 - 更换访问口令需要重启 DSH 后生效，之后手机需要重新扫码。
 
 ### 电脑与设备
@@ -497,7 +516,10 @@ A 端的原生文件树中是门牌占位目录，不是 B 端的文件内容。
 | `token` | `string` | *(随机生成)* | 重启生效 | 访问口令（支持手动修改，长度不得低于 12 位） |
 | `defaultMode` | `string` | `"minimal"` | 即时生效 | 移动端默认呈现视图：`"minimal"`、`"chat"`、`"full"` |
 | `externalNotify` | `boolean` | `true` | 即时生效 | 任务完成时是否触发系统通知音效与设备震动 |
-| `tunnel.enabled` | `boolean` | `false` | 重启生效 | 是否启用 Cloudflare 临时公网隧道 |
+| `tunnel.enabled` | `boolean` | `false` | 重启生效 | 是否启用 Cloudflare 公网隧道 |
+| `tunnel.mode` | `string` | `"quick"` | 重启生效 | `"quick"` 临时地址；`"named"` 固定域名 |
+| `tunnel.publicUrl` | `string` | `""` | 重启生效 | 命名隧道的固定公网地址，如 `https://dsh.example.com` |
+| `tunnel.namedToken` | `string` | `""` | 重启生效 | 命名隧道 token（密文，不回显） |
 | `tailscale.serve` | `boolean` | `false` | 重启生效 | 是否尝试配置并监听 Tailscale 专有 HTTPS 证书通道 |
 | `feishu.enabled` | `boolean` | `false` | 即时生效 | 是否开启飞书应用长连接双向通道 |
 

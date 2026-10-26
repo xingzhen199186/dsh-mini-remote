@@ -11,9 +11,21 @@ import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { parseTunnelUrl, startTunnel, TUNNEL_HINT } from '../lib/tunnel.js'
+import { parseTunnelUrl, startTunnel, namedTunnelArgs, NAMED_TUNNEL_READY_RE, TUNNEL_HINT } from '../lib/tunnel.js'
 import { ensureCloudflared } from '../lib/cloudflared.js'
 import { clientKey } from '../lib/server.js'
+
+test('命名隧道的 token 不放进命令行参数', () => {
+  const args = namedTunnelArgs()
+  assert.deepEqual(args, ['tunnel', '--no-autoupdate', '--protocol', 'http2', 'run'])
+  assert.ok(!args.includes('--token'), 'token 必须走 TUNNEL_TOKEN 环境变量，不能出现在 ps 里')
+})
+
+test('命名隧道能识别 Cloudflare 的注册成功日志', () => {
+  assert.equal(NAMED_TUNNEL_READY_RE.test('INF Registered tunnel connection connIndex=0'), true)
+  assert.equal(NAMED_TUNNEL_READY_RE.test('Connection abc registered'), true)
+  assert.equal(NAMED_TUNNEL_READY_RE.test('starting tunnel'), false)
+})
 
 // ---------------------------------------------------------------------------
 // 隧道失败时给用户的那句话
@@ -241,7 +253,31 @@ test('隧道起来之后，配对面板多出一条公网地址，排在最后',
   assert.match(entry.url, /^https:\/\//, '公网那条必须是 https')
   assert.match(entry.qr, /^data:image\/png;base64,/)
   assert.match(entry.hint, /每次重启/)
-  assert.deepEqual(payload.tunnel, { enabled: true, up: true, starting: false, error: null })
+  assert.deepEqual(payload.tunnel, { enabled: true, mode: 'quick', publicUrl: null, hasToken: false, up: true, starting: false, error: null })
+})
+
+test('命名隧道起来之后，配对面板给固定地址和固定文案', async () => {
+  const payload = await buildPairing({
+    port: 3090,
+    token: 'abc123',
+    bound: [],
+    tunnel: {
+      enabled: true,
+      mode: 'named',
+      publicUrl: 'https://dsh.example.com',
+      hasToken: true,
+      url: 'https://dsh.example.com',
+    },
+  })
+  assert.equal(payload.ok, true)
+  assert.equal(payload.entries.length, 1)
+  const [entry] = payload.entries
+  assert.equal(entry.kind, 'public')
+  assert.equal(entry.label, '公网（固定）')
+  assert.equal(entry.url, 'https://dsh.example.com/mini?token=abc123')
+  assert.match(entry.hint, /地址固定/)
+  assert.equal(payload.tunnel.mode, 'named')
+  assert.equal(payload.tunnel.hasToken, true)
 })
 
 test('自建中继连通时，配对面板多出一条固定公网地址', async () => {
