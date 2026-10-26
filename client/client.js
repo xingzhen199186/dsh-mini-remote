@@ -850,7 +850,11 @@ window.__ModuleLoader__.load({
         fetch(SELF_RELAY_PATH, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify(Object.assign({}, relayDraft, { action: action })),
+          body: JSON.stringify(Object.assign({}, relayDraft, {
+            action: action,
+            transport: 'wss',
+            serverPort: 443,
+          })),
         })
           .then(function (res) {
             return res.json().then(
@@ -3443,26 +3447,10 @@ window.__ModuleLoader__.load({
           '用自己的国内服务器和域名，不经过 Cloudflare 或第三方中继。'
           + '服务器需要先跑一次 relay-server/ 里的安装脚本。'),
         field('中继控制域名', 'serverAddr', { placeholder: 'frp.example.com' }),
-        field('控制端口', 'serverPort', { placeholder: '443' }),
         field('frp token', 'token', { secret: true, placeholder: configured ? '留空 = 沿用已保存的 token' : '从服务器安装脚本输出里复制' }),
         field('公网域名', 'publicHost', { placeholder: 'remote.example.com' }),
-        h('label', { style: { display: 'block', marginTop: 10 } },
-          h('div', { style: styles.muted }, '传输方式'),
-          h('select', {
-            value: draft.transport || 'wss',
-            onChange: function (e) {
-              var t = e.target.value;
-              run.setDraft(Object.assign({}, draft, {
-                transport: t,
-                serverPort: t === 'wss' ? 443 : 7000,
-              }));
-            },
-            style: Object.assign({}, styles.input, { marginTop: 4 }),
-          },
-            h('option', { value: 'wss' }, '443 · WebSocket + TLS（推荐，A 端只需出站 443）'),
-            h('option', { value: 'tcp' }, '7000 · TCP（服务器需要放行 7000）'),
-          ),
-        ),
+        h('div', { style: styles.muted, marginTop: 10 },
+          '控制端口固定 443，传输方式固定 WebSocket + TLS；A 端只需要出站 443。'),
         h('div', { style: { display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 12 } },
           h('button', { type: 'button', disabled: Boolean(busy), style: styles.btn, onClick: function () { run.save(); } }, '保存'),
           h('button', { type: 'button', disabled: Boolean(busy), style: styles.btn, onClick: function () { run.start(); } }, '开启'),
