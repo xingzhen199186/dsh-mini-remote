@@ -3426,6 +3426,7 @@ window.__ModuleLoader__.load({
       var configured = Boolean(info.configured);
       var running = Boolean(info.running);
       var connected = Boolean(info.connected);
+      var locked = Boolean(busy || running);
       var set = function (key, value) {
         run.setDraft(Object.assign({}, draft, { [key]: value }));
       };
@@ -3438,47 +3439,92 @@ window.__ModuleLoader__.load({
             value: draft[key] == null ? '' : String(draft[key]),
             placeholder: o.placeholder || '',
             spellCheck: false,
+            disabled: locked,
             onChange: function (e) { set(key, e.target.value); },
             style: Object.assign({}, styles.input, { marginTop: 4 }),
           }),
         );
       };
-      var status = !configured
-        ? '还没配置。先在自己的服务器上跑一次 relay-server/install.sh，再把地址、token 和域名填到这里。'
-        : running
-          ? (connected
-            ? 'frpc 正在运行，公网地址已经打通。'
-            : 'frpc 进程在，但公网还没确认打通。点“测试连接”看具体原因。')
-          : '已保存配置，但 frpc 没在跑。点“开启”后它会随 DSH 自动启动。';
+      var pill = function (text, fg, bg) {
+        return h('span', {
+          style: {
+            display: 'inline-flex', alignItems: 'center', padding: '2px 8px',
+            borderRadius: 999, fontSize: 12, fontWeight: 600, color: fg, background: bg,
+            whiteSpace: 'nowrap',
+          },
+        }, text);
+      };
+      var statePill = !configured
+        ? pill('未配置', '#6b7280', '#f3f4f6')
+        : running && connected
+          ? pill('已连接', '#15803d', '#dcfce7')
+          : running
+            ? pill('连接中', '#b45309', '#fef3c7')
+            : pill('已停止', '#6b7280', '#f3f4f6');
+      var copyUrl = function () {
+        try {
+          if (navigator && navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+            navigator.clipboard.writeText(info.url);
+          }
+        } catch (err) { /* 剪贴板不可用：输入框里仍可手动复制 */ }
+      };
+      var actions = running
+        ? [
+          h('button', { type: 'button', disabled: Boolean(busy), style: styles.btn, onClick: function () { run.test(); } }, '测试连接'),
+          h('button', {
+            type: 'button', disabled: Boolean(busy),
+            style: Object.assign({}, styles.btn, { color: '#b91c1c' }),
+            onClick: function () { run.stop(); },
+          }, '停止'),
+        ]
+        : [
+          h('button', { type: 'button', disabled: Boolean(busy), style: styles.btnPrimary, onClick: function () { run.start(); } }, '保存并开启'),
+          h('button', { type: 'button', disabled: Boolean(busy), style: styles.btn, onClick: function () { run.test(); } }, '测试连接'),
+        ];
 
       return h('div', { key: 'self-relay', style: styles.block },
-        h('div', { style: styles.entryTitle }, '自建中继'),
-        h('div', { style: styles.muted },
-          '用自己的国内服务器和域名，不经过 Cloudflare 或第三方中继。'
-          + '服务器需要先跑一次 relay-server/ 里的安装脚本。'),
-        field('中继控制域名', 'serverAddr', { placeholder: 'frp.example.com' }),
-        field('frp token', 'token', { secret: true, placeholder: configured ? '留空 = 沿用已保存的 token' : '从服务器安装脚本输出里复制' }),
-        field('公网域名', 'publicHost', { placeholder: 'remote.example.com' }),
-        h('div', { style: styles.muted, marginTop: 10 },
-          '控制端口固定 443，传输方式固定 WebSocket + TLS；A 端只需要出站 443。'),
-        h('div', { style: { display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 12 } },
-          h('button', { type: 'button', disabled: Boolean(busy), style: styles.btn, onClick: function () { run.save(); } }, '保存'),
-          h('button', { type: 'button', disabled: Boolean(busy), style: styles.btn, onClick: function () { run.start(); } }, '开启'),
-          h('button', { type: 'button', disabled: Boolean(busy), style: styles.btn, onClick: function () { run.test(); } }, '测试连接'),
-          running ? h('button', { type: 'button', disabled: Boolean(busy), style: styles.btn, onClick: function () { run.stop(); } }, '停止') : null,
+        h('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' } },
+          h('div', { style: styles.entryTitle }, '自建中继'),
+          statePill,
         ),
-        h('div', { style: styles.muted, marginTop: 10 }, status),
-        info.url ? h('div', { style: styles.monoInput, marginTop: 6 }, info.url) : null,
-        h('div', { style: styles.muted, marginTop: 8 },
-          '状态灯：'
-          + (running ? 'frpc 运行中' : 'frpc 未运行')
-          + ' · '
-          + (connected ? '公网已通' : '公网未确认')),
-        relay.note ? h('div', { style: styles.muted }, relay.note) : null,
+        h('div', { style: styles.muted },
+          '用自己的服务器和域名，地址固定，不经过第三方中继。服务器先按 relay-server/README 配好，再填这里。'),
+        h('div', {
+          style: {
+            marginTop: 10, padding: 12, borderRadius: 10,
+            border: '1px solid var(--dsw-alias-border-l2,#e5e7eb)',
+            background: 'var(--dsw-alias-bg-layer-1,#fff)',
+          },
+        },
+          field('中继控制域名', 'serverAddr', { placeholder: 'frp.example.com' }),
+          field('frp token', 'token', { secret: true, placeholder: configured ? '留空 = 沿用已保存的 token' : '从服务器安装脚本输出里复制' }),
+          field('公网域名', 'publicHost', { placeholder: 'remote.example.com' }),
+          h('div', { style: { marginTop: 8, color: 'var(--dsw-alias-label-tertiary,#8b93a1)', fontSize: 12, lineHeight: 1.6 } },
+            '两个域名都解析到同一台服务器；控制端口固定 443，A 端只需要出站 443。'
+            + (running ? ' 修改配置前请先停止。' : '')),
+        ),
+        h('div', { style: { display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 12 } }, actions),
+        h('div', {
+          style: {
+            display: 'grid', gap: 4, marginTop: 12, paddingTop: 10,
+            borderTop: '1px solid var(--dsw-alias-border-l2,#e5e7eb)',
+          },
+        },
+          h('div', { style: styles.muted }, 'frpc 进程：' + (running ? '运行中' : '未运行')),
+          h('div', { style: styles.muted }, '公网链路：' + (connected ? '已通' : (running ? '未确认' : '未开启'))),
+        ),
+        info.url ? h('div', { style: { display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' } },
+          h('input', {
+            readOnly: true, value: info.url, spellCheck: false,
+            onFocus: function (e) { try { e.target.select(); } catch (err) { /* 忽略 */ } },
+            style: Object.assign({}, styles.monoInput, { flex: '1 1 240px', width: 'auto', minWidth: 0 }),
+          }),
+          h('button', { type: 'button', style: styles.btn, onClick: copyUrl }, '复制'),
+        ) : null,
+        relay.note ? h('div', { style: styles.muted, marginTop: 8 }, relay.note) : null,
         relay.error ? h('div', { style: styles.detail }, relay.error) : null,
-        h('div', { style: styles.warn, marginTop: 8 },
-          '自建中继会把 A 的手机服务暴露到你的域名上；访问仍由 token/Bearer/票据保护。'
-          + '域名对外提供服务前，请确认备案和当地要求。'),
+        h('div', { style: { marginTop: 8, color: 'var(--dsw-alias-label-tertiary,#8b93a1)', fontSize: 12, lineHeight: 1.6 } },
+          '公网入口受 token/Bearer/票据保护；域名对外提供服务前，请确认备案和当地要求。'),
       );
     }
 
