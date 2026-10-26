@@ -672,6 +672,9 @@ window.__ModuleLoader__.load({
       var relayGuideState = useState(false);
       var relayGuideOpen = relayGuideState[0];
       var setRelayGuideOpen = relayGuideState[1];
+      var relayOpenState = useState(false);
+      var relayOpen = relayOpenState[0];
+      var setRelayOpen = relayOpenState[1];
       // 按钮点下去到 React 重渲染之间还有一小段；用 ref 挡住同一瞬间的第二次点击。
       var bPairingRef = useRef(false);
       // B 项目：门牌列表 + 新建表单 + 当前打开的文件面板。
@@ -2144,6 +2147,8 @@ window.__ModuleLoader__.load({
           note: relayNote,
           error: relayError,
           setDraft: setRelayDraft,
+          open: relayOpen,
+          toggleOpen: function () { setRelayOpen(function (v) { return !v; }); },
           guideOpen: relayGuideOpen,
           toggleGuide: function () { setRelayGuideOpen(function (v) { return !v; }); },
           save: function () { runRelay('save'); },
@@ -2190,6 +2195,8 @@ window.__ModuleLoader__.load({
           note: relay.note,
           error: relay.error,
           setDraft: relay.setDraft,
+          open: relay.open,
+          toggleOpen: relay.toggleOpen,
           guideOpen: relay.guideOpen,
           toggleGuide: relay.toggleGuide,
         }, busy, {
@@ -3489,12 +3496,31 @@ window.__ModuleLoader__.load({
           h('button', { type: 'button', disabled: Boolean(busy), style: styles.btn, onClick: function () { run.test(); } }, '测试连接'),
         ];
 
-      return h('div', { key: 'self-relay', style: styles.block },
-        h('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' } },
+      var header = h('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' } },
+        h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 } },
           h('div', { style: styles.entryTitle }, '自建中继'),
           statePill,
         ),
-        h('div', { style: styles.muted },
+        h('button', { type: 'button', style: styles.btn, onClick: relay.toggleOpen }, relay.open ? '收起' : '展开'),
+      );
+
+      if (!relay.open) {
+        var summary = !configured
+          ? '未配置。展开后填写控制域名、token 和公网域名。'
+          : running && connected
+            ? '已连接：' + info.url
+            : running
+              ? 'frpc 正在运行，公网还没确认。'
+              : '已停止。展开后可修改配置或重新开启。';
+        return h('div', { key: 'self-relay', style: styles.block },
+          header,
+          h('div', { style: Object.assign({}, styles.muted, { marginTop: 8 }) }, summary),
+        );
+      }
+
+      return h('div', { key: 'self-relay', style: styles.block },
+        header,
+        h('div', { style: Object.assign({}, styles.muted, { marginTop: 8 }) },
           '用自己的服务器和域名，地址固定，不经过第三方中继。服务器先按 relay-server/README 配好，再填这里。'),
         h('div', {
           style: {

@@ -2391,6 +2391,11 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
   await check('自建中继的配置指引能展开', async () => {
     fresh();
     const st = await mountRemotes(listOf([]), () => ({ ok: true }));
+    assert.match(textOf(st.tree), /未配置。展开后/, '自建中继默认收起');
+    const expandBtn = buttonIn(st.tree, '展开');
+    assert.ok(expandBtn, '自建中继要有展开按钮');
+    expandBtn.props.onClick();
+    await settle();
     const guideBtn = buttonIn(st.tree, '配置指引（服务器 + 域名 + frpc）');
     assert.ok(guideBtn, '自建中继末尾要有配置指引按钮');
     guideBtn.props.onClick();
