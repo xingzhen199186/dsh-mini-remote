@@ -669,6 +669,9 @@ window.__ModuleLoader__.load({
       var relayNote = relayNoteState[0];
       var setRelayNote = relayNoteState[1];
       var relayInitRef = useRef(false);
+      var relayGuideState = useState(false);
+      var relayGuideOpen = relayGuideState[0];
+      var setRelayGuideOpen = relayGuideState[1];
       // 按钮点下去到 React 重渲染之间还有一小段；用 ref 挡住同一瞬间的第二次点击。
       var bPairingRef = useRef(false);
       // B 项目：门牌列表 + 新建表单 + 当前打开的文件面板。
@@ -2141,6 +2144,8 @@ window.__ModuleLoader__.load({
           note: relayNote,
           error: relayError,
           setDraft: setRelayDraft,
+          guideOpen: relayGuideOpen,
+          toggleGuide: function () { setRelayGuideOpen(function (v) { return !v; }); },
           save: function () { runRelay('save'); },
           start: function () { runRelay('start'); },
           test: function () { runRelay('test'); },
@@ -3525,7 +3530,67 @@ window.__ModuleLoader__.load({
         relay.error ? h('div', { style: styles.detail }, relay.error) : null,
         h('div', { style: { marginTop: 8, color: 'var(--dsw-alias-label-tertiary,#8b93a1)', fontSize: 12, lineHeight: 1.6 } },
           '公网入口受 token/Bearer/票据保护；域名对外提供服务前，请确认备案和当地要求。'),
+        // 配置指引默认收起：配过的人不用看，第一次配的人被服务器和 DNS 绕住时，
+        // 这里是不用另开文档的唯一入口。
+        relay.guideOpen ? null : h('div', { style: Object.assign({}, styles.muted, { marginTop: 12 }) },
+          '第一次配置需要：一台干净服务器、两条域名解析、一次 frpc 配置。'),
+        h('div', { style: { marginTop: 12 } },
+          h('button', { type: 'button', onClick: relay.toggleGuide, style: styles.btn },
+            relay.guideOpen ? '收起配置指引' : '配置指引（服务器 + 域名 + frpc）'),
+        ),
+        relay.guideOpen ? selfRelayGuide() : null,
       );
+    }
+
+    /**
+     * 自建中继的配置指引。
+     *
+     * 面向“第一次装插件、有一台干净服务器和域名”的用户；步骤和
+     * `relay-server/README.md` 对齐，不在界面里另编一套。
+     */
+    function selfRelayGuide() {
+      var sections = [
+        ['一、先准备两个域名', [
+          '在 DNSPod / 域名后台加两条 A 记录，都指向这台服务器的公网 IP：',
+          'frp.example.com    → 控制连接（frpc 连它）',
+          'remote.example.com → 手机和 B 端打开的公网地址',
+          'TTL 用 600；两条都解析成功后，再往下做。',
+        ]],
+        ['二、在服务器上装 frps', [
+          '推荐用干净的 Ubuntu/Debian 服务器，80/443 没有被别的网站占用。',
+          '把插件包里的 relay-server/ 目录传到服务器，执行：',
+          'sudo bash install.sh --check --host remote.example.com --control-host frp.example.com',
+          'sudo bash install.sh --host remote.example.com --control-host frp.example.com',
+          '脚本会装好 frps + Caddy、申请证书，并打印 frp token。token 只显示一次。',
+          '如果服务器上已经有 Nginx，不要跑自动安装；按 relay-server/README.md 手工加两段 Nginx 配置。',
+        ]],
+        ['三、回到这台电脑填写', [
+          '中继控制域名：frp.example.com',
+          'frp token：安装脚本打印的那一串',
+          '公网域名：remote.example.com',
+          '控制端口固定 443，传输方式固定 WebSocket + TLS；保存并开启。',
+        ]],
+        ['四、确认成功', [
+          '顶部状态变成「已连接」，公网链路显示「已通」。',
+          '点「测试连接」，从公网拉一次接口；通过后手机连接里会出现「自建中继」二维码。',
+          'B 端和远程窗口也用同一个公网地址。',
+        ]],
+        ['五、注意', [
+          '服务器安全组放行 80/443；A 端只需要出站 443。',
+          '域名对外提供服务涉及备案，请按当地要求办理。',
+          'frp token 是服务器和 A 端之间的钥匙，不要发到公开地方。',
+          '自建中继解决的是地址固定和稳定可达，不增加带宽；4Mbps 下远程窗口冷加载仍需十几秒。',
+        ]],
+      ];
+      var out = [h('div', { key: 'self-relay-guide-intro', style: styles.muted },
+        '按下面顺序做，第一次大约 10 分钟。命令和 relay-server/README.md 保持一致。')];
+      for (var i = 0; i < sections.length; i += 1) {
+        out.push(h('div', { key: 'self-relay-guide-' + i, style: Object.assign({}, styles.entryTitle, { marginTop: 12 }) }, sections[i][0]));
+        for (var j = 0; j < sections[i][1].length; j += 1) {
+          out.push(h('div', { key: 'self-relay-guide-' + i + '-' + j, style: styles.muted }, sections[i][1][j]));
+        }
+      }
+      return h('div', { key: 'self-relay-guide' }, out);
     }
 
     function tunnelBlock(tunnel, busy, toggle) {
