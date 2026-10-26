@@ -44,7 +44,7 @@ test('手机页体量：不超过 8700 行、480 KB（超了就该重新想结�
   assert.ok(kb <= 480, `lib/page.html 已经 ${kb} KB，越过守门线 480 KB 了`)
 })
 
-test('发布包体量：问 npm 要真实数字，不超过 3 MB（现在约 2.1 MB）', () => {
+test('发布包体量：问 npm 要真实数字，不超过 25 MB（自建中继内置 frpc 后约 19 MB）', () => {
   // `--dry-run` 不写文件；`--json` 让我们拿到 `unpackedSize`，那是 npm 自己算的。
   let parsed
   try {
@@ -65,8 +65,8 @@ test('发布包体量：问 npm 要真实数字，不超过 3 MB（现在约 2.1
   assert.ok(entry && Number.isFinite(entry.unpackedSize), 'npm 返回里没有 unpackedSize')
 
   const mb = Math.round((entry.unpackedSize / (1024 * 1024)) * 100) / 100
-  assert.ok(entry.unpackedSize <= 3 * 1024 * 1024,
-    `发布包已经 ${mb} MB，越过守门线 3 MB。先看是不是有过程产物混进了 lib/：`
+  assert.ok(entry.unpackedSize <= 25 * 1024 * 1024,
+    `发布包已经 ${mb} MB，越过守门线 25 MB。先看是不是有过程产物混进了 lib/：`
     + 'lib/art/.npmignore 里那条 `out-*` 是唯一一道闸。')
   // 顺手钉一下"包里到底有没有那批过程产物"。体积是会飘的，这条更直接。
   const artFiles = (entry.files ?? []).filter((one) => String(one.path).startsWith('lib/art/'))

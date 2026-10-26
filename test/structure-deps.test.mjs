@@ -169,7 +169,9 @@ test('版本：engines.dsh 和 peerDependencies 声明的是同一个区间（�
 test('版本：package.json 的 version 必须等于 CHANGELOG 最顶上那一条', () => {
   const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
   const changelog = readFileSync(new URL('../CHANGELOG.md', import.meta.url), 'utf8')
-  const first = changelog.match(/^##\s*\[([^\]]+)\]/m)
+  // 「未发布」是工作区里的草稿，不是已经发出去的版本；跳过它，找第一条真正的版本号。
+  const first = [...changelog.matchAll(/^##\s*\[([^\]]+)\]/gm)]
+    .find((one) => one[1] !== '未发布')
   assert.ok(first, 'CHANGELOG 里找不到 `## [版本]` 形状的条目，发版惯例已经走样了')
   assert.equal(pkg.version, first[1],
     'package.json 的 version 和 CHANGELOG 最顶上那条不一致：发版时这两处要一起改')

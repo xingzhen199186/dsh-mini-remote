@@ -75,3 +75,9 @@ DELIVERY-EVIDENCE.md
 session.v4.jsonl
 dsh-session-*.zip
 *.tgz.bak-*
+
+# 自建中继内置的 frpc（前面 `bin/` 是给别的目录用的，这里单独放行）
+!lib/bin/
+!lib/bin/frpc.exe
+!lib/bin/README.md
+!lib/bin/frp-LICENSE

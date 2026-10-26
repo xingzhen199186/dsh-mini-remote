@@ -155,6 +155,7 @@ dsh plugin --profile web add C:\path\to\dsh-mini-remote
 | **局域网（LAN）** | 手机与电脑处于同一 Wi-Fi 子网 | 无额外客户端 | 配置即用；脱离当前局域网后立即断开 |
 | **Tailscale** | 跨地域移动访问，要求网络地址稳定 | 电脑与手机均安装并登录 [Tailscale](https://tailscale.com/download) | 固定私网 IP；可额外申请 Tailscale HTTPS 证书 |
 | **公网隧道** | 无公网 IP 且不便安装任何额外客户端 | 需开启 Cloudflare 隧道开关 | 每次重启 DSH 自动更换临时二级域名；初次开启下载约 50 MB 运行组件 |
+| **自建中继** | 自己有国内服务器和域名，要求地址固定 | 服务器、两个域名记录、frp token | 一次安装，地址长期不变；A 端只需出站 443 |
 | **飞书长连接** | 仅依赖企业 IM，完全脱离浏览器 | 配置飞书自建应用机器人凭据 | 无需公网暴露，通过长连接双向收发，支持移动审批 |
 
 ### 第一次连接手机
@@ -191,6 +192,33 @@ http://192.168.1.2:3090/mini?token=xxxxxxxxxxxx
 > 1. 「完全权限」允许 Agent 修改任意文件并执行系统命令，只应在明确了解后果时开启。
 > 2. 手机可处理已推送到页面的审批；未推送、已超时或需要更多上下文的审批，仍需回到电脑处理。
 > 3. 网络中断或页面关闭期间，审批可能自动退回电脑。以页面或电脑端实际提示为准。
+
+### 自建中继（自己的服务器 + 域名）
+
+适合自己有国内服务器和域名、希望公网地址长期不变的用户。
+
+1. 在服务器上执行一次安装脚本：
+
+   ```bash
+   sudo bash relay-server/install.sh --check --host remote.example.com --control-host frp.example.com
+   sudo bash relay-server/install.sh --host remote.example.com --control-host frp.example.com
+   ```
+
+2. 按脚本输出，在 A 端「遥控设置」→「外部访问」→「自建中继」里填：
+
+   ```text
+   中继控制域名：frp.example.com
+   控制端口：443
+   传输方式：wss
+   公网域名：remote.example.com
+   frp token：安装脚本输出的那一串
+   ```
+
+3. 点「开启」，再点「测试连接」；两个状态灯都变绿后，手机和 B 端用 `https://remote.example.com` 访问。
+
+> 自建中继需要两个域名记录：`frp.example.com` 给控制连接，`remote.example.com` 给网页流量。A 端只需要出站 443，不需要公网 IP。
+>
+> 服务器安装脚本不会自动修改已有的 Nginx；80/443 被占用时会退出。详细说明见 [relay-server/README.md](relay-server/README.md)。
 
 ### 进阶设置：内嵌桌面端界面（手机或 PC 网页）
 

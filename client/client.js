@@ -44,6 +44,7 @@ window.__ModuleLoader__.load({
     var PAIRING_PATH = '/mini-remote/pairing';
     var TOKEN_PATH = '/mini-remote/token';
     var TUNNEL_PATH = '/mini-remote/tunnel';
+    var SELF_RELAY_PATH = '/mini-remote/self-relay';
     var SERVE_PATH = '/mini-remote/serve';
     var FEISHU_PATH = '/mini-remote/feishu';
     // **这里原来有一条本机取票的地址常量**：面板点开时拿它去换一张「本机电脑端界面」的票。
@@ -653,6 +654,21 @@ window.__ModuleLoader__.load({
       var bManageState = useState(false);
       var bAllowManage = bManageState[0];
       var setBAllowManage = bManageState[1];
+      // 自建中继：表单草稿、最近一次服务端状态、错误和“测试通过”提示。
+      // token 永远不回显；草稿里留空表示沿用已保存的那一枚。
+      var relayDraftState = useState(null);
+      var relayDraft = relayDraftState[0];
+      var setRelayDraft = relayDraftState[1];
+      var relayInfoState = useState(null);
+      var relayInfo = relayInfoState[0];
+      var setRelayInfo = relayInfoState[1];
+      var relayErrState = useState(null);
+      var relayError = relayErrState[0];
+      var setRelayError = relayErrState[1];
+      var relayNoteState = useState(null);
+      var relayNote = relayNoteState[0];
+      var setRelayNote = relayNoteState[1];
+      var relayInitRef = useRef(false);
       // 按钮点下去到 React 重渲染之间还有一小段；用 ref 挡住同一瞬间的第二次点击。
       var bPairingRef = useRef(false);
       // B 项目：门牌列表 + 新建表单 + 当前打开的文件面板。
@@ -807,6 +823,54 @@ window.__ModuleLoader__.load({
           chatIds: typeof f.chatIds === 'string' ? f.chatIds : '',
         });
       }, [info, feishuDraft]);
+
+      // 自建中继的草稿只在第一次拿到服务端状态时填一次；之后以用户在这一页
+      // 改的为准，后台刷新不能把他的输入抹掉。token 永远是空的。
+      useEffect(function () {
+        if (relayInitRef.current) return;
+        var r = info && info.selfRelay;
+        if (!r) return;
+        relayInitRef.current = true;
+        setRelayInfo(r);
+        setRelayDraft({
+          serverAddr: typeof r.serverAddr === 'string' ? r.serverAddr : '',
+          serverPort: Number(r.serverPort || 443),
+          token: '',
+          publicHost: typeof r.publicHost === 'string' ? r.publicHost : '',
+          transport: r.transport || 'wss',
+          frpcPath: '',
+        });
+      }, [info]);
+
+      var runRelay = function (action) {
+        if (busy || !relayDraft) return;
+        setBusy(true);
+        setRelayError(null);
+        setRelayNote(null);
+        fetch(SELF_RELAY_PATH, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(Object.assign({}, relayDraft, { action: action })),
+        })
+          .then(function (res) {
+            return res.json().then(
+              function (body) { return { status: res.status, body: body }; },
+              function () { return { status: res.status, body: null }; },
+            );
+          })
+          .then(function (r) {
+            if (r.body && r.body.selfRelay) setRelayInfo(r.body.selfRelay);
+            if (r.body && r.body.ok) {
+              setRelayNote(action === 'test' ? '公网测试通过。' : (action === 'stop' ? '已停止。' : '已保存。'));
+            } else {
+              setRelayError((r.body && r.body.error) || ('操作失败：HTTP ' + r.status));
+            }
+          })
+          .catch(function (err) {
+            setRelayError('操作失败：' + ((err && err.message) || String(err)));
+          })
+          .then(function () { setBusy(false); });
+      };
 
       var copy = function (url) {
         if (!url) return;
@@ -2100,6 +2164,20 @@ window.__ModuleLoader__.load({
       // 出错时也要把开关露出来：不然「隧道起不来」会让整个面板变成一条报错，
       // 用户连关掉它的地方都找不到。
       if (info.tunnel) external.push(tunnelBlock(info.tunnel, busy, toggle));
+      if (info.selfRelay) {
+        external.push(selfRelayBlock({
+          draft: relayDraft,
+          info: relayInfo || info.selfRelay,
+          note: relayNote,
+          error: relayError,
+          setDraft: setRelayDraft,
+        }, busy, {
+          save: function () { runRelay('save'); },
+          start: function () { runRelay('start'); },
+          test: function () { runRelay('test'); },
+          stop: function () { runRelay('stop'); },
+        }));
+      }
       // HTTPS 那一块：**不管配对信息成功还是失败都要出现**。失败时尤其要出现——
       // tailnet 没开 Serve 的时候，用户需要的正是那条开启链接，而那时候面板上
       // 其它东西多半也在报错，正好是他最需要指路的时候。
@@ -3318,6 +3396,91 @@ window.__ModuleLoader__.load({
         createUi,
         list,
         browseModal,
+      );
+    }
+
+    /**
+     * 自建中继：用户自己的服务器 + 域名。
+     *
+     * 这一块只负责“填四项、保存、开启、测试”。服务器那一半由 relay-server/
+     * 的一次性安装脚本完成，不在这里做远程安装。
+     */
+    function selfRelayBlock(relay, busy, run) {
+      var draft = relay.draft;
+      if (!draft) return null;
+      var info = relay.info || {};
+      var configured = Boolean(info.configured);
+      var running = Boolean(info.running);
+      var connected = Boolean(info.connected);
+      var set = function (key, value) {
+        run.setDraft(Object.assign({}, draft, { [key]: value }));
+      };
+      var field = function (label, key, opts) {
+        var o = opts || {};
+        return h('label', { style: { display: 'block', marginTop: 10 } },
+          h('div', { style: styles.muted }, label),
+          h('input', {
+            type: o.secret ? 'password' : 'text',
+            value: draft[key] == null ? '' : String(draft[key]),
+            placeholder: o.placeholder || '',
+            spellCheck: false,
+            onChange: function (e) { set(key, e.target.value); },
+            style: Object.assign({}, styles.input, { marginTop: 4 }),
+          }),
+        );
+      };
+      var status = !configured
+        ? '还没配置。先在自己的服务器上跑一次 relay-server/install.sh，再把地址、token 和域名填到这里。'
+        : running
+          ? (connected
+            ? 'frpc 正在运行，公网地址已经打通。'
+            : 'frpc 进程在，但公网还没确认打通。点“测试连接”看具体原因。')
+          : '已保存配置，但 frpc 没在跑。点“开启”后它会随 DSH 自动启动。';
+
+      return h('div', { key: 'self-relay', style: styles.block },
+        h('div', { style: styles.entryTitle }, '自建中继'),
+        h('div', { style: styles.muted },
+          '用自己的国内服务器和域名，不经过 Cloudflare 或第三方中继。'
+          + '服务器需要先跑一次 relay-server/ 里的安装脚本。'),
+        field('中继控制域名', 'serverAddr', { placeholder: 'frp.example.com' }),
+        field('控制端口', 'serverPort', { placeholder: '443' }),
+        field('frp token', 'token', { secret: true, placeholder: configured ? '留空 = 沿用已保存的 token' : '从服务器安装脚本输出里复制' }),
+        field('公网域名', 'publicHost', { placeholder: 'remote.example.com' }),
+        h('label', { style: { display: 'block', marginTop: 10 } },
+          h('div', { style: styles.muted }, '传输方式'),
+          h('select', {
+            value: draft.transport || 'wss',
+            onChange: function (e) {
+              var t = e.target.value;
+              run.setDraft(Object.assign({}, draft, {
+                transport: t,
+                serverPort: t === 'wss' ? 443 : 7000,
+              }));
+            },
+            style: Object.assign({}, styles.input, { marginTop: 4 }),
+          },
+            h('option', { value: 'wss' }, '443 · WebSocket + TLS（推荐，A 端只需出站 443）'),
+            h('option', { value: 'tcp' }, '7000 · TCP（服务器需要放行 7000）'),
+          ),
+        ),
+        h('div', { style: { display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 12 } },
+          h('button', { type: 'button', disabled: Boolean(busy), style: styles.btn, onClick: function () { run.save(); } }, '保存'),
+          h('button', { type: 'button', disabled: Boolean(busy), style: styles.btn, onClick: function () { run.start(); } }, '开启'),
+          h('button', { type: 'button', disabled: Boolean(busy), style: styles.btn, onClick: function () { run.test(); } }, '测试连接'),
+          running ? h('button', { type: 'button', disabled: Boolean(busy), style: styles.btn, onClick: function () { run.stop(); } }, '停止') : null,
+        ),
+        h('div', { style: styles.muted, marginTop: 10 }, status),
+        info.url ? h('div', { style: styles.monoInput, marginTop: 6 }, info.url) : null,
+        h('div', { style: styles.muted, marginTop: 8 },
+          '状态灯：'
+          + (running ? 'frpc 运行中' : 'frpc 未运行')
+          + ' · '
+          + (connected ? '公网已通' : '公网未确认')),
+        relay.note ? h('div', { style: styles.muted }, relay.note) : null,
+        relay.error ? h('div', { style: styles.detail }, relay.error) : null,
+        h('div', { style: styles.warn, marginTop: 8 },
+          '自建中继会把 A 的手机服务暴露到你的域名上；访问仍由 token/Bearer/票据保护。'
+          + '域名对外提供服务前，请确认备案和当地要求。'),
       );
     }
 

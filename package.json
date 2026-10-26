@@ -16,6 +16,7 @@
   "files": [
     "lib",
     "client/client.js",
+    "relay-server",
     "cordis.patch.yml",
     "README.md",
     "CHANGELOG.md",
