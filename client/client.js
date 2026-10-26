@@ -3551,47 +3551,120 @@ window.__ModuleLoader__.load({
      * `relay-server/README.md` 对齐，不在界面里另编一套。
      */
     function selfRelayGuide() {
+      var aiPrompt = [
+        '我在自己的电脑上使用 dsh-mini-remote，想自建中继。请用你手里的终端工具，通过 SSH 帮我配置一台服务器。',
+        '',
+        '服务器信息：',
+        '- 系统：Ubuntu / Debian（以实际为准）',
+        '- 公网 IP：<填写服务器 IP>',
+        '- SSH 用户：<填写用户名>',
+        '- SSH 端口：22',
+        '- 域名：<填写你的域名，例如 example.com>',
+        '- 公网域名：<填写 remote.example.com>',
+        '- 控制域名：<填写 frp.example.com>',
+        '',
+        '请按下面顺序做，每一步先检查再动手；任何一步不满足就停下来告诉我，不要硬改：',
+        '1. 检查 80/443 是否空闲、两个域名是否都解析到这台服务器、云安全组是否放行 80/443。',
+        '2. 如果本机插件目录里有 relay-server/，优先用里面的 install.sh；没有就按 relay-server/README.md 手工配置。',
+        '3. 安装 frps 0.71.1，只监听 127.0.0.1:7000，vhostHTTPPort=8080，使用随机 token 鉴权。',
+        '4. 控制域名走 443 WebSocket + TLS，转发到 127.0.0.1:7000；公网域名走 443，转发到 127.0.0.1:8080。',
+        '5. 用 Caddy 自动申请证书；如果服务器已有 Nginx，不要自动改，先停下来把建议配置给我看。',
+        '6. 不要动服务器上已有的网站，不要重启原站服务；需要改 Nginx 时先备份并先跑 nginx -t。',
+        '7. 完成后验证：frps 正常运行、两张证书有效、公网域名返回 502 或 200（A 端还没连时 502 正常）。',
+        '8. 最后只把 frp token、你执行的命令、验证结果告诉我；token 不要写进日志或公开地方。',
+        '',
+        '如果 SSH 还没有配好，先告诉我要怎么登录，不要猜密码，也不要把密码写进聊天记录。',
+      ].join('\n');
+
+      var copyPrompt = function () {
+        try {
+          if (navigator && navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+            navigator.clipboard.writeText(aiPrompt);
+          }
+        } catch (err) { /* 剪贴板不可用：下面的文本框仍可手动全选 */ }
+      };
+
       var sections = [
-        ['一、先准备两个域名', [
-          '在 DNSPod / 域名后台加两条 A 记录，都指向这台服务器的公网 IP：',
-          'frp.example.com    → 控制连接（frpc 连它）',
-          'remote.example.com → 手机和 B 端打开的公网地址',
-          'TTL 用 600；两条都解析成功后，再往下做。',
+        ['方法一：自己在服务器上执行（推荐先看这一种）', [
+          '适合：你有一台干净的 Ubuntu/Debian 服务器，愿意复制一两条命令。',
         ]],
-        ['二、在服务器上装 frps', [
-          '推荐用干净的 Ubuntu/Debian 服务器，80/443 没有被别的网站占用。',
-          '把插件包里的 relay-server/ 目录传到服务器，执行：',
+        ['第 1 步：准备服务器和端口', [
+          '1. 买一台 Ubuntu 22.04/24.04 或 Debian 11/12 的服务器，2 核 2G 就够。',
+          '2. 在云厂商控制台的「防火墙 / 安全组」里放行 22、80、443。7000 不用对外开放。',
+          '3. 确认服务器上 80/443 没有被别的网站占用；已经有网站的机器不要跑自动安装。',
+          '4. 记下服务器公网 IP，后面 DNS 和 SSH 都要用。',
+        ]],
+        ['第 2 步：加两条 DNS 解析', [
+          '在 DNSPod / 域名后台加两条 A 记录，记录值都是服务器公网 IP，TTL 600：',
+          '主机记录 frp     → 控制域名，例如 frp.example.com',
+          '主机记录 remote  → 公网域名，例如 remote.example.com',
+          '主机记录只填 frp / remote，不要填完整域名；不要动已有的 @、www 记录。',
+          '加完在电脑上确认：nslookup frp.example.com 8.8.8.8 和 nslookup remote.example.com 8.8.8.8 都返回服务器 IP。',
+        ]],
+        ['第 3 步：把 relay-server 传到服务器', [
+          '插件包里有一个 relay-server/ 目录。tgz 安装包解压后在 package/relay-server；npm 安装在 node_modules/dsh-mini-remote/relay-server。',
+          '用 WinSCP 把整个 relay-server 文件夹拖到服务器，或在本机 PowerShell 执行：',
+          'scp -r "本机路径\relay-server" root@服务器IP:/root/',
+          '然后登录服务器：ssh root@服务器IP',
+          'cd /root/relay-server',
+        ]],
+        ['第 4 步：先体检，再安装', [
+          '先跑体检，不要直接安装：',
           'sudo bash install.sh --check --host remote.example.com --control-host frp.example.com',
+          '看到「检查通过」再正式安装：',
           'sudo bash install.sh --host remote.example.com --control-host frp.example.com',
-          '脚本会装好 frps + Caddy、申请证书，并打印 frp token。token 只显示一次。',
-          '如果服务器上已经有 Nginx，不要跑自动安装；按 relay-server/README.md 手工加两段 Nginx 配置。',
+          '脚本会装 frps + Caddy、申请两张证书、启动服务，最后打印 frp token。token 只显示一次，先复制到安全的地方。',
+          '如果提示 80/443 被占用，不要强行继续；要么换干净服务器，要么按 relay-server/README.md 手工加 Nginx。',
         ]],
-        ['三、回到这台电脑填写', [
+        ['第 5 步：回插件填写并开启', [
           '中继控制域名：frp.example.com',
           'frp token：安装脚本打印的那一串',
           '公网域名：remote.example.com',
-          '控制端口固定 443，传输方式固定 WebSocket + TLS；保存并开启。',
+          '控制端口固定 443，传输方式固定 WebSocket + TLS；点「保存并开启」。',
+          '状态变成「已连接」、公网链路「已通」后，点「测试连接」；手机连接里会出现「自建中继」二维码。',
         ]],
-        ['四、确认成功', [
-          '顶部状态变成「已连接」，公网链路显示「已通」。',
-          '点「测试连接」，从公网拉一次接口；通过后手机连接里会出现「自建中继」二维码。',
-          'B 端和远程窗口也用同一个公网地址。',
+        ['方法二：让当前 DSH 会话的模型帮你配', [
+          '适合：你不想自己看 Linux 命令，但愿意把服务器的 SSH 登录方式交给当前会话。',
+          '注意：只给你信任的会话；优先用 SSH 密钥，不要粘贴云账号密码。装完以后可以撤掉临时权限。',
         ]],
-        ['五、注意', [
-          '服务器安全组放行 80/443；A 端只需要出站 443。',
-          '域名对外提供服务涉及备案，请按当地要求办理。',
-          'frp token 是服务器和 A 端之间的钥匙，不要发到公开地方。',
-          '自建中继解决的是地址固定和稳定可达，不增加带宽；4Mbps 下远程窗口冷加载仍需十几秒。',
+        ['第 1 步：还是先加 DNS', [
+          'AI 不能替你登录 DNSPod，所以两条 A 记录仍然要你先加好，并确认解析到服务器 IP。',
+        ]],
+        ['第 2 步：复制下面这段提示词', [
+          '把尖括号里的内容换成你的真实信息，然后发给当前 DSH 会话。',
+          '如果 SSH 还没配好，模型会先问你怎么登录；不要让它猜密码。',
+        ]],
+        ['第 3 步：模型做完后', [
+          '它会告诉你 frp token、执行过的命令和验证结果。',
+          '把 token 填回上面的「frp token」，公网域名和控制域名保持和提示词里一致，点「保存并开启」。',
+          '如果模型说 80/443 被占用、DNS 没生效或证书失败，先解决那一项，不要跳过。',
         ]],
       ];
+
       var out = [h('div', { key: 'self-relay-guide-intro', style: styles.muted },
-        '按下面顺序做，第一次大约 10 分钟。命令和 relay-server/README.md 保持一致。')];
+        '按下面顺序做。第一次大约 10 分钟；命令和 relay-server/README.md 保持一致。')];
       for (var i = 0; i < sections.length; i += 1) {
         out.push(h('div', { key: 'self-relay-guide-' + i, style: Object.assign({}, styles.entryTitle, { marginTop: 12 }) }, sections[i][0]));
         for (var j = 0; j < sections[i][1].length; j += 1) {
           out.push(h('div', { key: 'self-relay-guide-' + i + '-' + j, style: styles.muted }, sections[i][1][j]));
         }
       }
+      out.push(h('div', { key: 'self-relay-ai-prompt-label', style: Object.assign({}, styles.muted, { marginTop: 12 }) },
+        '发给当前 DSH 会话的提示词（先替换尖括号内容）：'));
+      out.push(h('textarea', {
+        key: 'self-relay-ai-prompt',
+        readOnly: true,
+        value: aiPrompt,
+        spellCheck: false,
+        onFocus: function (e) { try { e.target.select(); } catch (err) { /* 忽略 */ } },
+        style: Object.assign({}, styles.monoInput, {
+          marginTop: 6, width: '100%', minHeight: 220, resize: 'vertical',
+          fontSize: 12, lineHeight: 1.6,
+        }),
+      }));
+      out.push(h('div', { key: 'self-relay-ai-copy', style: { marginTop: 8 } },
+        h('button', { type: 'button', style: styles.btn, onClick: copyPrompt }, '复制提示词'),
+      ));
       return h('div', { key: 'self-relay-guide' }, out);
     }
 

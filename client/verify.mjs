@@ -2395,8 +2395,12 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
     assert.ok(guideBtn, '自建中继末尾要有配置指引按钮');
     guideBtn.props.onClick();
     await settle();
-    assert.match(textOf(st.tree), /先准备两个域名/, '点开之后要看到第一步');
+    assert.match(textOf(st.tree), /准备服务器和端口/, '点开之后要看到第一步');
     assert.match(textOf(st.tree), /收起配置指引/, '按钮要变成收起');
+    const prompt = walk(st.tree).find((n) => n && n.type === 'textarea');
+    assert.ok(prompt, '第二种方法要提供可复制的提示词');
+    assert.match(prompt.props.value, /通过 SSH 帮我配置一台服务器/);
+    assert.ok(buttonIn(st.tree, '复制提示词'), '提示词旁边要有复制按钮');
     st.harness.unmount();
   });
 }
