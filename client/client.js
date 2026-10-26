@@ -3557,7 +3557,8 @@ window.__ModuleLoader__.load({
         '服务器信息：',
         '- 系统：Ubuntu / Debian（以实际为准）',
         '- 公网 IP：<填写服务器 IP>',
-        '- SSH 用户：<填写用户名>',
+        '- SSH 登录命令：<填写，例如 ssh relay 或 ssh root@服务器IP>',
+        '- 已经配置 SSH 密钥免密登录；如果连不上，先告诉我要怎么配，不要猜密码，也不要把密码写进聊天记录。',
         '- SSH 端口：22',
         '- 域名：<填写你的域名，例如 example.com>',
         '- 公网域名：<填写 remote.example.com>',
@@ -3604,14 +3605,24 @@ window.__ModuleLoader__.load({
           '7. 等 1～10 分钟，在电脑上执行 nslookup frp.example.com 8.8.8.8 和 nslookup remote.example.com 8.8.8.8；两个都返回服务器 IP 才算好。',
           '如果域名用的是 Cloudflare 或其他 CDN，先关掉代理（灰色云），让解析直接指向服务器；否则证书申请会失败。',
         ]],
-        ['第 3 步：把 relay-server 传到服务器', [
+        ['第 3 步：先让这台电脑能登录服务器', [
+          '有两种办法，选一种即可。',
+          '办法 A：用云厂商控制台的「网页终端 / OrcaTerm」登录。不用配 SSH，适合第一次用。',
+          '办法 B：配置 SSH 密钥免密登录，之后一条 ssh 命令就能进。Windows PowerShell 里执行：',
+          'ssh-keygen -t ed25519 -f $env:USERPROFILE\\.ssh\\dsh_relay',
+          'type $env:USERPROFILE\\.ssh\\dsh_relay.pub | ssh root@服务器IP "mkdir -p ~/.ssh && chmod 700 ~/.ssh && cat >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys"',
+          '然后在本机 ~/.ssh/config 里加：Host relay / HostName 服务器IP / User root / IdentityFile ~/.ssh/dsh_relay',
+          '测试：ssh relay。能直接进去、不再问密码，就配好了。',
+          '不要把 root 密码贴在聊天里；用密钥，装完可以撤掉。',
+        ]],
+        ['第 4 步：把 relay-server 传到服务器', [
           '插件包里有一个 relay-server/ 目录。tgz 安装包解压后在 package/relay-server；npm 安装在 node_modules/dsh-mini-remote/relay-server。',
           '用 WinSCP 把整个 relay-server 文件夹拖到服务器，或在本机 PowerShell 执行：',
-          'scp -r "本机路径\relay-server" root@服务器IP:/root/',
-          '然后登录服务器：ssh root@服务器IP',
+          'scp -r "本机路径\\relay-server" root@服务器IP:/root/',
+          '然后登录服务器：ssh relay（或 ssh root@服务器IP）',
           'cd /root/relay-server',
         ]],
-        ['第 4 步：先体检，再安装', [
+        ['第 5 步：先体检，再安装', [
           '先跑体检，不要直接安装：',
           'sudo bash install.sh --check --host remote.example.com --control-host frp.example.com',
           '看到「检查通过」再正式安装：',
@@ -3619,7 +3630,7 @@ window.__ModuleLoader__.load({
           '脚本会装 frps + Caddy、申请两张证书、启动服务，最后打印 frp token。token 只显示一次，先复制到安全的地方。',
           '如果提示 80/443 被占用，不要强行继续；要么换干净服务器，要么按 relay-server/README.md 手工加 Nginx。',
         ]],
-        ['第 5 步：回插件填写并开启', [
+        ['第 6 步：回插件填写并开启', [
           '中继控制域名：frp.example.com',
           'frp token：安装脚本打印的那一串',
           '公网域名：remote.example.com',
@@ -3640,11 +3651,17 @@ window.__ModuleLoader__.load({
           '6. 确认后告诉当前会话「DNS 已加好」，再让它继续；它会在服务器上再查一次解析，避免证书申请失败。',
           '如果域名走 Cloudflare/CDN，先把代理关掉（灰色云），让记录直接指向服务器。',
         ]],
-        ['第 2 步：复制下面这段提示词', [
+        ['第 2 步：先让当前会话能登录服务器', [
+          '先确认你的 DSH 会话能执行 ssh。最稳的是已经配好 SSH 密钥：',
+          '在本机终端执行 ssh relay（或 ssh root@服务器IP），能直接进去、不再问密码，就说明当前电脑已经能免密登录。',
+          '如果还没配，先按方法一第 3 步配一次；不要把 root 密码发给模型。',
+          '配好后，把登录命令（例如 ssh relay）写进下面的提示词，模型才知道怎么进服务器。',
+        ]],
+        ['第 3 步：复制下面这段提示词', [
           '把尖括号里的内容换成你的真实信息，然后发给当前 DSH 会话。',
           '如果 SSH 还没配好，模型会先问你怎么登录；不要让它猜密码。',
         ]],
-        ['第 3 步：模型做完后', [
+        ['第 4 步：模型做完后', [
           '它会告诉你 frp token、执行过的命令和验证结果。',
           '把 token 填回上面的「frp token」，公网域名和控制域名保持和提示词里一致，点「保存并开启」。',
           '如果模型说 80/443 被占用、DNS 没生效或证书失败，先解决那一项，不要跳过。',
