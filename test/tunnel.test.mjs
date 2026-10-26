@@ -244,6 +244,33 @@ test('隧道起来之后，配对面板多出一条公网地址，排在最后',
   assert.deepEqual(payload.tunnel, { enabled: true, up: true, starting: false, error: null })
 })
 
+test('自建中继连通时，配对面板多出一条固定公网地址', async () => {
+  const payload = await buildPairing({
+    port: 3090,
+    token: 'abc123',
+    bound: [],
+    selfRelay: { connected: true, url: 'https://remote.example.com' },
+  })
+  assert.equal(payload.ok, true)
+  assert.equal(payload.entries.length, 1)
+  const [entry] = payload.entries
+  assert.equal(entry.kind, 'self-relay')
+  assert.equal(entry.url, 'https://remote.example.com/mini?token=abc123')
+  assert.match(entry.qr, /^data:image\/png;base64,/)
+  assert.match(entry.hint, /地址固定/)
+})
+
+test('自建中继没连通时，不把死地址塞进二维码', async () => {
+  const payload = await buildPairing({
+    port: 3090,
+    token: 'abc123',
+    bound: [],
+    selfRelay: { connected: false, url: 'https://remote.example.com' },
+  })
+  assert.equal(payload.ok, false)
+  assert.equal(payload.entries, undefined)
+})
+
 test('隧道没开时，面板里不出现公网那条', async () => {
   const payload = await buildPairing({
     port: 3090,
