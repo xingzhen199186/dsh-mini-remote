@@ -94,18 +94,25 @@ check() {
     die "80 或 443 已被占用。第一版不自动改现有 Nginx；请换一台干净 VPS，或按 README 手工贴片段。"
   fi
   say "80/443 空闲。"
-  if [ -n "$PUBLIC_HOST" ]; then
-    say "公网域名：$PUBLIC_HOST"
-    if command -v getent >/dev/null 2>&1; then
-      getent hosts "$PUBLIC_HOST" || say "提示：这个域名现在解析不出来；先加 DNS，再签证书。"
-    fi
+  local server_ip=""
+  if command -v curl >/dev/null 2>&1; then
+    server_ip="$(curl -fsS --max-time 5 https://api.ipify.org 2>/dev/null || true)"
   fi
-  if [ -n "$CONTROL_HOST" ]; then
-    say "控制域名：$CONTROL_HOST"
+  for host in "$PUBLIC_HOST" "$CONTROL_HOST"; do
+    [ -n "$host" ] || continue
+    say "域名：$host"
     if command -v getent >/dev/null 2>&1; then
-      getent hosts "$CONTROL_HOST" || say "提示：这个域名现在解析不出来；先加 DNS，再签证书。"
+      local resolved
+      resolved="$(getent ahostsv4 "$host" 2>/dev/null | awk 'NR==1{print $1}')"
+      if [ -z "$resolved" ]; then
+        die "$host 还没有解析记录。先加 DNS，再签证书；现在继续会撞 Let's Encrypt 的失败次数。"
+      fi
+      if [ -n "$server_ip" ] && [ "$resolved" != "$server_ip" ]; then
+        die "$host 解析到 $resolved，但这台服务器的公网 IP 是 $server_ip。先改 DNS，再签证书。"
+      fi
+      say "  → $resolved"
     fi
-  fi
+  done
   say "检查通过。"
 }
 
