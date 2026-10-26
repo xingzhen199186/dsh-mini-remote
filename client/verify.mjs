@@ -1820,6 +1820,11 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
     token: TOKEN,
     entries: [{ kind: 'lan', label: '内网', hint: '手机连同一个 Wi-Fi 时用这个', url: URL_LAN, qr: QR }],
     tunnel: null,
+    selfRelay: {
+      enabled: false, running: false, connected: false, url: '', error: null,
+      frpcPath: '', version: '', configured: false, serverAddr: '',
+      serverPort: 443, publicHost: '', transport: 'wss',
+    },
   };
 
   // 「整屏显示别的电脑」要两样东西：官方布局服务的把手（`ctx.layout.selectPanel`）和设置页

@@ -2135,11 +2135,21 @@ window.__ModuleLoader__.load({
           toggleAgent: function () { setAgentGroupOpen(function (v) { return !v; }); },
           feishuOpen: feishuGroupOpen,
           toggleFeishu: function () { setFeishuGroupOpen(function (v) { return !v; }); },
+        }, {
+          draft: relayDraft,
+          info: relayInfo,
+          note: relayNote,
+          error: relayError,
+          setDraft: setRelayDraft,
+          save: function () { runRelay('save'); },
+          start: function () { runRelay('start'); },
+          test: function () { runRelay('test'); },
+          stop: function () { runRelay('stop'); },
         }),
       );
     }
 
-    function content(info, failure, copied, copy, busy, toggle, pwd, serve, feishu, dev, remote, agent, bAgent, bProject, rmt, self, groups) {
+    function content(info, failure, copied, copy, busy, toggle, pwd, serve, feishu, dev, remote, agent, bAgent, bProject, rmt, self, groups, relay) {
       if (failure) return h('div', { style: styles.error }, failure);
       if (!info) return h('div', { style: styles.loading }, '正在读取配对信息…');
 
@@ -2168,18 +2178,18 @@ window.__ModuleLoader__.load({
       // 出错时也要把开关露出来：不然「隧道起不来」会让整个面板变成一条报错，
       // 用户连关掉它的地方都找不到。
       if (info.tunnel) external.push(tunnelBlock(info.tunnel, busy, toggle));
-      if (info.selfRelay) {
+      if (info.selfRelay && relay) {
         external.push(selfRelayBlock({
-          draft: relayDraft,
-          info: relayInfo || info.selfRelay,
-          note: relayNote,
-          error: relayError,
-          setDraft: setRelayDraft,
+          draft: relay.draft,
+          info: relay.info || info.selfRelay,
+          note: relay.note,
+          error: relay.error,
+          setDraft: relay.setDraft,
         }, busy, {
-          save: function () { runRelay('save'); },
-          start: function () { runRelay('start'); },
-          test: function () { runRelay('test'); },
-          stop: function () { runRelay('stop'); },
+          save: relay.save,
+          start: relay.start,
+          test: relay.test,
+          stop: relay.stop,
         }));
       }
       // HTTPS 那一块：**不管配对信息成功还是失败都要出现**。失败时尤其要出现——
