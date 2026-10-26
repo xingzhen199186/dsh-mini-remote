@@ -2404,7 +2404,7 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
     assert.match(textOf(st.tree), /收起配置指引/, '按钮要变成收起');
     const prompt = walk(st.tree).find((n) => n && n.type === 'textarea');
     assert.ok(prompt, '第二种方法要提供可复制的提示词');
-    assert.match(prompt.props.value, /通过 SSH 帮我配置一台服务器/);
+    assert.match(prompt.props.value, /通过 SSH 登录服务器/);
     assert.ok(buttonIn(st.tree, '复制提示词'), '提示词旁边要有复制按钮');
     st.harness.unmount();
   });
