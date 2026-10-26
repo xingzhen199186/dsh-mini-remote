@@ -3595,11 +3595,14 @@ window.__ModuleLoader__.load({
           '4. 记下服务器公网 IP，后面 DNS 和 SSH 都要用。',
         ]],
         ['第 2 步：加两条 DNS 解析', [
-          '在 DNSPod / 域名后台加两条 A 记录，记录值都是服务器公网 IP，TTL 600：',
-          '主机记录 frp     → 控制域名，例如 frp.example.com',
-          '主机记录 remote  → 公网域名，例如 remote.example.com',
-          '主机记录只填 frp / remote，不要填完整域名；不要动已有的 @、www 记录。',
-          '加完在电脑上确认：nslookup frp.example.com 8.8.8.8 和 nslookup remote.example.com 8.8.8.8 都返回服务器 IP。',
+          '1. 登录 DNSPod（或腾讯云「DNS 解析 DNSPod」），点开你的域名，进入「记录管理」。',
+          '2. 点左上角蓝色的「添加记录」，不要点「新手快速解析」。',
+          '3. 第一条填：主机记录 frp；记录类型 A；线路类型 默认；记录值 服务器公网 IP；TTL 600；权重和优先级留空。保存。',
+          '4. 再点一次「添加记录」，第二条填：主机记录 remote；记录类型 A；线路类型 默认；记录值同一个服务器 IP；TTL 600；权重和优先级留空。保存。',
+          '5. 主机记录只填 frp / remote，不要填 frp.example.com 这种完整域名；不要改已有的 @、www 记录。',
+          '6. 如果列表里已经有 frp 或 remote，点「修改」改那条，不要再新增一条重复的。',
+          '7. 等 1～10 分钟，在电脑上执行 nslookup frp.example.com 8.8.8.8 和 nslookup remote.example.com 8.8.8.8；两个都返回服务器 IP 才算好。',
+          '如果域名用的是 Cloudflare 或其他 CDN，先关掉代理（灰色云），让解析直接指向服务器；否则证书申请会失败。',
         ]],
         ['第 3 步：把 relay-server 传到服务器', [
           '插件包里有一个 relay-server/ 目录。tgz 安装包解压后在 package/relay-server；npm 安装在 node_modules/dsh-mini-remote/relay-server。',
@@ -3627,8 +3630,15 @@ window.__ModuleLoader__.load({
           '适合：你不想自己看 Linux 命令，但愿意把服务器的 SSH 登录方式交给当前会话。',
           '注意：只给你信任的会话；优先用 SSH 密钥，不要粘贴云账号密码。装完以后可以撤掉临时权限。',
         ]],
-        ['第 1 步：还是先加 DNS', [
-          'AI 不能替你登录 DNSPod，所以两条 A 记录仍然要你先加好，并确认解析到服务器 IP。',
+        ['第 1 步：还是先加 DNS（这一步 AI 替不了你）', [
+          'AI 不能替你登录 DNSPod，也没有你的域名账号权限；两条 A 记录必须你自己加。具体操作：',
+          '1. 登录 DNSPod 或腾讯云「DNS 解析 DNSPod」，点开域名，进入「记录管理」。',
+          '2. 点「添加记录」，第一条：主机记录 frp；类型 A；线路 默认；记录值 服务器公网 IP；TTL 600；权重和优先级留空；保存。',
+          '3. 再点「添加记录」，第二条：主机记录 remote；类型 A；线路 默认；记录值同一个服务器 IP；TTL 600；权重和优先级留空；保存。',
+          '4. 主机记录只填 frp / remote，不要填完整域名；不要动已有 @、www；已有同名记录就改，不要重复添加。',
+          '5. 等 1～10 分钟，自己先确认：nslookup frp.example.com 8.8.8.8 和 nslookup remote.example.com 8.8.8.8 都返回服务器 IP。',
+          '6. 确认后告诉当前会话「DNS 已加好」，再让它继续；它会在服务器上再查一次解析，避免证书申请失败。',
+          '如果域名走 Cloudflare/CDN，先把代理关掉（灰色云），让记录直接指向服务器。',
         ]],
         ['第 2 步：复制下面这段提示词', [
           '把尖括号里的内容换成你的真实信息，然后发给当前 DSH 会话。',
