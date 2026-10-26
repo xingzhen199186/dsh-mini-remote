@@ -2387,6 +2387,18 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
     st.harness.unmount();
     fakeLayout.panelInfo.getSnapshot = () => ({ activePanelId: 'conversation' });
   });
+
+  await check('自建中继的配置指引能展开', async () => {
+    fresh();
+    const st = await mountRemotes(listOf([]), () => ({ ok: true }));
+    const guideBtn = buttonIn(st.tree, '配置指引（服务器 + 域名 + frpc）');
+    assert.ok(guideBtn, '自建中继末尾要有配置指引按钮');
+    guideBtn.props.onClick();
+    await settle();
+    assert.match(textOf(st.tree), /先准备两个域名/, '点开之后要看到第一步');
+    assert.match(textOf(st.tree), /收起配置指引/, '按钮要变成收起');
+    st.harness.unmount();
+  });
 }
 
 {

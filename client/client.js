@@ -2190,6 +2190,8 @@ window.__ModuleLoader__.load({
           note: relay.note,
           error: relay.error,
           setDraft: relay.setDraft,
+          guideOpen: relay.guideOpen,
+          toggleGuide: relay.toggleGuide,
         }, busy, {
           save: relay.save,
           start: relay.start,
