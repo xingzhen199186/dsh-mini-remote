@@ -10,7 +10,7 @@
 - Usage based billing
 
 它们是付费账单/超阈值通知，不是 Workers Free 每日额度告警。  
-`Monitors` 功能在 Cloudflare 文档里存在（Alerts > Monitors，可对 SQL API 数据集设阈值），但当前账户的 Monitors 页面没有 `Create a Monitor` 按钮；Jev 浏览器两次尝试都停在侧栏，无法创建。因此改用只读 GraphQL 查询。
+`Monitors` 功能在 Cloudflare 文档里存在（Alerts > Monitors，可对 SQL API 数据集设阈值），当前账户的 Monitors 页面最终能打开创建表单，但 Dataset 下拉只有 `Workers Logs`、`Workers Real-Time Issues`，没有 `Workers Requests` / `Workers Invocations`；Free 账户无法按 Workers 请求量设阈值。因此改用只读 GraphQL 查询。
 
 ## 运行
 
