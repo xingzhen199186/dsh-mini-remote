@@ -679,6 +679,9 @@ window.__ModuleLoader__.load({
       var namedTunnelState = useState({ token: '', publicUrl: '' });
       var namedTunnel = namedTunnelState[0];
       var setNamedTunnel = namedTunnelState[1];
+      var namedGuideState = useState(false);
+      var namedGuideOpen = namedGuideState[0];
+      var setNamedGuideOpen = namedGuideState[1];
       // 按钮点下去到 React 重渲染之间还有一小段；用 ref 挡住同一瞬间的第二次点击。
       var bPairingRef = useRef(false);
       // B 项目：门牌列表 + 新建表单 + 当前打开的文件面板。
@@ -2176,6 +2179,8 @@ window.__ModuleLoader__.load({
           publicUrl: namedTunnel.publicUrl,
           setToken: function (v) { setNamedTunnel(function (d) { return Object.assign({}, d, { token: v }); }); },
           setPublicUrl: function (v) { setNamedTunnel(function (d) { return Object.assign({}, d, { publicUrl: v }); }); },
+          guideOpen: namedGuideOpen,
+          toggleGuide: function () { setNamedGuideOpen(function (v) { return !v; }); },
         }),
       );
     }
@@ -2213,6 +2218,8 @@ window.__ModuleLoader__.load({
         publicUrl: named.publicUrl,
         setToken: named.setToken,
         setPublicUrl: named.setPublicUrl,
+        guideOpen: named.guideOpen,
+        toggleGuide: named.toggleGuide,
         save: function () {
           toggle(true, { mode: 'named', namedToken: named.token, publicUrl: named.publicUrl });
         },
@@ -3813,7 +3820,73 @@ window.__ModuleLoader__.load({
         ),
         namedActive ? h('div', { style: styles.warn },
           '固定地址也经过 Cloudflare，Cloudflare 在边缘能看到明文；它不是端到端加密。别把地址或二维码发出去。') : null,
+        // 固定域名第一次配置比快速隧道多几步：域名、Zero Trust、隧道、路由。
+        // 默认收起，配过的人不用再看；第一次配的人不用另开文档。
+        named.guideOpen ? null : h('div', { style: Object.assign({}, styles.muted, { marginTop: 12 }) },
+          '第一次配置需要：一个 Cloudflare 域名、一条命名隧道、一个 Public Hostname。'),
+        h('div', { style: { marginTop: 12 } },
+          h('button', { type: 'button', style: styles.btn, onClick: named.toggleGuide },
+            named.guideOpen ? '收起配置指引' : '配置指引（Cloudflare 六步）'),
+        ),
+        named.guideOpen ? namedTunnelGuide() : null,
       );
+    }
+
+    /**
+     * 固定域名（Cloudflare 命名隧道）的配置指引。
+     *
+     * 按 2026-10-27 实机走通的那条路写：Cloudflare Registrar 买域名 →
+     * Zero Trust 建隧道 → 已发布应用 → 插件填 token。域名一律用 example.com，
+     * 用户换成自己的；不在界面里写死某一个人的域名。
+     */
+    function namedTunnelGuide() {
+      var sections = [
+        ['一、准备域名', [
+          '在 Cloudflare Registrar 买一个域名，或把已有域名接入 Cloudflare；首页看到状态是 Active 才能继续。',
+          '域名只用来做固定地址，不需要建站、不需要邮箱；新域名最省事。',
+          '如果域名已有网站，不要为了试这个功能去迁整个域名的 NS，先确认现有记录能一起搬。',
+        ]],
+        ['二、进 Zero Trust，起团队名', [
+          '打开 https://one.dash.cloudflare.com/ ，第一次进会要求起团队名；随便填一个英文名，计划选 Free。',
+          '团队名不是域名，也不影响隧道，只是 Cloudflare Access 的标识。',
+        ]],
+        ['三、创建命名隧道，复制 token', [
+          '左侧 Networks → Tunnels → Create a tunnel，选 Cloudflared，名字例如 dsh-mini-remote。',
+          '保存后页面会给一条安装命令，里面有 --token eyJ...；只复制 token 这一串。',
+          '不要安装 Windows 服务，也不要手动运行那条命令——插件会自己启动 cloudflared。',
+        ]],
+        ['四、添加已发布应用（Public Hostname）', [
+          '点隧道名字进入详情，点 Add route / 添加路由，选「已发布应用」。',
+          '子域填 dsh；域名选你的域名，例如 example.com；路径留空。',
+          '服务类型选 HTTP，服务 URL 填 http://127.0.0.1:3090；端口要和插件实际监听的一致。',
+          '保存后完整主机名是 dsh.example.com，路由会从「无路由」变成 1，Cloudflare 自动创建 CNAME。',
+        ]],
+        ['五、回插件填写并开启', [
+          '公网地址填 https://dsh.example.com，不要带路径，也不要少 https://。',
+          '隧道 token 粘贴 --token 后面那一串；保存并开启。',
+          '状态变成「已连接」后，手机连接里会出现「公网（固定）」。',
+        ]],
+        ['六、验证', [
+          '在电脑上执行 nslookup dsh.example.com 8.8.8.8，能返回 Cloudflare 地址就对了。',
+          '再执行 curl.exe -I https://dsh.example.com，能返回 HTTP 状态码就说明公网入口通了。',
+          '手机用流量打开二维码；如果本机提示解析不了域名，多半是本地 DNS 缓存，手机走运营商 DNS 通常没问题。',
+        ]],
+        ['七、注意', [
+          'token 是密码，不要截图或发人；泄露后在 Cloudflare 里轮换。',
+          'Cloudflare 在边缘能看到明文，不是端到端加密。',
+          '这条路解决地址固定，不解决国内速度；国内日常仍建议用自建 frp。',
+          '404 多半是公网地址和 Public Hostname 不一致；502 多半是本机端口没开或填错。',
+        ]],
+      ];
+      var out = [h('div', { key: 'named-guide-intro', style: Object.assign({}, styles.muted, { marginTop: 12 }) },
+        '按下面顺序做，第一次大约 10 分钟；域名和端口换成你自己的。')];
+      for (var i = 0; i < sections.length; i += 1) {
+        out.push(h('div', { key: 'named-guide-' + i, style: Object.assign({}, styles.entryTitle, { marginTop: 12 }) }, sections[i][0]));
+        for (var j = 0; j < sections[i][1].length; j += 1) {
+          out.push(h('div', { key: 'named-guide-' + i + '-' + j, style: styles.muted }, sections[i][1][j]));
+        }
+      }
+      return h('div', { key: 'named-guide' }, out);
     }
 
     /**
