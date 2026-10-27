@@ -11,7 +11,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { parseTunnelUrl, startTunnel, namedTunnelArgs, NAMED_TUNNEL_READY_RE, TUNNEL_HINT } from '../lib/tunnel.js'
+import { parseTunnelUrl, startTunnel, namedTunnelArgs, quickTunnelArgs, NAMED_TUNNEL_READY_RE, TUNNEL_HINT } from '../lib/tunnel.js'
 import { ensureCloudflared } from '../lib/cloudflared.js'
 import { clientKey } from '../lib/server.js'
 
@@ -213,6 +213,13 @@ test('配置里指的 cloudflared 存在就直接用，不去联网下载', asyn
 // ---------------------------------------------------------------------------
 // 起隧道失败时的表现
 // ---------------------------------------------------------------------------
+
+test('quick 隧道只有 relay 开启时才传固定 Host', () => {
+  const plain = quickTunnelArgs({ port: 3090 })
+  assert.equal(plain.includes('--http-host-header'), false)
+  const relay = quickTunnelArgs({ port: 3090, originHostHeader: 'abc.relay.example' })
+  assert.equal(relay[relay.indexOf('--http-host-header') + 1], 'abc.relay.example')
+})
 
 test('cloudflared 文件不存在时，startTunnel 要拒绝而不是挂住', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'mini-cf-'))

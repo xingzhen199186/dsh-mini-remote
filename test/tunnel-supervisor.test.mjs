@@ -58,6 +58,9 @@ test('目标指纹不包含明文 token，但 token 变化会改变指纹', () =
   assert.notEqual(one, two)
   assert.match(one, /^[a-f0-9]{64}$/)
   assert.doesNotMatch(one, /aaa/)
+  const plain = targetFingerprint({ mode: 'quick', port: 3090, originHostHeader: '' })
+  const relay = targetFingerprint({ mode: 'quick', port: 3090, originHostHeader: 'abc.relay.example' })
+  assert.notEqual(plain, relay, '固定 Host 变化要重建连接器')
 })
 
 test('失败分类：token 错不重试，DNS 和本机服务不重启隧道', () => {
