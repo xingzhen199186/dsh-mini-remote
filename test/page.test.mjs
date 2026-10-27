@@ -2835,6 +2835,41 @@ function chatSequenceRunner(layout) {
   return { state, mainEl, render }
 }
 
+test('发送后流式暂时清空：不把上一轮回答当成新回答跳回开头', () => {
+  const previous = { role: 'assistant', text: '上一轮回答', timestamp: 1 }
+  const latest = { role: 'assistant', text: '这一轮回答', timestamp: 2 }
+  const r = chatSequenceRunner((state) => {
+    const started = state.history.some((m) => m.text === '下一轮')
+    const saids = state.history.filter((m) => m.role === 'assistant').length
+    return {
+      height: saids > 1 ? 3600 : started ? 3200 : 1900,
+      saidTops: saids > 1 ? [200, 2400] : [200],
+      liveTop: 2000,
+    }
+  })
+  r.state.history = [{ role: 'user', text: '上一轮', timestamp: 0 }, previous]
+  r.state.latest = previous
+  r.render()
+  assert.equal(r.mainEl.scrollTop, 188, '上一轮先停在正文开头')
+
+  // 与 send() 相同：用户发送后先回到底部，再本地回显指令、开始新一轮流式。
+  r.mainEl.scrollTop = r.mainEl.scrollHeight
+  r.state.history = r.state.history.concat([{ role: 'user', text: '下一轮', timestamp: 1 }])
+  r.state.live = '这一轮正在生成'
+  r.render()
+  assert.equal(r.mainEl.scrollTop, 1988, '新一轮流式停在它的正文开头')
+
+  // 工具条目录定或空的增量帧都可能先清 live；此时 latest 仍是上一轮，不能当成新回答。
+  r.state.live = ''
+  r.render()
+  assert.equal(r.mainEl.scrollTop, 1988, '没有新回答到来，就不能跳回上一轮开头')
+
+  r.state.latest = latest
+  r.state.history = r.state.history.concat([latest])
+  r.render()
+  assert.equal(r.mainEl.scrollTop, 2388, '真正的新回答到达后仍要对齐它的正文开头')
+})
+
 test('上一轮较长时，新一轮从流式到落定仍跟着最新回答', () => {
   for (const { finalHeight, expected, kind } of [
     { finalHeight: 3400, expected: 2000 - 12, kind: '长回答对齐正文第一行' },

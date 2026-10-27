@@ -4096,6 +4096,9 @@
    * 切到 `render()` 来跑聊天模式的，放前面就切不进来，一跑就是 ReferenceError。
    */
   var pinnedAnswerKey = '';
+  // 落定回答是否已经见过要单独记：live 暂时清空时 latest 还是上一轮，
+  // 不能把「从 live 变回 done」误当成新回答到达。
+  var seenSettledKey = '';
   // 程序上次自动对齐后的位置。仍停在这里才算「跟着看」：长回答的开头离底部
   // 可能超过一屏，单靠 nearEnd 会把它误当成在翻旧历史；用户滚走后则不继承。
   var pinnedAnswerSpot = null;
@@ -4128,16 +4131,16 @@
    */
   function scrollChat(stick) {
     var liveNow = state.live || '';
-    var newest = liveNow
-      ? 'live'
-      : (state.latest && state.latest.timestamp ? 'done:' + state.latest.timestamp : '');
-    if (newest && newest !== pinnedAnswerKey) {
-      var followsPinned = pinnedAnswerSpot
-        && pinnedAnswerSpot.key === pinnedAnswerKey
-        && Math.abs(mainEl.scrollTop - pinnedAnswerSpot.top) < 48;
-      // 先记账，再决定动不动他。记完就不再重复处理这条回答——
+    var settledKey = state.latest && state.latest.timestamp ? 'done:' + state.latest.timestamp : '';
+    var newest = liveNow ? 'live' : settledKey;
+    var isNew = liveNow ? newest !== pinnedAnswerKey : !!newest && newest !== seenSettledKey;
+    pinnedAnswerKey = newest;
+    if (!liveNow && settledKey) seenSettledKey = settledKey;
+    if (newest && isNew) {
+      var followsPinned = pinnedAnswerSpot !== null
+        && Math.abs(mainEl.scrollTop - pinnedAnswerSpot) < 48;
+      // 上面已经记账，接下来不再重复处理这条回答——
       // 用户往下读的时候被反复拉回开头，比不对齐还烦人。
-      pinnedAnswerKey = newest;
       // **只在「他本来就在底部跟着看」的时候才动他。**
       //
       // 这一条不能省：用户 2026-09-22 实机提过「有动画的时候手机端页面运动到上面
@@ -4173,7 +4176,7 @@
       var canPin = !!line && view > 0 && (mainEl.scrollTop + desired <= maxScroll + 1);
       pinToTop(target);
       if (!stick && !canPin) mainEl.scrollTop = mainEl.scrollHeight;
-      if (line) pinnedAnswerSpot = { key: newest, top: mainEl.scrollTop };
+      if (line) pinnedAnswerSpot = mainEl.scrollTop;
       return;
     }
     // 没有新回答的时候照旧黏底（历史重排、切会话、用户自己发指令这些），
