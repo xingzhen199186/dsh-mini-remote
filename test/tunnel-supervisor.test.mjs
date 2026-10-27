@@ -88,6 +88,20 @@ test('同一个目标重复 start 不会起第二个进程', async () => {
   sup.stop()
 })
 
+test('目标变化会停旧起新，同目标不重复起', async () => {
+  const timer = makeTimer()
+  const fake = makeStart()
+  const sup = new TunnelSupervisor({ start: fake.start, probe: async () => ({ ok: true }), timer })
+  await sup.start({ mode: 'named', port: 3090, publicUrl: 'https://a.example.com', token: 'tok' })
+  await sup.start({ mode: 'named', port: 3090, publicUrl: 'https://b.example.com', token: 'tok' })
+  assert.equal(fake.calls.length, 2)
+  assert.equal(fake.handles[0].stopped, true, '旧目标要停掉')
+  assert.equal(sup.snapshot().url, 'https://b.example.com')
+  await sup.start({ mode: 'named', port: 3090, publicUrl: 'https://b.example.com', token: 'tok' })
+  assert.equal(fake.calls.length, 2, '同目标不能起第三条')
+  sup.stop()
+})
+
 test('进程异常退出后按退避重启', async () => {
   const timer = makeTimer()
   const fake = makeStart()
