@@ -109,7 +109,8 @@ Authorization: Bearer <ADMIN_TOKEN>
 
 - 未登录访问 `/admin/relay/v1/identities` 返回 302，跳到 `proud-math-c20b.cloudflareaccess.com`；
 - `/health` 仍为 200；
-- 固定地址不受影响。
+- 固定地址不受影响；
+- CLI 带 Access 服务令牌 + `ADMIN_TOKEN` 已返回身份列表（2026-10-27）。
 
 
 | 检查 | 通过标准 |
