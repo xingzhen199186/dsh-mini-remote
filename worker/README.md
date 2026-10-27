@@ -1,7 +1,7 @@
 # A 固定中继 Worker（Phase 1 控制面）
 
-> 当前只实现身份、邀请、target 登记、撤销和运营开关；**不代理手机流量**。
-> 数据面（HTTP/SSE/WebSocket/文件）在 Phase 2。
+> 当前实现身份、邀请、target 登记、撤销、运营开关，以及数据面初版（HTTP/路径/查询串/流式 body/WebSocket 分支）。
+> 真实手机 SSE/WebSocket/大文件验收仍待完成。
 
 ## 结构
 
@@ -70,3 +70,16 @@ node worker/scripts/relay-admin.mjs config --registration=false
 - Cloudflare Access JWT 校验（当前是 service token，生产前必须加 Access）；
 - 精确全局配额；
 - B/claim、DO bridge。
+
+## 数据面 staging 前置
+
+在 Cloudflare DNS 添加：
+
+```text
+类型：AAAA
+名称：*
+IPv6：100::
+代理：已代理
+```
+
+这样 `<id>.dsh-mini-remote.com` 才会解析到 Cloudflare 并由 Worker 通配路由接管。

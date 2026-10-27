@@ -14,6 +14,7 @@
 - 设置页显示恢复阶段、重试次数和最近错误类型。
 - A 方案 Phase 0：quick 接入监督器，新增 `originHostHeader` 与 `RelayProvider` 纯状态机（未接 Worker）。
 - A 方案 Phase 1：新增 Worker 控制面、D1/KV 迁移、邀请/注册/注销/撤销、运营 CLI 与 11 项 Worker 测试；staging 已部署到 `relay.dsh-mini-remote.com`。
+- A 方案 Phase 2：Worker 数据面初版（Host 解析、路径/查询串、Host 重写、流式 body、WebSocket 分支、离线/撤销页）与 staging 通配路由；真实手机长连接验收待做。
 - 固定域名走 HTTPS 时，设备和口令 cookie 自动带 `Secure`；启动后立即做一次公网探测。
 
 ## [0.2.6] - 2026-10-26

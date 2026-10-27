@@ -210,6 +210,102 @@ async function handleUnregister(request, env) {
   return json({ ok: true })
 }
 
+
+/** `<id>.dsh-mini-remote.com` 的 id；只认一层，避免二级子域绕过。 */
+function relayIdOf(host, suffix) {
+  if (typeof host !== 'string' || !host.endsWith(suffix)) return null
+  const id = host.slice(0, -suffix.length)
+  if (!id || id.includes('.')) return null
+  return ID_RE.test(id) ? id : null
+}
+
+const OFFLINE_HTML = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex">
+<title>实例离线</title></head><body style="font-family:system-ui,sans-serif;padding:24px;max-width:32em;margin:0 auto;line-height:1.6">
+<p><strong>这台 DSH 当前离线。</strong></p>
+<p>隧道尚未启动或地址已更换，稍等片刻后刷新本页即可；本页地址固定不变，无需重新配对。</p>
+<hr style="border:none;border-top:1px solid #ccc;margin:16px 0">
+<p><strong>This DSH instance is offline.</strong></p>
+<p>The tunnel is not running right now. Refresh in a moment — this address never changes, so no re-pairing is needed.</p>
+</body></html>`
+
+function offlineResponse(status = 503, detail = 'offline') {
+  return new Response(OFFLINE_HTML, {
+    status,
+    headers: {
+      'content-type': 'text/html; charset=utf-8',
+      'cache-control': 'no-store',
+      'x-robots-tag': 'noindex',
+      'referrer-policy': 'no-referrer',
+      'x-relay-offline': detail,
+    },
+  })
+}
+
+/** 把 target 的绝对 Location 换回固定 Origin；外部 Location 不跟着跳。 */
+function rewriteLocation(location, targetOrigin, publicOrigin) {
+  if (!location) return location
+  try {
+    const parsed = new URL(location, targetOrigin)
+    if (parsed.origin === targetOrigin) return publicOrigin + parsed.pathname + parsed.search + parsed.hash
+    return location
+  } catch {
+    return location
+  }
+}
+
+async function handleProxy(request, env, id) {
+  let record
+  try {
+    record = await env.RELAY_KV.get('relay-target:' + id, 'json')
+  } catch {
+    return new Response('relay storage unavailable', { status: 503, headers: { 'content-type': 'text/plain; charset=utf-8' } })
+  }
+  if (!record) return offlineResponse(503, 'no-target')
+  if (record.state === 'revoked') return offlineResponse(410, 'revoked')
+  if (record.state !== 'active' || typeof record.target !== 'string') return offlineResponse(503, 'no-target')
+
+  let target
+  try { target = new URL(record.target) } catch { return offlineResponse(502, 'bad-target') }
+  const targetOrigin = target.origin
+  const publicOrigin = 'https://' + id + suffixOf(env)
+
+  const url = new URL(request.url)
+  url.protocol = 'https:'
+  url.hostname = target.hostname
+  url.port = ''
+
+  const headers = new Headers(request.headers)
+  headers.set('host', target.host)
+  for (const name of ['cf-connecting-ip', 'cf-ipcountry', 'cf-ray', 'cf-visitor', 'x-forwarded-for', 'x-forwarded-proto', 'x-real-ip']) {
+    headers.delete(name)
+  }
+  // Origin/Referer 保留固定 Origin，应用层看到的就是手机实际访问的源。
+  const upgrade = request.headers.get('upgrade') === 'websocket'
+  const init = {
+    method: request.method,
+    headers,
+    body: request.method === 'GET' || request.method === 'HEAD' || upgrade ? undefined : request.body,
+    redirect: 'manual',
+    ...(upgrade ? {} : { duplex: 'half' }),
+  }
+  let response
+  try {
+    response = await fetch(url.toString(), init)
+  } catch (error) {
+    return new Response('relay upstream unavailable', { status: 502, headers: { 'content-type': 'text/plain; charset=utf-8' } })
+  }
+  if (response.status === 101) return response
+
+  const location = rewriteLocation(response.headers.get('location'), targetOrigin, publicOrigin)
+  if (location !== response.headers.get('location')) {
+    const next = new Headers(response.headers)
+    next.set('location', location)
+    return new Response(response.body, { status: response.status, statusText: response.statusText, headers: next })
+  }
+  return response
+}
+
 async function handleAdmin(request, env, url) {
   const auth = await requireAdmin(request, env)
   if (!auth.ok) return auth.response
@@ -273,14 +369,25 @@ async function handleAdmin(request, env, url) {
   return fail('not-found', 404)
 }
 
-export async function handleRequest(request, env) {
-  const url = new URL(request.url)
+async function handleControl(request, env, url) {
   if (request.method === 'GET' && url.pathname === '/health') {
     return json({ ok: true, service: 'dsh-mini-relay', version: 1 })
   }
   if (url.pathname === '/api/relay/v1/register') return handleRegister(request, env)
   if (url.pathname === '/api/relay/v1/unregister') return handleUnregister(request, env)
   if (url.pathname.startsWith('/admin/relay/v1/')) return handleAdmin(request, env, url)
+  return fail('not-found', 404)
+}
+
+export async function handleRequest(request, env) {
+  const url = new URL(request.url)
+  const suffix = suffixOf(env)
+  const controlHost = typeof env.RELAY_CONTROL_HOST === 'string' && env.RELAY_CONTROL_HOST
+    ? env.RELAY_CONTROL_HOST
+    : 'relay' + suffix
+  if (url.hostname === controlHost) return handleControl(request, env, url)
+  const id = relayIdOf(url.hostname, suffix)
+  if (id) return handleProxy(request, env, id)
   return fail('not-found', 404)
 }
 

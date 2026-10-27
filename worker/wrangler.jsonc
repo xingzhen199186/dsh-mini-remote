@@ -24,6 +24,7 @@
   },
   "observability": { "enabled": true },
   "routes": [
-    { "pattern": "relay.dsh-mini-remote.com", "custom_domain": true }
+    { "pattern": "relay.dsh-mini-remote.com", "custom_domain": true },
+    { "pattern": "*.dsh-mini-remote.com/*", "zone_name": "dsh-mini-remote.com" }
   ]
 }

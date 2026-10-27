@@ -60,6 +60,7 @@ function makeEnv() {
     ADMIN_TOKEN: ADMIN,
     RELAY_INVITE_REQUIRED: '1',
     RELAY_PUBLIC_SUFFIX: '.relay.example.com',
+    RELAY_CONTROL_HOST: 'relay.example.com',
   }
 }
 
@@ -240,6 +241,79 @@ test('同一 id 一分钟超过 6 次登记会被 429', async () => {
     }), env)
   }
   assert.equal(last.status, 429)
+})
+
+test('数据面按 Host 解析 id，转发路径/查询并清理转发头', async () => {
+  const env = makeEnv()
+  const code = await createInvite(env)
+  await handleRequest(req('/api/relay/v1/register', {
+    method: 'PUT', body: { id, secret, target, inviteCode: code },
+  }), env)
+  const original = globalThis.fetch
+  let seen
+  globalThis.fetch = async (url, init) => {
+    seen = { url, init }
+    return new Response('proxied', { status: 200, headers: { 'content-type': 'text/plain' } })
+  }
+  try {
+    const response = await handleRequest(new Request('https://' + id + '.relay.example.com/mini/api/state?a=1&b=2', {
+      headers: {
+        'cf-connecting-ip': '1.2.3.4',
+        'x-forwarded-for': '5.6.7.8',
+        'x-real-ip': '9.9.9.9',
+        origin: 'https://' + id + '.relay.example.com',
+      },
+    }), env)
+    assert.equal(response.status, 200)
+    assert.equal(await response.text(), 'proxied')
+    assert.equal(seen.url, 'https://quick-one.trycloudflare.com/mini/api/state?a=1&b=2')
+    assert.equal(seen.init.headers.get('host'), 'quick-one.trycloudflare.com')
+    assert.equal(seen.init.headers.get('cf-connecting-ip'), null)
+    assert.equal(seen.init.headers.get('x-forwarded-for'), null)
+    assert.equal(seen.init.headers.get('origin'), 'https://' + id + '.relay.example.com')
+  } finally {
+    globalThis.fetch = original
+  }
+})
+
+test('数据面无 target 返回离线页，撤销返回 410，不调用上游', async () => {
+  const env = makeEnv()
+  const original = globalThis.fetch
+  let calls = 0
+  globalThis.fetch = async () => { calls += 1; return new Response('should not') }
+  try {
+    const missing = await handleRequest(new Request('https://' + id + '.relay.example.com/mini'), env)
+    assert.equal(missing.status, 503)
+    assert.match(await missing.text(), /当前离线/)
+    const code = await createInvite(env)
+    await handleRequest(req('/api/relay/v1/register', {
+      method: 'PUT', body: { id, secret, target, inviteCode: code },
+    }), env)
+    await handleRequest(req('/admin/relay/v1/revoke', {
+      method: 'POST', token: ADMIN, body: { id, reason: 'test' },
+    }), env)
+    const revoked = await handleRequest(new Request('https://' + id + '.relay.example.com/mini'), env)
+    assert.equal(revoked.status, 410)
+    assert.equal(calls, 0)
+  } finally {
+    globalThis.fetch = original
+  }
+})
+
+test('未知 Host 和非法 id 不代理', async () => {
+  const env = makeEnv()
+  const original = globalThis.fetch
+  let calls = 0
+  globalThis.fetch = async () => { calls += 1; return new Response('no') }
+  try {
+    const bad = await handleRequest(new Request('https://dsh.relay.example.com/mini'), env)
+    assert.equal(bad.status, 404)
+    const unknown = await handleRequest(new Request('https://foo.example.com/mini'), env)
+    assert.equal(unknown.status, 404)
+    assert.equal(calls, 0)
+  } finally {
+    globalThis.fetch = original
+  }
 })
 
 test('admin 无 token 被拒绝，列表不返回 secret', async () => {
