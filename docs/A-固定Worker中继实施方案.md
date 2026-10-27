@@ -4,7 +4,7 @@
 >
 > 目标：用户不准备 Cloudflare 账号、域名或服务器，也能用固定地址访问本插件；插件仍运行 quick tunnel，我方 Worker 把固定子域名映射到当前临时地址。
 >
-> 证据口径：**[仓库证据]** 指可直接定位到源码/文档；**[工程推断]** 指本方案的设计或估算，需开发、压测和真机验证。参考项目的 Worker 源码、wrangler 配置、真实套餐/账单信息：**仓库中未提供**。
+> 证据口径：**[仓库证据]** 指可直接定位到源码/文档；**[工程推断]** 指本方案的设计或估算，需开发、压测和真机验证。参考项目的本地 clone 未包含 Worker；其远端 GitHub `main` 已提供 `market/worker`，本稿已于 2026-10-27 追加核对。真实套餐/账单信息仍未提供。
 
 ## 0. 结论先行
 
@@ -42,25 +42,58 @@ A 可行，但它不是“免费换一个固定域名”这么简单，而是新
 
 补充边界：
 
-- 参考客户端只在 tunnel start、target 变化和失败重试时 `announce`，未见独立的周期性注册心跳；不要据此推断其 Worker 是否有 TTL。[仓库证据：`src/relay-registry.ts:125-230`]
+- 参考客户端只在 tunnel start、target 变化和失败重试时 `announce`，没有周期性心跳；其 Worker 用 90 天 `last_seen_at` 做 GC，不是 45 分钟短 TTL。[客户端证据：`src/relay-registry.ts:125-230`；Worker 证据：`market/worker/src/relay.js:pruneRelay`]
 - 注册请求未见显式超时或 `AbortSignal`；其注销封装也未检查 `response.ok`。这是客户端现状，不应原样复制。[仓库证据：`src/relay-registry.ts:104-115,159-198`]
 - `tests/tunnel-plan.spec.ts:22-55` 证明 quick 优先于 named，named 必须有 token 和有效固定 URL；它验证的是模式选择，不验证 Worker。
 - `tests/tunnel.spec.ts` 使用注入的进程、计时器和网络替身，证明生命周期策略，不证明真实 Cloudflare 中继行为。[仓库证据：该文件 `1-9,63-98`]
 
-### 1.2 只有文档声明、没有服务端源码可核验的行为
+### 1.2 远端 Worker 实现（2026-10-27 GitHub 核对）
 
-`README.zh.md:192` 声称：Worker 逐字节转发、注册表保存 secret 的 SHA-256 哈希、只接受 `*.trycloudflare.com`、注册限流、除映射外不存数据。`README.zh.md:95` 还描述了实例离线页。
+本地 clone 没有 `market/worker`，但远端 GitHub `main` 有完整 Worker 源码：
 
-这些只能记为**参考项目的文档声明**，不能记为已审计实现。参考仓库中没有对应 Worker 源码，无法核实：
+- `market/worker/src/relay.js`：A 的 quick 中继；
+- `market/worker/src/relay-control.js`：命名隧道 lease（B 形态）；
+- `market/worker/src/relay-bridge.js`：Durable Object 桥接；
+- `market/worker/wrangler.jsonc`：D1、DO、cron、通配路由；
+- `market/worker/migrations/0007_relay_registry.sql`、`0009_relay_leases.sql`、`0010_relay_lease_mode.sql`。
 
-- target 校验是否真的覆盖用户信息、端口、重定向和异常 URL；
-- 哈希、撤销、TTL、存储一致性和限流如何实现；
-- Host、Origin、路径、查询串和请求头的真实转发规则；
-- SSE、WebSocket、上传、下载、超时是否完整支持；
-- 是否记录查询串、Cookie、token 或目标 URL；
-- 离线页、配额和监控的真实行为。
+#### A 的 quick 中继实际做法
 
-对参考仓库检索 `wrangler`、Worker 源文件、KV/Cache/D1 和套餐信息，未发现 Worker 实现或 wrangler 配置；D1 只在客户端一条恢复注释中出现（`src/relay-registry.ts:189-193`）。因此：**Worker 源码、wrangler 配置、账单/套餐信息，仓库中未提供。**
+| 主题 | 实际实现 | 证据 |
+|---|---|---|
+| 数据面存储 | 每个请求直接查 D1 `relay_registrations`；没有 KV/Cache 作为注册表缓存。 | `relay.js:handleRelayProxy` |
+| 表结构 | `relay_registrations(id, secret_hash, target, registered_at, last_seen_at)` + `relay_rate_limit(bucket, window_start, count)`。 | `0007_relay_registry.sql` |
+| target 校验 | 只接受 `https://*.trycloudflare.com`，且 pathname 必须 `/`、无 query、无 userinfo、无端口。 | `relay.js:isAllowedTarget` |
+| 注册限流 | 30 次/IP/分钟、6 次/id/分钟；窗口计数与注册写在同一 D1 batch。 | `relay.js:REGISTER_MAX_*` |
+| 清理 | cron 每 30 分钟；90 天未见的注册删除，旧限流窗口删除。 | `wrangler.jsonc:triggers.crons`；`relay.js:pruneRelay` |
+| 固定子域 | `<id>.dsh-market.com`，只允许一层子域，避免 Universal SSL 不覆盖两级。 | `relay.js:relayIdOf` |
+| 代理 | 按 Host 解析 id，重写 Host 到临时隧道；逐跳头清理；`redirect: manual`；body 流式。 | `relay.js:handleRelayProxy` |
+| WebSocket | 识别 `Upgrade: websocket`，保留 Upgrade 头，不设 `duplex`。 | `relay.js:handleRelayProxy` |
+| 静态资源 | 只对带内容哈希的 `/assets/**` 加一年 immutable 缓存，其他响应原样。 | `relay.js:isImmutableAssetPath` |
+| 离线页 | 无注册行返回 503 双语离线页，提示“刷新即可，无需重新配对”。 | `relay.js:OFFLINE_HTML` |
+| 管理后台 | **没有**。注册/注销是插件自服务；运营者直接看 D1/Cloudflare 控制台。 | `relay.js`；`index.js` 路由 |
+
+#### 额外的 named lease 和 bridge
+
+`relay-control.js` 是**服务方代建命名隧道**（B 形态），不是 A 的 quick 路径：
+
+- `PUT /api/relay/claim`：用 id/secret 认领；
+- 通过 Cloudflare API 创建 `dsh-relay-<id>` 隧道、写 ingress、创建 `<id>.dsh-market.com` CNAME；
+- 把 tunnel token 返回给插件；
+- `release` 只标记 released，保留隧道和 CNAME；
+- `retire` 才删除 Cloudflare 资源；
+- `RELAY_MODE` / `relay_leases.mode` 控制 `quick` / `named` / `bridge`，默认 quick。
+
+`relay-bridge.js` 是 Durable Object 桥接：每个 id 一个 DO，持有插件侧 connector socket，HTTP/WS 字节通过 DO 转发。它是 quick/named 之外的第三条传输，默认不启用。
+
+#### 这份外部源码没有回答的事
+
+- 真实套餐/账单：仓库没有；`wrangler.jsonc` 只声明 D1、DO、cron、observability，不能证明作者付了多少钱。
+- 运营后台：没有；参考项目没有面向作者的 relay 管理页。
+- D1 每请求读的容量上限：代码能看到，但没有压测数据。
+- SSE/WS 的真实稳定性：有代理代码，没有公开压测报告。
+
+因此，之前“Worker 源码/ wrangler 不在仓库”的结论只对**本地 clone** 成立；远端 GitHub 已经能核对实现。账单和后台仍然没有。
 
 ---
 
@@ -172,6 +205,8 @@ relay-target/v1/<id> → {
 | KV | 适合高频按 key 读、低频更新；部署简单 | 不适合原子计数、强一致撤销、每请求写入 |
 | Cache API | 降低热点 KV 读取和延迟 | 不是数据库；不能全局 purge、不能保证撤销时效 |
 | D1 | 主键、状态和管理审计清晰，适合身份控制面 | 不应成为每个手机请求的热点依赖；也不用来每请求累计用量 |
+
+> 参考项目的 quick 路径实际是**每请求读一次 D1**，没有 KV/Cache 注册表缓存。它简单、一致，但把数据面绑在 D1 读配额和延迟上。我们建议的 KV + Cache 是为了在 Paid 规模下把 D1 从热路径拿开；Free 阶段也可以先用 D1 简化实现，但必须知道这是不同的容量模型。
 
 **为什么绝不能每请求写 KV：**
 
@@ -331,6 +366,8 @@ C 的 named 配对逻辑不变；现有局域网、Tailscale、自建 frp 不经
 - Workers Free：100,000 请求/天，10 ms CPU/请求。
 - Workers Paid：5 美元/月，含 10,000,000 请求/月。
 - KV、D1、日志/分析、超额请求及其他资源另算；实际上线前必须以我方 Cloudflare 控制台和官方当前文档复核。参考项目的账单/套餐信息：**仓库中未提供**。
+
+> 参考项目的 quick 路径没有 15 分钟心跳，target 的 GC 是 90 天；本节的 96 次/日心跳是**我们的设计假设**，不是参考项目的实际请求量。若采用参考项目的“启动/变化才注册”，后台请求会明显更低，但 target 失效恢复更慢。
 
 定义“活跃实例/日”：一台电脑整天在线，一台手机中度使用。以下是容量模型假设，不是实测：
 
@@ -502,7 +539,7 @@ Paid 使用 30 天月份；不能把 1,000 万当成每日额度。
 | 工程运维 | Worker 部署回滚、KV/D1 迁移、密钥管理、安全审计、值班、撤销和故障演练 |
 | 客服与合规 | 固定地址失效、跨 Origin 重配、Cloudflare 可达性、隐私咨询、条款/备案与事件处置 |
 
-参考项目的真实账单、KV/D1 用量和套餐选择：**仓库中未提供**，不能拿它的存在证明本方案必然便宜。
+参考项目的 Worker 源码已可核对；真实账单、D1/DO 用量和套餐选择：**仓库中未提供**，不能拿它的存在证明本方案必然便宜。
 
 ### 10.2 主要风险
 
