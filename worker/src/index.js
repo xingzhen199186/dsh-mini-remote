@@ -100,6 +100,9 @@ async function configOf(env) {
     registrationEnabled: raw?.registrationEnabled !== false,
     proxyEnabled: raw?.proxyEnabled !== false,
     dailyReportEnabled: raw?.dailyReportEnabled === true,
+    inviteRequired: raw?.inviteRequired !== undefined
+      ? raw.inviteRequired !== false
+      : env.RELAY_INVITE_REQUIRED !== '0',
   }
 }
 
@@ -171,7 +174,7 @@ async function handleRegister(request, env) {
   } else {
     const config = await configOf(env)
     if (!config.registrationEnabled) return fail('registration-disabled', 403)
-    if (env.RELAY_INVITE_REQUIRED !== '0') {
+    if (config.inviteRequired) {
       const inviteCode = typeof body.inviteCode === 'string' ? body.inviteCode : ''
       if (!inviteCode) return fail('invite-required', 403)
       let inviteHash
@@ -460,6 +463,7 @@ async function handleAdmin(request, env, url) {
     if (typeof body.registrationEnabled === 'boolean') patch.registrationEnabled = body.registrationEnabled
     if (typeof body.proxyEnabled === 'boolean') patch.proxyEnabled = body.proxyEnabled
     if (typeof body.dailyReportEnabled === 'boolean') patch.dailyReportEnabled = body.dailyReportEnabled
+    if (typeof body.inviteRequired === 'boolean') patch.inviteRequired = body.inviteRequired
     if (!Object.keys(patch).length) return fail('invalid-params', 400)
     const next = await setConfig(env, patch)
     await audit(env, auth.actor, 'config.update', null, JSON.stringify(patch))

@@ -132,6 +132,27 @@ test('未使用的邀请码可在运维台回看', async () => {
   assert.equal(body.invites[0].used_at, undefined)
 })
 
+test('关闭邀请码要求后，自服务注册无需邀请码', async () => {
+  const env = makeEnv()
+  const closed = await handleRequest(req('/api/relay/v1/register', {
+    method: 'PUT', body: { id, secret, target },
+  }), env)
+  assert.equal(closed.status, 403)
+  assert.equal((await closed.json()).error, 'invite-required')
+
+  const saved = await handleRequest(req('/admin/relay/v1/config', {
+    method: 'POST', token: ADMIN, body: { inviteRequired: false },
+  }), env)
+  assert.equal(saved.status, 200)
+  assert.equal((await saved.json()).config.inviteRequired, false)
+
+  const opened = await handleRequest(req('/api/relay/v1/register', {
+    method: 'PUT', body: { id, secret, target },
+  }), env)
+  assert.equal(opened.status, 200)
+  assert.equal((await opened.json()).ok, true)
+})
+
 test('每日用量开关可写可读', async () => {
   const env = makeEnv()
   env.ACCESS_ADMIN = '1'

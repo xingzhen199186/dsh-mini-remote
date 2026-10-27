@@ -54,6 +54,7 @@ th{color:var(--muted);font-weight:500}code{background:#f3f4f6;padding:2px 6px;bo
   <section class="card">
     <h2>运营开关</h2>
     <label class="switch"><input type="checkbox" id="registrationEnabled"> 允许新实例注册</label>
+    <label class="switch"><input type="checkbox" id="inviteRequired"> 新实例必须带邀请码（关闭后为自服务注册）</label>
     <label class="switch"><input type="checkbox" id="proxyEnabled"> 数据面转发（关闭后所有固定地址返回离线页）</label>
     <label class="switch"><input type="checkbox" id="dailyReportEnabled"> 每天自动采集一次用量</label>
     <div class="muted small">每日任务在 Worker Cron 中运行；需要配置 CF_ANALYTICS_TOKEN 才能查到 Cloudflare 用量。</div>
@@ -97,6 +98,7 @@ async function api(path, init){
 }
 function setChecks(config){
   $('registrationEnabled').checked=!!config.registrationEnabled;
+  $('inviteRequired').checked=config.inviteRequired !== false;
   $('proxyEnabled').checked=!!config.proxyEnabled;
   $('dailyReportEnabled').checked=!!config.dailyReportEnabled;
 }
@@ -134,6 +136,7 @@ async function saveConfig(key,value){
   try{const r=await api('/admin/relay/v1/config',{method:'POST',body:JSON.stringify({[key]:value})});setChecks(r.config);await load()}catch(e){showError('保存失败：'+e.message)}
 }
 $('registrationEnabled').addEventListener('change',(e)=>saveConfig('registrationEnabled',e.target.checked));
+$('inviteRequired').addEventListener('change',(e)=>saveConfig('inviteRequired',e.target.checked));
 $('proxyEnabled').addEventListener('change',(e)=>saveConfig('proxyEnabled',e.target.checked));
 $('dailyReportEnabled').addEventListener('change',(e)=>saveConfig('dailyReportEnabled',e.target.checked));
 $('newInvite').addEventListener('click',async()=>{
