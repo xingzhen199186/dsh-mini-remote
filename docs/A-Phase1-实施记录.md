@@ -89,3 +89,17 @@ Worker 测试 11 项，使用 Node 内置 SQLite 模拟 D1，覆盖：
 - D1 和 KV 的实际 id；
 - `RELAY_PEPPER`、`ADMIN_TOKEN` 两个 secret；
 - 是否用 Cloudflare Access 保护 `/admin/*` 的决定。
+
+
+## Staging 部署（2026-10-27）
+
+- Worker：`dsh-mini-relay`
+- 控制面：`https://relay.dsh-mini-remote.com`
+- 健康检查：`GET /health` → 200 `{"ok":true,"service":"dsh-mini-relay","version":1}`
+- D1：`dsh-mini-relay`，id `7a2df92e-02c9-40e5-9ffe-f8cad48569cd`
+- KV：`RELAY_KV`，id `e7deca783d2b4085842387c77229a24d`
+- 迁移：`0001_init.sql` 已应用
+- 路由：`relay.dsh-mini-remote.com` custom domain
+- secret：`RELAY_PEPPER`、`ADMIN_TOKEN` 已上传；本地备份在 `worker/.staging-secrets.json`（已 gitignore）
+- 鉴权：staging 先使用 service token；Cloudflare Access 尚未启用
+- 实测：创建邀请 → 注册测试身份 → admin 列表 → 撤销，全部成功；测试身份已撤销

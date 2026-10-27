@@ -7,14 +7,14 @@
     {
       "binding": "DB",
       "database_name": "dsh-mini-relay",
-      "database_id": "REPLACE_WITH_STAGING_D1_ID",
+      "database_id": "7a2df92e-02c9-40e5-9ffe-f8cad48569cd",
       "migrations_dir": "migrations"
     }
   ],
   "kv_namespaces": [
     {
       "binding": "RELAY_KV",
-      "id": "REPLACE_WITH_STAGING_KV_ID"
+      "id": "e7deca783d2b4085842387c77229a24d"
     }
   ],
   "vars": {
@@ -22,5 +22,8 @@
     "RELAY_CONTROL_HOST": "relay.dsh-mini-remote.com",
     "RELAY_INVITE_REQUIRED": "1"
   },
-  "observability": { "enabled": true }
+  "observability": { "enabled": true },
+  "routes": [
+    { "pattern": "relay.dsh-mini-remote.com", "custom_domain": true }
+  ]
 }

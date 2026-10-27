@@ -81,3 +81,6 @@ dsh-session-*.zip
 !lib/bin/frpc.exe
 !lib/bin/README.md
 !lib/bin/frp-LICENSE
+
+# A staging Worker 的本地 secret（不进仓库）
+worker/.staging-secrets.json
