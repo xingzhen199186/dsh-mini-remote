@@ -116,6 +116,10 @@ test('连续失败达到预算后暂停，不再自动重试', async () => {
   assert.equal(sup.snapshot().phase, 'paused')
   assert.equal(sup.snapshot().attempts, 2)
   assert.equal(fake.calls.length, 2)
+  sup.retryNow()
+  await flush()
+  assert.equal(sup.snapshot().phase, 'running')
+  assert.equal(fake.calls.length, 3, '立即重试要真的再起一次')
   sup.stop()
 })
 
