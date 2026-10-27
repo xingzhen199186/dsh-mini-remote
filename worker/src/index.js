@@ -135,7 +135,9 @@ async function requireAdmin(request, env) {
   const bearer = header.startsWith('Bearer ') ? header.slice(7) : ''
   if (!token) return { ok: false, response: fail('admin-not-configured', 503) }
   if (!timingSafeEqual(bearer, token)) return { ok: false, response: fail('admin-unauthorized', 401) }
-  return { ok: true, actor: 'admin-token' }
+  // Cloudflare Access 在 Worker 前面验证身份；这里只把它带来的邮箱用于审计。
+  const email = request.headers.get('cf-access-authenticated-user-email') || ''
+  return { ok: true, actor: email || 'admin-token' }
 }
 
 async function handleRegister(request, env) {

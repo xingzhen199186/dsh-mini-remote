@@ -17,6 +17,7 @@
 - A 方案 Phase 2：Worker 数据面初版（Host 解析、路径/查询串、Host 重写、流式 body、WebSocket 分支、离线/撤销页）与 staging 通配路由；真实手机长连接验收待做。
 - A 方案 Phase 3：插件 RelayProvider 接 staging Worker，新增本机身份、Worker 客户端、固定中继配对条目与设置页开关；真机固定地址页面/API/SSE 已通过。
 - A 方案 Phase 4 起步：数据面全局停用开关（`proxyEnabled=false` 不转发），管理面仍可恢复。
+- A 中继：`workers_dev` 关闭，CLI 支持 Cloudflare Access service token，补 Access 配置清单。
 - 固定域名走 HTTPS 时，设备和口令 cookie 自动带 `Secure`；启动后立即做一次公网探测。
 
 ## [0.2.6] - 2026-10-26

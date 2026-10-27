@@ -91,3 +91,15 @@ IPv6：100::
 - `/mini/api/stream`：200，`text/event-stream`，首个 `connected` 事件已到；
 - 撤销后 410；
 - 测试 id 已撤销，临时 quick 已停止。
+
+
+## Cloudflare Access
+
+`/admin/*` 建议放在 Cloudflare Access 后面；CLI 额外带：
+
+```text
+CF-Access-Client-Id
+CF-Access-Client-Secret
+```
+
+详细步骤见 `docs/A-Cloudflare-Access-配置清单.md`。

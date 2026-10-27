@@ -13,6 +13,8 @@
  */
 const base = (process.env.RELAY_ADMIN_URL || '').replace(/\/+$/, '')
 const token = process.env.RELAY_ADMIN_TOKEN || ''
+const accessId = process.env.RELAY_ACCESS_CLIENT_ID || ''
+const accessSecret = process.env.RELAY_ACCESS_CLIENT_SECRET || ''
 
 if (!base || !token) {
   console.error('需要 RELAY_ADMIN_URL 和 RELAY_ADMIN_TOKEN')
@@ -20,9 +22,18 @@ if (!base || !token) {
 }
 
 async function call(method, path, body) {
+  const headers = {
+    authorization: 'Bearer ' + token,
+    ...(body ? { 'content-type': 'application/json' } : {}),
+  }
+  // 如果 /admin/* 前面套了 Cloudflare Access，命令行也要带服务令牌。
+  if (accessId && accessSecret) {
+    headers['CF-Access-Client-Id'] = accessId
+    headers['CF-Access-Client-Secret'] = accessSecret
+  }
   const response = await fetch(base + path, {
     method,
-    headers: { authorization: 'Bearer ' + token, ...(body ? { 'content-type': 'application/json' } : {}) },
+    headers,
     body: body ? JSON.stringify(body) : undefined,
   })
   const text = await response.text()

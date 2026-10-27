@@ -1,6 +1,7 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "dsh-mini-relay",
+  "workers_dev": false,
   "main": "src/index.js",
   "compatibility_date": "2026-10-01",
   "d1_databases": [
