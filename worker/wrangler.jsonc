@@ -18,7 +18,8 @@
     }
   ],
   "vars": {
-    "RELAY_PUBLIC_SUFFIX": ".relay.example.com",
+    "RELAY_PUBLIC_SUFFIX": ".dsh-mini-remote.com",
+    "RELAY_CONTROL_HOST": "relay.dsh-mini-remote.com",
     "RELAY_INVITE_REQUIRED": "1"
   },
   "observability": { "enabled": true }

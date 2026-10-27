@@ -21,7 +21,8 @@ worker/
 | `RELAY_KV` | KV | target（45 分钟 TTL）和运营配置 |
 | `RELAY_PEPPER` | Secret | 身份/邀请哈希的 HMAC pepper |
 | `ADMIN_TOKEN` | Secret | Phase 1 管理 API；生产前置 Cloudflare Access |
-| `RELAY_PUBLIC_SUFFIX` | Var | 固定子域后缀，默认 `.relay.example.com` |
+| `RELAY_PUBLIC_SUFFIX` | Var | 固定子域后缀；当前规划 `.dsh-mini-remote.com` |
+| `RELAY_CONTROL_HOST` | Var | 控制面/后台主机名；当前规划 `relay.dsh-mini-remote.com` |
 | `RELAY_INVITE_REQUIRED` | Var | `1` 时必须邀请；内测保持 `1` |
 
 ## 部署（staging）
