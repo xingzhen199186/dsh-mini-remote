@@ -52,6 +52,7 @@ B 可行，且与 A 的价值不同：**B 用服务方的一次性资源配置�
 | clientSecret 生成方 | **插件本地生成，服务端只存哈希** | 服务端不保存可回看明文；首次响应丢失后可用同一 secret + 幂等号恢复 |
 | released 保留期 | **30 天** | 立即阻断公网入口，保留隧道/CNAME 30 天便于恢复；到期自动清理 |
 | B 控制面部署 | **独立 Worker + 独立 D1 + 独立 secret** | 不把账户级 Cloudflare API token 放进 A 的公共数据面 Worker |
+| B 的域名/zone | **同一父域名下的子 zone：`b.dsh-mini-remote.com`** | 不改 A；B host `<id>.b.dsh-mini-remote.com`；A 的 `*.dsh-mini-remote.com/*` 不应命中子 zone |
 
 仍未定：生产域名/zone、真实 tunnel token 轮换能力、实际 Tunnel 配额、cloudflared 平台矩阵、预算/合规。见第 17 节。
 
@@ -191,6 +192,23 @@ B 可行，且与 A 的价值不同：**B 用服务方的一次性资源配置�
 - B staging 与生产使用不同 D1、资源前缀和凭据，最好使用不同账户或至少不同 zone 与 API token。
 
 ### 4.3 域名和 TLS 约束
+
+**已定（2026-10-27）：使用子 zone，不新买域名。**
+
+```text
+A：<id>.dsh-mini-remote.com        （现有 A，不动）
+B：<id>.b.dsh-mini-remote.com      （B 数据面）
+B 控制面：control.b.dsh-mini-remote.com
+```
+
+需要在 Cloudflare 添加：
+
+1. 新 zone `b.dsh-mini-remote.com`（同一账户，Full setup）；
+2. 在父 zone `dsh-mini-remote.com` 给 `b` 加 NS 记录，指向子 zone 的 NS；
+3. 等子 zone 状态 Active；
+4. 为 B 控制面建一个只作用于子 zone 的 DNS token。
+
+验收点：请求 `<id>.b.dsh-mini-remote.com` 不能命中 A 的 `*.dsh-mini-remote.com/*` Worker 路由；若仍命中，说明子 zone 没有真正隔离，必须停下重做。
 
 - 固定 hostname 采用单标签 `<id>.<B域后缀>`，不引入多级通配证书假设。
 - CNAME 必须为 proxied，目标严格为预期 `<tunnel-id>.cfargotunnel.com`。
@@ -762,7 +780,7 @@ B Worker 的版本回滚与 A Worker 完全分开。已 retired 的 Tunnel/token
 
 ### 17.1 产品与域名
 
-1. **生产域和 zone**：是否确认使用截图中的 `jiulingssh.xyz`？其所有权、DNS 托管、注册商锁和现有记录是否满足？若与 A 通配路由冲突，是否接受独立 zone？
+1. **生产域和 zone**：**已定：使用 `b.dsh-mini-remote.com` 子 zone**，B host `<id>.b.dsh-mini-remote.com`，控制面建议 `control.b.dsh-mini-remote.com`；A 保持 `*.dsh-mini-remote.com` 不动。待验证：父 zone 的 Worker 通配路由不会命中子 zone。
 2. **B 的产品定位**：替代部分 A 高价值用户、与 A 并列供选择，还是未来成为默认？建议先并列邀请，不默认迁移。
 3. **开通粒度**：一码对一台电脑、一个 DSH profile，还是允许同一用户多实例？这直接决定 Tunnel 配额和客服模型。
 4. **本地端口**：自动发现当前插件端口，还是让用户确认？端口变化是否允许 renew 自动改 ingress？建议只允许受控端口变化并审计。
