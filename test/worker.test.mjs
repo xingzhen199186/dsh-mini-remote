@@ -93,6 +93,47 @@ test('health 公开，不泄露配置', async () => {
   assert.deepEqual(await response.json(), { ok: true, service: 'dsh-mini-relay', version: 1 })
 })
 
+test('Cloudflare Access 邮箱可打开运维台和总览，非白名单仍拒绝', async () => {
+  const env = makeEnv()
+  env.ACCESS_ADMIN = '1'
+  env.ADMIN_EMAILS = 'owner@example.com'
+  const page = await handleRequest(new Request('https://relay.example.com/admin', {
+    headers: { 'cf-access-authenticated-user-email': 'owner@example.com' },
+  }), env)
+  assert.equal(page.status, 200)
+  assert.match(await page.text(), /A 中继运维台/)
+
+  const overview = await handleRequest(new Request('https://relay.example.com/admin/relay/v1/overview', {
+    headers: { 'cf-access-authenticated-user-email': 'owner@example.com' },
+  }), env)
+  assert.equal(overview.status, 200)
+  const body = await overview.json()
+  assert.equal(body.ok, true)
+  assert.equal(body.counts.active, 0)
+  assert.equal(body.config.dailyReportEnabled, false)
+
+  const denied = await handleRequest(new Request('https://relay.example.com/admin/relay/v1/overview', {
+    headers: { 'cf-access-authenticated-user-email': 'other@example.com' },
+  }), env)
+  assert.equal(denied.status, 401)
+})
+
+test('每日用量开关可写可读', async () => {
+  const env = makeEnv()
+  env.ACCESS_ADMIN = '1'
+  env.ADMIN_EMAILS = 'owner@example.com'
+  const headers = { 'cf-access-authenticated-user-email': 'owner@example.com', 'content-type': 'application/json' }
+  const saved = await handleRequest(new Request('https://relay.example.com/admin/relay/v1/config', {
+    method: 'POST', headers, body: JSON.stringify({ dailyReportEnabled: true }),
+  }), env)
+  assert.equal(saved.status, 200)
+  assert.equal((await saved.json()).config.dailyReportEnabled, true)
+  const overview = await handleRequest(new Request('https://relay.example.com/admin/relay/v1/overview', {
+    headers: { 'cf-access-authenticated-user-email': 'owner@example.com' },
+  }), env)
+  assert.equal((await overview.json()).config.dailyReportEnabled, true)
+})
+
 test('没有邀请不能创建身份', async () => {
   const env = makeEnv()
   const response = await handleRequest(req('/api/relay/v1/register', {

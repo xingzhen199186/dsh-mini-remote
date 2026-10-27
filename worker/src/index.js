@@ -12,6 +12,8 @@
  *   ADMIN_TOKEN    管理 API 的 service token（Phase 1；生产前置 Cloudflare Access）
  */
 
+import { dashboardHtml } from './dashboard.js'
+
 const ID_RE = /^[a-z2-7]{26}$/
 const SECRET_RE = /^[A-Za-z0-9_-]{43}$/
 const TARGET_HOST_RE = /^[a-z0-9-]+\.trycloudflare\.com$/
@@ -97,6 +99,7 @@ async function configOf(env) {
   return {
     registrationEnabled: raw?.registrationEnabled !== false,
     proxyEnabled: raw?.proxyEnabled !== false,
+    dailyReportEnabled: raw?.dailyReportEnabled === true,
   }
 }
 
@@ -134,9 +137,13 @@ async function requireAdmin(request, env) {
   const header = request.headers.get('authorization') || ''
   const bearer = header.startsWith('Bearer ') ? header.slice(7) : ''
   if (!token) return { ok: false, response: fail('admin-not-configured', 503) }
-  if (!timingSafeEqual(bearer, token)) return { ok: false, response: fail('admin-unauthorized', 401) }
-  // Cloudflare Access 在 Worker 前面验证身份；这里只把它带来的邮箱用于审计。
   const email = request.headers.get('cf-access-authenticated-user-email') || ''
+  // 浏览器走 Cloudflare Access：只信任 Access 注入的邮箱，并要求在 ADMIN_EMAILS 白名单里。
+  const allowed = String(env.ADMIN_EMAILS || '').split(',').map((v) => v.trim()).filter(Boolean)
+  if (env.ACCESS_ADMIN === '1' && email && allowed.includes(email)) {
+    return { ok: true, actor: email }
+  }
+  if (!timingSafeEqual(bearer, token)) return { ok: false, response: fail('admin-unauthorized', 401) }
   return { ok: true, actor: email || 'admin-token' }
 }
 
@@ -310,10 +317,91 @@ async function handleProxy(request, env, id) {
   return response
 }
 
+async function collectUsage(env) {
+  const token = typeof env.CF_ANALYTICS_TOKEN === 'string' ? env.CF_ANALYTICS_TOKEN : ''
+  if (!token) return { error: '未配置 CF_ANALYTICS_TOKEN，无法查询 Cloudflare 用量。', collectedAt: Date.now() }
+  const accountId = typeof env.RELAY_ACCOUNT_ID === 'string' && env.RELAY_ACCOUNT_ID
+    ? env.RELAY_ACCOUNT_ID
+    : 'c388ee35863086d5ffbcee0bb4b63e0b'
+  const day = new Date().toISOString().slice(0, 10)
+  const query = `query {
+    viewer {
+      accounts(filter: {accountTag: "${accountId}"}) {
+        workersInvocationsAdaptive(limit: 1, filter: {date_geq: "${day}", date_leq: "${day}"}) { sum { requests errors } }
+        d1AnalyticsAdaptiveGroups(limit: 1, filter: {date_geq: "${day}", date_leq: "${day}"}) { sum { readQueries writeQueries rowsRead rowsWritten } }
+        kvOperationsAdaptiveGroups(limit: 1, filter: {date_geq: "${day}", date_leq: "${day}"}) { sum { requests objectBytes } }
+      }
+    }
+  }`
+  let payload
+  try {
+    const response = await fetch('https://api.cloudflare.com/client/v4/graphql', {
+      method: 'POST',
+      headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json' },
+      body: JSON.stringify({ query }),
+    })
+    payload = await response.json().catch(() => ({}))
+    if (!response.ok || payload.errors?.length) {
+      return { error: 'Cloudflare 查询失败：' + JSON.stringify(payload.errors || payload).slice(0, 300), collectedAt: Date.now() }
+    }
+  } catch (error) {
+    return { error: 'Cloudflare 查询失败：' + (error?.message ?? String(error)), collectedAt: Date.now() }
+  }
+  const account = payload.data?.viewer?.accounts?.[0] || {}
+  return {
+    day,
+    collectedAt: Date.now(),
+    workers: account.workersInvocationsAdaptive?.[0]?.sum || { requests: 0, errors: 0 },
+    d1: account.d1AnalyticsAdaptiveGroups?.[0]?.sum || { readQueries: 0, writeQueries: 0, rowsRead: 0, rowsWritten: 0 },
+    kv: account.kvOperationsAdaptiveGroups?.[0]?.sum || { requests: 0, objectBytes: 0 },
+  }
+}
+
+async function refreshUsage(env) {
+  const usage = await collectUsage(env)
+  await env.RELAY_KV.put('relay-usage:latest', JSON.stringify(usage)).catch(() => undefined)
+  if (!usage.error && usage.day) {
+    await env.RELAY_KV.put('relay-usage:' + usage.day, JSON.stringify(usage), { expirationTtl: 35 * 24 * 3600 }).catch(() => undefined)
+  }
+  return usage
+}
+
 async function handleAdmin(request, env, url) {
   const auth = await requireAdmin(request, env)
   if (!auth.ok) return auth.response
   const path = url.pathname
+
+  if (request.method === 'GET' && path === '/admin/relay/v1/overview') {
+    const config = await configOf(env)
+    const counts = await env.DB.prepare(
+      'SELECT state, COUNT(*) AS n FROM relay_identities GROUP BY state',
+    ).all()
+    const invite = await env.DB.prepare(
+      'SELECT COUNT(*) AS n FROM relay_invites WHERE used_at IS NULL AND expires_at > ?',
+    ).bind(Date.now()).first()
+    const usage = await env.RELAY_KV.get('relay-usage:latest', 'json').catch(() => null)
+    const byState = Object.fromEntries((counts.results ?? []).map((row) => [row.state, Number(row.n)]))
+    return json({
+      ok: true,
+      config,
+      counts: {
+        active: byState.active ?? 0,
+        revoked: byState.revoked ?? 0,
+        unusedInvites: Number(invite?.n ?? 0),
+      },
+      usage: usage ?? null,
+    })
+  }
+
+  if (request.method === 'GET' && path === '/admin/relay/v1/usage') {
+    const usage = await env.RELAY_KV.get('relay-usage:latest', 'json').catch(() => null)
+    return json({ ok: true, usage: usage ?? null })
+  }
+
+  if (request.method === 'POST' && path === '/admin/relay/v1/usage/refresh') {
+    const usage = await refreshUsage(env)
+    return json({ ok: !usage.error, usage, error: usage.error ?? null })
+  }
 
   if (request.method === 'GET' && path === '/admin/relay/v1/identities') {
     const limit = Math.max(1, Math.min(100, Number(url.searchParams.get('limit')) || 50))
@@ -364,6 +452,7 @@ async function handleAdmin(request, env, url) {
     const patch = {}
     if (typeof body.registrationEnabled === 'boolean') patch.registrationEnabled = body.registrationEnabled
     if (typeof body.proxyEnabled === 'boolean') patch.proxyEnabled = body.proxyEnabled
+    if (typeof body.dailyReportEnabled === 'boolean') patch.dailyReportEnabled = body.dailyReportEnabled
     if (!Object.keys(patch).length) return fail('invalid-params', 400)
     const next = await setConfig(env, patch)
     await audit(env, auth.actor, 'config.update', null, JSON.stringify(patch))
@@ -376,6 +465,19 @@ async function handleAdmin(request, env, url) {
 async function handleControl(request, env, url) {
   if (request.method === 'GET' && url.pathname === '/health') {
     return json({ ok: true, service: 'dsh-mini-relay', version: 1 })
+  }
+  if (request.method === 'GET' && (url.pathname === '/admin' || url.pathname === '/admin/')) {
+    const auth = await requireAdmin(request, env)
+    if (!auth.ok) return auth.response
+    return new Response(dashboardHtml, {
+      headers: {
+        'content-type': 'text/html; charset=utf-8',
+        'cache-control': 'no-store',
+        'x-robots-tag': 'noindex',
+        'referrer-policy': 'no-referrer',
+        'content-security-policy': "default-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src 'self' data:; connect-src 'self'",
+      },
+    })
   }
   if (url.pathname === '/api/relay/v1/register') return handleRegister(request, env)
   if (url.pathname === '/api/relay/v1/unregister') return handleUnregister(request, env)
@@ -395,4 +497,10 @@ export async function handleRequest(request, env) {
   return fail('not-found', 404)
 }
 
-export default { fetch: handleRequest }
+export async function scheduled(event, env, ctx) {
+  const config = await configOf(env)
+  if (!config.dailyReportEnabled) return
+  ctx.waitUntil(refreshUsage(env))
+}
+
+export default { fetch: handleRequest, scheduled }

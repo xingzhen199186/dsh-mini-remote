@@ -21,8 +21,12 @@
   "vars": {
     "RELAY_PUBLIC_SUFFIX": ".dsh-mini-remote.com",
     "RELAY_CONTROL_HOST": "relay.dsh-mini-remote.com",
-    "RELAY_INVITE_REQUIRED": "1"
+    "RELAY_INVITE_REQUIRED": "1",
+    "ACCESS_ADMIN": "1",
+    "ADMIN_EMAILS": "xingzhen19910806@gmail.com",
+    "RELAY_ACCOUNT_ID": "c388ee35863086d5ffbcee0bb4b63e0b"
   },
+  "triggers": { "crons": ["10 0 * * *"] },
   "observability": { "enabled": true },
   "routes": [
     { "pattern": "relay.dsh-mini-remote.com", "custom_domain": true },
