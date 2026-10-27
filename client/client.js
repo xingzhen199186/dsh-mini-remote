@@ -682,6 +682,9 @@ window.__ModuleLoader__.load({
       var namedGuideState = useState(false);
       var namedGuideOpen = namedGuideState[0];
       var setNamedGuideOpen = namedGuideState[1];
+      var aRelayInviteState = useState('');
+      var aRelayInvite = aRelayInviteState[0];
+      var setARelayInvite = aRelayInviteState[1];
       // 恢复倒计时要每秒重画一次；只在有 nextRetryAt 时开定时器。
       var namedTickState = useState(0);
       var setNamedTick = namedTickState[1];
@@ -2192,11 +2195,17 @@ window.__ModuleLoader__.load({
           setPublicUrl: function (v) { setNamedTunnel(function (d) { return Object.assign({}, d, { publicUrl: v }); }); },
           guideOpen: namedGuideOpen,
           toggleGuide: function () { setNamedGuideOpen(function (v) { return !v; }); },
+        }, {
+          invite: aRelayInvite,
+          setInvite: setARelayInvite,
+          save: function (enabled) {
+            toggleTunnel(true, { mode: 'quick', relayEnabled: enabled, relayInviteCode: aRelayInvite });
+          },
         }),
       );
     }
 
-    function content(info, failure, copied, copy, busy, toggle, pwd, serve, feishu, dev, remote, agent, bAgent, bProject, rmt, self, groups, relay, named) {
+    function content(info, failure, copied, copy, busy, toggle, pwd, serve, feishu, dev, remote, agent, bAgent, bProject, rmt, self, groups, relay, named, aRelay) {
       if (failure) return h('div', { style: styles.error }, failure);
       if (!info) return h('div', { style: styles.loading }, '正在读取配对信息…');
 
@@ -2205,6 +2214,16 @@ window.__ModuleLoader__.load({
       var computers = [];
       var agentGroup = [];
       var feishuGroup = [];
+      var relayUi = {
+        enabled: Boolean(info.relay && info.relay.enabled),
+        state: info.relay && info.relay.state,
+        publicUrl: info.relay && info.relay.publicUrl,
+        error: info.relay && info.relay.error,
+        hasInviteCode: Boolean(info.relay && info.relay.hasInviteCode),
+        invite: aRelay ? aRelay.invite : '',
+        setInvite: aRelay ? aRelay.setInvite : function () {},
+        save: aRelay ? aRelay.save : function () {},
+      };
       if (info.ok === false) {
         mobile.push(h('div', { key: 'err', style: styles.error }, info.error || '读取配对信息失败。'));
       } else {
@@ -2236,7 +2255,7 @@ window.__ModuleLoader__.load({
           toggle(true, { mode: 'named', namedToken: named.token, publicUrl: named.publicUrl });
         },
         stop: function () { toggle(false, { mode: 'named' }); },
-      }));
+      }, relayUi));
       if (info.selfRelay && relay) {
         external.push(selfRelayBlock({
           draft: relay.draft,
@@ -3768,7 +3787,7 @@ window.__ModuleLoader__.load({
       return h('div', { key: 'self-relay-guide' }, out);
     }
 
-    function tunnelBlock(tunnel, busy, toggle, named) {
+    function tunnelBlock(tunnel, busy, toggle, named, aRelay) {
       var namedActive = Boolean(tunnel.enabled && tunnel.mode === 'named');
       var quickEnabled = Boolean(tunnel.enabled && !namedActive);
       var working = Boolean(busy || tunnel.starting);
@@ -3825,6 +3844,43 @@ window.__ModuleLoader__.load({
         quickEnabled && tunnel.error ? h('div', { style: styles.detail }, tunnel.error) : null,
         quickEnabled ? h('div', { style: styles.muted }, '每次重启 DSH 后地址会变化，需重新扫码。') : null,
         quickEnabled ? h('div', { style: styles.warn }, '开着的时候这个服务就挂在公网上了。密码仍然是唯一的门，别把地址或二维码发出去。') : null,
+
+        h('div', { style: Object.assign({}, styles.entryTitle, { marginTop: 18 }) }, '固定地址中继（A）'),
+        h('div', { style: styles.muted }, '在快速隧道前面套一层我们的 Worker 中继，得到一个固定的 <id>.dsh-mini-remote.com 地址。流量经过中继，不是端到端加密；首次开通需要邀请码。'),
+        h('label', { style: styles.toggleRow },
+          h('input', {
+            type: 'checkbox',
+            checked: Boolean(aRelay && aRelay.enabled),
+            disabled: Boolean(busy || namedActive || !quickEnabled),
+            onChange: function (e) { aRelay.save(e.target.checked); },
+          }),
+          h('span', null, aRelay && aRelay.enabled ? '已开启' : '开启'),
+        ),
+        h('div', { style: styles.muted }, (function () {
+          if (!aRelay || !aRelay.enabled) return '未开启。先开启上面的快速隧道，再打开这一项。';
+          if (aRelay.state === 'active') return '已连接：' + (aRelay.publicUrl || '固定地址');
+          if (aRelay.state === 'paused') return '自动登记已暂停：' + (aRelay.error || '检查邀请码或 Worker。');
+          if (aRelay.state === 'degraded') return '中继暂时异常，正在重试：' + (aRelay.error || '');
+          return '正在等待快速隧道地址并登记…';
+        })()),
+        h('div', { style: { marginTop: 8 } },
+          h('input', {
+            type: 'text',
+            value: aRelay.invite,
+            placeholder: aRelay.hasInviteCode ? '邀请码已保存；要换再填一次' : '首次开通的邀请码',
+            onChange: function (e) { aRelay.setInvite(e.target.value); },
+            style: styles.input,
+          }),
+        ),
+        h('div', { style: { marginTop: 8 } },
+          h('button', {
+            type: 'button',
+            disabled: Boolean(busy || namedActive || !quickEnabled),
+            style: styles.btn,
+            onClick: function () { aRelay.save(true); },
+          }, '保存固定中继'),
+        ),
+        aRelay && aRelay.enabled ? h('div', { style: styles.warn }, '固定中继会看到明文流量；它不是端到端加密。别把地址或二维码发出去。') : null,
 
         h('div', { style: Object.assign({}, styles.entryTitle, { marginTop: 18 }) }, '固定地址（Cloudflare 命名隧道）'),
         h('div', { style: styles.muted },

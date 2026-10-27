@@ -962,7 +962,7 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
   await check('公网没开时：开关是未选中的，并且说明「出门进不来」', async () => {
     await mount(withTunnel({ enabled: false, up: false, starting: false, error: null }));
     const boxes = byType(tree6, 'input').filter((n) => n.props.type === 'checkbox');
-    assert.equal(boxes.length, 1, '要有一个公网开关');
+    assert.equal(boxes.length, 2, '快速隧道和 A 中继各有一个开关');
     assert.equal(boxes[0].props.checked, false);
     const text = textOf(tree6);
     assert.match(text, /公网访问/);
@@ -1024,6 +1024,23 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
     assert.deepEqual(posted[0].body, { enabled: false, mode: 'quick' });
   });
 
+  await check('A 固定中继：显示状态，打开时 POST 带 relayEnabled', async () => {
+    posted = [];
+    await mount(withTunnel(
+      { enabled: true, up: true, starting: false, error: null },
+      { relay: { enabled: false, state: 'waiting-tunnel', publicUrl: null, error: null, hasInviteCode: false } },
+    ));
+    const text = textOf(tree6);
+    assert.match(text, /固定地址中继（A）/);
+    const boxes = byType(tree6, 'input').filter((n) => n.props.type === 'checkbox');
+    assert.equal(boxes.length, 2);
+    boxes[1].props.onChange({ target: { checked: true } });
+    await tick();
+    assert.equal(posted.length, 1);
+    assert.equal(posted[0].body.relayEnabled, true);
+    assert.equal(posted[0].body.mode, 'quick');
+  });
+
   await check('整块面板报错时，公网开关仍然露得出来', async () => {
     // 否则「隧道起不来」会把面板变成一条报错，用户连关掉它的地方都找不到
     await mount(withTunnel(
@@ -1031,7 +1048,7 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
       { ok: false, error: '公网访问没起来：找不到 cloudflared', entries: undefined },
     ));
     const boxes = byType(tree6, 'input').filter((n) => n.props.type === 'checkbox');
-    assert.equal(boxes.length, 1, '报错时也得能点得动开关');
+    assert.equal(boxes.length, 2, '报错时快速隧道和 A 中继开关都得在');
     assert.equal(boxes[0].props.checked, true);
     assert.match(textOf(tree6), /公网访问没起来/);
   });
@@ -1351,7 +1368,7 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
       'HTTPS 那一块该排在公网后面',
     );
 
-    assert.equal(serveBox().length, 2, '两块各有一个开关');
+    assert.equal(serveBox().length, 3, '快速隧道、A 中继、HTTPS 各有一个开关');
   });
 }
 

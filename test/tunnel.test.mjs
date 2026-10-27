@@ -260,7 +260,30 @@ test('隧道起来之后，配对面板多出一条公网地址，排在最后',
   assert.match(entry.url, /^https:\/\//, '公网那条必须是 https')
   assert.match(entry.qr, /^data:image\/png;base64,/)
   assert.match(entry.hint, /每次重启/)
-  assert.deepEqual(payload.tunnel, { enabled: true, mode: 'quick', publicUrl: null, hasToken: false, phase: null, attempts: 0, nextRetryAt: null, lastErrorKind: null, publicHealthy: null, up: true, starting: false, error: null })
+  assert.deepEqual(payload.tunnel, { enabled: true, mode: 'quick', publicUrl: null, hasToken: false, phase: null, attempts: 0, nextRetryAt: null, lastErrorKind: null, publicHealthy: null, up: true, starting: false, error: null, relay: null })
+})
+
+test('A 中继 active 时，配对面板给固定中继地址而不是裸 quick', async () => {
+  const payload = await buildPairing({
+    port: 3090,
+    token: 'abc123',
+    bound: [],
+    tunnel: { enabled: true, url: 'https://tidy-lamp-brave-honest.trycloudflare.com' },
+    relay: {
+      enabled: true,
+      state: 'active',
+      publicUrl: 'https://abcdefghijklmnopqrstuvwxyz.dsh-mini-remote.com',
+      publicHealthy: true,
+    },
+  })
+  assert.equal(payload.ok, true)
+  assert.equal(payload.entries.length, 1)
+  const [entry] = payload.entries
+  assert.equal(entry.kind, 'public-relay')
+  assert.equal(entry.label, '公网（固定中继）')
+  assert.equal(entry.url, 'https://abcdefghijklmnopqrstuvwxyz.dsh-mini-remote.com/mini?token=abc123')
+  assert.match(entry.hint, /固定/)
+  assert.equal(payload.tunnel.relay.state, 'active')
 })
 
 test('命名隧道起来之后，配对面板给固定地址和固定文案', async () => {
