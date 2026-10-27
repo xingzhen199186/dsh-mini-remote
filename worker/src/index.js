@@ -255,6 +255,8 @@ function rewriteLocation(location, targetOrigin, publicOrigin) {
 }
 
 async function handleProxy(request, env, id) {
+  const config = await configOf(env)
+  if (!config.proxyEnabled) return offlineResponse(503, 'disabled')
   let record
   try {
     record = await env.RELAY_KV.get('relay-target:' + id, 'json')

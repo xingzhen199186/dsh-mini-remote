@@ -300,6 +300,36 @@ test('数据面无 target 返回离线页，撤销返回 410，不调用上游',
   }
 })
 
+test('全局停代理后数据面不转发，管理面仍可恢复', async () => {
+  const env = makeEnv()
+  const code = await createInvite(env)
+  await handleRequest(req('/api/relay/v1/register', {
+    method: 'PUT', body: { id, secret, target, inviteCode: code },
+  }), env)
+  const original = globalThis.fetch
+  let calls = 0
+  globalThis.fetch = async () => { calls += 1; return new Response('should not') }
+  try {
+    const off = await handleRequest(req('/admin/relay/v1/config', {
+      method: 'POST', token: ADMIN, body: { proxyEnabled: false },
+    }), env)
+    assert.equal(off.status, 200)
+    const blocked = await handleRequest(new Request('https://' + id + '.relay.example.com/mini'), env)
+    assert.equal(blocked.status, 503)
+    assert.equal(blocked.headers.get('x-relay-offline'), 'disabled')
+    assert.equal(calls, 0)
+    const on = await handleRequest(req('/admin/relay/v1/config', {
+      method: 'POST', token: ADMIN, body: { proxyEnabled: true },
+    }), env)
+    assert.equal(on.status, 200)
+    const allowed = await handleRequest(new Request('https://' + id + '.relay.example.com/mini'), env)
+    assert.equal(allowed.status, 200)
+    assert.equal(calls, 1)
+  } finally {
+    globalThis.fetch = original
+  }
+})
+
 test('未知 Host 和非法 id 不代理', async () => {
   const env = makeEnv()
   const original = globalThis.fetch
