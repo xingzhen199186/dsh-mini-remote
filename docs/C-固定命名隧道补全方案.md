@@ -244,7 +244,7 @@ action = save | start | stop | retry
 2. **M2 接入命名隧道**：替换 `bringTunnelUp` 的命名分支，保留 quick（已完成）；
 3. **M3 前端状态与重试**：倒计时、立即重试、错误分类（已完成）；
 4. **M4 健康检查与 DNS 复核**：三层探测、不误杀（已完成）；
-5. **M5 真机验收与文档**：更新指引、CHANGELOG、README（文档已完成；真机验收被当前 Clash/TUN fake-IP 阻塞，需用户关闭代理并重启 DSH 后完成）。
+5. **M5 真机验收与文档**：更新指引、CHANGELOG、README（已完成；真机验证了杀掉 cloudflared 后自动恢复、公网重新 200）。
 
 ## 13. 我们比对方多什么
 
