@@ -13,6 +13,7 @@
 - **错误分类**：token 错、公网地址/Public Hostname 不一致、本机服务没开等配置类问题不会盲目重启；本机 DNS 失败会用公共 DNS 复核，避免误判。
 - 设置页显示恢复阶段、重试次数和最近错误类型。
 - A 方案 Phase 0：quick 接入监督器，新增 `originHostHeader` 与 `RelayProvider` 纯状态机（未接 Worker）。
+- A 方案 Phase 1：新增 Worker 控制面、D1/KV 迁移、邀请/注册/注销/撤销、运营 CLI 与 11 项 Worker 测试（未部署、未接数据面）。
 - 固定域名走 HTTPS 时，设备和口令 cookie 自动带 `Secure`；启动后立即做一次公网探测。
 
 ## [0.2.6] - 2026-10-26

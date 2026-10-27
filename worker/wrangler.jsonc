@@ -1,0 +1,25 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "dsh-mini-relay",
+  "main": "src/index.js",
+  "compatibility_date": "2026-10-01",
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "dsh-mini-relay",
+      "database_id": "REPLACE_WITH_STAGING_D1_ID",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "kv_namespaces": [
+    {
+      "binding": "RELAY_KV",
+      "id": "REPLACE_WITH_STAGING_KV_ID"
+    }
+  ],
+  "vars": {
+    "RELAY_PUBLIC_SUFFIX": ".relay.example.com",
+    "RELAY_INVITE_REQUIRED": "1"
+  },
+  "observability": { "enabled": true }
+}
