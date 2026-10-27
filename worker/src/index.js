@@ -17,7 +17,7 @@ import { dashboardHtml } from './dashboard.js'
 const ID_RE = /^[a-z2-7]{26}$/
 const SECRET_RE = /^[A-Za-z0-9_-]{43}$/
 const TARGET_HOST_RE = /^[a-z0-9-]+\.trycloudflare\.com$/
-const TARGET_TTL_SECONDS = 45 * 60
+const TARGET_TTL_SECONDS = 90 * 24 * 60 * 60
 const MAX_BODY_BYTES = 8 * 1024
 const RATE_WINDOW_MS = 60_000
 const RATE_PER_IP = 30

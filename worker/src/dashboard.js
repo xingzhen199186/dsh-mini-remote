@@ -76,7 +76,7 @@ th{color:var(--muted);font-weight:500}code{background:#f3f4f6;padding:2px 6px;bo
   <section class="card">
     <h2>实例</h2>
     <div class="muted small" id="identityMeta"></div>
-    <table><thead><tr><th>id</th><th>状态</th><th>最近心跳</th><th>创建</th><th></th></tr></thead><tbody id="identities"></tbody></table>
+    <table><thead><tr><th>id</th><th>状态</th><th>最近登记</th><th>创建</th><th></th></tr></thead><tbody id="identities"></tbody></table>
   </section>
 
   <section class="card">

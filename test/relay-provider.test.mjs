@@ -107,13 +107,14 @@ test('429 遵守 Retry-After', async () => {
   assert.ok(timer.delays.includes(7000))
 })
 
-test('心跳会重新登记当前 URL', async () => {
+test('不做 15 分钟周期心跳，只在 URL 变化时登记', async () => {
   const { provider, timer, calls } = makeProvider(async () => ({ ok: true, publicUrl: 'https://abc.relay.example' }))
   await provider.attach('https://one.trycloudflare.com')
   assert.equal(calls.length, 1)
-  assert.ok(timer.delays.includes(15 * 60_000))
-  timer.runNext()
+  assert.equal(timer.delays.includes(15 * 60_000), false)
   await flush()
+  assert.equal(calls.length, 1)
+  await provider.attach('https://two.trycloudflare.com')
   assert.equal(calls.length, 2)
 })
 
