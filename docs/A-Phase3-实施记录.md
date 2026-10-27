@@ -73,3 +73,16 @@ node client/verify.mjs   148/148
 - SSE/WebSocket/大文件经插件 RelayProvider 的端到端；
 - Cloudflare Access；
 - 精确全局配额。
+
+
+## 插件真机验收（2026-10-27）
+
+- 重启后加载 Phase 3；
+- 开启 quick + A 中继，首次邀请注册成功；
+- 固定地址：`https://jeq2jwsou2lojv2m4bm3e7dll4.dsh-mini-remote.com`
+- 配对面板出现 `public-relay`，标签「公网（固定中继）」；
+- 固定地址 `/mini`：200，约 334 KB；
+- 固定地址 `/mini/api/version`：200；
+- 固定地址 `/mini/api/stream`：200，`text/event-stream`，首个 `connected` 事件和 `state` 数据；
+- 中继状态曾因固定地址探测 530 显示 degraded，但固定地址随后 200；已补「探测失败按退避重试」的代码，待下次重启加载。
+- 测试身份 `defghijklmnopqrstuvwxyzabc` 已撤销。

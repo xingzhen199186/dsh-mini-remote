@@ -139,6 +139,26 @@ test('已 active 后 detach 会尽力注销固定地址', async () => {
   assert.equal(unregisters[0].publicUrl, 'https://abc.relay.example')
 })
 
+test('登记成功但固定地址探测失败时，按退避重试而不是等 15 分钟心跳', async () => {
+  let probes = 0
+  const { provider, timer } = makeProvider(async () => ({ ok: true, publicUrl: 'https://abc.relay.example' }), {
+    probe: async () => {
+      probes += 1
+      return probes === 1 ? { ok: false, kind: 'edge', detail: 'HTTP 530' } : { ok: true }
+    },
+    baseDelayMs: 100,
+    random: () => 0.5,
+  })
+  await provider.attach('https://one.trycloudflare.com')
+  assert.equal(provider.snapshot().state, 'degraded')
+  assert.equal(provider.snapshot().publicHealthy, false)
+  assert.ok(provider.snapshot().nextRetryAt > 0)
+  timer.runNext()
+  await flush()
+  assert.equal(provider.snapshot().state, 'active')
+  assert.equal(probes, 2)
+})
+
 test('快照不包含 secret 或 register 输入之外的敏感值', async () => {
   const { provider } = makeProvider(async () => ({ ok: true, publicUrl: 'https://abc.relay.example' }))
   await provider.attach('https://one.trycloudflare.com')
