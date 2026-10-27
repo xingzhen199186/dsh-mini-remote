@@ -83,3 +83,11 @@ IPv6：100::
 ```
 
 这样 `<id>.dsh-mini-remote.com` 才会解析到 Cloudflare 并由 Worker 通配路由接管。
+
+## 真实数据面验证（2026-10-27）
+
+- `<id>.dsh-mini-remote.com/mini` 经 Worker 到临时 quick 隧道：200；
+- `/mini/api/version`：200；
+- `/mini/api/stream`：200，`text/event-stream`，首个 `connected` 事件已到；
+- 撤销后 410；
+- 测试 id 已撤销，临时 quick 已停止。

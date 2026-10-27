@@ -55,3 +55,18 @@ Worker 测试 14 项，新增：
 - Cloudflare Access JWT；
 - 插件 RelayProvider 接生产 endpoint（Phase 3）；
 - 精确全局配额。
+
+
+## 真实数据面验收（2026-10-27）
+
+- 临时 quick 隧道：`https://catalyst-warranties-moment-egg.trycloudflare.com`
+- 测试 id：`cdefghijklmnopqrstuvwxyzab`
+- 固定地址：`https://cdefghijklmnopqrstuvwxyzab.dsh-mini-remote.com`
+- 直接访问 quick：401（需要应用 token，说明隧道活着）
+- 经固定地址 `/mini`：200，页面约 334 KB
+- 经固定地址 `/mini/api/version?token=...`：200，返回 `dshVersion: 0.2.1-rc.3`
+- 经固定地址 `/mini/api/stream?token=...`：200，`content-type: text/event-stream`，首个事件 `connected`，收到 `state` 数据
+- 撤销测试 id 后固定地址：410
+- 测试 id 已撤销，临时 quick 隧道已停止，无 cloudflared 残留
+
+未测：WebSocket/远程窗口、50 MiB 文件、30 分钟长稳。
