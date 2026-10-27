@@ -72,3 +72,9 @@ node client/verify.mjs   147/147
 - quick 现在也走监督器，行为变化最大的是“失败后自动重试”和“公网探测”；现有 quick/C/frp 回归已跑，但真机重启验证仍需在 DSH 重启后做。
 - `originHostHeader` 字段暂未在 UI 暴露，普通用户不会看到，也不会误传。
 - RelayProvider 只是状态机，尚未接任何 Worker，不会向外发请求。
+
+## 真机验证（2026-10-27）
+
+- 当前插件加载 Phase 0 后，named 固定地址仍为 `phase=running`、`publicHealthy=true`，公网 200。
+- 用真实 cloudflared 单独启动 quick 监督器：初始拿到 `https://mattress-ict-press-rotary.trycloudflare.com`，杀掉子进程后自动重试，约 8 秒内变成 `https://miami-railroad-employment-continued.trycloudflare.com`，`phase=running`。
+- 该验证只覆盖 `TunnelSupervisor + startTunnel` 的真实 quick 路径；插件设置页的 quick 模式切换仍由自动化测试覆盖，未在真机上切换用户当前 named 模式。
