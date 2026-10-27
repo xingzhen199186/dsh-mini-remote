@@ -253,7 +253,7 @@ test('隧道起来之后，配对面板多出一条公网地址，排在最后',
   assert.match(entry.url, /^https:\/\//, '公网那条必须是 https')
   assert.match(entry.qr, /^data:image\/png;base64,/)
   assert.match(entry.hint, /每次重启/)
-  assert.deepEqual(payload.tunnel, { enabled: true, mode: 'quick', publicUrl: null, hasToken: false, up: true, starting: false, error: null })
+  assert.deepEqual(payload.tunnel, { enabled: true, mode: 'quick', publicUrl: null, hasToken: false, phase: null, attempts: 0, nextRetryAt: null, lastErrorKind: null, publicHealthy: null, up: true, starting: false, error: null })
 })
 
 test('命名隧道起来之后，配对面板给固定地址和固定文案', async () => {

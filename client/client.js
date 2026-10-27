@@ -682,6 +682,9 @@ window.__ModuleLoader__.load({
       var namedGuideState = useState(false);
       var namedGuideOpen = namedGuideState[0];
       var setNamedGuideOpen = namedGuideState[1];
+      // 恢复倒计时要每秒重画一次；只在有 nextRetryAt 时开定时器。
+      var namedTickState = useState(0);
+      var setNamedTick = namedTickState[1];
       // 按钮点下去到 React 重渲染之间还有一小段；用 ref 挡住同一瞬间的第二次点击。
       var bPairingRef = useRef(false);
       // B 项目：门牌列表 + 新建表单 + 当前打开的文件面板。
@@ -866,6 +869,14 @@ window.__ModuleLoader__.load({
           return Object.assign({}, d, { publicUrl: typeof t.publicUrl === 'string' ? t.publicUrl : '' });
         });
       }, [info]);
+
+      // 命名隧道恢复倒计时：每秒动一下，让 nextRetryAt 的剩余秒数真的会变。
+      useEffect(function () {
+        var retryAt = info && info.tunnel && info.tunnel.nextRetryAt;
+        if (!retryAt) return undefined;
+        var timer = setInterval(function () { setNamedTick(function (v) { return v + 1; }); }, 1000);
+        return function () { clearInterval(timer); };
+      }, [info && info.tunnel && info.tunnel.nextRetryAt]);
 
       var runRelay = function (action) {
         if (busy || !relayDraft) return;
@@ -2220,6 +2231,7 @@ window.__ModuleLoader__.load({
         setPublicUrl: named.setPublicUrl,
         guideOpen: named.guideOpen,
         toggleGuide: named.toggleGuide,
+        retry: function () { toggle(true, { action: 'retry' }); },
         save: function () {
           toggle(true, { mode: 'named', namedToken: named.token, publicUrl: named.publicUrl });
         },
@@ -3769,8 +3781,23 @@ window.__ModuleLoader__.load({
         : '已开启，但还没拿到公网地址。';
       else quickStatus = '未开启。手机与电脑不在同一网络时无法连接；可改用 Tailscale 或下面的固定地址。';
 
+      var retryIn = tunnel.nextRetryAt
+        ? Math.max(0, Math.ceil((Number(tunnel.nextRetryAt) - Date.now()) / 1000))
+        : 0;
       var namedStatus;
-      if (working && namedActive) namedStatus = '正在连接 Cloudflare 固定隧道…';
+      if (tunnel.phase === 'paused') namedStatus = '自动重试已暂停。检查下面的原因，改好后点「立即重试」。';
+      else if (tunnel.phase === 'restarting') namedStatus = retryIn > 0
+        ? '隧道断了，正在恢复，约 ' + retryIn + ' 秒后重试。'
+        : '隧道断了，正在恢复。';
+      else if (tunnel.phase === 'failed') namedStatus = '固定隧道没有启动成功。下面这段是原因，改好后再点「保存并重启」。';
+      else if (tunnel.phase === 'degraded') namedStatus = tunnel.lastErrorKind === 'dns' || tunnel.lastErrorKind === 'dns-local'
+        ? '隧道进程还活着，但这台电脑解析不了固定域名；手机走运营商 DNS 可能仍然能用。'
+        : tunnel.lastErrorKind === 'origin'
+          ? '隧道通了，但本机手机服务没应答；先检查 3090 端口和插件服务。'
+          : tunnel.lastErrorKind === 'hostname'
+            ? '公网地址和 Cloudflare 的 Public Hostname 对不上，先检查域名。'
+            : '隧道还在，但公网探测失败；正在继续观察。';
+      else if (working && namedActive) namedStatus = '正在连接 Cloudflare 固定隧道…';
       else if (namedActive && tunnel.up) namedStatus = '已连接。手机用上面的固定地址，DSH 重启后也不用重新扫码。';
       else if (namedActive) namedStatus = tunnel.error
         ? '固定隧道开着，但公网那边连不上。下面那段是 cloudflared 的原话。'
@@ -3817,6 +3844,15 @@ window.__ModuleLoader__.load({
             style: styles.btn,
             onClick: named.stop,
           }, '停止'),
+          (tunnel.phase === 'paused' || tunnel.phase === 'failed'
+            || tunnel.phase === 'degraded' || tunnel.phase === 'restarting')
+            ? h('button', {
+              type: 'button',
+              disabled: Boolean(busy),
+              style: styles.btn,
+              onClick: named.retry,
+            }, '立即重试')
+            : null,
         ),
         namedActive ? h('div', { style: styles.warn },
           '固定地址也经过 Cloudflare，Cloudflare 在边缘能看到明文；它不是端到端加密。别把地址或二维码发出去。') : null,

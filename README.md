@@ -237,6 +237,8 @@ http://192.168.1.2:3090/mini?token=xxxxxxxxxxxx
 
 > token 通过 `TUNNEL_TOKEN` 环境变量传给 cloudflared，不放进命令行参数；读取设置时不回显。
 >
+> 隧道异常退出或公网探测连续失败时，插件会在有限预算内自动退避重试；连续失败达到上限会暂停自动重试，并在设置页提供「立即重试」。token 错、Public Hostname 不一致、本机服务没开等配置类问题不会盲目重启。
+>
 > 这条路仍然经过 Cloudflare，Cloudflare 在边缘能看到明文，不是端到端加密；国内网络稳定性取决于 Cloudflare。
 
 ### 进阶设置：内嵌桌面端界面（手机或 PC 网页）

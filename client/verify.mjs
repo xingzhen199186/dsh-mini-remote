@@ -1102,6 +1102,58 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
   });
 }
 
+// 4d-3. 命名隧道恢复中：状态和「立即重试」
+{
+  const payload = {
+    ok: true,
+    port: 3090,
+    token: TOKEN,
+    entries: [{ kind: 'lan', label: '内网', hint: '手机连同一个 Wi-Fi 时用这个', url: URL_LAN, qr: QR }],
+    tunnel: {
+      enabled: true,
+      mode: 'named',
+      publicUrl: 'https://dsh.example.com',
+      hasToken: true,
+      up: true,
+      starting: true,
+      error: 'TLS handshake with edge error: EOF',
+      phase: 'restarting',
+      attempts: 1,
+      nextRetryAt: null,
+      lastErrorKind: 'edge',
+      publicHealthy: false,
+    },
+  };
+  const h8 = useHarness();
+  let tree8 = null;
+  const posted8 = [];
+  h8.onUpdate(() => { tree8 = h8.draw(Comp); });
+  setGlobal('fetch', async (url, init) => {
+    if (init && init.method === 'POST') {
+      posted8.push({ url, body: JSON.parse(init.body) });
+      return jsonResponse(200, payload);
+    }
+    return jsonResponse(200, payload);
+  });
+  tree8 = h8.draw(Comp);
+  h8.runEffects();
+  await tick();
+  h8.runEffects();
+  await tick();
+
+  await check('命名隧道恢复中：说正在恢复，并给立即重试', async () => {
+    const text = textOf(tree8);
+    assert.match(text, /隧道断了，正在恢复/);
+    const retryBtn = byType(tree8, 'button').find((b) => textOf(b) === '立即重试');
+    assert.ok(retryBtn, '恢复中要有立即重试');
+    retryBtn.props.onClick();
+    await tick();
+    assert.equal(posted8.length, 1);
+    assert.equal(posted8[0].url, '/mini-remote/tunnel');
+    assert.deepEqual(posted8[0].body, { enabled: true, action: 'retry' });
+  });
+}
+
 // 4e. Tailscale 的 HTTPS 地址：开关、状态、以及「tailnet 没开 Serve」那条路
 {
   const withServe = (serve, extra) => Object.assign({

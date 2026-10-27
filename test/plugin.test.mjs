@@ -1395,6 +1395,32 @@ test('公网开关：打开后配置落盘，起不来时把原因说清楚', as
   assert.equal(saved.tunnel.enabled, true, '开关状态要落盘，重启之后还记得')
 })
 
+test('固定域名隧道：cloudflared 找不到时状态是 failed，不假装已连接', async (t) => {
+  const p = await bootPlugin({
+    config: {
+      bindAddress: 'auto',
+      tunnel: {
+        enabled: false,
+        mode: 'named',
+        namedToken: 'tok',
+        publicUrl: 'https://dsh.example.com',
+        cloudflaredPath: join(tmpdir(), 'no-such-cloudflared.exe'),
+      },
+    },
+  })
+  t.after(p.stop)
+  const route = p.routes.get('/mini-remote/tunnel')
+  const res = fakeRes()
+  await route.handler(fakeReq('127.0.0.1', { method: 'POST', body: '{"enabled":true}' }), res)
+  const payload = JSON.parse(res.out.body)
+
+  assert.equal(payload.tunnel.enabled, true)
+  assert.equal(payload.tunnel.mode, 'named')
+  assert.equal(payload.tunnel.phase, 'failed')
+  assert.equal(payload.tunnel.up, false)
+  assert.match(payload.tunnel.error, /cloudflaredPath/)
+})
+
 test('公网开关：关掉之后配置落盘，面板里不再有公网那条', async (t) => {
   const p = await bootPlugin({ config: { bindAddress: 'auto', tunnel: { enabled: false } } })
   t.after(p.stop)
