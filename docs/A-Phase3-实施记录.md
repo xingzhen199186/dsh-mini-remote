@@ -86,3 +86,13 @@ node client/verify.mjs   148/148
 - 固定地址 `/mini/api/stream`：200，`text/event-stream`，首个 `connected` 事件和 `state` 数据；
 - 中继状态曾因固定地址探测 530 显示 degraded，但固定地址随后 200；已补「探测失败按退避重试」的代码，待下次重启加载。
 - 测试身份 `defghijklmnopqrstuvwxyzabc` 已撤销。
+
+
+## 重启与 quick 自恢复复验（2026-10-27）
+
+- 重启后 relay 状态 `active`，`publicHealthy=true`；
+- 固定地址 `/mini` 200、`/mini/api/version` 200；
+- 手动杀掉 quick cloudflared：
+  - tunnel `restarting → starting → running`；
+  - 新 quick URL 生成后 relay `registering → degraded → active`；
+  - 固定地址仍然是 `https://jeq2jwsou2lojv2m4bm3e7dll4.dsh-mini-remote.com`，重启后 `/mini/api/version` 仍 200。
