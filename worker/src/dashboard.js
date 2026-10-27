@@ -67,8 +67,9 @@ th{color:var(--muted);font-weight:500}code{background:#f3f4f6;padding:2px 6px;bo
 
   <section class="card">
     <h2>邀请</h2>
-    <div class="row"><button id="newInvite" class="primary">新建 7 天邀请码</button><span class="muted small">只显示一次，发出后自行保存。</span></div>
+    <div class="row"><button id="newInvite" class="primary">新建 7 天邀请码</button><span class="muted small">未使用、未过期的邀请码会列在下面。</span></div>
     <div id="inviteResult" class="notice hidden"></div>
+    <table><thead><tr><th>邀请码</th><th>备注</th><th>到期</th><th></th></tr></thead><tbody id="invites"></tbody></table>
   </section>
 
   <section class="card">
@@ -108,10 +109,11 @@ function usageHtml(u){
 async function load(){
   hideError();
   try{
-    const [o,ids,audit]=await Promise.all([
+    const [o,ids,audit,invites]=await Promise.all([
       api('/admin/relay/v1/overview'),
       api('/admin/relay/v1/identities?limit=50'),
       api('/admin/relay/v1/audit?limit=30'),
+      api('/admin/relay/v1/invites'),
     ]);
     setChecks(o.config||{});
     $('activeCount').textContent=o.counts?.active??'—';
@@ -124,6 +126,8 @@ async function load(){
     $('identityMeta').textContent='共 '+rows.length+' 条（最多显示 50 条）';
     $('identities').innerHTML=rows.map((x)=>'<tr><td><code>'+esc(x.id)+'</code></td><td>'+esc(x.state)+'</td><td>'+esc(time(x.last_seen_at))+'</td><td>'+esc(time(x.created_at))+'</td><td>'+(x.state==='active'?'<button class="danger" data-revoke="'+esc(x.id)+'">撤销</button>':'')+'</td></tr>').join('');
     $('audit').innerHTML=(audit.audit||[]).map((a)=>'<tr><td>'+esc(time(a.at))+'</td><td>'+esc(a.action)+'</td><td>'+esc(a.target||'—')+'</td><td>'+esc(a.reason||'—')+'</td><td>'+esc(a.actor||'—')+'</td></tr>').join('');
+    const invRows=invites.invites||[];
+    $('invites').innerHTML=invRows.map((x)=>'<tr><td>'+(x.code?'<code>'+esc(x.code)+'</code> <button data-copy="'+esc(x.code)+'">复制</button>':'<span class="muted">旧码不可查看</span>')+'</td><td>'+esc(x.note||'—')+'</td><td>'+esc(time(x.expires_at))+'</td><td></td></tr>').join('') || '<tr><td colspan="4" class="muted">没有未使用的邀请码。</td></tr>';
   }catch(e){showError('读取失败：'+e.message)}
 }
 async function saveConfig(key,value){
@@ -136,6 +140,7 @@ $('newInvite').addEventListener('click',async()=>{
   try{const r=await api('/admin/relay/v1/invites',{method:'POST',body:JSON.stringify({expiresInDays:7})});$('inviteResult').classList.remove('hidden');$('inviteResult').innerHTML='新邀请码（只显示这一次）：<br><code>'+esc(r.code)+'</code>';await load()}catch(e){showError('创建邀请失败：'+e.message)}
 });
 document.addEventListener('click',async(e)=>{
+  const copy=e.target?.dataset?.copy;if(copy){try{await navigator.clipboard.writeText(copy);e.target.textContent='已复制'}catch{}return;}
   const id=e.target?.dataset?.revoke;if(!id)return;
   if(!confirm('确定撤销 '+id+'？撤销后固定地址立即失效。'))return;
   try{await api('/admin/relay/v1/revoke',{method:'POST',body:JSON.stringify({id,reason:'ops-console'})});await load()}catch(err){showError('撤销失败：'+err.message)}

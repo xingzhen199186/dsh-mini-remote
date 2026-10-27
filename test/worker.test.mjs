@@ -5,13 +5,16 @@ import { DatabaseSync } from 'node:sqlite'
 
 import { handleRequest } from '../worker/src/index.js'
 
-const MIGRATION = readFileSync(new URL('../worker/migrations/0001_init.sql', import.meta.url), 'utf8')
+const MIGRATIONS = [
+  readFileSync(new URL('../worker/migrations/0001_init.sql', import.meta.url), 'utf8'),
+  readFileSync(new URL('../worker/migrations/0002_invite_code.sql', import.meta.url), 'utf8'),
+]
 const ADMIN = 'test-admin-token'
 const PEPPER = 'test-pepper'
 
 function makeD1() {
   const db = new DatabaseSync(':memory:')
-  db.exec(MIGRATION)
+  for (const sql of MIGRATIONS) db.exec(sql)
   const wrap = (sql) => {
     const stmt = db.prepare(sql)
     const run = (params) => {
@@ -116,6 +119,17 @@ test('Cloudflare Access 邮箱可打开运维台和总览，非白名单仍拒�
     headers: { 'cf-access-authenticated-user-email': 'other@example.com' },
   }), env)
   assert.equal(denied.status, 401)
+})
+
+test('未使用的邀请码可在运维台回看', async () => {
+  const env = makeEnv()
+  const code = await createInvite(env)
+  const response = await handleRequest(req('/admin/relay/v1/invites', { token: ADMIN }), env)
+  assert.equal(response.status, 200)
+  const body = await response.json()
+  assert.equal(body.invites.length, 1)
+  assert.equal(body.invites[0].code, code)
+  assert.equal(body.invites[0].used_at, undefined)
 })
 
 test('每日用量开关可写可读', async () => {

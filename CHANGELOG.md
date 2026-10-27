@@ -20,6 +20,7 @@
 - A 中继：`workers_dev` 关闭，CLI 支持 Cloudflare Access service token，补 Access 配置清单。
 - A 中继：新增只读用量监控脚本 `worker/scripts/relay-usage.mjs`（Workers/D1/KV 每日 Free 用量）。
 - A 中继：新增 Cloudflare Access 保护的运维台 `/admin`，含实例、审计、邀请、运营开关和每日用量；Worker Cron 每天 08:10（北京时间）采集。
+- A 中继运维台：未使用邀请码可在页面回看和复制（新增 `code` 列迁移；旧码不可恢复）。
 - 固定域名走 HTTPS 时，设备和口令 cookie 自动带 `Secure`；启动后立即做一次公网探测。
 
 ## [0.2.6] - 2026-10-26

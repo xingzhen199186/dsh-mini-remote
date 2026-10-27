@@ -371,6 +371,13 @@ async function handleAdmin(request, env, url) {
   if (!auth.ok) return auth.response
   const path = url.pathname
 
+  if (request.method === 'GET' && path === '/admin/relay/v1/invites') {
+    const rows = await env.DB.prepare(
+      'SELECT code, created_at, expires_at, note FROM relay_invites WHERE used_at IS NULL AND expires_at > ? ORDER BY created_at DESC LIMIT 50',
+    ).bind(Date.now()).all()
+    return json({ ok: true, invites: rows.results ?? [] })
+  }
+
   if (request.method === 'GET' && path === '/admin/relay/v1/overview') {
     const config = await configOf(env)
     const counts = await env.DB.prepare(
@@ -426,8 +433,8 @@ async function handleAdmin(request, env, url) {
     const days = Math.max(1, Math.min(90, Number(body.expiresInDays) || 7))
     let hash
     try { hash = await hmac(env, 'invite', code) } catch { return fail('storage-unavailable', 503) }
-    await env.DB.prepare('INSERT INTO relay_invites (code_hash, created_at, expires_at, note) VALUES (?, ?, ?, ?)')
-      .bind(hash, Date.now(), Date.now() + days * 86_400_000, typeof body.note === 'string' ? body.note : null).run()
+    await env.DB.prepare('INSERT INTO relay_invites (code_hash, code, created_at, expires_at, note) VALUES (?, ?, ?, ?, ?)')
+      .bind(hash, code, Date.now(), Date.now() + days * 86_400_000, typeof body.note === 'string' ? body.note : null).run()
     await audit(env, auth.actor, 'invite.create', null, body.note ?? null)
     return json({ ok: true, code, expiresInDays: days })
   }
