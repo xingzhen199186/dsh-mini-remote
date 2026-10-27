@@ -29,7 +29,7 @@ Access
 Application name：dsh-mini-relay admin
 Session duration：8 hours（或 24 hours）
 Application domain：relay.dsh-mini-remote.com
-Path：admin
+Path：/admin
 ```
 
 注意 Path 只填 `admin`，不要填 `/admin`，也不要填 `/*`；  
@@ -57,8 +57,8 @@ https://relay.dsh-mini-remote.com/admin/relay/v1/identities
 ## 3. 创建 CLI 服务令牌
 
 ```text
-Access
-→ Service Auth
+Access controls
+→ Service credentials
 → Service Tokens
 → Create Service Token
 ```
@@ -104,6 +104,13 @@ Authorization: Bearer <ADMIN_TOKEN>
 ```
 
 ## 5. 验收
+
+已验证（2026-10-27）：
+
+- 未登录访问 `/admin/relay/v1/identities` 返回 302，跳到 `proud-math-c20b.cloudflareaccess.com`；
+- `/health` 仍为 200；
+- 固定地址不受影响。
+
 
 | 检查 | 通过标准 |
 |---|---|
