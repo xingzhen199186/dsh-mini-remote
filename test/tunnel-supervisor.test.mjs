@@ -66,6 +66,7 @@ test('失败分类：token 错不重试，DNS 和本机服务不重启隧道', (
   assert.equal(classifyTunnelFailure(new Error('HTTP 502 Bad Gateway')), 'origin')
   assert.equal(classifyTunnelFailure(new Error('HTTP 404 Not Found')), 'hostname')
   assert.equal(classifyTunnelFailure(new Error('TLS handshake with edge error: EOF')), 'edge')
+  assert.equal(classifyTunnelFailure(new Error('TLS handshake with edge error: EOF ip=198.18.0.41')), 'proxy')
 })
 
 test('退避有上限，并带抖动', () => {

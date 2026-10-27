@@ -3785,8 +3785,12 @@ window.__ModuleLoader__.load({
         ? Math.max(0, Math.ceil((Number(tunnel.nextRetryAt) - Date.now()) / 1000))
         : 0;
       var namedStatus;
-      if (tunnel.phase === 'paused') namedStatus = '自动重试已暂停。检查下面的原因，改好后点「立即重试」。';
-      else if (tunnel.phase === 'restarting') namedStatus = retryIn > 0
+      if (tunnel.phase === 'paused') namedStatus = tunnel.lastErrorKind === 'proxy'
+        ? '自动重试已暂停：代理/TUN 把 Cloudflare 边缘解析成了假地址。先关掉代理，再点「立即重试」。'
+        : '自动重试已暂停。检查下面的原因，改好后点「立即重试」。';
+      else if (tunnel.phase === 'restarting') namedStatus = tunnel.lastErrorKind === 'proxy'
+        ? '代理/TUN 正在拦截 Cloudflare 边缘；关掉代理后会自动重试。'
+        : retryIn > 0
         ? '隧道断了，正在恢复，约 ' + retryIn + ' 秒后重试。'
         : '隧道断了，正在恢复。';
       else if (tunnel.phase === 'failed') namedStatus = '固定隧道没有启动成功。下面这段是原因，改好后再点「保存并重启」。';
