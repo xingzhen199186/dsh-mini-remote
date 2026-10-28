@@ -866,3 +866,22 @@ PoC 的成功标准不是“手机终于能打开页面”，而是同时证明�
 - retire 第一次因 Tunnel 活动连接返回 502，等待后清理成功。
 
 未实现：30 天自动清理、后台对账/自动重试、token 轮换、Access 保护、插件端 B 接线。
+
+
+## 20. 插件端第一版接线（2026-10-28）
+
+代码提交 `93ae739`：
+
+- `lib/b-relay-client.js`：claim/status/renew/release/retire；
+- `lib/b-relay-identity.js`：本地 clientSecret，0600；
+- `lib/b-relay-provider.js`：claim、cloudflared、退避重连、stop release；
+- 设置项 `bRelayEnabled`、`bActivationCode`、`bHostname`；
+- 配对新增 `b-relay` 条目；
+- 设置页新增“B 固定地址（服务方代建）”块；
+- token 只走 `TUNNEL_TOKEN` 环境变量。
+
+测试：`npm test 1267/1267`，`node client/verify.mjs 150/150`。
+
+控制面补了 released 租约用同一 clientSecret + claimRequestId 恢复（`4360581`），否则停止后重新开启会 409。
+
+**未验证**：插件加载后真实 claim/cloudflared/固定地址；需要重启 DSH 后做。
