@@ -7,7 +7,8 @@
 - Worker：`dsh-b-relay`
 - 控制面：`control.dsh-everywhere.com`
 - 数据面：`<id>.dsh-everywhere.com`（命名隧道 CNAME）
-- D1：`dsh-b-relay`
+- D1：`dsh-b-relay`（id `9c05b031-0c09-490f-97a4-b214084e50e0`）
+- 已部署 Worker：`dsh-b-relay`（control.dsh-everywhere.com）
 - Secrets：`CF_API_TOKEN`、`B_PEPPER`、`ADMIN_TOKEN`
 
 `CF_API_TOKEN` 权限：
@@ -38,3 +39,13 @@ node --test worker-b/test/*.test.mjs
 - 未部署；
 - 30 天自动清理、后台对账、token 轮换未实现；
 - `release` 只保留资源，不是公网入口安全阻断。
+
+
+## 2026-10-28 首次真机 E2E
+
+- 管理 API 建激活码：200；
+- claim：200，state=active，返回 tunnelToken；
+- cloudflared 用 `TUNNEL_TOKEN` + `--protocol http2 --edge-ip-version 4`；
+- `<id>.dsh-everywhere.com/mini/api/version`：200；
+- 说明数据不经过 A Worker；
+- retire 第一次因 Tunnel 仍有活动连接返回 502；等待连接关闭后重试/直接清理成功。

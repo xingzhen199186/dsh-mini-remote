@@ -843,3 +843,26 @@ PoC 的成功标准不是“手机终于能打开页面”，而是同时证明�
 - 配额、审计、客服和成本有人负责。
 
 以上全部通过后，B 才进入 5–10 实例内测；否则继续使用 A/C，不拿生产账户和用户固定地址做未验证实验。
+
+
+## 19. 第一版控制面落地（2026-10-28）
+
+代码：`worker-b/`，独立 Worker `dsh-b-relay`，独立 D1 `dsh-b-relay`，控制面 `control.dsh-everywhere.com`。
+
+已实现：
+
+- 管理建激活码/租约；
+- claim / status / renew / release / retire；
+- HMAC、限流、审计、操作记录、资源清单；
+- 可注入 Cloudflare 客户端与 14 项测试。
+
+真机 E2E：
+
+- 管理建码 200；
+- claim 200，state=active，返回 tunnel token；
+- cloudflared 用 `TUNNEL_TOKEN` + `--protocol http2 --edge-ip-version 4`；
+- `<id>.dsh-everywhere.com/mini/api/version` 200；
+- 数据不经过 A Worker；
+- retire 第一次因 Tunnel 活动连接返回 502，等待后清理成功。
+
+未实现：30 天自动清理、后台对账/自动重试、token 轮换、Access 保护、插件端 B 接线。
