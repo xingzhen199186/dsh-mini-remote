@@ -216,6 +216,49 @@ test('运维台有左侧两条路径导航，不再把所有卡片堆在一个�
   assert.match(dashboardHtml, /id="page-dedicated"/)
 })
 
+test('运维快照会记录容量、租约和异常，并保留趋势', async () => {
+  const env = makeEnv()
+  env.B_CONTROL_URL = 'https://control.example.com'
+  env.B_ADMIN_TOKEN = 'b-admin'
+  const original = globalThis.fetch
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    ok: true,
+    leases: [
+      { id: 'a', hostname: 'a.dsh-everywhere.com', state: 'active', lastSeenAt: Date.now() },
+      { id: 'b', hostname: 'b.dsh-everywhere.com', state: 'released', releasedAt: Date.now() - 31 * 86400000 },
+    ],
+  }), { status: 200, headers: { 'content-type': 'application/json' } })
+  try {
+    const response = await handleRequest(req('/admin/relay/v1/ops/refresh', { method: 'POST', token: ADMIN }), env)
+    assert.equal(response.status, 200)
+    const body = await response.json()
+    assert.equal(body.ok, true)
+    assert.equal(body.snapshot.b.counts.total, 2)
+    assert.equal(body.snapshot.b.counts.active, 1)
+    assert.equal(body.snapshot.b.counts.released, 1)
+    assert.ok(body.snapshot.anomalies.some((x) => x.code === 'b_released_old'))
+    assert.equal(body.history.length, 1)
+    const read = await handleRequest(req('/admin/relay/v1/ops/snapshot', { token: ADMIN }), env)
+    assert.equal((await read.json()).history.length, 1)
+  } finally {
+    globalThis.fetch = original
+  }
+})
+
+test('只读 ops token 可以读快照，但打不开管理页', async () => {
+  const env = makeEnv()
+  env.OPS_READ_TOKEN = 'ops-read-token'
+  const read = await handleRequest(new Request('https://relay.example.com/ops/v1/snapshot', {
+    headers: { authorization: 'Bearer ops-read-token' },
+  }), env)
+  assert.equal(read.status, 200)
+  assert.equal((await read.json()).ok, true)
+  const page = await handleRequest(new Request('https://relay.example.com/admin', {
+    headers: { authorization: 'Bearer ops-read-token' },
+  }), env)
+  assert.equal(page.status, 401)
+})
+
 test('每日用量开关可写可读', async () => {
   const env = makeEnv()
   env.ACCESS_ADMIN = '1'

@@ -76,6 +76,7 @@ code{background:#f3f4f6;padding:2px 6px;border-radius:4px;word-break:break-all}
       <div class="side-title">路径</div>
       <nav class="nav" id="nav">
         <button data-page="overview" class="active">总览 <span class="tag">两条一起看</span></button>
+        <button data-page="visual">可视化 <span class="tag">水位与趋势</span></button>
         <button data-page="shared">共享固定地址 <span class="tag">公共中转</span></button>
         <button data-page="dedicated">专属固定地址 <span class="tag">单独隧道</span></button>
       </nav>
@@ -99,6 +100,20 @@ code{background:#f3f4f6;padding:2px 6px;border-radius:4px;word-break:break-all}
         <div class="metric"><div class="k">已释放</div><div class="v" id="bReleased">—</div></div>
         <div class="metric"><div class="k">已退休</div><div class="v" id="bRetired">—</div></div>
       </div></div>
+    </section>
+
+    <section class="page" id="page-visual">
+      <div class="page-head"><div><h2>可视化</h2><p>容量水位、租约分布、最近趋势和异常。</p></div><div class="row"><button class="btn" id="refreshOps">立即采集</button></div></div>
+      <div class="card"><h3>系统健康</h3><div class="grid">
+        <div class="metric"><div class="k">共享数据面</div><div class="v" id="vAProxy">—</div></div>
+        <div class="metric"><div class="k">专属控制面</div><div class="v" id="vBControl">—</div></div>
+        <div class="metric"><div class="k">专属连接率</div><div class="v" id="vBRatio">—</div></div>
+        <div class="metric"><div class="k">采集时间</div><div class="v" id="vCollected" style="font-size:14px;font-weight:500">—</div></div>
+      </div></div>
+      <div class="card"><h3>容量水位</h3><div id="vMeters" class="muted">读取中…</div></div>
+      <div class="card"><h3>专属租约分布</h3><div id="vStates" class="muted">读取中…</div></div>
+      <div class="card"><h3>最近趋势</h3><div id="vTrend" class="muted">还没有历史快照。点“立即采集”开始记录。</div></div>
+      <div class="card"><h3>异常</h3><div id="vAnomalies" class="muted">没有异常。</div></div>
     </section>
 
     <section class="page" id="page-shared">
@@ -158,13 +173,58 @@ function renderOverview(o,b){
   const rows=b?.ok===true?(b.leases||[]):[];const count=(s)=>rows.filter((x)=>x.state===s).length;
   $('bTotal').textContent=b?.ok===true?rows.length:'—';$('bActive').textContent=b?.ok===true?count('active'):'—';$('bReleased').textContent=b?.ok===true?count('released'):'—';$('bRetired').textContent=b?.ok===true?count('retired'):'—';
 }
+function meter(label,value,max,unit){
+  const v=Number(value||0),m=Number(max||0),p=m?Math.min(100,v/m*100):0;
+  const color=p>=80?'#b91c1c':(p>=60?'#b45309':'#047857');
+  return '<div style="margin:10px 0"><div class="row" style="justify-content:space-between"><span>'+esc(label)+'</span><span class="muted small">'+esc(v.toLocaleString('zh-CN'))+' / '+esc(m.toLocaleString('zh-CN'))+' '+(unit||'')+' · '+p.toFixed(1)+'%</span></div><div style="height:10px;background:#eef1f4;border-radius:999px;overflow:hidden;margin-top:5px"><div style="height:100%;width:'+p.toFixed(1)+'%;background:'+color+';border-radius:999px"></div></div></div>';
+}
+function stateRow(label,value,total,color){
+  const p=total?Math.min(100,value/total*100):0;
+  return '<div style="margin:10px 0"><div class="row" style="justify-content:space-between"><span>'+esc(label)+'</span><span class="muted small">'+esc(value)+'</span></div><div style="height:10px;background:#eef1f4;border-radius:999px;overflow:hidden;margin-top:5px"><div style="height:100%;width:'+p.toFixed(1)+'%;background:'+color+';border-radius:999px"></div></div></div>';
+}
+function trendSvg(history){
+  const rows=(history||[]).slice(-30);
+  if(rows.length<2)return '<span class="muted">至少需要两次采集才能画趋势。</span>';
+  const w=720,h=190,pad=26;
+  const maxW=Math.max(...rows.map((x)=>Number(x.workers||0)),1);
+  const maxB=Math.max(...rows.map((x)=>Number(x.bTotal||0)),1);
+  const x=(i)=>pad+(w-pad*2)*(i/(rows.length-1));
+  const y=(v,m)=>h-pad-(h-pad*2)*(Number(v||0)/m);
+  const line=(key,max,color)=>rows.map((r,i)=>x(i)+','+y(r[key],max)).join(' ');
+  return '<svg viewBox="0 0 '+w+' '+h+'" style="width:100%;height:auto;max-height:220px" role="img" aria-label="最近趋势"><line x1="'+pad+'" y1="'+(h-pad)+'" x2="'+(w-pad)+'" y2="'+(h-pad)+'" stroke="#d1d5db"/><line x1="'+pad+'" y1="'+pad+'" x2="'+pad+'" y2="'+(h-pad)+'" stroke="#d1d5db"/><polyline fill="none" stroke="#1d4ed8" stroke-width="2" points="'+line('workers',maxW)+'"/><polyline fill="none" stroke="#047857" stroke-width="2" stroke-dasharray="5 4" points="'+line('bTotal',maxB)+'"/><text x="'+pad+'" y="16" font-size="11" fill="#1d4ed8">共享请求</text><text x="'+(pad+86)+'" y="16" font-size="11" fill="#047857">专属租约</text><text x="'+pad+'" y="'+(h-6)+'" font-size="11" fill="#6b7280">最近 '+rows.length+' 次采集</text></svg>';
+}
+function renderVisual(o,b,ops){
+  const snap=ops?.snapshot||null;
+  const usage=snap?.a?.usage||o.usage||null;
+  const aCounts=snap?.a?.counts||o.counts||{};
+  const bCounts=snap?.b?.counts||{total:(b?.leases||[]).length,active:(b?.leases||[]).filter((x)=>x.state==='active').length,released:(b?.leases||[]).filter((x)=>x.state==='released').length,retired:(b?.leases||[]).filter((x)=>x.state==='retired').length};
+  $('vAProxy').textContent=o.config?.proxyEnabled?'开启':'停用';$('vAProxy').className='v '+(o.config?.proxyEnabled?'ok':'bad');
+  $('vBControl').textContent=snap?.b?.ok===false?'连不上':(b?.ok===true?'正常':'未知');$('vBControl').className='v '+(snap?.b?.ok===false?'bad':'ok');
+  $('vBRatio').textContent=bCounts.total?Math.round(bCounts.active/bCounts.total*100)+'%':'—';
+  $('vCollected').textContent=snap?.collectedAt?time(snap.collectedAt):'还没有采集';
+  $('vMeters').innerHTML=[
+    meter('共享 Workers 请求',usage?.workers?.requests,100000,'次/天'),
+    meter('共享 KV 请求',usage?.kv?.requests,100000,'次/天'),
+    meter('共享 D1 读取行',usage?.d1?.rowsRead,5000000,'行/天'),
+    meter('共享 D1 写入行',usage?.d1?.rowsWritten,100000,'行/天'),
+    meter('专属 Tunnel 数量',bCounts.total,1000,'条'),
+  ].join('');
+  $('vStates').innerHTML=[
+    stateRow('已连接',bCounts.active,bCounts.total,'#047857'),
+    stateRow('已释放',bCounts.released,bCounts.total,'#b45309'),
+    stateRow('已退休',bCounts.retired,bCounts.total,'#6b7280'),
+  ].join('');
+  $('vTrend').innerHTML=trendSvg(ops?.history);
+  const list=snap?.anomalies||[];
+  $('vAnomalies').innerHTML=list.length?list.map((x)=>'<div class="notice" style="border-color:'+(x.level==='error'?'#fecaca':'#fde68a')+';background:'+(x.level==='error'?'#fef2f2':'#fffbeb')+';color:'+(x.level==='error'?'#991b1b':'#92400e')+'">'+esc(x.text)+'</div>').join(''):'<span class="muted">没有异常。</span>';
+}
 async function load(){
   hideError();
   try{
-    const [o,ids,audit,invites,b]=await Promise.all([
-      api('/admin/relay/v1/overview'),api('/admin/relay/v1/identities?limit=50'),api('/admin/relay/v1/audit?limit=30'),api('/admin/relay/v1/invites'),api('/admin/relay/v1/b/leases'),
+    const [o,ids,audit,invites,b,ops]=await Promise.all([
+      api('/admin/relay/v1/overview'),api('/admin/relay/v1/identities?limit=50'),api('/admin/relay/v1/audit?limit=30'),api('/admin/relay/v1/invites'),api('/admin/relay/v1/b/leases'),api('/admin/relay/v1/ops/snapshot'),
     ]);
-    setChecks(o.config||{});renderOverview(o,b);renderB(b);$('usage').innerHTML=usageHtml(o.usage);
+    setChecks(o.config||{});renderOverview(o,b);renderB(b);renderVisual(o,b,ops);$('usage').innerHTML=usageHtml(o.usage);
     const rows=ids.identities||[];$('identityMeta').textContent='共 '+rows.length+' 条（最多显示 50 条）';
     $('identities').innerHTML=rows.map((x)=>'<tr><td><code>'+esc(x.id)+'</code></td><td>'+esc(x.state)+'</td><td>'+esc(time(x.last_seen_at))+'</td><td>'+esc(time(x.created_at))+'</td><td>'+(x.state==='active'?'<button class="btn danger" data-revoke="'+esc(x.id)+'">撤销</button>':'')+'</td></tr>').join('')||'<tr><td colspan="5" class="muted">没有实例。</td></tr>';
     $('audit').innerHTML=(audit.audit||[]).map((a)=>'<tr><td>'+esc(time(a.at))+'</td><td>'+esc(a.action)+'</td><td>'+esc(a.target||'—')+'</td><td>'+esc(a.reason||'—')+'</td><td>'+esc(a.actor||'—')+'</td></tr>').join('')||'<tr><td colspan="5" class="muted">没有审计记录。</td></tr>';
@@ -182,6 +242,7 @@ $('dailyReportEnabled').addEventListener('change',(e)=>saveConfig('dailyReportEn
 $('newInvite').addEventListener('click',async()=>{try{const r=await api('/admin/relay/v1/invites',{method:'POST',body:JSON.stringify({expiresInDays:7})});$('inviteResult').classList.remove('hidden');$('inviteResult').innerHTML='新邀请码（只显示这一次）：<br><code>'+esc(r.code)+'</code>';await load()}catch(e){showError('创建邀请失败：'+e.message)}});
 $('newBInvite').addEventListener('click',async()=>{try{const r=await api('/admin/relay/v1/b/invites',{method:'POST',body:JSON.stringify({expiresInDays:7,note:'ops-console'})});$('bInviteResult').classList.remove('hidden');$('bInviteResult').innerHTML='新激活码（只显示这一次）：<br><code>'+esc(r.code)+'</code><br><span class="small">固定地址：<code>'+esc(r.hostname)+'</code></span>';await load()}catch(e){showError('创建激活码失败：'+e.message)}});
 document.addEventListener('click',async(e)=>{const copy=e.target?.dataset?.copy;if(copy){try{await navigator.clipboard.writeText(copy);e.target.textContent='已复制'}catch{}return}const id=e.target?.dataset?.revoke;if(!id)return;if(!confirm('确定撤销 '+id+'？撤销后固定地址立即失效。'))return;try{await api('/admin/relay/v1/revoke',{method:'POST',body:JSON.stringify({id,reason:'ops-console'})});await load()}catch(err){showError('撤销失败：'+err.message)}});
+$('refreshOps').addEventListener('click',async()=>{try{const r=await api('/admin/relay/v1/ops/refresh',{method:'POST'});renderVisual(await api('/admin/relay/v1/overview'),await api('/admin/relay/v1/b/leases'),r);await load()}catch(e){showError('采集失败：'+e.message)}});
 load();
 </script>
 </body></html>`

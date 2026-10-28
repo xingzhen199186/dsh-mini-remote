@@ -400,6 +400,69 @@ async function bLeasesForOps(env) {
   return result.ok ? { ok: true, leases: result.leases ?? [] } : result
 }
 
+const OPS_HISTORY_LIMIT = 30
+
+function opsAnomalies({ usage, b, counts, now }) {
+  const out = []
+  const pct = (value, limit) => limit ? Math.round((Number(value || 0) / limit) * 1000) / 10 : 0
+  if (usage?.workers?.requests >= 60000) out.push({ level: 'warn', code: 'a_workers_high', text: '共享固定地址的 Workers 请求已到 ' + pct(usage.workers.requests, 100000) + '%' })
+  if (usage?.kv?.requests >= 60000) out.push({ level: 'warn', code: 'a_kv_high', text: '共享固定地址的 KV 请求已到 ' + pct(usage.kv.requests, 100000) + '%' })
+  if (counts?.active >= 40) out.push({ level: 'warn', code: 'a_active_high', text: '共享固定地址活跃实例已到 ' + counts.active + ' 个' })
+  if (!b?.ok) out.push({ level: 'error', code: 'b_control_unreachable', text: b?.error || '专属固定地址控制面读不到' })
+  const leases = b?.ok ? (b.leases || []) : []
+  const releasedOld = leases.filter((x) => x.state === 'released' && x.releasedAt && now - Number(x.releasedAt) > 30 * 86400000)
+  const staleActive = leases.filter((x) => x.state === 'active' && x.lastSeenAt && now - Number(x.lastSeenAt) > 7 * 86400000)
+  if (releasedOld.length) out.push({ level: 'warn', code: 'b_released_old', text: releasedOld.length + ' 条专属租约已释放超过 30 天，建议退休' })
+  if (staleActive.length) out.push({ level: 'warn', code: 'b_active_stale', text: staleActive.length + ' 条专属租约超过 7 天没有登记' })
+  if (leases.length >= 700) out.push({ level: 'warn', code: 'b_tunnel_high', text: '专属租约总数已到 ' + leases.length + ' 条，接近 1000 条规划线' })
+  return out
+}
+
+async function collectOpsSnapshot(env) {
+  const now = Date.now()
+  const config = await configOf(env)
+  const counts = await env.DB.prepare('SELECT state, COUNT(*) AS n FROM relay_identities GROUP BY state').all()
+  const invite = await env.DB.prepare('SELECT COUNT(*) AS n FROM relay_invites WHERE used_at IS NULL AND expires_at > ?').bind(now).first()
+  const byState = Object.fromEntries((counts.results ?? []).map((row) => [row.state, Number(row.n)]))
+  const aCounts = { active: byState.active ?? 0, revoked: byState.revoked ?? 0, unusedInvites: Number(invite?.n ?? 0) }
+  const usage = await env.RELAY_KV.get('relay-usage:latest', 'json').catch(() => null)
+  const b = await bLeasesForOps(env)
+  const leases = b.ok ? (b.leases || []) : []
+  const bCounts = {
+    total: leases.length,
+    active: leases.filter((x) => x.state === 'active').length,
+    released: leases.filter((x) => x.state === 'released').length,
+    retired: leases.filter((x) => x.state === 'retired').length,
+  }
+  const snapshot = {
+    collectedAt: now,
+    config,
+    a: { counts: aCounts, usage },
+    b: { ok: b.ok, error: b.ok ? null : b.error, counts: bCounts },
+    anomalies: opsAnomalies({ usage, b, counts: aCounts, now }),
+  }
+  await env.RELAY_KV.put('ops:snapshot:latest', JSON.stringify(snapshot)).catch(() => undefined)
+  const history = await env.RELAY_KV.get('ops:snapshot:history', 'json').catch(() => [])
+  const next = Array.isArray(history) ? history.slice(-(OPS_HISTORY_LIMIT - 1)) : []
+  next.push({ at: now, aActive: aCounts.active, bActive: bCounts.active, bTotal: bCounts.total, workers: Number(usage?.workers?.requests || 0), kv: Number(usage?.kv?.requests || 0) })
+  await env.RELAY_KV.put('ops:snapshot:history', JSON.stringify(next)).catch(() => undefined)
+  return snapshot
+}
+
+function opsReadAuthorized(request, env) {
+  const expected = typeof env.OPS_READ_TOKEN === 'string' ? env.OPS_READ_TOKEN : ''
+  if (!expected) return false
+  const header = request.headers.get('authorization') || ''
+  const bearer = header.startsWith('Bearer ') ? header.slice(7) : ''
+  return Boolean(bearer) && timingSafeEqual(bearer, expected)
+}
+
+async function opsSnapshotPayload(env) {
+  const snapshot = await env.RELAY_KV.get('ops:snapshot:latest', 'json').catch(() => null)
+  const history = await env.RELAY_KV.get('ops:snapshot:history', 'json').catch(() => [])
+  return { ok: true, snapshot: snapshot ?? null, history: Array.isArray(history) ? history : [] }
+}
+
 async function handleAdmin(request, env, url) {
   const auth = await requireAdmin(request, env)
   if (!auth.ok) return auth.response
@@ -448,6 +511,17 @@ async function handleAdmin(request, env, url) {
       body: JSON.stringify({ expiresInDays: days, note: typeof body.note === 'string' ? body.note : 'ops-console' }),
     })
     return json(result, result.ok ? 200 : 502)
+  }
+
+  if (request.method === 'GET' && path === '/admin/relay/v1/ops/snapshot') {
+    return json(await opsSnapshotPayload(env))
+  }
+
+  if (request.method === 'POST' && path === '/admin/relay/v1/ops/refresh') {
+    await refreshUsage(env).catch(() => undefined)
+    const snapshot = await collectOpsSnapshot(env)
+    const history = await env.RELAY_KV.get('ops:snapshot:history', 'json').catch(() => [])
+    return json({ ok: true, snapshot, history: Array.isArray(history) ? history : [] })
   }
 
   if (request.method === 'GET' && path === '/admin/relay/v1/usage') {
@@ -537,6 +611,9 @@ async function handleControl(request, env, url) {
       },
     })
   }
+  if (request.method === 'GET' && url.pathname === '/ops/v1/snapshot' && opsReadAuthorized(request, env)) {
+    return json(await opsSnapshotPayload(env))
+  }
   if (url.pathname === '/api/relay/v1/register') return handleRegister(request, env)
   if (url.pathname === '/api/relay/v1/unregister') return handleUnregister(request, env)
   if (url.pathname.startsWith('/admin/relay/v1/')) return handleAdmin(request, env, url)
@@ -558,7 +635,10 @@ export async function handleRequest(request, env) {
 export async function scheduled(event, env, ctx) {
   const config = await configOf(env)
   if (!config.dailyReportEnabled) return
-  ctx.waitUntil(refreshUsage(env))
+  ctx.waitUntil((async () => {
+    await refreshUsage(env)
+    await collectOpsSnapshot(env)
+  })())
 }
 
 export default { fetch: handleRequest, scheduled }
