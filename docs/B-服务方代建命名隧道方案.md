@@ -56,18 +56,32 @@ B 可行，且与 A 的价值不同：**B 用服务方的一次性资源配置�
 
 仍未定：生产域名/zone、真实 tunnel token 轮换能力、实际 Tunnel 配额、cloudflared 平台矩阵、预算/合规。见第 17 节。
 
-## 0.2 已完成的 PoC 能力核对（2026-10-27）
+## 0.2 已完成的 PoC 能力核对（2026-10-27 / 2026-10-28）
 
-用本机 wrangler 的 Cloudflare OAuth 凭据做了一次**只读/临时**能力核对：
+用本机 wrangler 的 Cloudflare OAuth 凭据做了一次**临时**能力核对：
 
-- 能列出账户现有 Tunnel；
-- 能创建临时 Tunnel `b-poc-token-test-*`；
-- 能读取该 Tunnel 的 token（返回 240 字符）；
-- 能删除该临时 Tunnel；
-- 测试后确认账户只剩原有 `dsh-mini-remote`（down），无孤儿。
+- 能创建临时 Tunnel、读 token（240 字符）、删除；
+- 测试后清理，无孤儿。
 
-这次只证明“当前账户凭据能做创建/读 token/删除”。  
-**没有**证明生产级 token 轮换、配额上限和独立账户隔离；这些仍需专用 API token 和 PoC。
+2026-10-28 用 B 专用 API token 对 `dsh-everywhere.com` 做了完整临时链路：
+
+- zone `dsh-everywhere.com` 已 Active；
+- 创建临时命名 Tunnel；
+- 写 ingress 到 `http://127.0.0.1:3090`；
+- 创建 `<test>.dsh-everywhere.com` 的 proxied CNAME；
+- 用 `TUNNEL_TOKEN` 环境变量启动 cloudflared（不放进命令行）；
+- 请求 `/mini/api/version` 返回 **200**，证明数据走命名隧道，没有命中 A 的 Worker；
+- 清理 DNS 和 Tunnel，无残留。
+
+**关键实测**：cloudflared 在本机需要加：
+
+```text
+--protocol http2 --edge-ip-version 4
+```
+
+否则会因 `cfd-features.argotunnel.com` DNS 失败而返回 1033。
+
+仍未证明：生产级 token 轮换、实际 Tunnel 配额上限、独立账户隔离。
 
 ---
 
@@ -480,6 +494,8 @@ claim 成功但 cloudflared 下载失败时，不重复建 Tunnel；重试下载
 `TUNNEL_TOKEN` 在目标 cloudflared 版本和各平台上的行为为 **[待验证]**；若改用 token 文件，仍须满足不进命令行、权限受限和可轮换。
 
 ### 9.3 cloudflared 生命周期
+
+本地 PoC 实测：命名隧道连接需加 `--protocol http2 --edge-ip-version 4`；token 用 `TUNNEL_TOKEN` 环境变量传入，不进入命令行。
 
 - 复用统一 TunnelSupervisor 思想：start、probe、retry、stop、状态快照和代次保护只有一套；B 不另造与 quick/named 冲突的进程树。
 - 启动前确认本地插件端口有效；固定 hostname、originPort 和 credentialVersion 进入目标指纹。
