@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs'
 import { DatabaseSync } from 'node:sqlite'
 
 import { handleRequest } from '../worker/src/index.js'
+import { dashboardHtml } from '../worker/src/dashboard.js'
 
 const MIGRATIONS = [
   readFileSync(new URL('../worker/migrations/0001_init.sql', import.meta.url), 'utf8'),
@@ -104,7 +105,7 @@ test('Cloudflare Access 邮箱可打开运维台和总览，非白名单仍拒�
     headers: { 'cf-access-authenticated-user-email': 'owner@example.com' },
   }), env)
   assert.equal(page.status, 200)
-  assert.match(await page.text(), /A 中继运维台/)
+  assert.match(await page.text(), /固定地址运维台/)
 
   const overview = await handleRequest(new Request('https://relay.example.com/admin/relay/v1/overview', {
     headers: { 'cf-access-authenticated-user-email': 'owner@example.com' },
@@ -175,6 +176,44 @@ test('运维台总览会合并 B 控制面的租约摘要', async () => {
   } finally {
     globalThis.fetch = original
   }
+})
+
+test('B 控制面代理：租约和激活码走 A 的服务端凭据', async () => {
+  const env = makeEnv()
+  env.B_CONTROL_URL = 'https://control.example.com'
+  env.B_ADMIN_TOKEN = 'b-admin'
+  const original = globalThis.fetch
+  const calls = []
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url, init })
+    if (url.endsWith('/admin/b/v1/leases')) {
+      return new Response(JSON.stringify({ ok: true, leases: [{ id: 'x', hostname: 'x.dsh-everywhere.com', state: 'active' }] }), { status: 200, headers: { 'content-type': 'application/json' } })
+    }
+    return new Response(JSON.stringify({ ok: true, code: 'new-code', id: 'x', hostname: 'x.dsh-everywhere.com' }), { status: 200, headers: { 'content-type': 'application/json' } })
+  }
+  try {
+    const leases = await handleRequest(req('/admin/relay/v1/b/leases', { token: ADMIN }), env)
+    assert.equal(leases.status, 200)
+    assert.equal((await leases.json()).leases[0].hostname, 'x.dsh-everywhere.com')
+    const invite = await handleRequest(req('/admin/relay/v1/b/invites', { method: 'POST', token: ADMIN, body: { expiresInDays: 7 } }), env)
+    assert.equal(invite.status, 200)
+    assert.equal((await invite.json()).code, 'new-code')
+    assert.equal(calls.length, 2)
+    assert.equal(calls[0].init.headers.authorization, 'Bearer b-admin')
+    assert.equal(calls[1].init.headers.authorization, 'Bearer b-admin')
+  } finally {
+    globalThis.fetch = original
+  }
+})
+
+test('运维台有左侧两条路径导航，不再把所有卡片堆在一个页面', () => {
+  assert.match(dashboardHtml, /共享固定地址/)
+  assert.match(dashboardHtml, /专属固定地址/)
+  assert.match(dashboardHtml, /data-page="overview"/)
+  assert.match(dashboardHtml, /data-page="shared"/)
+  assert.match(dashboardHtml, /data-page="dedicated"/)
+  assert.match(dashboardHtml, /id="page-shared"/)
+  assert.match(dashboardHtml, /id="page-dedicated"/)
 })
 
 test('每日用量开关可写可读', async () => {

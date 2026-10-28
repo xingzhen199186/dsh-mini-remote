@@ -369,25 +369,35 @@ async function refreshUsage(env) {
   return usage
 }
 
-async function bLeasesForOps(env) {
+async function bAdminFetch(env, path, init = {}) {
   const base = typeof env.B_CONTROL_URL === 'string' && env.B_CONTROL_URL
     ? env.B_CONTROL_URL.replace(/\/+$/, '')
     : ''
   const token = typeof env.B_ADMIN_TOKEN === 'string' ? env.B_ADMIN_TOKEN : ''
   if (!base || !token) return { ok: false, error: '未配置 B 控制面或 B_ADMIN_TOKEN' }
   try {
-    const response = await fetch(base + '/admin/b/v1/leases', {
-      headers: { authorization: 'Bearer ' + token },
+    const response = await fetch(base + path, {
+      ...init,
+      headers: {
+        authorization: 'Bearer ' + token,
+        ...(init.body ? { 'content-type': 'application/json' } : {}),
+        ...(init.headers ?? {}),
+      },
       signal: AbortSignal.timeout(5000),
     })
     const payload = await response.json().catch(() => ({}))
     if (!response.ok || payload.ok !== true) {
       return { ok: false, error: 'B 控制面返回 HTTP ' + response.status }
     }
-    return { ok: true, leases: payload.leases ?? [] }
+    return payload
   } catch (error) {
     return { ok: false, error: 'B 控制面连不上：' + (error?.message ?? String(error)) }
   }
+}
+
+async function bLeasesForOps(env) {
+  const result = await bAdminFetch(env, '/admin/b/v1/leases')
+  return result.ok ? { ok: true, leases: result.leases ?? [] } : result
 }
 
 async function handleAdmin(request, env, url) {
@@ -423,6 +433,21 @@ async function handleAdmin(request, env, url) {
       usage: usage ?? null,
       b: await bLeasesForOps(env),
     })
+  }
+
+  if (request.method === 'GET' && path === '/admin/relay/v1/b/leases') {
+    return json(await bLeasesForOps(env))
+  }
+
+  if (request.method === 'POST' && path === '/admin/relay/v1/b/invites') {
+    const body = await readJson(request)
+    if (body.error) return fail(body.error, 400)
+    const days = Math.max(1, Math.min(30, Number(body.expiresInDays) || 7))
+    const result = await bAdminFetch(env, '/admin/b/v1/invites', {
+      method: 'POST',
+      body: JSON.stringify({ expiresInDays: days, note: typeof body.note === 'string' ? body.note : 'ops-console' }),
+    })
+    return json(result, result.ok ? 200 : 502)
   }
 
   if (request.method === 'GET' && path === '/admin/relay/v1/usage') {
