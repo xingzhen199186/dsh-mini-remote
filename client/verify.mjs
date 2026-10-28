@@ -1171,6 +1171,115 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
   });
 }
 
+// 4d-4. B 固定地址（服务方代建）：激活码、运行状态、固定地址、停止
+{
+  const B_HOST = 'abcdefghijklmnopqrstuvwxyz.dsh-everywhere.com';
+  const base = (bRelay) => ({
+    ok: true,
+    port: 3090,
+    token: TOKEN,
+    entries: [{ kind: 'lan', label: '内网', hint: '手机连同一个 Wi-Fi 时用这个', url: URL_LAN, qr: QR }],
+    tunnel: null,
+    serve: null,
+    feishu: null,
+    bRelay,
+  });
+
+  const runningReply = base({
+    enabled: true,
+    state: 'running',
+    configured: true,
+    hasActivationCode: true,
+    hostname: B_HOST,
+    url: 'https://' + B_HOST,
+    lastError: null,
+    error: null,
+    errorCode: null,
+  });
+  const releasedReply = {
+    ok: true,
+    bRelay: {
+      enabled: false,
+      state: 'released',
+      configured: true,
+      hasActivationCode: true,
+      hostname: B_HOST,
+      url: 'https://' + B_HOST,
+      lastError: null,
+      error: null,
+      errorCode: null,
+    },
+  };
+
+  const h9 = useHarness();
+  let tree9 = null;
+  let posted9 = [];
+  h9.onUpdate(() => { tree9 = h9.draw(Comp); });
+  const mount9 = async (payload) => {
+    setGlobal('fetch', async (url, init) => {
+      if (url === '/mini-remote/b-relay' && init && init.method === 'POST') {
+        const body = JSON.parse(init.body);
+        posted9.push(body);
+        return jsonResponse(200, body.action === 'stop' ? releasedReply : runningReply);
+      }
+      return jsonResponse(200, payload);
+    });
+    tree9 = h9.draw(Comp);
+    h9.runEffects();
+    await tick();
+    h9.runEffects();
+    await tick();
+  };
+
+  await check('B 固定地址 running：显示固定地址，停止按钮 POST action=stop', async () => {
+    posted9 = [];
+    await mount9(runningReply);
+    const text = textOf(tree9);
+    assert.match(text, /B 固定地址（服务方代建）/);
+    assert.ok(byType(tree9, 'input').some((n) => String(n.props.value).includes(B_HOST)),
+      '固定地址要摆在只读输入框里');
+    assert.match(text, /已连接/);
+    const stop = byType(tree9, 'button').find((b) => textOf(b) === '停止 B 固定地址');
+    assert.ok(stop, '运行中要有停止入口');
+    stop.props.onClick();
+    await tick();
+    assert.equal(posted9.length, 1);
+    assert.deepEqual(posted9[0], { action: 'stop' });
+    assert.match(textOf(tree9), /已停止/);
+    h9.unmount();
+  });
+
+  await check('B 固定地址未开启：输入激活码后开启，POST 带上激活码并显示固定地址', async () => {
+    posted9 = [];
+    const off = base({
+      enabled: false,
+      state: 'idle',
+      configured: false,
+      hasActivationCode: false,
+      hostname: '',
+      url: null,
+      lastError: null,
+      error: null,
+      errorCode: null,
+    });
+    await mount9(off);
+    const codeInput = byType(tree9, 'input').find((n) => n.props.type === 'password');
+    assert.ok(codeInput, '未开启时要有激活码密码框');
+    const secret = 'z'.repeat(43);
+    codeInput.props.onChange({ target: { value: secret } });
+    await tick();
+    const start = byType(tree9, 'button').find((b) => textOf(b) === '开启 B 固定地址');
+    assert.ok(start, '要有开启按钮');
+    start.props.onClick();
+    await tick();
+    assert.equal(posted9.length, 1);
+    assert.deepEqual(posted9[0], { action: 'start', activationCode: secret });
+    assert.ok(byType(tree9, 'input').some((n) => String(n.props.value).includes(B_HOST)),
+      '开通成功后要显示固定地址');
+    h9.unmount();
+  });
+}
+
 // 4e. Tailscale 的 HTTPS 地址：开关、状态、以及「tailnet 没开 Serve」那条路
 {
   const withServe = (serve, extra) => Object.assign({

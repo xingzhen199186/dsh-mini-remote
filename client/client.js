@@ -45,6 +45,7 @@ window.__ModuleLoader__.load({
     var TOKEN_PATH = '/mini-remote/token';
     var TUNNEL_PATH = '/mini-remote/tunnel';
     var SELF_RELAY_PATH = '/mini-remote/self-relay';
+    var B_RELAY_PATH = '/mini-remote/b-relay';
     var SERVE_PATH = '/mini-remote/serve';
     var FEISHU_PATH = '/mini-remote/feishu';
     // **这里原来有一条本机取票的地址常量**：面板点开时拿它去换一张「本机电脑端界面」的票。
@@ -675,6 +676,13 @@ window.__ModuleLoader__.load({
       var relayOpenState = useState(false);
       var relayOpen = relayOpenState[0];
       var setRelayOpen = relayOpenState[1];
+      // B 固定地址：激活码只作为密码框草稿，服务端从不回显已保存的那一枚。
+      var bActivationState = useState('');
+      var bActivation = bActivationState[0];
+      var setBActivation = bActivationState[1];
+      var bRelayErrState = useState(null);
+      var bRelayError = bRelayErrState[0];
+      var setBRelayError = bRelayErrState[1];
       // Cloudflare 命名隧道：固定域名 + token。token 不回显，留空表示沿用已保存的。
       var namedTunnelState = useState({ token: '', publicUrl: '' });
       var namedTunnel = namedTunnelState[0];
@@ -820,6 +828,30 @@ window.__ModuleLoader__.load({
         return function () { alive = false; clearInterval(timer); };
       }, [Boolean(info && info.bAgent)]);
 
+      // B 固定地址的进程会自己退出/重连，设置页不刷新也要看到新状态。
+      // 只在开启时轮询；关着时一条请求都不发。
+      useEffect(function () {
+        if (!info || !info.bRelay || !info.bRelay.enabled) return undefined;
+        var alive = true;
+        var tick = function () {
+          fetch(B_RELAY_PATH, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ action: 'status' }),
+          })
+            .then(function (res) { return res.json(); })
+            .then(function (body) {
+              if (!alive || !body || !body.bRelay) return;
+              setInfo(function (prev) {
+                return prev ? Object.assign({}, prev, { bRelay: body.bRelay }) : prev;
+              });
+            })
+            .catch(function () { /* 静默失败，下一轮再试 */ });
+        };
+        var timer = setInterval(tick, 3000);
+        return function () { alive = false; clearInterval(timer); };
+      }, [Boolean(info && info.bRelay && info.bRelay.enabled)]);
+
       // 「已复制」只停留一会儿，然后自己变回「复制」。
       useEffect(function () {
         if (!copied) return undefined;
@@ -911,6 +943,41 @@ window.__ModuleLoader__.load({
           })
           .catch(function (err) {
             setRelayError('操作失败：' + ((err && err.message) || String(err)));
+          })
+          .then(function () { setBusy(false); });
+      };
+
+      var runBRelay = function (action) {
+        if (busy) return;
+        setBusy(true);
+        setBRelayError(null);
+        var body = { action: action };
+        if (action === 'start' && bActivation.trim()) body.activationCode = bActivation.trim();
+        fetch(B_RELAY_PATH, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(body),
+        })
+          .then(function (res) {
+            return res.json().then(
+              function (payload) { return { status: res.status, body: payload }; },
+              function () { return { status: res.status, body: null }; },
+            );
+          })
+          .then(function (r) {
+            var payload = (r.body && typeof r.body === 'object') ? r.body : null;
+            if (payload && payload.bRelay) {
+              setInfo(function (prev) {
+                return prev ? Object.assign({}, prev, { bRelay: payload.bRelay }) : prev;
+              });
+            }
+            if (payload && payload.ok && action === 'start') setBActivation('');
+            if (!payload || !payload.ok) {
+              setBRelayError((payload && payload.error) || ('B 固定地址操作失败：HTTP ' + r.status));
+            }
+          })
+          .catch(function (err) {
+            setBRelayError('B 固定地址操作失败：' + ((err && err.message) || String(err)));
           })
           .then(function () { setBusy(false); });
       };
@@ -2201,11 +2268,18 @@ window.__ModuleLoader__.load({
           save: function (enabled) {
             toggleTunnel(true, { mode: 'quick', relayEnabled: enabled, relayInviteCode: aRelayInvite });
           },
+        }, {
+          activationCode: bActivation,
+          setActivationCode: setBActivation,
+          error: bRelayError,
+          start: function () { runBRelay('start'); },
+          stop: function () { runBRelay('stop'); },
+          copy: copy,
         }),
       );
     }
 
-    function content(info, failure, copied, copy, busy, toggle, pwd, serve, feishu, dev, remote, agent, bAgent, bProject, rmt, self, groups, relay, named, aRelay) {
+    function content(info, failure, copied, copy, busy, toggle, pwd, serve, feishu, dev, remote, agent, bAgent, bProject, rmt, self, groups, relay, named, aRelay, bRelay) {
       if (failure) return h('div', { style: styles.error }, failure);
       if (!info) return h('div', { style: styles.loading }, '正在读取配对信息…');
 
@@ -2256,6 +2330,7 @@ window.__ModuleLoader__.load({
         },
         stop: function () { toggle(false, { mode: 'named' }); },
       }, relayUi));
+      if (info.bRelay && bRelay) external.push(bRelayBlock(info.bRelay, bRelay, busy));
       if (info.selfRelay && relay) {
         external.push(selfRelayBlock({
           draft: relay.draft,
@@ -3492,6 +3567,89 @@ window.__ModuleLoader__.load({
         createUi,
         list,
         browseModal,
+      );
+    }
+
+    /**
+     * B 固定地址：服务方代建的 Cloudflare 命名隧道。
+     *
+     * 用户只输入一次性激活码。固定域名和 tunnel token 都由控制面开通时下发；
+     * token 只进 cloudflared 进程环境，不回到这个界面，也不写进本地身份文件。
+     */
+    function bRelayBlock(st, relay, busy) {
+      var running = st.state === 'running';
+      var claiming = st.state === 'claiming' || Boolean(st.busy);
+      var hostname = typeof st.hostname === 'string' ? st.hostname : '';
+      var url = typeof st.url === 'string' ? st.url : (hostname ? 'https://' + hostname : '');
+      var errorText = relay.error || st.lastError || null;
+      var statusText;
+      if (running) statusText = '已连接。手机可以用下面的固定地址。';
+      else if (claiming) statusText = '正在开通并连接 B 固定地址…';
+      else if (st.state === 'released') statusText = '已停止。服务方仍保留固定地址对应的资源。';
+      else if (st.state === 'error') statusText = '没有连接成功。';
+      else if (st.enabled) statusText = '已开启，正在准备。';
+      else statusText = '未开启。填写激活码后开启。';
+      var pill = h('span', {
+        style: {
+          display: 'inline-flex', alignItems: 'center', padding: '2px 8px', borderRadius: 999,
+          fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap',
+          color: running ? '#15803d' : (errorText ? '#b91c1c' : '#6b7280'),
+          background: running ? '#dcfce7' : (errorText ? '#fee2e2' : '#f3f4f6'),
+        },
+      }, running ? '已连接' : (claiming ? '连接中' : (errorText ? '未连接' : '未开启')));
+      var canStart = Boolean(String(relay.activationCode || '').trim() || st.hasActivationCode);
+      var codeInput = running ? null : h('label', { style: { display: 'block', marginTop: 10 } },
+        h('div', { style: styles.muted }, '激活码'),
+        h('input', {
+          type: 'password',
+          value: relay.activationCode || '',
+          placeholder: st.hasActivationCode ? '激活码已保存；要换再填一次' : '输入 B 一次性激活码',
+          spellCheck: false,
+          disabled: Boolean(busy),
+          onChange: function (e) { relay.setActivationCode(e.target.value); },
+          style: Object.assign({}, styles.monoInput, { marginTop: 4 }),
+        }),
+      );
+      var actions = running || claiming
+        ? h('button', {
+          type: 'button', disabled: Boolean(busy),
+          style: Object.assign({}, styles.btn, { color: '#b91c1c' }),
+          onClick: relay.stop,
+        }, '停止 B 固定地址')
+        : h('button', {
+          type: 'button', disabled: Boolean(busy) || !canStart,
+          style: styles.btnPrimary,
+          onClick: relay.start,
+        }, claiming ? '连接中…' : '开启 B 固定地址');
+
+      return h('div', { key: 'b-relay', style: styles.block },
+        h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' } },
+          h('div', { style: styles.entryTitle }, 'B 固定地址（服务方代建）'),
+          pill,
+        ),
+        h('div', { style: styles.muted },
+          '用一次性激活码开通 Cloudflare 命名隧道，得到一个固定的 dsh-everywhere.com 地址。'
+          + '和上面的快速隧道、A 中继、自建中继互不影响。'),
+        codeInput,
+        h('div', { style: { display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 12 } }, actions),
+        h('div', { style: { marginTop: 10 } },
+          h('div', { style: styles.muted }, statusText),
+          errorText ? h('div', { style: styles.detail }, errorText) : null,
+          errorText && st.errorCode ? h('div', { style: styles.muted }, '错误码：' + st.errorCode) : null,
+          st.restarting && st.nextRetryAt
+            ? h('div', { style: styles.muted }, 'cloudflared 退出后会按退避自动重连。')
+            : null,
+        ),
+        url ? h('div', { style: { display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' } },
+          h('input', {
+            readOnly: true, value: url, spellCheck: false,
+            onFocus: function (e) { try { e.target.select(); } catch (err) { /* 忽略 */ } },
+            style: Object.assign({}, styles.monoInput, { flex: '1 1 260px', width: 'auto', minWidth: 0 }),
+          }),
+          h('button', { type: 'button', style: styles.btn, onClick: function () { relay.copy(url); } }, '复制 B 地址'),
+        ) : null,
+        running ? h('div', { style: styles.warn },
+          '流量经 Cloudflare，不是端到端加密。停止会释放租约，但不会自动删除 Tunnel/CNAME。') : null,
       );
     }
 

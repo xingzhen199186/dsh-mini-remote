@@ -326,6 +326,58 @@ test('自建中继连通时，配对面板多出一条固定公网地址', async
   assert.match(entry.hint, /地址固定/)
 })
 
+test('B 固定地址 running 时，配对面板多出一条 b-relay 固定地址', async () => {
+  const payload = await buildPairing({
+    port: 3090,
+    token: 'abc123',
+    bound: [],
+    bRelay: {
+      state: 'running',
+      hostname: 'abcdefghijklmnopqrstuvwxyz.dsh-everywhere.com',
+    },
+  })
+  assert.equal(payload.ok, true)
+  assert.equal(payload.entries.length, 1)
+  const [entry] = payload.entries
+  assert.equal(entry.kind, 'b-relay')
+  assert.equal(entry.label, 'B 固定地址')
+  assert.equal(entry.url, 'https://abcdefghijklmnopqrstuvwxyz.dsh-everywhere.com/mini?token=abc123')
+  assert.match(entry.hint, /地址固定/)
+  assert.match(entry.hint, /Cloudflare/)
+  assert.match(entry.qr, /^data:image\/png;base64,/)
+})
+
+test('B 固定地址出错时，不影响 A quick 的公网条目', async () => {
+  const payload = await buildPairing({
+    port: 3090,
+    token: 'abc123',
+    bound: [],
+    tunnel: { enabled: true, url: 'https://tidy-lamp-brave-honest.trycloudflare.com' },
+    bRelay: {
+      state: 'error',
+      hostname: 'abcdefghijklmnopqrstuvwxyz.dsh-everywhere.com',
+      lastError: '连不上 B 控制面',
+    },
+  })
+  assert.equal(payload.ok, true)
+  assert.deepEqual(payload.entries.map((entry) => entry.kind), ['public'])
+  assert.match(payload.entries[0].url, /trycloudflare\.com/)
+})
+
+test('B 还没 running 时，不把固定地址塞进二维码', async () => {
+  const payload = await buildPairing({
+    port: 3090,
+    token: 'abc123',
+    bound: [],
+    bRelay: {
+      state: 'claiming',
+      hostname: 'abcdefghijklmnopqrstuvwxyz.dsh-everywhere.com',
+    },
+  })
+  assert.equal(payload.ok, false)
+  assert.equal(payload.entries, undefined)
+})
+
 test('自建中继没连通时，不把死地址塞进二维码', async () => {
   const payload = await buildPairing({
     port: 3090,

@@ -1439,6 +1439,41 @@ test('公网开关：关掉之后配置落盘，面板里不再有公网那条',
   assert.equal(saved.tunnel.enabled, false)
 })
 
+test('B 固定地址：默认关闭，不创建身份文件，也不影响配对里的其它路线', async (t) => {
+  const p = await bootPlugin({ config: { bindAddress: 'auto' } })
+  t.after(p.stop)
+  const route = p.routes.get('/mini-remote/b-relay')
+  assert.ok(route, 'B 固定地址的设置路由要挂上')
+
+  const denied = fakeRes()
+  await route.handler(fakeReq('192.168.1.50', { method: 'POST', body: '{"action":"status"}' }), denied)
+  assert.equal(denied.out.status, 403, 'B 激活码和停止动作不能让局域网里的别人操作')
+
+  const wrong = fakeRes()
+  await route.handler(fakeReq('127.0.0.1'), wrong)
+  assert.equal(wrong.out.status, 405)
+
+  const noCode = fakeRes()
+  await route.handler(fakeReq('127.0.0.1', { method: 'POST', body: '{"action":"start"}' }), noCode)
+  assert.equal(noCode.out.status, 400)
+  assert.match(JSON.parse(noCode.out.body).error, /激活码/)
+
+  const pairing = fakeRes()
+  await p.routes.get('/mini-remote/pairing').handler(fakeReq('127.0.0.1'), pairing)
+  const payload = JSON.parse(pairing.out.body)
+  assert.equal(payload.bRelay.enabled, false)
+  assert.equal(payload.bRelay.state, 'idle')
+  assert.equal(payload.bRelay.hasActivationCode, false)
+  assert.equal(payload.entries.some((entry) => entry.kind === 'b-relay'), false,
+    '默认关着时不许出现 B 固定地址的二维码')
+  assert.equal(existsSync(join(p.home, 'dsh-mini-remote', 'b-identity.json')), false,
+    '没开启就不该生成 B 本地身份')
+
+  const saved = JSON.parse(readFileSync(join(p.home, 'dsh-mini-remote', 'settings.json'), 'utf8'))
+  assert.equal(saved.bRelayEnabled, false, '缺激活码时不能把开关留在开启状态')
+  assert.equal(saved.bActivationCode, '')
+})
+
 // ---------------------------------------------------------------------------
 // 「远程窗口」：桌面端面板取票那一条
 //
@@ -2492,7 +2527,7 @@ test('声明成 volatile 的字段只有那两个：能兑现的才标', async (
     '多标一个是谎话（DSH 就不再重载，而我们手里还是旧值），少标一个就白白多重载一次')
 
   assert.deepEqual(Object.keys(dict).sort(),
-    ['agentAllowManage', 'agentAllowShell', 'agentAllowWrite', 'agentMode', 'agentRoots', 'agentToken', 'agentUrl', 'allowAgent', 'allowRemoteComputers', 'bindAddress', 'defaultMode', 'feishu', 'maxHistory', 'notify', 'port', 'selfRelay', 'token', 'tunnel'],
+    ['agentAllowManage', 'agentAllowShell', 'agentAllowWrite', 'agentMode', 'agentRoots', 'agentToken', 'agentUrl', 'allowAgent', 'allowRemoteComputers', 'bActivationCode', 'bHostname', 'bRelayEnabled', 'bindAddress', 'defaultMode', 'feishu', 'maxHistory', 'notify', 'port', 'selfRelay', 'token', 'tunnel'],
     '每个设置都该在声明里露面，否则标准通道看不见它')
   // 飞书那一块**故意不标 volatile**：它的长连接是拿 appId/appSecret 建的，改了凭据
   // 就得把连接整个换掉，"就地改一个值"兑现不了。上面那条 volatile 清单因此不该有它。
@@ -4272,10 +4307,11 @@ test('自检：该回答的那几样一样不缺（版本 / 进程 / 接口 / �
     '/mini-remote/b-projects', '/mini-remote/b-project', '/mini-remote/b-project/new-session', '/mini-remote/b-browse',
     '/mini-remote/devices/cleanup',
     '/mini-remote/selfcheck',
+    '/mini-remote/b-relay',
   ]) {
     assert.ok(paths.includes(want), `清单里少了 ${want}`)
   }
-  assert.equal(body.routes.length, 35, '三十五条注册就报三十五条（清单和注册同一处发生）')
+  assert.equal(body.routes.length, 36, '三十六条注册就报三十六条（清单和注册同一处发生）')
   assert.ok(body.routes.every((one) => one.mounted === true), '刚起来的这一份，条条都该是"在"')
 
   // ④ 开关：默认关
