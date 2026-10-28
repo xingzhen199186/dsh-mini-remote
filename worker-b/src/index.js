@@ -730,7 +730,9 @@ export async function runOps(env, options = {}) {
   return { runId, status, summary }
 }
 
-function adminUnauthorized(request, env, requestId) {
+async function adminUnauthorized(request, env, requestId) {
+  const retryAfter = await spendRate(env, 'admin:' + clientIp(request), 60, 60)
+  if (retryAfter) return fail(requestId, 'rate_limited', 429, true, retryAfter)
   const token = typeof env.ADMIN_TOKEN === 'string' ? env.ADMIN_TOKEN : ''
   if (!token) return fail(requestId, 'admin_not_configured', 503)
   const header = request.headers.get('authorization') || ''
@@ -739,7 +741,7 @@ function adminUnauthorized(request, env, requestId) {
 }
 
 async function handleAdmin(request, env, url, requestId) {
-  const unauthorized = adminUnauthorized(request, env, requestId)
+  const unauthorized = await adminUnauthorized(request, env, requestId)
   if (unauthorized) return unauthorized
   if (url.pathname === '/admin/b/v1/invites') {
     if (request.method !== 'POST') return fail(requestId, 'method_not_allowed', 405)
