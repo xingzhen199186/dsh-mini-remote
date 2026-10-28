@@ -175,6 +175,21 @@ test('status and renew authenticate without returning a token; port renewal upda
   assert.equal('hostname' in denied.body, false)
 })
 
+test('released lease can be reactivated with the same clientSecret and claimRequestId', async () => {
+  const context = createEnv()
+  const invitation = await invite(context.env)
+  const first = await claim(context.env, invitation.code)
+  assert.equal(first.body.state, 'active')
+  const released = await request(context.env, 'POST', '/api/b/v1/release', { id: first.body.id, clientSecret: CLIENT_SECRET })
+  assert.equal(released.body.state, 'released')
+  const again = await claim(context.env, invitation.code)
+  assert.equal(again.status, 200)
+  assert.equal(again.body.state, 'active')
+  assert.equal(again.body.tunnelToken, first.body.tunnelToken)
+  assert.equal(context.cf.createdTunnelCount, 1)
+  assert.equal(context.db.prepare('SELECT state FROM b_leases').get().state, 'active')
+})
+
 test('release is reentrant, retains resources for 30 days and blocks renew', async () => {
   const context = createEnv()
   const { id } = await activate(context.env)

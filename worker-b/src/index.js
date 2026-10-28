@@ -331,7 +331,7 @@ async function handleClaim(request, env, requestId) {
 
   if (!timingSafeEqual(lease.client_secret_hash, secretHash)) return fail(requestId, 'auth_failed', 403)
   if (lease.state === 'retired') return fail(requestId, 'lease_retired', 410)
-  if (lease.state !== 'claimed' && lease.state !== 'active') return fail(requestId, 'state_conflict', 409)
+  if (lease.state !== 'claimed' && lease.state !== 'active' && lease.state !== 'released') return fail(requestId, 'state_conflict', 409)
   const operation = await env.DB.prepare('SELECT * FROM b_operations WHERE lease_id = ? AND operation_id = ? AND type = \'claim\'')
     .bind(lease.lease_id, claimRequestId).first()
   if (!operation || operation.request_fingerprint !== fingerprint) return fail(requestId, 'idempotency_conflict', 409)
@@ -340,6 +340,28 @@ async function handleClaim(request, env, requestId) {
     try {
       const tunnelToken = await api.getTunnelToken(lease.tunnel_id)
       if (typeof tunnelToken !== 'string' || !tunnelToken) throw new CloudflareError()
+      return ok(requestId, claimData(env, lease, tunnelToken))
+    } catch (error) {
+      return externalError(requestId, error)
+    }
+  }
+  if (lease.state === 'released') {
+    // released 只是产品层保留；资源仍在。同 clientSecret + 同 claimRequestId
+    // 重新 claim 是“恢复”，不是新开通：不消费新邀请、不建新 Tunnel。
+    if (!lease.tunnel_id) return fail(requestId, 'state_conflict', 409)
+    try {
+      const tunnelToken = await api.getTunnelToken(lease.tunnel_id)
+      if (typeof tunnelToken !== 'string' || !tunnelToken) throw new CloudflareError()
+      const now = Date.now()
+      await env.DB.batch([
+        env.DB.prepare(
+          'UPDATE b_leases SET state = \'active\', released_at = NULL, last_seen_at = ?, row_version = row_version + 1 WHERE lease_id = ? AND state = \'released\'',
+        ).bind(now, lease.lease_id),
+        auditStatement(env, { actor: 'plugin', action: 'lease.reactivate', leaseId: lease.lease_id, requestId, before: 'released', after: 'active', result: 'succeeded' }),
+      ])
+      lease.state = 'active'
+      lease.released_at = null
+      lease.last_seen_at = now
       return ok(requestId, claimData(env, lease, tunnelToken))
     } catch (error) {
       return externalError(requestId, error)

@@ -8,7 +8,7 @@
     {
       "binding": "DB",
       "database_name": "dsh-b-relay",
-      "database_id": "REPLACE_WITH_D1_DATABASE_ID",
+      "database_id": "9c05b031-0c09-490f-97a4-b214084e50e0",
       "migrations_dir": "migrations"
     }
   ],
