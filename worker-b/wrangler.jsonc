@@ -15,8 +15,8 @@
   "vars": {
     "B_SUFFIX": "dsh-everywhere.com",
     "B_CONTROL_HOST": "control.dsh-everywhere.com",
-    "B_ACCOUNT_ID": "REPLACE_WITH_CLOUDFLARE_ACCOUNT_ID",
-    "B_ZONE_ID": "REPLACE_WITH_CLOUDFLARE_ZONE_ID"
+    "B_ACCOUNT_ID": "c388ee35863086d5ffbcee0bb4b63e0b",
+    "B_ZONE_ID": "f2cc2bd5058c743656e938494cdee309"
   },
   "routes": [
     { "pattern": "control.dsh-everywhere.com", "custom_domain": true }
