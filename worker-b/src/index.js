@@ -7,6 +7,9 @@ const MAX_BODY_BYTES = 4 * 1024
 const DAY_MS = 24 * 60 * 60 * 1000
 const RELEASE_RETENTION_MS = 30 * DAY_MS
 const TUNNEL_PREFIX = 'dsh-b-relay-'
+const OPS_RETIRE_LIMIT = 10
+const OPS_RECONCILE_LIMIT = 50
+const OPS_FINDINGS_LIMIT = 500
 
 class ControlError extends Error {
   constructor(code, status = 409, retryable = false) {
@@ -503,6 +506,230 @@ async function retireLease(env, lease, requestId) {
   }
 }
 
+function findingIdOf(runId, finding) {
+  return [
+    runId,
+    finding.kind,
+    finding.leaseId ?? '-',
+    finding.resourceType ?? '-',
+    finding.resourceId ?? '-',
+  ].join(':')
+}
+
+async function recordFinding(env, runId, finding, createdAt = Date.now()) {
+  const findingId = findingIdOf(runId, finding)
+  await env.DB.prepare(
+    'INSERT INTO b_reconcile_findings '
+    + '(finding_id, run_id, lease_id, resource_type, resource_id, kind, detail, created_at) '
+    + 'VALUES (?, ?, ?, ?, ?, ?, ?, ?) '
+    + 'ON CONFLICT(finding_id) DO UPDATE SET '
+    + 'lease_id = excluded.lease_id, resource_type = excluded.resource_type, '
+    + 'resource_id = excluded.resource_id, detail = excluded.detail',
+  ).bind(
+    findingId,
+    runId,
+    finding.leaseId ?? null,
+    finding.resourceType,
+    finding.resourceId ?? null,
+    finding.kind,
+    String(finding.detail ?? '').slice(0, 500),
+    createdAt,
+  ).run()
+}
+
+/** 对一条 active/released lease 做只读核对；任何 Cloudflare 写操作都不在这里发生。 */
+async function reconcileLease(env, api, lease, runId) {
+  const tunnelName = lease.tunnel_name || tunnelNameOf(lease.lease_id)
+  const tunnel = await api.findTunnel(tunnelName)
+
+  if (!lease.tunnel_id && tunnel) {
+    await recordFinding(env, runId, {
+      kind: 'tunnel_mismatch',
+      leaseId: lease.lease_id,
+      resourceType: 'tunnel',
+      resourceId: tunnel.id,
+      detail: `D1 没有 tunnel_id，但 Cloudflare 上已有同名 Tunnel ${tunnelName}`,
+    })
+  } else if (!tunnel) {
+    await recordFinding(env, runId, {
+      kind: 'tunnel_missing',
+      leaseId: lease.lease_id,
+      resourceType: 'tunnel',
+      resourceId: lease.tunnel_id || tunnelName,
+      detail: `Cloudflare 上找不到 Tunnel ${tunnelName}`,
+    })
+  } else if (lease.tunnel_id && tunnel.id !== lease.tunnel_id) {
+    await recordFinding(env, runId, {
+      kind: 'tunnel_mismatch',
+      leaseId: lease.lease_id,
+      resourceType: 'tunnel',
+      resourceId: lease.tunnel_id,
+      detail: `D1 tunnel_id=${lease.tunnel_id}，Cloudflare 同名 Tunnel id=${tunnel.id}`,
+    })
+  }
+
+  const records = await api.findDnsRecords(lease.hostname)
+  if (!records.length) {
+    await recordFinding(env, runId, {
+      kind: 'cname_missing',
+      leaseId: lease.lease_id,
+      resourceType: 'dns',
+      resourceId: lease.dns_record_id || lease.hostname,
+      detail: `Cloudflare 上找不到 ${lease.hostname} 的同名记录`,
+    })
+    return
+  }
+
+  const cnames = records.filter((record) => record.type === 'CNAME')
+  if (records.length !== 1 || cnames.length !== 1) {
+    await recordFinding(env, runId, {
+      kind: 'dns_conflict',
+      leaseId: lease.lease_id,
+      resourceType: 'dns',
+      resourceId: lease.dns_record_id || lease.hostname,
+      detail: `同名记录 ${records.length} 条，类型=${records.map((record) => record.type).join(',')}`,
+    })
+    return
+  }
+
+  const target = lease.dns_target || (tunnel ? dnsTargetOf(tunnel.id) : null)
+  const record = cnames[0]
+  if (!target) {
+    await recordFinding(env, runId, {
+      kind: 'cname_mismatch',
+      leaseId: lease.lease_id,
+      resourceType: 'dns',
+      resourceId: record.id,
+      detail: `D1 没有记录 CNAME 目标，当前内容=${record.content ?? ''}`,
+    })
+    return
+  }
+  if (record.content !== target || record.proxied !== true) {
+    await recordFinding(env, runId, {
+      kind: 'cname_mismatch',
+      leaseId: lease.lease_id,
+      resourceType: 'dns',
+      resourceId: record.id,
+      detail: `期望 ${target}（proxied=true），实际 ${record.content ?? ''}（proxied=${record.proxied === true}）`,
+    })
+  }
+}
+
+function parseSummary(text) {
+  try {
+    return text ? JSON.parse(text) : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * 每日运维：自动退休过期 released，并只读对账 Tunnel/CNAME/孤儿。
+ * 所有删除只发生在 retireLease；对账与孤儿检查不会调用任何 Cloudflare 写接口。
+ */
+export async function runOps(env, options = {}) {
+  const runId = typeof options.runId === 'string' && options.runId ? options.runId : crypto.randomUUID()
+  const kind = typeof options.kind === 'string' && options.kind ? options.kind : 'daily'
+  const startedAt = Number.isFinite(options.now) ? options.now : Date.now()
+  const summary = {
+    retired: 0,
+    retireFailures: [],
+    reconcileChecked: 0,
+    reconcileFailures: [],
+    orphanTunnels: 0,
+    findings: 0,
+    findingKinds: {},
+    errors: [],
+  }
+  let status = 'succeeded'
+
+  await env.DB.prepare(
+    'INSERT INTO b_ops_runs (run_id, kind, started_at, status) VALUES (?, ?, ?, \'running\') '
+    + 'ON CONFLICT(run_id) DO UPDATE SET status = \'running\', finished_at = NULL, summary = NULL',
+  ).bind(runId, kind, startedAt).run()
+
+  try {
+    const stale = await env.DB.prepare(
+      'SELECT * FROM b_leases WHERE state = \'released\' AND released_at IS NOT NULL AND released_at < ? '
+      + 'ORDER BY released_at ASC LIMIT ?',
+    ).bind(startedAt - RELEASE_RETENTION_MS, OPS_RETIRE_LIMIT).all()
+
+    for (const lease of stale.results || []) {
+      try {
+        const response = await retireLease(env, lease, `ops:${runId}:retire:${lease.lease_id}`)
+        const payload = await response.json().catch(() => null)
+        if (response.ok && payload?.state === 'retired') {
+          summary.retired += 1
+        } else {
+          summary.retireFailures.push({ leaseId: lease.lease_id, code: payload?.code || 'retire_failed' })
+        }
+      } catch {
+        summary.retireFailures.push({ leaseId: lease.lease_id, code: 'retire_failed' })
+      }
+    }
+
+    const api = cloudflareApiOf(env)
+    if (!api) {
+      summary.errors.push('cf_api_unavailable')
+    } else {
+      const candidates = await env.DB.prepare(
+        'SELECT * FROM b_leases WHERE state IN (\'active\', \'released\') '
+        + 'ORDER BY COALESCE(last_seen_at, created_at) ASC LIMIT ?',
+      ).bind(OPS_RECONCILE_LIMIT).all()
+
+      for (const lease of candidates.results || []) {
+        summary.reconcileChecked += 1
+        try {
+          await reconcileLease(env, api, lease, runId)
+        } catch {
+          summary.reconcileFailures.push({ leaseId: lease.lease_id, code: 'reconcile_failed' })
+        }
+      }
+
+      try {
+        const tunnels = await api.listTunnels()
+        const known = await env.DB.prepare('SELECT tunnel_name, tunnel_id FROM b_leases').all()
+        const knownNames = new Set((known.results || []).map((row) => row.tunnel_name).filter(Boolean))
+        const knownIds = new Set((known.results || []).map((row) => row.tunnel_id).filter(Boolean))
+        for (const tunnel of tunnels) {
+          if (!tunnel?.name?.startsWith(TUNNEL_PREFIX)) continue
+          if (knownNames.has(tunnel.name) || knownIds.has(tunnel.id)) continue
+          await recordFinding(env, runId, {
+            kind: 'orphan_tunnel',
+            leaseId: null,
+            resourceType: 'tunnel',
+            resourceId: tunnel.id,
+            detail: `Cloudflare Tunnel ${tunnel.name} 没有对应 D1 lease；只记录，不删除`,
+          }, startedAt)
+          summary.orphanTunnels += 1
+        }
+      } catch {
+        summary.errors.push('orphan_list_failed')
+      }
+    }
+
+    const counts = await env.DB.prepare(
+      'SELECT kind, COUNT(*) AS n FROM b_reconcile_findings WHERE run_id = ? GROUP BY kind',
+    ).bind(runId).all()
+    for (const row of counts.results || []) {
+      summary.findingKinds[row.kind] = Number(row.n)
+      summary.findings += Number(row.n)
+    }
+    if (summary.retireFailures.length || summary.reconcileFailures.length || summary.errors.length) {
+      status = 'partial'
+    }
+  } catch {
+    summary.errors.push('ops_failed')
+    status = 'failed'
+  }
+
+  await env.DB.prepare(
+    'UPDATE b_ops_runs SET finished_at = ?, status = ?, summary = ? WHERE run_id = ?',
+  ).bind(Date.now(), status, JSON.stringify(summary), runId).run()
+
+  return { runId, status, summary }
+}
+
 function adminUnauthorized(request, env, requestId) {
   const token = typeof env.ADMIN_TOKEN === 'string' ? env.ADMIN_TOKEN : ''
   if (!token) return fail(requestId, 'admin_not_configured', 503)
@@ -549,6 +776,23 @@ async function handleAdmin(request, env, url, requestId) {
     ).bind(limit).all()
     return ok(requestId, { leases: rows.results || [] })
   }
+  if (url.pathname === '/admin/b/v1/ops') {
+    if (request.method !== 'GET') return fail(requestId, 'method_not_allowed', 405)
+    const run = await env.DB.prepare(
+      'SELECT run_id AS runId, kind, started_at AS startedAt, finished_at AS finishedAt, status, summary '
+      + 'FROM b_ops_runs ORDER BY started_at DESC, run_id DESC LIMIT 1',
+    ).first()
+    if (!run) return ok(requestId, { run: null, findings: [] })
+    const findings = await env.DB.prepare(
+      'SELECT finding_id AS findingId, run_id AS runId, lease_id AS leaseId, resource_type AS resourceType, '
+      + 'resource_id AS resourceId, kind, detail, created_at AS createdAt, resolved_at AS resolvedAt '
+      + 'FROM b_reconcile_findings WHERE run_id = ? ORDER BY created_at, finding_id LIMIT ?',
+    ).bind(run.runId, OPS_FINDINGS_LIMIT).all()
+    return ok(requestId, {
+      run: { ...run, summary: parseSummary(run.summary) },
+      findings: findings.results || [],
+    })
+  }
   return fail(requestId, 'not_found', 404)
 }
 
@@ -568,4 +812,8 @@ export async function handleRequest(request, env) {
   }
 }
 
-export default { fetch: handleRequest }
+export async function scheduled(event, env) {
+  return await runOps(env, { kind: 'cron' })
+}
+
+export default { fetch: handleRequest, scheduled }

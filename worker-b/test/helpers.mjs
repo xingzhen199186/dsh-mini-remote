@@ -1,9 +1,14 @@
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
 import { DatabaseSync } from 'node:sqlite'
 import { handleRequest } from '../src/index.js'
 import { CloudflareError } from '../src/cloudflare.js'
 
-const migration = readFileSync(new URL('../migrations/0001_init.sql', import.meta.url), 'utf8')
+const migrationsUrl = new URL('../migrations/', import.meta.url)
+const migration = readdirSync(migrationsUrl)
+  .filter((name) => name.endsWith('.sql'))
+  .sort()
+  .map((name) => readFileSync(new URL(name, migrationsUrl), 'utf8'))
+  .join('\n')
 
 class Statement {
   constructor(db, sql) {
@@ -36,10 +41,14 @@ export function createD1() {
     db,
     prepare(sql) {
       const statement = new Statement(db, sql)
+      const bound = statement.bind()
       return {
+        run: bound.runAsync,
+        first: bound.first,
+        all: bound.all,
         bind(...params) {
-          const bound = statement.bind(...params)
-          return { run: bound.runAsync, first: bound.first, all: bound.all }
+          const withParams = statement.bind(...params)
+          return { run: withParams.runAsync, first: withParams.first, all: withParams.all }
         },
       }
     },
@@ -102,6 +111,12 @@ export class FakeCloudflare {
     this.createdTunnelCount += 1
     this.check('createTunnel', 'after')
     return tunnel
+  }
+
+  async listTunnels() {
+    this.record('listTunnels')
+    this.check('listTunnels', 'after')
+    return [...this.tunnels.values()]
   }
 
   async putTunnelConfiguration(id, ingress) {

@@ -21,6 +21,8 @@
   "routes": [
     { "pattern": "control.dsh-everywhere.com", "custom_domain": true }
   ],
+  // 每天 01:20 UTC = 北京时间 09:20。
+  "triggers": { "crons": ["20 1 * * *"] },
   "observability": { "enabled": true }
   // Workers Secrets: CF_API_TOKEN, B_PEPPER, ADMIN_TOKEN. Never put them in vars.
 }

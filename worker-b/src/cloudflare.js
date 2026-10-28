@@ -39,6 +39,11 @@ export function createCloudflareRelayApi(config) {
     async createTunnel(name) {
       return await cfCall(config, 'POST', account + '/cfd_tunnel', { name, config_src: 'cloudflare' })
     },
+    /** 只读列出一页 Tunnel；对账只观察，不在这里做任何变更。 */
+    async listTunnels() {
+      const result = await cfCall(config, 'GET', account + '/cfd_tunnel?is_deleted=false&per_page=100')
+      return Array.isArray(result) ? result.filter((tunnel) => tunnel && !tunnel.deleted_at) : []
+    },
     async putTunnelConfiguration(tunnelId, ingress) {
       return await cfCall(config, 'PUT', account + '/cfd_tunnel/' + encodeURIComponent(tunnelId) + '/configurations', { config: { ingress } })
     },
