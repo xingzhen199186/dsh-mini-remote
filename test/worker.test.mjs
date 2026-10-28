@@ -153,6 +153,30 @@ test('关闭邀请码要求后，自服务注册无需邀请码', async () => {
   assert.equal((await opened.json()).ok, true)
 })
 
+test('运维台总览会合并 B 控制面的租约摘要', async () => {
+  const env = makeEnv()
+  env.B_CONTROL_URL = 'https://control.example.com'
+  env.B_ADMIN_TOKEN = 'b-admin'
+  const original = globalThis.fetch
+  globalThis.fetch = async (url, init) => {
+    assert.equal(url, 'https://control.example.com/admin/b/v1/leases')
+    assert.equal(init.headers.authorization, 'Bearer b-admin')
+    return new Response(JSON.stringify({
+      ok: true,
+      leases: [{ id: 'abc', hostname: 'abc.dsh-everywhere.com', state: 'active', lastSeenAt: 1, createdAt: 2 }],
+    }), { status: 200, headers: { 'content-type': 'application/json' } })
+  }
+  try {
+    const response = await handleRequest(req('/admin/relay/v1/overview', { token: ADMIN }), env)
+    assert.equal(response.status, 200)
+    const body = await response.json()
+    assert.equal(body.b.ok, true)
+    assert.equal(body.b.leases[0].hostname, 'abc.dsh-everywhere.com')
+  } finally {
+    globalThis.fetch = original
+  }
+})
+
 test('每日用量开关可写可读', async () => {
   const env = makeEnv()
   env.ACCESS_ADMIN = '1'

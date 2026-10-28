@@ -369,6 +369,27 @@ async function refreshUsage(env) {
   return usage
 }
 
+async function bLeasesForOps(env) {
+  const base = typeof env.B_CONTROL_URL === 'string' && env.B_CONTROL_URL
+    ? env.B_CONTROL_URL.replace(/\/+$/, '')
+    : ''
+  const token = typeof env.B_ADMIN_TOKEN === 'string' ? env.B_ADMIN_TOKEN : ''
+  if (!base || !token) return { ok: false, error: '未配置 B 控制面或 B_ADMIN_TOKEN' }
+  try {
+    const response = await fetch(base + '/admin/b/v1/leases', {
+      headers: { authorization: 'Bearer ' + token },
+      signal: AbortSignal.timeout(5000),
+    })
+    const payload = await response.json().catch(() => ({}))
+    if (!response.ok || payload.ok !== true) {
+      return { ok: false, error: 'B 控制面返回 HTTP ' + response.status }
+    }
+    return { ok: true, leases: payload.leases ?? [] }
+  } catch (error) {
+    return { ok: false, error: 'B 控制面连不上：' + (error?.message ?? String(error)) }
+  }
+}
+
 async function handleAdmin(request, env, url) {
   const auth = await requireAdmin(request, env)
   if (!auth.ok) return auth.response
@@ -400,6 +421,7 @@ async function handleAdmin(request, env, url) {
         unusedInvites: Number(invite?.n ?? 0),
       },
       usage: usage ?? null,
+      b: await bLeasesForOps(env),
     })
   }
 

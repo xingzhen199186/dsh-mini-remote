@@ -52,6 +52,12 @@ th{color:var(--muted);font-weight:500}code{background:#f3f4f6;padding:2px 6px;bo
   </section>
 
   <section class="card">
+    <h2>专属固定地址（B）</h2>
+    <div class="muted small" id="bMeta">读取中…</div>
+    <table><thead><tr><th>固定地址</th><th>状态</th><th>最近登记</th><th>创建</th></tr></thead><tbody id="bLeases"></tbody></table>
+  </section>
+
+  <section class="card">
     <h2>运营开关</h2>
     <label class="switch"><input type="checkbox" id="registrationEnabled"> 允许新实例注册</label>
     <label class="switch"><input type="checkbox" id="inviteRequired"> 新实例必须带邀请码（关闭后为自服务注册）</label>
@@ -102,6 +108,18 @@ function setChecks(config){
   $('proxyEnabled').checked=!!config.proxyEnabled;
   $('dailyReportEnabled').checked=!!config.dailyReportEnabled;
 }
+function renderB(b){
+  const tbody=$('bLeases');
+  if(!b || b.ok!==true){
+    $('bMeta').textContent=b?.error||'没有 B 控制面数据。';
+    tbody.innerHTML='<tr><td colspan="4" class="muted">—</td></tr>';
+    return;
+  }
+  const rows=b.leases||[];
+  const count=(state)=>rows.filter((x)=>x.state===state).length;
+  $('bMeta').textContent='共 '+rows.length+' 条 · active '+count('active')+' · released '+count('released')+' · retired '+count('retired');
+  tbody.innerHTML=rows.map((x)=>'<tr><td><code>'+esc(x.hostname||'—')+'</code></td><td>'+esc(x.state)+'</td><td>'+esc(time(x.lastSeenAt))+'</td><td>'+esc(time(x.createdAt))+'</td></tr>').join('') || '<tr><td colspan="4" class="muted">没有租约。</td></tr>';
+}
 function usageHtml(u){
   if(!u) return '<span class="muted">还没有用量快照。开启每日任务并配置 token 后，这里会出现。</span>';
   if(u.error) return '<div class="error">'+esc(u.error)+'</div>';
@@ -124,6 +142,7 @@ async function load(){
     $('proxyState').textContent=o.config?.proxyEnabled?'开启':'停用';
     $('proxyState').className=o.config?.proxyEnabled?'ok':'';
     $('usage').innerHTML=usageHtml(o.usage);
+    renderB(o.b);
     const rows=ids.identities||[];
     $('identityMeta').textContent='共 '+rows.length+' 条（最多显示 50 条）';
     $('identities').innerHTML=rows.map((x)=>'<tr><td><code>'+esc(x.id)+'</code></td><td>'+esc(x.state)+'</td><td>'+esc(time(x.last_seen_at))+'</td><td>'+esc(time(x.created_at))+'</td><td>'+(x.state==='active'?'<button class="danger" data-revoke="'+esc(x.id)+'">撤销</button>':'')+'</td></tr>').join('');

@@ -106,3 +106,20 @@ npx wrangler secret put CF_ANALYTICS_TOKEN -c worker/wrangler.jsonc
 - 能接受被陌生人消耗 Workers/D1/KV 配额。
 
 建议首批 5–10 个仍用邀请码；等限流和用量数据稳定后再关掉。
+
+
+## 专属固定地址（B）合并展示（2026-10-28）
+
+A 运维台新增「专属固定地址（B）」卡片：
+
+- A Worker 用 `B_ADMIN_TOKEN` 服务端读取 B 控制面的租约；
+- 页面显示固定地址、状态、最近登记、创建时间；
+- 浏览器不接触 B admin token；
+- B 控制面仍然独立，A 只做只读汇总。
+
+需要 A Worker 配置：
+
+```text
+B_CONTROL_URL=https://control.dsh-everywhere.com
+B_ADMIN_TOKEN=<B 控制面的 ADMIN_TOKEN>
+```

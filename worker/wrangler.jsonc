@@ -24,7 +24,8 @@
     "RELAY_INVITE_REQUIRED": "1",
     "ACCESS_ADMIN": "1",
     "ADMIN_EMAILS": "xingzhen19910806@gmail.com",
-    "RELAY_ACCOUNT_ID": "c388ee35863086d5ffbcee0bb4b63e0b"
+    "RELAY_ACCOUNT_ID": "c388ee35863086d5ffbcee0bb4b63e0b",
+    "B_CONTROL_URL": "https://control.dsh-everywhere.com"
   },
   "triggers": { "crons": ["10 0 * * *"] },
   "observability": { "enabled": true },
