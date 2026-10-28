@@ -776,6 +776,11 @@ async function handleAdmin(request, env, url, requestId) {
     ).bind(limit).all()
     return ok(requestId, { leases: rows.results || [] })
   }
+  if (url.pathname === '/admin/b/v1/ops/run') {
+    if (request.method !== 'POST') return fail(requestId, 'method_not_allowed', 405)
+    const result = await runOps(env, { kind: 'manual' })
+    return ok(requestId, result)
+  }
   if (url.pathname === '/admin/b/v1/ops') {
     if (request.method !== 'GET') return fail(requestId, 'method_not_allowed', 405)
     const run = await env.DB.prepare(

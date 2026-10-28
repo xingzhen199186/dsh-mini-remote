@@ -543,6 +543,14 @@ async function handleAdmin(request, env, url) {
     return json(await bLeasesForOps(env))
   }
 
+  if (request.method === 'GET' && path === '/admin/relay/v1/b/ops') {
+    return json(await bAdminFetch(env, '/admin/b/v1/ops'))
+  }
+
+  if (request.method === 'POST' && path === '/admin/relay/v1/b/ops/run') {
+    return json(await bAdminFetch(env, '/admin/b/v1/ops/run', { method: 'POST' }))
+  }
+
   if (request.method === 'POST' && path === '/admin/relay/v1/b/invites') {
     const body = await readJson(request)
     if (body.error) return fail(body.error, 400)

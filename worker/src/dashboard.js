@@ -140,6 +140,7 @@ code{background:#f3f4f6;padding:2px 6px;border-radius:4px;word-break:break-all}
         <div class="metric"><div class="k">已退休</div><div class="v" id="bdRetired">—</div></div>
       </div></div>
       <div class="card"><h3>新建激活码</h3><div class="row"><button class="btn primary" id="newBInvite">新建 7 天激活码</button><span class="muted small">给用户一次性开通专属固定地址；7 天内有效。</span></div><div id="bInviteResult" class="notice hidden"></div></div>
+      <div class="card"><h3>最近对账</h3><div class="row"><button class="btn" id="runBOps">立即对账</button><span class="muted small">只读核对；会顺带退休 released 超过 30 天的租约。</span></div><div class="muted small" id="bOpsMeta" style="margin-top:8px">读取中…</div><div id="bOpsFindings"></div></div>
       <div class="card"><h3>租约</h3><div class="muted small" id="bMeta">读取中…</div><div class="table-wrap"><table><thead><tr><th>固定地址</th><th>状态</th><th>本机端口</th><th>最近登记</th><th>创建</th></tr></thead><tbody id="bLeases"></tbody></table></div></div>
     </section>
   </main>
@@ -159,6 +160,14 @@ function usageHtml(u){
   if(u.error)return '<div class="error">'+esc(u.error)+'</div>';
   const rows=[['Workers 请求',u.workers?.requests,100000],['D1 读取行',u.d1?.rowsRead,5000000],['D1 写入行',u.d1?.rowsWritten,100000],['KV 请求',u.kv?.requests,100000]];
   return '<div class="muted small">采集时间：'+esc(time(u.collectedAt))+' · 日期 '+esc(u.day)+'</div><div class="table-wrap"><table><thead><tr><th>项目</th><th>用量</th><th>Free 上限</th><th>占比</th></tr></thead><tbody>'+rows.map(([n,v,l])=>{const p=l?Number(v||0)/l*100:0;return '<tr><td>'+esc(n)+'</td><td>'+esc(v??0)+'</td><td>'+esc(l)+'</td><td>'+p.toFixed(1)+'%</td></tr>'}).join('')+'</tbody></table></div>';
+}
+function renderBOps(ops){
+  const run=ops?.run;
+  if(!run){$('bOpsMeta').textContent='还没有对账记录。';$('bOpsFindings').innerHTML='';return;}
+  const s=run.summary||{};
+  $('bOpsMeta').textContent='最近一次：'+time(run.startedAt)+' · '+esc(run.status)+' · 退休 '+esc(s.retired??0)+' · 对账 '+esc(s.reconcileChecked??0)+' · 发现 '+esc(s.findings??0);
+  const rows=ops.findings||[];
+  $('bOpsFindings').innerHTML=rows.length?('<div class="table-wrap"><table><thead><tr><th>类型</th><th>租约</th><th>详情</th><th>时间</th></tr></thead><tbody>'+rows.map((x)=>'<tr><td>'+esc(x.kind)+'</td><td><code>'+esc(x.leaseId||'—')+'</code></td><td>'+esc(x.detail||'')+'</td><td>'+esc(time(x.createdAt))+'</td></tr>').join('')+'</tbody></table></div>'):'<span class="muted">这次没有发现异常。</span>';
 }
 function renderB(b){
   const tbody=$('bLeases');
@@ -221,10 +230,10 @@ function renderVisual(o,b,ops){
 async function load(){
   hideError();
   try{
-    const [o,ids,audit,invites,b,ops]=await Promise.all([
-      api('/admin/relay/v1/overview'),api('/admin/relay/v1/identities?limit=50'),api('/admin/relay/v1/audit?limit=30'),api('/admin/relay/v1/invites'),api('/admin/relay/v1/b/leases'),api('/admin/relay/v1/ops/snapshot'),
+    const [o,ids,audit,invites,b,bops,ops]=await Promise.all([
+      api('/admin/relay/v1/overview'),api('/admin/relay/v1/identities?limit=50'),api('/admin/relay/v1/audit?limit=30'),api('/admin/relay/v1/invites'),api('/admin/relay/v1/b/leases'),api('/admin/relay/v1/b/ops'),api('/admin/relay/v1/ops/snapshot'),
     ]);
-    setChecks(o.config||{});renderOverview(o,b);renderB(b);renderVisual(o,b,ops);$('usage').innerHTML=usageHtml(o.usage);
+    setChecks(o.config||{});renderOverview(o,b);renderB(b);renderBOps(bops);renderVisual(o,b,ops);$('usage').innerHTML=usageHtml(o.usage);
     const rows=ids.identities||[];$('identityMeta').textContent='共 '+rows.length+' 条（最多显示 50 条）';
     $('identities').innerHTML=rows.map((x)=>'<tr><td><code>'+esc(x.id)+'</code></td><td>'+esc(x.state)+'</td><td>'+esc(time(x.last_seen_at))+'</td><td>'+esc(time(x.created_at))+'</td><td>'+(x.state==='active'?'<button class="btn danger" data-revoke="'+esc(x.id)+'">撤销</button>':'')+'</td></tr>').join('')||'<tr><td colspan="5" class="muted">没有实例。</td></tr>';
     $('audit').innerHTML=(audit.audit||[]).map((a)=>'<tr><td>'+esc(time(a.at))+'</td><td>'+esc(a.action)+'</td><td>'+esc(a.target||'—')+'</td><td>'+esc(a.reason||'—')+'</td><td>'+esc(a.actor||'—')+'</td></tr>').join('')||'<tr><td colspan="5" class="muted">没有审计记录。</td></tr>';
@@ -242,6 +251,7 @@ $('dailyReportEnabled').addEventListener('change',(e)=>saveConfig('dailyReportEn
 $('newInvite').addEventListener('click',async()=>{try{const r=await api('/admin/relay/v1/invites',{method:'POST',body:JSON.stringify({expiresInDays:7})});$('inviteResult').classList.remove('hidden');$('inviteResult').innerHTML='新邀请码（只显示这一次）：<br><code>'+esc(r.code)+'</code>';await load()}catch(e){showError('创建邀请失败：'+e.message)}});
 $('newBInvite').addEventListener('click',async()=>{try{const r=await api('/admin/relay/v1/b/invites',{method:'POST',body:JSON.stringify({expiresInDays:7,note:'ops-console'})});$('bInviteResult').classList.remove('hidden');$('bInviteResult').innerHTML='新激活码（只显示这一次）：<br><code>'+esc(r.code)+'</code><br><span class="small">固定地址：<code>'+esc(r.hostname)+'</code></span>';await load()}catch(e){showError('创建激活码失败：'+e.message)}});
 document.addEventListener('click',async(e)=>{const copy=e.target?.dataset?.copy;if(copy){try{await navigator.clipboard.writeText(copy);e.target.textContent='已复制'}catch{}return}const id=e.target?.dataset?.revoke;if(!id)return;if(!confirm('确定撤销 '+id+'？撤销后固定地址立即失效。'))return;try{await api('/admin/relay/v1/revoke',{method:'POST',body:JSON.stringify({id,reason:'ops-console'})});await load()}catch(err){showError('撤销失败：'+err.message)}});
+$('runBOps').addEventListener('click',async()=>{if(!confirm('立即对账会只读核对 Tunnel/CNAME，并尝试退休 released 超过 30 天的租约。继续？'))return;try{await api('/admin/relay/v1/b/ops/run',{method:'POST'});await load()}catch(e){showError('对账失败：'+e.message)}});
 $('refreshOps').addEventListener('click',async()=>{try{const r=await api('/admin/relay/v1/ops/refresh',{method:'POST'});renderVisual(await api('/admin/relay/v1/overview'),await api('/admin/relay/v1/b/leases'),r);await load()}catch(e){showError('采集失败：'+e.message)}});
 load();
 </script>
