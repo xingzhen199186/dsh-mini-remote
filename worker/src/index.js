@@ -380,6 +380,9 @@ async function bAdminFetch(env, path, init = {}) {
       ...init,
       headers: {
         authorization: 'Bearer ' + token,
+        ...(env.B_ACCESS_CLIENT_ID && env.B_ACCESS_CLIENT_SECRET
+          ? { 'cf-access-client-id': env.B_ACCESS_CLIENT_ID, 'cf-access-client-secret': env.B_ACCESS_CLIENT_SECRET }
+          : {}),
         ...(init.body ? { 'content-type': 'application/json' } : {}),
         ...(init.headers ?? {}),
       },

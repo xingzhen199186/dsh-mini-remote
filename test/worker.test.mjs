@@ -287,6 +287,29 @@ test('每周清单只读接口会列出 stale / released / invites', async () =>
   }
 })
 
+test('A 调 B 管理接口会带 Access 服务令牌头', async () => {
+  const env = makeEnv()
+  env.B_CONTROL_URL = 'https://control.example.com'
+  env.B_ADMIN_TOKEN = 'b-admin'
+  env.B_ACCESS_CLIENT_ID = 'access-id'
+  env.B_ACCESS_CLIENT_SECRET = 'access-secret'
+  const original = globalThis.fetch
+  let seen
+  globalThis.fetch = async (url, init) => {
+    seen = init.headers
+    return new Response(JSON.stringify({ ok: true, leases: [] }), { status: 200, headers: { 'content-type': 'application/json' } })
+  }
+  try {
+    const response = await handleRequest(req('/admin/relay/v1/b/leases', { token: ADMIN }), env)
+    assert.equal(response.status, 200)
+    assert.equal(seen['cf-access-client-id'], 'access-id')
+    assert.equal(seen['cf-access-client-secret'], 'access-secret')
+    assert.equal(seen.authorization, 'Bearer b-admin')
+  } finally {
+    globalThis.fetch = original
+  }
+})
+
 test('每日用量开关可写可读', async () => {
   const env = makeEnv()
   env.ACCESS_ADMIN = '1'
