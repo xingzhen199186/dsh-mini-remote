@@ -280,7 +280,7 @@ test('A 中继 active 时，配对面板给固定中继地址而不是裸 quick'
   assert.equal(payload.entries.length, 1)
   const [entry] = payload.entries
   assert.equal(entry.kind, 'public-relay')
-  assert.equal(entry.label, '公网（固定中继）')
+  assert.equal(entry.label, '公网（共享固定）')
   assert.equal(entry.url, 'https://abcdefghijklmnopqrstuvwxyz.dsh-mini-remote.com/mini?token=abc123')
   assert.match(entry.hint, /固定/)
   assert.equal(payload.tunnel.relay.state, 'active')
@@ -340,7 +340,7 @@ test('B 固定地址 running 时，配对面板多出一条 b-relay 固定地址
   assert.equal(payload.entries.length, 1)
   const [entry] = payload.entries
   assert.equal(entry.kind, 'b-relay')
-  assert.equal(entry.label, 'B 固定地址')
+  assert.equal(entry.label, '公网（专属固定）')
   assert.equal(entry.url, 'https://abcdefghijklmnopqrstuvwxyz.dsh-everywhere.com/mini?token=abc123')
   assert.match(entry.hint, /地址固定/)
   assert.match(entry.hint, /Cloudflare/)

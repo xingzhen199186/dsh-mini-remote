@@ -973,11 +973,11 @@ window.__ModuleLoader__.load({
             }
             if (payload && payload.ok && action === 'start') setBActivation('');
             if (!payload || !payload.ok) {
-              setBRelayError((payload && payload.error) || ('B 固定地址操作失败：HTTP ' + r.status));
+              setBRelayError((payload && payload.error) || ('专属固定地址操作失败：HTTP ' + r.status));
             }
           })
           .catch(function (err) {
-            setBRelayError('B 固定地址操作失败：' + ((err && err.message) || String(err)));
+            setBRelayError('专属固定地址操作失败：' + ((err && err.message) || String(err)));
           })
           .then(function () { setBusy(false); });
       };
@@ -3584,7 +3584,7 @@ window.__ModuleLoader__.load({
       var errorText = relay.error || st.lastError || null;
       var statusText;
       if (running) statusText = '已连接。手机可以用下面的固定地址。';
-      else if (claiming) statusText = '正在开通并连接 B 固定地址…';
+      else if (claiming) statusText = '正在开通并连接专属固定地址…';
       else if (st.state === 'released') statusText = '已停止。服务方仍保留固定地址对应的资源。';
       else if (st.state === 'error') statusText = '没有连接成功。';
       else if (st.enabled) statusText = '已开启，正在准备。';
@@ -3603,7 +3603,7 @@ window.__ModuleLoader__.load({
         h('input', {
           type: 'password',
           value: relay.activationCode || '',
-          placeholder: st.hasActivationCode ? '激活码已保存；要换再填一次' : '输入 B 一次性激活码',
+          placeholder: st.hasActivationCode ? '激活码已保存；要换再填一次' : '输入专属固定地址的一次性激活码',
           spellCheck: false,
           disabled: Boolean(busy),
           onChange: function (e) { relay.setActivationCode(e.target.value); },
@@ -3615,21 +3615,21 @@ window.__ModuleLoader__.load({
           type: 'button', disabled: Boolean(busy),
           style: Object.assign({}, styles.btn, { color: '#b91c1c' }),
           onClick: relay.stop,
-        }, '停止 B 固定地址')
+        }, '停止专属固定地址')
         : h('button', {
           type: 'button', disabled: Boolean(busy) || !canStart,
           style: styles.btnPrimary,
           onClick: relay.start,
-        }, claiming ? '连接中…' : '开启 B 固定地址');
+        }, claiming ? '连接中…' : '开启专属固定地址');
 
       return h('div', { key: 'b-relay', style: styles.block },
         h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' } },
-          h('div', { style: styles.entryTitle }, 'B 固定地址（服务方代建）'),
+          h('div', { style: styles.entryTitle }, '专属固定地址'),
           pill,
         ),
         h('div', { style: styles.muted },
-          '用一次性激活码开通 Cloudflare 命名隧道，得到一个固定的 dsh-everywhere.com 地址。'
-          + '和上面的快速隧道、A 中继、自建中继互不影响。'),
+          '用一次性激活码单独开一条 Cloudflare 命名隧道，得到一个固定的 dsh-everywhere.com 地址。'
+          + '和上面的快速隧道、共享固定地址、自建中继互不影响。'),
         codeInput,
         h('div', { style: { display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 12 } }, actions),
         h('div', { style: { marginTop: 10 } },
@@ -3646,10 +3646,10 @@ window.__ModuleLoader__.load({
             onFocus: function (e) { try { e.target.select(); } catch (err) { /* 忽略 */ } },
             style: Object.assign({}, styles.monoInput, { flex: '1 1 260px', width: 'auto', minWidth: 0 }),
           }),
-          h('button', { type: 'button', style: styles.btn, onClick: function () { relay.copy(url); } }, '复制 B 地址'),
+          h('button', { type: 'button', style: styles.btn, onClick: function () { relay.copy(url); } }, '复制专属地址'),
         ) : null,
         running ? h('div', { style: styles.warn },
-          '流量经 Cloudflare，不是端到端加密。停止会释放租约，但不会自动删除 Tunnel/CNAME。') : null,
+          '流量经 Cloudflare，不是端到端加密。停止会释放租约，但不会自动删除已建好的隧道和解析记录。') : null,
       );
     }
 
@@ -4003,8 +4003,8 @@ window.__ModuleLoader__.load({
         quickEnabled ? h('div', { style: styles.muted }, '每次重启 DSH 后地址会变化，需重新扫码。') : null,
         quickEnabled ? h('div', { style: styles.warn }, '开着的时候这个服务就挂在公网上了。密码仍然是唯一的门，别把地址或二维码发出去。') : null,
 
-        h('div', { style: Object.assign({}, styles.entryTitle, { marginTop: 18 }) }, '固定地址中继（A）'),
-        h('div', { style: styles.muted }, '在快速隧道前面套一层我们的 Worker 中继，得到一个固定的 <id>.dsh-mini-remote.com 地址。流量经过中继，不是端到端加密；首次开通需要邀请码。'),
+        h('div', { style: Object.assign({}, styles.entryTitle, { marginTop: 18 }) }, '共享固定地址'),
+        h('div', { style: styles.muted }, '在快速隧道前面套一层共享中转，得到一个固定的 <id>.dsh-mini-remote.com 地址。开箱即用；流量经过共享中转，不是端到端加密；首次开通需要邀请码。'),
         h('label', { style: styles.toggleRow },
           h('input', {
             type: 'checkbox',
@@ -4038,7 +4038,7 @@ window.__ModuleLoader__.load({
             onClick: function () { aRelay.save(true); },
           }, '保存固定中继'),
         ),
-        aRelay && aRelay.enabled ? h('div', { style: styles.warn }, '固定中继会看到明文流量；它不是端到端加密。别把地址或二维码发出去。') : null,
+        aRelay && aRelay.enabled ? h('div', { style: styles.warn }, '共享中转会看到明文流量；它不是端到端加密。别把地址或二维码发出去。') : null,
 
         h('div', { style: Object.assign({}, styles.entryTitle, { marginTop: 18 }) }, '固定地址（Cloudflare 命名隧道）'),
         h('div', { style: styles.muted },
