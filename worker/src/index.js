@@ -463,6 +463,47 @@ async function opsSnapshotPayload(env) {
   return { ok: true, snapshot: snapshot ?? null, history: Array.isArray(history) ? history : [] }
 }
 
+async function opsWeeklyPayload(env) {
+  const now = Date.now()
+  const staleBefore = now - 7 * 86400000
+  const releasedBefore = now - 30 * 86400000
+  const aCounts = await env.DB.prepare('SELECT state, COUNT(*) AS n FROM relay_identities GROUP BY state').all()
+  const aByState = Object.fromEntries((aCounts.results ?? []).map((row) => [row.state, Number(row.n)]))
+  const aStale = await env.DB.prepare(
+    'SELECT id, created_at, last_seen_at FROM relay_identities WHERE state = \'active\' AND (last_seen_at IS NULL OR last_seen_at < ?) ORDER BY last_seen_at ASC LIMIT 50',
+  ).bind(staleBefore).all()
+  const invites = await env.DB.prepare(
+    'SELECT note, created_at, expires_at FROM relay_invites WHERE used_at IS NULL AND expires_at > ? AND created_at < ? ORDER BY created_at ASC LIMIT 50',
+  ).bind(now, staleBefore).all()
+  const usage = await env.RELAY_KV.get('relay-usage:latest', 'json').catch(() => null)
+  const b = await bLeasesForOps(env)
+  const leases = b.ok ? (b.leases || []) : []
+  const releasedOld = leases.filter((x) => x.state === 'released' && x.releasedAt && Number(x.releasedAt) < releasedBefore)
+  const activeStale = leases.filter((x) => x.state === 'active' && (!x.lastSeenAt || Number(x.lastSeenAt) < staleBefore))
+  return {
+    ok: true,
+    generatedAt: now,
+    a: {
+      counts: { active: aByState.active ?? 0, revoked: aByState.revoked ?? 0 },
+      staleActive: (aStale.results ?? []).map((x) => ({ id: x.id, createdAt: x.created_at, lastSeenAt: x.last_seen_at })),
+      unusedInvites: (invites.results ?? []).map((x) => ({ note: x.note, createdAt: x.created_at, expiresAt: x.expires_at })),
+      usage,
+    },
+    b: {
+      ok: b.ok,
+      error: b.ok ? null : b.error,
+      counts: {
+        total: leases.length,
+        active: leases.filter((x) => x.state === 'active').length,
+        released: leases.filter((x) => x.state === 'released').length,
+        retired: leases.filter((x) => x.state === 'retired').length,
+      },
+      releasedOld: releasedOld.map((x) => ({ id: x.id, hostname: x.hostname, releasedAt: x.releasedAt })),
+      activeStale: activeStale.map((x) => ({ id: x.id, hostname: x.hostname, lastSeenAt: x.lastSeenAt })),
+    },
+  }
+}
+
 async function handleAdmin(request, env, url) {
   const auth = await requireAdmin(request, env)
   if (!auth.ok) return auth.response
@@ -613,6 +654,9 @@ async function handleControl(request, env, url) {
   }
   if (request.method === 'GET' && url.pathname === '/ops/v1/snapshot' && opsReadAuthorized(request, env)) {
     return json(await opsSnapshotPayload(env))
+  }
+  if (request.method === 'GET' && url.pathname === '/ops/v1/weekly' && opsReadAuthorized(request, env)) {
+    return json(await opsWeeklyPayload(env))
   }
   if (url.pathname === '/api/relay/v1/register') return handleRegister(request, env)
   if (url.pathname === '/api/relay/v1/unregister') return handleUnregister(request, env)

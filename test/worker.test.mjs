@@ -259,6 +259,34 @@ test('只读 ops token 可以读快照，但打不开管理页', async () => {
   assert.equal(page.status, 401)
 })
 
+test('每周清单只读接口会列出 stale / released / invites', async () => {
+  const env = makeEnv()
+  env.OPS_READ_TOKEN = 'ops-read-token'
+  env.B_CONTROL_URL = 'https://control.example.com'
+  env.B_ADMIN_TOKEN = 'b-admin'
+  const original = globalThis.fetch
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    ok: true,
+    leases: [
+      { id: 'a', hostname: 'a.dsh-everywhere.com', state: 'active', lastSeenAt: Date.now() - 8 * 86400000 },
+      { id: 'b', hostname: 'b.dsh-everywhere.com', state: 'released', releasedAt: Date.now() - 31 * 86400000 },
+    ],
+  }), { status: 200, headers: { 'content-type': 'application/json' } })
+  try {
+    const response = await handleRequest(new Request('https://relay.example.com/ops/v1/weekly', {
+      headers: { authorization: 'Bearer ops-read-token' },
+    }), env)
+    assert.equal(response.status, 200)
+    const body = await response.json()
+    assert.equal(body.ok, true)
+    assert.equal(body.b.counts.total, 2)
+    assert.equal(body.b.releasedOld.length, 1)
+    assert.equal(body.b.activeStale.length, 1)
+  } finally {
+    globalThis.fetch = original
+  }
+})
+
 test('每日用量开关可写可读', async () => {
   const env = makeEnv()
   env.ACCESS_ADMIN = '1'
