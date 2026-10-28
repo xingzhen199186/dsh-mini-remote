@@ -1,0 +1,26 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "dsh-b-relay",
+  "workers_dev": false,
+  "main": "src/index.js",
+  "compatibility_date": "2026-10-01",
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "dsh-b-relay",
+      "database_id": "REPLACE_WITH_D1_DATABASE_ID",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "vars": {
+    "B_SUFFIX": "dsh-everywhere.com",
+    "B_CONTROL_HOST": "control.dsh-everywhere.com",
+    "B_ACCOUNT_ID": "REPLACE_WITH_CLOUDFLARE_ACCOUNT_ID",
+    "B_ZONE_ID": "REPLACE_WITH_CLOUDFLARE_ZONE_ID"
+  },
+  "routes": [
+    { "pattern": "control.dsh-everywhere.com", "custom_domain": true }
+  ],
+  "observability": { "enabled": true }
+  // Workers Secrets: CF_API_TOKEN, B_PEPPER, ADMIN_TOKEN. Never put them in vars.
+}
