@@ -52,7 +52,7 @@ th{color:var(--muted);font-weight:500}code{background:#f3f4f6;padding:2px 6px;bo
   </section>
 
   <section class="card">
-    <h2>专属固定地址（B）</h2>
+    <h2>专属固定地址</h2>
     <div class="muted small" id="bMeta">读取中…</div>
     <table><thead><tr><th>固定地址</th><th>状态</th><th>最近登记</th><th>创建</th></tr></thead><tbody id="bLeases"></tbody></table>
   </section>
