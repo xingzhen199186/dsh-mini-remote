@@ -694,6 +694,9 @@ window.__ModuleLoader__.load({
       var multiErrState = useState(null);
       var multiRelayError = multiErrState[0];
       var setMultiRelayError = multiErrState[1];
+      var multiGuideState = useState(false);
+      var multiGuideOpen = multiGuideState[0];
+      var setMultiGuideOpen = multiGuideState[1];
       var multiInitRef = useRef(false);
       // Cloudflare 命名隧道：固定域名 + token。token 不回显，留空表示沿用已保存的。
       var namedTunnelState = useState({ token: '', publicUrl: '' });
@@ -2372,6 +2375,8 @@ window.__ModuleLoader__.load({
           setControlUrl: setMultiControl,
           inviteCode: multiInvite,
           setInviteCode: setMultiInvite,
+          guideOpen: multiGuideOpen,
+          toggleGuide: function () { setMultiGuideOpen(function (v) { return !v; }); },
           error: multiRelayError,
           start: function () { runMultiRelay('start'); },
           reconnect: function () { runMultiRelay('reconnect'); },
@@ -3867,6 +3872,33 @@ window.__ModuleLoader__.load({
         running ? h('div', { style: styles.warn },
           '停止只停这台电脑上的 frpc，固定地址和中继服务器上的资源会保留。'
           + '邀请码不会保存，也不会显示 token。') : null,
+        h('button', {
+          type: 'button',
+          style: Object.assign({}, styles.btn, { marginTop: 12 }),
+          onClick: relay.toggleGuide,
+        }, relay.guideOpen ? '收起配置指引' : '配置指引：怎么自己搭一个？'),
+        relay.guideOpen ? h('div', {
+          style: Object.assign({}, styles.detail, {
+            marginTop: 8, padding: 12, borderRadius: 8,
+            background: 'var(--dsw-alias-bg-layer-2,#f9fafb)',
+            border: '1px solid var(--dsw-alias-border-l2,#e5e7eb)',
+          }),
+        },
+          h('div', { style: styles.entryTitleSub }, '自己搭一套多用户中继'),
+          h('div', { style: styles.muted }, '服务器、域名、流量都由你自己持有；这里只负责把插件接上。'),
+          h('div', { style: Object.assign({}, styles.muted, { marginTop: 8 }) },
+            '1. 准备一台 Ubuntu 22.04/24.04 VPS 和一个域名。'),
+          h('div', { style: styles.muted },
+            '2. 把 relay.example.com、admin.relay.example.com、*.relay.example.com 都解析到这台 VPS。'),
+          h('div', { style: styles.muted },
+            '3. 上传 relay-multi，运行 install.sh；已有 Nginx 时加 --existing-nginx。'),
+          h('div', { style: styles.muted },
+            '4. 打开 https://admin.relay.example.com，用安装时打印的密码登录，创建一个邀请码。'),
+          h('div', { style: styles.muted },
+            '5. 回到这里填控制台地址和邀请码，点「开通并连接」。'),
+          h('div', { style: Object.assign({}, styles.muted, { marginTop: 8 }) },
+            '控制台地址填管理后台域名，不要填租户地址；frp token 只留在本机，不会显示在页面上。'),
+        ) : null,
       );
     }
 

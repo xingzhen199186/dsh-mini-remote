@@ -1355,6 +1355,13 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
     assert.ok(byType(tree10, 'button').some((b) => textOf(b) === '重新连接'), '要有重新连接按钮');
     assert.ok(byType(tree10, 'button').some((b) => textOf(b) === '停止'), '要有停止按钮');
     assert.ok(byType(tree10, 'button').some((b) => textOf(b) === '复制地址'), '要有复制地址按钮');
+    assert.doesNotMatch(text, /准备一台 Ubuntu/, '配置指引默认收起');
+    const guideBtn = byType(tree10, 'button').find((b) => textOf(b) === '配置指引：怎么自己搭一个？');
+    assert.ok(guideBtn, '板块底部要有配置指引按钮');
+    guideBtn.props.onClick();
+    await tick();
+    assert.match(textOf(tree10), /准备一台 Ubuntu/, '展开后要看到搭建步骤');
+    assert.ok(byType(tree10, 'button').find((b) => textOf(b) === '收起配置指引'), '按钮要变成收起');
 
     const written = [];
     setGlobal('navigator', { clipboard: { writeText: async (value) => { written.push(value); } } });
