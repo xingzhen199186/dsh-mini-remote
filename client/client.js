@@ -2331,7 +2331,7 @@ window.__ModuleLoader__.load({
         },
         stop: function () { toggle(false, { mode: 'named' }); },
       }, relayUi));
-      if (info.bRelay && bRelay) external.push(bRelayBlock(info.bRelay, bRelay, busy));
+      if (info.bRelay && bRelay) external.push(bRelayBlock(info.bRelay, bRelay, busy, copied));
       if (info.selfRelay && relay) {
         external.push(selfRelayBlock({
           draft: relay.draft,
@@ -3577,7 +3577,7 @@ window.__ModuleLoader__.load({
      * 用户只输入一次性激活码。固定域名和 tunnel token 都由控制面开通时下发；
      * token 只进 cloudflared 进程环境，不回到这个界面，也不写进本地身份文件。
      */
-    function bRelayBlock(st, relay, busy) {
+    function bRelayBlock(st, relay, busy, copied) {
       var running = st.state === 'running';
       var claiming = st.state === 'claiming' || Boolean(st.busy);
       var hostname = typeof st.hostname === 'string' ? st.hostname : '';
@@ -3654,7 +3654,11 @@ window.__ModuleLoader__.load({
             onFocus: function (e) { try { e.target.select(); } catch (err) { /* 忽略 */ } },
             style: Object.assign({}, styles.monoInput, { flex: '1 1 260px', width: 'auto', minWidth: 0 }),
           }),
-          h('button', { type: 'button', style: styles.btn, onClick: function () { relay.copy(url); } }, '复制专属地址'),
+          h('button', {
+            type: 'button',
+            style: copied === url ? Object.assign({}, styles.btn, { color: '#15803d', borderColor: '#86efac' }) : styles.btn,
+            onClick: function () { relay.copy(url); },
+          }, copied === url ? '已复制' : '复制专属地址'),
         ) : null,
         running ? h('div', { style: styles.warn },
           '流量经 Cloudflare，不是端到端加密。停止会释放租约，但不会自动删除已建好的隧道和解析记录。') : null,
