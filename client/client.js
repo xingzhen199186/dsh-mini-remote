@@ -2273,6 +2273,7 @@ window.__ModuleLoader__.load({
           setActivationCode: setBActivation,
           error: bRelayError,
           start: function () { runBRelay('start'); },
+          reconnect: function () { runBRelay('reconnect'); },
           stop: function () { runBRelay('stop'); },
           copy: copy,
         }),
@@ -3586,7 +3587,7 @@ window.__ModuleLoader__.load({
       if (running) statusText = '已连接。手机可以用下面的固定地址。';
       else if (claiming) statusText = '正在开通并连接专属固定地址…';
       else if (st.state === 'released') statusText = '已停止。服务方仍保留固定地址对应的资源。';
-      else if (st.state === 'error') statusText = '没有连接成功。';
+      else if (st.state === 'error') statusText = st.reconnectable ? '没有连接成功。关掉代理后可点“重新连接”。' : '没有连接成功。';
       else if (st.enabled) statusText = '已开启，正在准备。';
       else statusText = '未开启。有激活码就填；已开放自服务时可直接开启。';
       var pill = h('span', {
@@ -3616,11 +3617,18 @@ window.__ModuleLoader__.load({
           style: Object.assign({}, styles.btn, { color: '#b91c1c' }),
           onClick: relay.stop,
         }, '停止专属固定地址')
-        : h('button', {
-          type: 'button', disabled: Boolean(busy) || !canStart,
-          style: styles.btnPrimary,
-          onClick: relay.start,
-        }, claiming ? '连接中…' : '开启专属固定地址');
+        : h('div', { style: { display: 'flex', gap: 8, flexWrap: 'wrap' } },
+          st.reconnectable ? h('button', {
+            type: 'button', disabled: Boolean(busy),
+            style: styles.btnPrimary,
+            onClick: relay.reconnect,
+          }, '重新连接') : null,
+          h('button', {
+            type: 'button', disabled: Boolean(busy) || !canStart,
+            style: st.reconnectable ? styles.btn : styles.btnPrimary,
+            onClick: relay.start,
+          }, claiming ? '连接中…' : '开启专属固定地址'),
+        );
 
       return h('div', { key: 'b-relay', style: styles.block },
         h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' } },

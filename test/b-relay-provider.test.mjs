@@ -273,6 +273,21 @@ test('没有激活码时也交给服务端判断，本地不再直接拒绝', as
   assert.equal(client.lastClaim.activationCode, '')
 })
 
+test('手动重连只重启 cloudflared，不重新 claim', async () => {
+  const identity = loadOrCreateBRelayIdentity(mkdtempSync(join(tmpdir(), 'b-relay-reconnect-')), null)
+  const client = activeClient()
+  const proc = processImpl()
+  const provider = new BRelayProvider({ client, identity, startProcess: proc.startProcess })
+  const first = await provider.start({ activationCode: 'code', originPort: 3090 })
+  assert.equal(first.state, 'running')
+  assert.equal(proc.calls.length, 1)
+  const second = await provider.reconnect()
+  assert.equal(second.state, 'running')
+  assert.equal(client.claimCalls, 1, '重连不许重新 claim')
+  assert.equal(proc.calls.length, 2)
+  assert.equal(proc.handles[0].stopped, true, '旧进程要停掉')
+})
+
 test('进程退出后按退避重启，但不重新 claim', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'dsh-b-restart-'))
   const identity = await makeIdentity(dir)
