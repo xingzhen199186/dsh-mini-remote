@@ -1,0 +1,6 @@
+*.sh text eol=lf
+helper/relay-multi-helper text eol=lf
+templates/* text eol=lf
+control/*.py text eol=lf
+control/*.html text eol=lf
+control/*.txt text eol=lf
