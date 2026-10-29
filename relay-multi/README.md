@@ -54,6 +54,13 @@ sudo ./install.sh \
   --admin-host admin.relay.example.com \
   --email admin@example.com \
   --max-tenants 20
+
+# 机器上已经有 Nginx / 其它站点时，加 --existing-nginx：
+sudo ./install.sh --existing-nginx \
+  --domain relay.example.com \
+  --admin-host admin.relay.example.com \
+  --email admin@example.com \
+  --max-tenants 20
 ```
 
 安装脚本会：
@@ -67,6 +74,8 @@ sudo ./install.sh \
 - 安装 Nginx 基础配置、ACME 入口和管理后台证书；
 - 安装 `relay-control.service` 和 `frps@.service`；
 - 启动控制面并跑 `/health`、SQLite、Nginx 自检。
+
+`--existing-nginx` 只追加 `00-relay-*` / `zz-relay-*` 配置，不接管 80/443，不删除现有默认站点；适合在已有 Nginx 的机器上试装。
 
 重复执行安装脚本是安全的：数据库、密钥、管理员密码和租户配置不会被覆盖。`--max-tenants` 只在第一次安装时作为默认值；之后以管理后台的配置为准。
 

@@ -11,6 +11,7 @@ EMAIL=""
 MAX_TENANTS=20
 CHECK_ONLY=0
 UNINSTALL=0
+EXISTING_NGINX=0
 PURGE=0
 
 APP_DIR="/opt/relay-multi"
@@ -47,6 +48,7 @@ usage() {
   --email        Let's Encrypt 通知邮箱
   --max-tenants  首次安装的最大租户数，1..100，默认 20
   --check        只做预检，不修改系统
+  --existing-nginx  机器上已有 Nginx/站点；只追加 relay-multi 配置，不接管 80/443
   --uninstall    停服务并移除程序、Nginx 和 helper；保留数据库与租户配置
   --purge        与 --uninstall 一起用，连数据目录、配置和 relay 用户一起删除
 EOF
@@ -63,6 +65,7 @@ while [ $# -gt 0 ]; do
     --email) need_arg "$1" "${2:-}"; EMAIL="${2:-}"; shift 2 ;;
     --max-tenants) need_arg "$1" "${2:-}"; MAX_TENANTS="${2:-}"; shift 2 ;;
     --check) CHECK_ONLY=1; shift ;;
+    --existing-nginx) EXISTING_NGINX=1; shift ;;
     --uninstall) UNINSTALL=1; shift ;;
     --purge) PURGE=1; shift ;;
     -h|--help) usage; exit 0 ;;
@@ -114,7 +117,9 @@ uninstall() {
   say "移除 relay-multi 的 Nginx 配置…"
   rm -f /etc/nginx/conf.d/00-relay-*.conf
   rm -f /etc/nginx/conf.d/zz-relay-*.conf
-  if [ -e "${CONF_DIR}/nginx-default-site.backup" ]; then
+  if [ -e "${CONF_DIR}/install-mode" ] && [ "$(cat "${CONF_DIR}/install-mode")" = "existing" ]; then
+    say "已有 Nginx 模式：不动 sites-enabled/default。"
+  elif [ -e "${CONF_DIR}/nginx-default-site.backup" ]; then
     rm -f /etc/nginx/sites-enabled/default
     cp -a "${CONF_DIR}/nginx-default-site.backup" /etc/nginx/sites-enabled/default
   elif [ -f "${CONF_DIR}/nginx-default-disabled" ] && [ -f /etc/nginx/sites-available/default ]; then
@@ -171,9 +176,12 @@ PY
   for command in curl tar openssl getent; do
     command -v "$command" >/dev/null 2>&1 || die "缺少命令：$command"
   done
-  if [ ! -f "$ENV_FILE" ]; then
-    port_busy 80 && die "80 端口已被占用。第一版要求干净 VPS。"
-    port_busy 443 && die "443 端口已被占用。第一版要求干净 VPS。"
+  if [ "$EXISTING_NGINX" -eq 1 ]; then
+    command -v nginx >/dev/null 2>&1 || die "--existing-nginx 需要机器上已安装 Nginx。"
+    say "  已有 Nginx 模式：只追加 relay-multi 配置，不接管 80/443。"
+  elif [ ! -f "$ENV_FILE" ]; then
+    port_busy 80 && die "80 端口已被占用。第一版要求干净 VPS；已有 Nginx 请加 --existing-nginx。"
+    port_busy 443 && die "443 端口已被占用。第一版要求干净 VPS；已有 Nginx 请加 --existing-nginx。"
   fi
 
   local server_ip resolved host
@@ -295,10 +303,15 @@ visudo -cf /etc/sudoers.d/relay-multi >/dev/null || die "sudoers 校验失败。
 
 say "配置 Nginx 与管理后台证书…"
 install -d -o root -g root -m 0755 "$ACME_ROOT"
-if [ -L /etc/nginx/sites-enabled/default ] || [ -f /etc/nginx/sites-enabled/default ]; then
-  cp -a /etc/nginx/sites-enabled/default "${CONF_DIR}/nginx-default-site.backup" 2>/dev/null || true
-  rm -f /etc/nginx/sites-enabled/default
-  : > "${CONF_DIR}/nginx-default-disabled"
+if [ "$EXISTING_NGINX" -eq 1 ]; then
+  printf 'existing\n' > "${CONF_DIR}/install-mode"
+else
+  printf 'clean\n' > "${CONF_DIR}/install-mode"
+  if [ -L /etc/nginx/sites-enabled/default ] || [ -f /etc/nginx/sites-enabled/default ]; then
+    cp -a /etc/nginx/sites-enabled/default "${CONF_DIR}/nginx-default-site.backup" 2>/dev/null || true
+    rm -f /etc/nginx/sites-enabled/default
+    : > "${CONF_DIR}/nginx-default-disabled"
+  fi
 fi
 cat > /etc/nginx/conf.d/00-relay-map.conf <<'EOF'
 map $http_upgrade $connection_upgrade {
@@ -308,9 +321,9 @@ map $http_upgrade $connection_upgrade {
 EOF
 cat > /etc/nginx/conf.d/00-relay-acme.conf <<EOF
 server {
-    listen 80 default_server;
-    listen [::]:80 default_server;
-    server_name _;
+    listen 80;
+    listen [::]:80;
+    server_name ${DOMAIN} *.${DOMAIN};
     root ${ACME_ROOT};
     location /.well-known/acme-challenge/ { try_files \$uri =404; }
     location / { return 404; }
