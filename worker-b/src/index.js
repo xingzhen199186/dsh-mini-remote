@@ -10,6 +10,7 @@ const TUNNEL_PREFIX = 'dsh-b-relay-'
 const OPS_RETIRE_LIMIT = 10
 const OPS_RECONCILE_LIMIT = 50
 const OPS_FINDINGS_LIMIT = 500
+const SELF_SERVICE_CAPACITY = 900
 
 class ControlError extends Error {
   constructor(code, status = 409, retryable = false) {
@@ -117,6 +118,20 @@ function validPort(port) {
 
 function clientIp(request) {
   return (request.headers.get('cf-connecting-ip') || 'unknown').split(',')[0].trim()
+}
+
+function configValue(rows, key) {
+  const row = (rows || []).find((item) => item.key === key)
+  if (!row) return true
+  return String(row.value) !== '0'
+}
+
+async function readBConfig(env) {
+  const rows = await env.DB.prepare('SELECT key, value FROM b_config').all()
+  return {
+    registrationEnabled: configValue(rows.results, 'registrationEnabled'),
+    inviteRequired: configValue(rows.results, 'inviteRequired'),
+  }
 }
 
 async function spendRate(env, bucket, maximum, windowSeconds) {
@@ -283,17 +298,183 @@ async function convergeClaim(env, api, lease, operation, requestId) {
   }
 }
 
+async function selfServiceLeaseOf(env, claimRequestId) {
+  return await env.DB.prepare('SELECT * FROM b_leases WHERE claim_request_id = ?')
+    .bind(claimRequestId).first()
+}
+
+/** 自服务 claim 的恢复路径：不消耗新名额，也不新建 Tunnel。 */
+async function resumeSelfServiceClaim(env, api, lease, {
+  clientSecret,
+  claimRequestId,
+  fingerprint,
+  requestId,
+}) {
+  const secretHash = await hmac(env, 'client', lease.lease_id + ':' + clientSecret)
+  if (!timingSafeEqual(lease.client_secret_hash, secretHash)) return fail(requestId, 'auth_failed', 403)
+  if (lease.state === 'retired') return fail(requestId, 'lease_retired', 410)
+  if (lease.state !== 'claimed' && lease.state !== 'active' && lease.state !== 'released') {
+    return fail(requestId, 'state_conflict', 409)
+  }
+  const operation = await env.DB.prepare(
+    'SELECT * FROM b_operations WHERE lease_id = ? AND operation_id = ? AND type = \'claim\'',
+  ).bind(lease.lease_id, claimRequestId).first()
+  if (!operation || operation.request_fingerprint !== fingerprint) {
+    return fail(requestId, 'idempotency_conflict', 409)
+  }
+
+  if (lease.state === 'active' || lease.state === 'released') {
+    if (!lease.tunnel_id) return fail(requestId, 'state_conflict', 409)
+    try {
+      const tunnelToken = await api.getTunnelToken(lease.tunnel_id)
+      if (typeof tunnelToken !== 'string' || !tunnelToken) throw new CloudflareError()
+      if (lease.state === 'released') {
+        const now = Date.now()
+        await env.DB.batch([
+          env.DB.prepare(
+            'UPDATE b_leases SET state = \'active\', released_at = NULL, last_seen_at = ?, row_version = row_version + 1 WHERE lease_id = ? AND state = \'released\'',
+          ).bind(now, lease.lease_id),
+          auditStatement(env, {
+            actor: 'plugin',
+            action: 'lease.reactivate',
+            leaseId: lease.lease_id,
+            requestId,
+            before: 'released',
+            after: 'active',
+            result: 'succeeded',
+          }),
+        ])
+        lease.state = 'active'
+        lease.released_at = null
+        lease.last_seen_at = now
+      }
+      return ok(requestId, claimData(env, lease, tunnelToken))
+    } catch (error) {
+      return externalError(requestId, error)
+    }
+  }
+  return await convergeClaim(env, api, lease, operation, requestId)
+}
+
+async function handleSelfServiceClaim(env, {
+  requestId,
+  clientSecret,
+  claimRequestId,
+  originPort,
+  ipHash,
+  fingerprint,
+}) {
+  const existing = await selfServiceLeaseOf(env, claimRequestId)
+  if (existing) {
+    const api = cloudflareApiOf(env)
+    if (!api) return fail(requestId, 'cf_api_unavailable', 503, true, 5)
+    return await resumeSelfServiceClaim(env, api, existing, {
+      clientSecret, claimRequestId, fingerprint, requestId,
+    })
+  }
+
+  const config = await readBConfig(env)
+  if (!config.registrationEnabled) return fail(requestId, 'registration_closed', 403)
+  if (config.inviteRequired) return fail(requestId, 'invite_required', 403)
+
+  const api = cloudflareApiOf(env)
+  if (!api) return fail(requestId, 'cf_api_unavailable', 503, true, 5)
+
+  let retryAfter = await spendRate(env, 'claim:self:ip:' + ipHash, 3, 3600)
+  if (!retryAfter) retryAfter = await spendRate(env, 'claim:self:global', 50, 86400)
+  if (retryAfter) return fail(requestId, 'rate_limited', 429, true, retryAfter)
+
+  const id = randomId()
+  const secretHash = await hmac(env, 'client', id + ':' + clientSecret)
+  const hostname = hostnameOf(env, id)
+  const tunnelName = tunnelNameOf(id)
+  const now = Date.now()
+
+  let inserted
+  try {
+    inserted = await env.DB.batch([
+      env.DB.prepare(
+        'INSERT INTO b_leases '
+        + '(lease_id, hostname, state, client_secret_hash, secret_version, origin_port, tunnel_name, claim_request_id, '
+        + 'config_version, credential_version, created_at, claimed_at, last_seen_at, row_version) '
+        + 'SELECT ?, ?, \'claimed\', ?, 1, ?, ?, ?, 0, 1, ?, ?, ?, 0 '
+        + 'WHERE (SELECT COUNT(*) FROM b_leases WHERE state IN (\'active\', \'claimed\', \'released\')) < ?',
+      ).bind(id, hostname, secretHash, originPort, tunnelName, claimRequestId, now, now, now, SELF_SERVICE_CAPACITY),
+      env.DB.prepare(
+        'INSERT INTO b_operations (operation_id, lease_id, type, request_fingerprint, state, current_step, retry_count, created_at, updated_at) '
+        + 'SELECT ?, ?, \'claim\', ?, \'running\', \'tunnel\', 0, ?, ? '
+        + 'WHERE EXISTS (SELECT 1 FROM b_leases WHERE lease_id = ? AND claim_request_id = ? AND client_secret_hash = ?)',
+      ).bind(claimRequestId, id, fingerprint, now, now, id, claimRequestId, secretHash),
+      env.DB.prepare(
+        'INSERT INTO b_admin_audit (actor, action, lease_id, request_id, before_state, after_state, result, created_at) '
+        + 'SELECT \'plugin\', \'lease.self_register\', ?, ?, NULL, \'claimed\', \'succeeded\', ? '
+        + 'WHERE EXISTS (SELECT 1 FROM b_leases WHERE lease_id = ? AND claim_request_id = ?)',
+      ).bind(id, requestId, now, id, claimRequestId),
+    ])
+  } catch {
+    // 同一个 claimRequestId 的并发请求可能刚被另一个请求插入；它已经是赢家。
+    const raced = await selfServiceLeaseOf(env, claimRequestId)
+    if (raced) {
+      return await resumeSelfServiceClaim(env, api, raced, {
+        clientSecret, claimRequestId, fingerprint, requestId,
+      })
+    }
+    return fail(requestId, 'storage_unavailable', 503, true, 5)
+  }
+
+  if (inserted[0]?.meta?.changes !== 1) {
+    const raced = await selfServiceLeaseOf(env, claimRequestId)
+    if (raced) {
+      return await resumeSelfServiceClaim(env, api, raced, {
+        clientSecret, claimRequestId, fingerprint, requestId,
+      })
+    }
+    const count = await env.DB.prepare(
+      'SELECT COUNT(*) AS n FROM b_leases WHERE state IN (\'active\', \'claimed\', \'released\')',
+    ).first()
+    if (Number(count?.n || 0) >= SELF_SERVICE_CAPACITY) {
+      return fail(requestId, 'self_service_capacity', 503)
+    }
+    return fail(requestId, 'storage_unavailable', 503, true, 5)
+  }
+
+  const lease = await leaseOf(env, id)
+  const operation = await env.DB.prepare(
+    'SELECT * FROM b_operations WHERE lease_id = ? AND operation_id = ? AND type = \'claim\'',
+  ).bind(id, claimRequestId).first()
+  if (!lease || !operation) return fail(requestId, 'storage_unavailable', 503, true, 5)
+  return await convergeClaim(env, api, lease, operation, requestId)
+}
+
 async function handleClaim(request, env, requestId) {
   if (request.method !== 'PUT') return fail(requestId, 'method_not_allowed', 405)
   const body = await readJson(request)
   if (body.error) return fail(requestId, body.error, 400)
   const { activationCode, clientSecret, claimRequestId, originPort } = body
-  if (!SECRET_RE.test(activationCode || '') || !SECRET_RE.test(clientSecret || '')
+  if (activationCode !== undefined && activationCode !== null && typeof activationCode !== 'string') {
+    return fail(requestId, 'invalid_request', 400)
+  }
+  if (!SECRET_RE.test(clientSecret || '')
     || !REQUEST_ID_RE.test(claimRequestId || '') || !validPort(originPort)) {
     return fail(requestId, validPort(originPort) ? 'invalid_request' : 'invalid_origin_port', 400)
   }
-  const codeHash = await hmac(env, 'activation', activationCode)
+  const activationProvided = typeof activationCode === 'string' && activationCode.length > 0
+  if (activationProvided && !SECRET_RE.test(activationCode)) return fail(requestId, 'invalid_request', 400)
+
   const ipHash = await hmac(env, 'ip', clientIp(request))
+  const fingerprint = await digestHex(claimRequestId + ':' + String(originPort))
+  if (!activationProvided) {
+    return await handleSelfServiceClaim(env, {
+      requestId,
+      clientSecret,
+      claimRequestId,
+      originPort,
+      ipHash,
+      fingerprint,
+    })
+  }
+
+  const codeHash = await hmac(env, 'activation', activationCode)
   let retryAfter = await spendRate(env, 'claim:ip:' + ipHash, 5, 3600)
   if (!retryAfter) retryAfter = await spendRate(env, 'claim:code:' + codeHash, 10, 900)
   if (retryAfter) return fail(requestId, 'rate_limited', 429, true, retryAfter)
@@ -306,7 +487,6 @@ async function handleClaim(request, env, requestId) {
   let lease = await leaseOf(env, invite.lease_id)
   if (!lease) return fail(requestId, 'storage_unavailable', 503, true, 5)
   const secretHash = await hmac(env, 'client', lease.lease_id + ':' + clientSecret)
-  const fingerprint = await digestHex(claimRequestId + ':' + String(originPort))
 
   if (lease.state === 'invited') {
     if (invite.state !== 'invited') return fail(requestId, 'activation_already_claimed', 409)
@@ -743,6 +923,38 @@ async function adminUnauthorized(request, env, requestId) {
 async function handleAdmin(request, env, url, requestId) {
   const unauthorized = await adminUnauthorized(request, env, requestId)
   if (unauthorized) return unauthorized
+  if (url.pathname === '/admin/b/v1/config') {
+    if (request.method === 'GET') return ok(requestId, await readBConfig(env))
+    if (request.method !== 'POST') return fail(requestId, 'method_not_allowed', 405)
+
+    const body = await readJson(request)
+    if (body.error) return fail(requestId, body.error, 400)
+    const patch = {}
+    for (const key of ['registrationEnabled', 'inviteRequired']) {
+      if (body[key] === undefined) continue
+      if (typeof body[key] !== 'boolean') return fail(requestId, 'invalid_request', 400)
+      patch[key] = body[key]
+    }
+    if (!Object.keys(patch).length) return fail(requestId, 'invalid_request', 400)
+
+    const before = await readBConfig(env)
+    const after = { ...before, ...patch }
+    const now = Date.now()
+    const statements = Object.entries(patch).map(([key, value]) => env.DB.prepare(
+      'INSERT INTO b_config (key, value, updated_at) VALUES (?, ?, ?) '
+      + 'ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at',
+    ).bind(key, value ? '1' : '0', now))
+    statements.push(auditStatement(env, {
+      actor: 'admin-token',
+      action: 'config.update',
+      requestId,
+      before: JSON.stringify(before),
+      after: JSON.stringify(after),
+      result: 'succeeded',
+    }))
+    await env.DB.batch(statements)
+    return ok(requestId, after)
+  }
   if (url.pathname === '/admin/b/v1/invites') {
     if (request.method !== 'POST') return fail(requestId, 'method_not_allowed', 405)
     const body = await readJson(request)
