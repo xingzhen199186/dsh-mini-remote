@@ -1280,6 +1280,138 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
   });
 }
 
+// 4d-5. 自建多用户中继：控制台地址、邀请码、停止/重连、复制固定地址
+{
+  const MULTI_CONTROL = 'https://admin.relay.example.com';
+  const MULTI_HOST = 'abcdefghijklmnopqrstuvwxyz.relay.example.com';
+  const withMulti = (multiRelay, extra) => Object.assign({
+    ok: true,
+    port: 3090,
+    token: TOKEN,
+    entries: [{ kind: 'lan', label: '内网', hint: '手机连同一个 Wi-Fi 时用这个', url: URL_LAN, qr: QR }],
+    tunnel: null,
+    bRelay: null,
+    selfRelay: null,
+    serve: null,
+    feishu: null,
+    multiRelay,
+  }, extra || {});
+
+  const runningMulti = withMulti({
+    enabled: true,
+    state: 'running',
+    controlUrl: MULTI_CONTROL,
+    publicHost: MULTI_HOST,
+    url: 'https://' + MULTI_HOST,
+    reconnectable: true,
+    lastError: null,
+    error: null,
+    errorCode: null,
+  });
+  const stoppedMulti = {
+    ok: true,
+    multiRelay: {
+      enabled: false,
+      state: 'idle',
+      controlUrl: MULTI_CONTROL,
+      publicHost: MULTI_HOST,
+      url: 'https://' + MULTI_HOST,
+      reconnectable: true,
+      lastError: null,
+      error: null,
+      errorCode: null,
+    },
+  };
+
+  const h10 = useHarness();
+  let tree10 = null;
+  let posted10 = [];
+  h10.onUpdate(() => { tree10 = h10.draw(Comp); });
+  const mount10 = async (payload) => {
+    setGlobal('fetch', async (url, init) => {
+      if (url === '/mini-remote/multi-relay' && init && init.method === 'POST') {
+        const body = JSON.parse(init.body);
+        posted10.push(body);
+        if (body.action === 'stop') return jsonResponse(200, stoppedMulti);
+        return jsonResponse(200, runningMulti);
+      }
+      return jsonResponse(200, payload);
+    });
+    tree10 = h10.draw(Comp);
+    h10.runEffects();
+    await tick();
+    h10.runEffects();
+    await tick();
+  };
+
+  await check('自建多用户中继 running：显示固定地址、重连/停止按钮和复制反馈', async () => {
+    posted10 = [];
+    await mount10(runningMulti);
+    const text = textOf(tree10);
+    assert.match(text, /自建多用户中继/);
+    assert.match(text, /已连接/);
+    assert.ok(byType(tree10, 'input').some((n) => String(n.props.value).includes(MULTI_HOST)),
+      '固定地址要摆在只读输入框里');
+    assert.ok(byType(tree10, 'button').some((b) => textOf(b) === '重新连接'), '要有重新连接按钮');
+    assert.ok(byType(tree10, 'button').some((b) => textOf(b) === '停止'), '要有停止按钮');
+    assert.ok(byType(tree10, 'button').some((b) => textOf(b) === '复制地址'), '要有复制地址按钮');
+
+    const written = [];
+    setGlobal('navigator', { clipboard: { writeText: async (value) => { written.push(value); } } });
+    const copy = byType(tree10, 'button').find((b) => textOf(b) === '复制地址');
+    copy.props.onClick();
+    await tick();
+    assert.deepEqual(written, ['https://' + MULTI_HOST]);
+    assert.equal(textOf(byType(tree10, 'button').find((b) => textOf(b) === '已复制')), '已复制');
+
+    const stop = byType(tree10, 'button').find((b) => textOf(b) === '停止');
+    stop.props.onClick();
+    await tick();
+    assert.deepEqual(posted10[0], { action: 'stop' });
+    h10.unmount();
+  });
+
+  await check('自建多用户中继未开通：填控制台地址和邀请码，POST start，成功后清空邀请码', async () => {
+    posted10 = [];
+    const off = withMulti({
+      enabled: false,
+      state: 'idle',
+      controlUrl: MULTI_CONTROL,
+      publicHost: '',
+      url: null,
+      reconnectable: false,
+      lastError: null,
+      error: null,
+      errorCode: null,
+    });
+    await mount10(off);
+    const inputs = byType(tree10, 'input');
+    const urlInput = inputs.find((n) => n.props.type === 'url');
+    assert.ok(urlInput, '要有控制台地址输入框');
+    assert.equal(urlInput.props.value, MULTI_CONTROL);
+    const codeInput = inputs.find((n) => n.props.type === 'password');
+    assert.ok(codeInput, '要有邀请码密码框');
+    codeInput.props.onChange({ target: { value: 'invite-code-123' } });
+    await tick();
+    const start = byType(tree10, 'button').find((b) => textOf(b) === '开通并连接');
+    assert.ok(start, '要有开通并连接按钮');
+    start.props.onClick();
+    await tick();
+    assert.equal(posted10.length, 1);
+    assert.deepEqual(posted10[0], {
+      action: 'start',
+      controlUrl: MULTI_CONTROL,
+      inviteCode: 'invite-code-123',
+    });
+    assert.ok(byType(tree10, 'input').some((n) => String(n.props.value).includes(MULTI_HOST)),
+      '开通成功后要显示固定地址');
+    const passwordAfter = byType(tree10, 'input').find((n) => n.props.type === 'password');
+    assert.equal(passwordAfter.props.value, '', '开通成功后邀请码要清空');
+    assert.doesNotMatch(textOf(tree10), /frpToken/i, '界面不显示 token');
+    h10.unmount();
+  });
+}
+
 // 4e. Tailscale 的 HTTPS 地址：开关、状态、以及「tailnet 没开 Serve」那条路
 {
   const withServe = (serve, extra) => Object.assign({

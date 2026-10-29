@@ -46,6 +46,7 @@ window.__ModuleLoader__.load({
     var TUNNEL_PATH = '/mini-remote/tunnel';
     var SELF_RELAY_PATH = '/mini-remote/self-relay';
     var B_RELAY_PATH = '/mini-remote/b-relay';
+    var MULTI_RELAY_PATH = '/mini-remote/multi-relay';
     var SERVE_PATH = '/mini-remote/serve';
     var FEISHU_PATH = '/mini-remote/feishu';
     // **这里原来有一条本机取票的地址常量**：面板点开时拿它去换一张「本机电脑端界面」的票。
@@ -683,6 +684,17 @@ window.__ModuleLoader__.load({
       var bRelayErrState = useState(null);
       var bRelayError = bRelayErrState[0];
       var setBRelayError = bRelayErrState[1];
+      // 自建多用户中继：控制台地址 + 邀请码。邀请码只用于本次开通，成功后清空。
+      var multiControlState = useState('');
+      var multiControl = multiControlState[0];
+      var setMultiControl = multiControlState[1];
+      var multiInviteState = useState('');
+      var multiInvite = multiInviteState[0];
+      var setMultiInvite = multiInviteState[1];
+      var multiErrState = useState(null);
+      var multiRelayError = multiErrState[0];
+      var setMultiRelayError = multiErrState[1];
+      var multiInitRef = useRef(false);
       // Cloudflare 命名隧道：固定域名 + token。token 不回显，留空表示沿用已保存的。
       var namedTunnelState = useState({ token: '', publicUrl: '' });
       var namedTunnel = namedTunnelState[0];
@@ -827,6 +839,41 @@ window.__ModuleLoader__.load({
         var timer = setInterval(tick, 5000);
         return function () { alive = false; clearInterval(timer); };
       }, [Boolean(info && info.bAgent)]);
+
+      // 自建多用户中继：首次拿到服务端状态时回填控制台地址，之后以用户输入为准。
+      useEffect(function () {
+        if (multiInitRef.current) return;
+        var m = info && info.multiRelay;
+        if (!m) return;
+        multiInitRef.current = true;
+        if (m.controlUrl) setMultiControl(m.controlUrl);
+      }, [info]);
+
+      // 多用户中继的 frpc 会自己退出/重连，设置页不刷新也要看到新状态。
+      useEffect(function () {
+        if (!info || !info.multiRelay || !info.multiRelay.enabled) return undefined;
+        var alive = true;
+        var tick = function () {
+          fetch(MULTI_RELAY_PATH, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ action: 'status' }),
+          })
+            .then(function (res) { return res.json(); })
+            .then(function (body) {
+              if (!alive || !body || !body.multiRelay) return;
+              if (!body.multiRelay.lastError && body.multiRelay.state === 'running') {
+                setMultiRelayError(null);
+              }
+              setInfo(function (prev) {
+                return prev ? Object.assign({}, prev, { multiRelay: body.multiRelay }) : prev;
+              });
+            })
+            .catch(function () { /* 静默失败，下一轮再试 */ });
+        };
+        var timer = setInterval(tick, 3000);
+        return function () { alive = false; clearInterval(timer); };
+      }, [Boolean(info && info.multiRelay && info.multiRelay.enabled)]);
 
       // B 固定地址的进程会自己退出/重连，设置页不刷新也要看到新状态。
       // 只在开启时轮询；关着时一条请求都不发。
@@ -978,6 +1025,50 @@ window.__ModuleLoader__.load({
           })
           .catch(function (err) {
             setBRelayError('专属固定地址操作失败：' + ((err && err.message) || String(err)));
+          })
+          .then(function () { setBusy(false); });
+      };
+
+      var runMultiRelay = function (action) {
+        if (busy) return;
+        setBusy(true);
+        setMultiRelayError(null);
+        var body = { action: action };
+        if (action === 'start') {
+          body.controlUrl = multiControl.trim();
+          body.inviteCode = multiInvite.trim();
+        }
+        fetch(MULTI_RELAY_PATH, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(body),
+        })
+          .then(function (res) {
+            return res.json().then(
+              function (payload) { return { status: res.status, body: payload }; },
+              function () { return { status: res.status, body: null }; },
+            );
+          })
+          .then(function (r) {
+            var payload = (r.body && typeof r.body === 'object') ? r.body : null;
+            if (payload && payload.multiRelay) {
+              setInfo(function (prev) {
+                return prev ? Object.assign({}, prev, { multiRelay: payload.multiRelay }) : prev;
+              });
+              if (action === 'start' && payload.multiRelay.controlUrl) {
+                setMultiControl(payload.multiRelay.controlUrl);
+              }
+              if (action === 'start' && payload.multiRelay.reconnectable) setMultiInvite('');
+            }
+            if (!payload || !payload.ok) {
+              setMultiRelayError(
+                (payload && (payload.error || (payload.multiRelay && payload.multiRelay.lastError)))
+                  || ('自建多用户中继操作失败：HTTP ' + r.status)
+              );
+            }
+          })
+          .catch(function (err) {
+            setMultiRelayError('自建多用户中继操作失败：' + ((err && err.message) || String(err)));
           })
           .then(function () { setBusy(false); });
       };
@@ -2276,11 +2367,21 @@ window.__ModuleLoader__.load({
           reconnect: function () { runBRelay('reconnect'); },
           stop: function () { runBRelay('stop'); },
           copy: copy,
+        }, {
+          controlUrl: multiControl,
+          setControlUrl: setMultiControl,
+          inviteCode: multiInvite,
+          setInviteCode: setMultiInvite,
+          error: multiRelayError,
+          start: function () { runMultiRelay('start'); },
+          reconnect: function () { runMultiRelay('reconnect'); },
+          stop: function () { runMultiRelay('stop'); },
+          copy: copy,
         }),
       );
     }
 
-    function content(info, failure, copied, copy, busy, toggle, pwd, serve, feishu, dev, remote, agent, bAgent, bProject, rmt, self, groups, relay, named, aRelay, bRelay) {
+    function content(info, failure, copied, copy, busy, toggle, pwd, serve, feishu, dev, remote, agent, bAgent, bProject, rmt, self, groups, relay, named, aRelay, bRelay, multiRelay) {
       if (failure) return h('div', { style: styles.error }, failure);
       if (!info) return h('div', { style: styles.loading }, '正在读取配对信息…');
 
@@ -2349,6 +2450,9 @@ window.__ModuleLoader__.load({
           test: relay.test,
           stop: relay.stop,
         }));
+      }
+      if (info.multiRelay && multiRelay) {
+        external.push(multiRelayBlock(info.multiRelay, multiRelay, busy, copied));
       }
       // HTTPS 那一块：**不管配对信息成功还是失败都要出现**。失败时尤其要出现——
       // tailnet 没开 Serve 的时候，用户需要的正是那条开启链接，而那时候面板上
@@ -3662,6 +3766,107 @@ window.__ModuleLoader__.load({
         ) : null,
         running ? h('div', { style: styles.warn },
           '流量经 Cloudflare，不是端到端加密。停止会释放租约，但不会自动删除已建好的隧道和解析记录。') : null,
+      );
+    }
+
+    /**
+     * 自建多用户中继：用户或管理员自建的 relay-multi 控制台。
+     *
+     * 邀请码只用于本次开通，成功后清空；frpToken 不回到这个界面。
+     */
+    function multiRelayBlock(st, relay, busy, copied) {
+      var running = st.state === 'running';
+      var claiming = st.state === 'claiming' || Boolean(st.busy);
+      var hostname = typeof st.publicHost === 'string' ? st.publicHost : '';
+      var url = typeof st.url === 'string' ? st.url : (hostname ? 'https://' + hostname : '');
+      var errorText = relay.error || st.lastError || null;
+      var statusText;
+      if (running) statusText = '已连接。手机可以用下面的固定地址。';
+      else if (claiming) statusText = '正在开通或连接中…';
+      else if (st.state === 'error') statusText = st.reconnectable
+        ? '连接断了。本地已有身份，可以点「重新连接」。'
+        : '没有开通成功，检查控制台地址和邀请码。';
+      else if (st.state === 'released') statusText = '已释放。需要管理员重新发邀请码才能再开通。';
+      else if (st.enabled) statusText = '已开启，等待连接。';
+      else statusText = '未开启。首次开通需要控制台地址和邀请码。';
+      var pill = h('span', {
+        style: {
+          display: 'inline-flex', alignItems: 'center', padding: '2px 8px', borderRadius: 999,
+          fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap',
+          color: running ? '#15803d' : (errorText ? '#b91c1c' : '#6b7280'),
+          background: running ? '#dcfce7' : (errorText ? '#fee2e2' : '#f3f4f6'),
+        },
+      }, running ? '已连接' : (claiming ? '连接中' : (errorText ? '未连接' : '未开启')));
+      var stopButton = running || claiming ? h('button', {
+        type: 'button', disabled: Boolean(busy),
+        style: Object.assign({}, styles.btn, { color: '#b91c1c' }),
+        onClick: relay.stop,
+      }, '停止') : null;
+      var reconnectButton = st.reconnectable ? h('button', {
+        type: 'button', disabled: Boolean(busy) || claiming,
+        style: running ? styles.btn : styles.btnPrimary,
+        onClick: relay.reconnect,
+      }, '重新连接') : null;
+      var startButton = !st.reconnectable && !running && !claiming ? h('button', {
+        type: 'button', disabled: Boolean(busy), style: styles.btnPrimary, onClick: relay.start,
+      }, '开通并连接') : null;
+      return h('div', { key: 'multi-relay', style: styles.block },
+        h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' } },
+          h('div', { style: styles.entryTitle }, '自建多用户中继'),
+          pill,
+        ),
+        h('div', { style: styles.muted },
+          '连接你自己或管理员搭建的 relay-multi 控制台。填 https 控制台地址和一次性邀请码，'
+          + '开通后得到固定地址。服务器、域名和流量都由服务方自己持有。'),
+        h('label', { style: { display: 'block', marginTop: 10 } },
+          h('div', { style: styles.muted }, '控制台地址'),
+          h('input', {
+            type: 'url',
+            value: relay.controlUrl || '',
+            placeholder: 'https://admin.relay.example.com',
+            spellCheck: false,
+            disabled: Boolean(busy) || running || claiming,
+            onChange: function (e) { relay.setControlUrl(e.target.value); },
+            style: Object.assign({}, styles.monoInput, { marginTop: 4 }),
+          }),
+        ),
+        h('label', { style: { display: 'block', marginTop: 10 } },
+          h('div', { style: styles.muted }, '邀请码'),
+          h('input', {
+            type: 'password',
+            value: relay.inviteCode || '',
+            placeholder: st.reconnectable ? '已有身份，无需再填' : '一次性邀请码',
+            spellCheck: false,
+            disabled: Boolean(busy) || running || claiming,
+            onChange: function (e) { relay.setInviteCode(e.target.value); },
+            style: Object.assign({}, styles.monoInput, { marginTop: 4 }),
+          }),
+        ),
+        h('div', { style: { display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 12 } },
+          stopButton, reconnectButton, startButton),
+        h('div', { style: { marginTop: 10 } },
+          h('div', { style: styles.muted }, statusText),
+          errorText ? h('div', { style: styles.detail }, errorText) : null,
+          errorText && st.errorCode ? h('div', { style: styles.muted }, '错误码：' + st.errorCode) : null,
+          st.restarting && st.nextRetryAt
+            ? h('div', { style: styles.muted }, 'frpc 退出后会按退避自动重连。')
+            : null,
+        ),
+        url ? h('div', { style: { display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' } },
+          h('input', {
+            readOnly: true, value: url, spellCheck: false,
+            onFocus: function (e) { try { e.target.select(); } catch (err) { /* 忽略 */ } },
+            style: Object.assign({}, styles.monoInput, { flex: '1 1 260px', width: 'auto', minWidth: 0 }),
+          }),
+          h('button', {
+            type: 'button',
+            style: copied === url ? Object.assign({}, styles.btn, { color: '#15803d', borderColor: '#86efac' }) : styles.btn,
+            onClick: function () { relay.copy(url); },
+          }, copied === url ? '已复制' : '复制地址'),
+        ) : null,
+        running ? h('div', { style: styles.warn },
+          '停止只停这台电脑上的 frpc，固定地址和中继服务器上的资源会保留。'
+          + '邀请码不会保存，也不会显示 token。') : null,
       );
     }
 
