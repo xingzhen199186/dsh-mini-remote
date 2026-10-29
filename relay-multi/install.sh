@@ -314,6 +314,9 @@ else
   fi
 fi
 cat > /etc/nginx/conf.d/00-relay-map.conf <<'EOF'
+server_names_hash_bucket_size 128;
+server_names_hash_max_size 4096;
+
 map $http_upgrade $connection_upgrade {
     default upgrade;
     ''      close;
