@@ -322,11 +322,7 @@ server {
     server_name ${ADMIN_HOST};
     root ${ACME_ROOT};
     location /.well-known/acme-challenge/ { try_files \$uri =404; }
-    location / {
-        proxy_pass http://127.0.0.1:${CONTROL_PORT};
-        proxy_set_header Host \$host;
-        proxy_set_header X-Forwarded-Proto http;
-    }
+    location / { return 404; }
 }
 EOF
 nginx -t >/dev/null || die "Nginx 初始配置检查失败。"
