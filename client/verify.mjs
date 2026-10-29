@@ -1363,6 +1363,8 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
     assert.match(textOf(tree10), /先判断：这条路适合你吗/, '展开后要看到适不适合的判断');
     assert.match(textOf(tree10), /一台一直开着的远程电脑/, '要用大白话解释服务器');
     assert.match(textOf(tree10), /不会登录服务器/, '要给不会命令行的人一个退路');
+    assert.match(textOf(tree10), /github.com\/xingzhen199186\/dsh-mini-remote/, '要告诉用户安装包去哪里找');
+    assert.match(textOf(tree10), /cd relay-multi/, '要给可执行的命令');
     assert.ok(byType(tree10, 'button').find((b) => textOf(b) === '收起配置指引'), '按钮要变成收起');
 
     const written = [];
