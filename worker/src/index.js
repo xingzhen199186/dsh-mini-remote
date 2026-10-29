@@ -546,6 +546,22 @@ async function handleAdmin(request, env, url) {
     return json(await bLeasesForOps(env))
   }
 
+  if (request.method === 'GET' && path === '/admin/relay/v1/b/config') {
+    return json(await bAdminFetch(env, '/admin/b/v1/config'))
+  }
+
+  if (request.method === 'POST' && path === '/admin/relay/v1/b/config') {
+    const body = await readJson(request)
+    if (body.error) return fail(body.error, 400)
+    const patch = {}
+    if (typeof body.registrationEnabled === 'boolean') patch.registrationEnabled = body.registrationEnabled
+    if (typeof body.inviteRequired === 'boolean') patch.inviteRequired = body.inviteRequired
+    return json(await bAdminFetch(env, '/admin/b/v1/config', {
+      method: 'POST',
+      body: JSON.stringify(patch),
+    }))
+  }
+
   if (request.method === 'GET' && path === '/admin/relay/v1/b/ops') {
     return json(await bAdminFetch(env, '/admin/b/v1/ops'))
   }

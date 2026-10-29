@@ -1453,11 +1453,6 @@ test('B 固定地址：默认关闭，不创建身份文件，也不影响配对
   await route.handler(fakeReq('127.0.0.1'), wrong)
   assert.equal(wrong.out.status, 405)
 
-  const noCode = fakeRes()
-  await route.handler(fakeReq('127.0.0.1', { method: 'POST', body: '{"action":"start"}' }), noCode)
-  assert.equal(noCode.out.status, 400)
-  assert.match(JSON.parse(noCode.out.body).error, /激活码/)
-
   const pairing = fakeRes()
   await p.routes.get('/mini-remote/pairing').handler(fakeReq('127.0.0.1'), pairing)
   const payload = JSON.parse(pairing.out.body)

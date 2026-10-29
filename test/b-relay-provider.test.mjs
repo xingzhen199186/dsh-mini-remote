@@ -259,6 +259,20 @@ test('cloudflared 参数不含 token，token 只从子进程环境变量传入',
   assert.equal(child.killed, true)
 })
 
+test('没有激活码时也交给服务端判断，本地不再直接拒绝', async () => {
+  const identity = loadOrCreateBRelayIdentity(mkdtempSync(join(tmpdir(), 'b-relay-nocode-')), null)
+  const client = activeClient()
+  const proc = processImpl()
+  const provider = new BRelayProvider({
+    client,
+    identity,
+    startProcess: proc.startProcess,
+  })
+  const snapshot = await provider.start({ activationCode: '', originPort: 3090 })
+  assert.equal(snapshot.state, 'running')
+  assert.equal(client.lastClaim.activationCode, '')
+})
+
 test('进程退出后按退避重启，但不重新 claim', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'dsh-b-restart-'))
   const identity = await makeIdentity(dir)

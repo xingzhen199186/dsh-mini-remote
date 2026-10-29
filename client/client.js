@@ -3588,7 +3588,7 @@ window.__ModuleLoader__.load({
       else if (st.state === 'released') statusText = '已停止。服务方仍保留固定地址对应的资源。';
       else if (st.state === 'error') statusText = '没有连接成功。';
       else if (st.enabled) statusText = '已开启，正在准备。';
-      else statusText = '未开启。填写激活码后开启。';
+      else statusText = '未开启。有激活码就填；已开放自服务时可直接开启。';
       var pill = h('span', {
         style: {
           display: 'inline-flex', alignItems: 'center', padding: '2px 8px', borderRadius: 999,
@@ -3597,13 +3597,13 @@ window.__ModuleLoader__.load({
           background: running ? '#dcfce7' : (errorText ? '#fee2e2' : '#f3f4f6'),
         },
       }, running ? '已连接' : (claiming ? '连接中' : (errorText ? '未连接' : '未开启')));
-      var canStart = Boolean(String(relay.activationCode || '').trim() || st.hasActivationCode);
+      var canStart = true;
       var codeInput = running ? null : h('label', { style: { display: 'block', marginTop: 10 } },
         h('div', { style: styles.muted }, '激活码'),
         h('input', {
           type: 'password',
           value: relay.activationCode || '',
-          placeholder: st.hasActivationCode ? '激活码已保存；要换再填一次' : '输入专属固定地址的一次性激活码',
+          placeholder: st.hasActivationCode ? '激活码已保存；要换再填一次' : '输入激活码；已开放自服务时可留空',
           spellCheck: false,
           disabled: Boolean(busy),
           onChange: function (e) { relay.setActivationCode(e.target.value); },
@@ -3628,7 +3628,7 @@ window.__ModuleLoader__.load({
           pill,
         ),
         h('div', { style: styles.muted },
-          '用一次性激活码单独开一条 Cloudflare 命名隧道，得到一个固定的 dsh-everywhere.com 地址。'
+          '用一次性激活码，或（在服务方开放自服务时）直接开通一条 Cloudflare 命名隧道，得到一个固定的 dsh-everywhere.com 地址。'
           + '和上面的快速隧道、共享固定地址、自建中继互不影响。'),
         codeInput,
         h('div', { style: { display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 12 } }, actions),
