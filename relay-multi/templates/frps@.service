@@ -1,0 +1,21 @@
+[Unit]
+Description=relay-multi frps tenant %i
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=relay
+Group=relay
+ExecStart=/usr/local/bin/frps -c /etc/relay-multi/tenants/%i.toml
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadOnlyPaths=/etc/relay-multi/tenants
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

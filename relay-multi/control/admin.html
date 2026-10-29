@@ -1,0 +1,295 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>relay-multi 管理台</title>
+  <style>
+    :root { color-scheme: light dark; --line: #d0d7de; --muted: #57606a; --bg: #f6f8fa; --bad: #b42318; --good: #1a7f37; }
+    * { box-sizing: border-box; }
+    body { margin: 0; font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+    header { padding: 24px; border-bottom: 1px solid var(--line); }
+    h1 { margin: 0 0 4px; font-size: 22px; }
+    p { margin: 4px 0; }
+    .muted { color: var(--muted); }
+    nav { display: flex; gap: 6px; padding: 12px 24px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+    nav button { border: 1px solid var(--line); background: transparent; padding: 6px 12px; border-radius: 6px; cursor: pointer; }
+    nav button.active { background: var(--bg); font-weight: 600; }
+    main { padding: 20px 24px 48px; max-width: 1100px; }
+    section { display: none; }
+    section.active { display: block; }
+    .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; }
+    .card { border: 1px solid var(--line); border-radius: 8px; padding: 14px; background: var(--bg); }
+    .card strong { display: block; font-size: 24px; }
+    table { border-collapse: collapse; width: 100%; margin-top: 12px; }
+    th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--line); vertical-align: top; word-break: break-all; }
+    th { font-size: 12px; color: var(--muted); text-transform: uppercase; }
+    input, button { font: inherit; }
+    input { padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; }
+    .row { display: flex; gap: 8px; align-items: end; flex-wrap: wrap; margin: 12px 0; }
+    .field { display: flex; flex-direction: column; gap: 4px; }
+    .primary { background: #1f6feb; color: white; border: 1px solid #1f6feb; border-radius: 6px; padding: 7px 12px; cursor: pointer; }
+    .danger { color: var(--bad); border: 1px solid var(--line); background: transparent; border-radius: 6px; padding: 4px 8px; cursor: pointer; }
+    .notice { margin: 10px 0; padding: 10px; border: 1px solid var(--line); border-radius: 6px; display: none; }
+    .notice.show { display: block; }
+    .notice.error { color: var(--bad); }
+    code { background: var(--bg); padding: 2px 5px; border-radius: 4px; }
+    .ok { color: var(--good); }
+    .bad { color: var(--bad); }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>relay-multi 管理台</h1>
+    <p class="muted">用户自建的多用户 FRP 中继。这里只管理邀请、租户与配置，不显示 token。</p>
+    <div id="notice" class="notice"></div>
+  </header>
+  <nav id="tabs">
+    <button data-tab="overview" class="active">总览</button>
+    <button data-tab="tenants">租户</button>
+    <button data-tab="invites">邀请</button>
+    <button data-tab="config">配置</button>
+    <button data-tab="audit">审计</button>
+  </nav>
+  <main>
+    <section id="overview" class="active">
+      <h2>总览</h2>
+      <div id="overview-cards" class="cards"></div>
+      <p id="overview-note" class="muted"></p>
+    </section>
+
+    <section id="tenants">
+      <h2>租户</h2>
+      <p class="muted">撤销会删除该租户的 frps 与 Nginx 配置，并保留审计记录。</p>
+      <table>
+        <thead><tr><th>租户</th><th>地址</th><th>状态</th><th>创建时间</th><th></th></tr></thead>
+        <tbody id="tenant-rows"></tbody>
+      </table>
+    </section>
+
+    <section id="invites">
+      <h2>邀请</h2>
+      <div class="row">
+        <label class="field">有效期（天）
+          <input id="invite-days" type="number" min="1" max="30" value="7">
+        </label>
+        <button id="create-invite" class="primary" type="button">创建邀请码</button>
+      </div>
+      <p>新邀请码：<code id="invite-code">尚未创建</code></p>
+      <p class="muted">邀请码只显示这一次。服务端只保存哈希。</p>
+      <table>
+        <thead><tr><th>邀请 ID</th><th>状态</th><th>创建时间</th><th>过期时间</th><th>使用租户</th></tr></thead>
+        <tbody id="invite-rows"></tbody>
+      </table>
+    </section>
+
+    <section id="config">
+      <h2>配置</h2>
+      <form id="config-form">
+        <div class="row">
+          <label><input id="allow-registration" type="checkbox"> 允许无邀请码注册</label>
+        </div>
+        <div class="row">
+          <label><input id="invite-required" type="checkbox"> 必须使用邀请码</label>
+        </div>
+        <div class="row">
+          <label class="field">最大租户数
+            <input id="max-tenants" type="number" min="1" max="100">
+          </label>
+          <button class="primary" type="submit">保存配置</button>
+        </div>
+      </form>
+      <p class="muted">默认必须邀请码，且不开放自助注册。最多 100 个租户。</p>
+    </section>
+
+    <section id="audit">
+      <h2>审计</h2>
+      <table>
+        <thead><tr><th>时间</th><th>操作者</th><th>动作</th><th>对象</th><th>详情</th></tr></thead>
+        <tbody id="audit-rows"></tbody>
+      </table>
+    </section>
+  </main>
+
+  <script>
+    (function () {
+      var notice = document.getElementById('notice');
+      function showNotice(text, isError) {
+        notice.textContent = text;
+        notice.className = 'notice show' + (isError ? ' error' : '');
+      }
+      function fmt(value) {
+        if (!value) return '—';
+        var date = new Date(Number(value));
+        return isNaN(date.getTime()) ? String(value) : date.toLocaleString();
+      }
+      function cell(text) {
+        var td = document.createElement('td');
+        td.textContent = text == null ? '—' : String(text);
+        return td;
+      }
+      function row(values) {
+        var tr = document.createElement('tr');
+        values.forEach(function (value) {
+          tr.appendChild(value && value.nodeType ? value : cell(value));
+        });
+        return tr;
+      }
+      function clear(node) { while (node.firstChild) node.removeChild(node.firstChild); }
+      async function api(path, options) {
+        var init = options || {};
+        init.credentials = 'same-origin';
+        if (init.body) init.headers = { 'Content-Type': 'application/json' };
+        var response = await fetch(path, init);
+        var body = null;
+        try { body = await response.json(); } catch (err) { body = null; }
+        if (!response.ok || !body || body.ok === false) {
+          throw new Error((body && (body.message || body.error)) || ('HTTP ' + response.status));
+        }
+        return body;
+      }
+      async function loadOverview() {
+        var data = await api('/admin/api/overview');
+        var cards = document.getElementById('overview-cards');
+        clear(cards);
+        var t = data.tenants || {};
+        var values = [
+          ['可用租户', (data.capacity.used || 0) + ' / ' + data.capacity.maxTenants],
+          ['active', t.active || 0],
+          ['provisioning', t.provisioning || 0],
+          ['released', t.released || 0],
+          ['revoked', t.revoked || 0],
+          ['可用邀请码', (data.invites || {}).available || 0]
+        ];
+        values.forEach(function (pair) {
+          var box = document.createElement('div');
+          box.className = 'card';
+          var label = document.createElement('span');
+          label.className = 'muted';
+          label.textContent = pair[0];
+          var strong = document.createElement('strong');
+          strong.textContent = pair[1];
+          box.appendChild(label);
+          box.appendChild(strong);
+          cards.appendChild(box);
+        });
+        document.getElementById('overview-note').textContent =
+          '默认必须邀请码；自助注册默认关闭。流量只经过你正在看的这台服务器。';
+      }
+      async function loadTenants() {
+        var data = await api('/admin/api/tenants');
+        var body = document.getElementById('tenant-rows');
+        clear(body);
+        (data.tenants || []).forEach(function (tenant) {
+          var action = document.createElement('button');
+          action.type = 'button';
+          action.className = 'danger';
+          action.textContent = '撤销';
+          action.disabled = tenant.state === 'revoked';
+          action.addEventListener('click', async function () {
+            if (!window.confirm('撤销 ' + tenant.id + '？这会删除它的中继进程和 Nginx 配置。')) return;
+            try {
+              await api('/admin/api/tenants/' + encodeURIComponent(tenant.id) + '/revoke', { method: 'POST' });
+              showNotice('租户已撤销。', false);
+              await Promise.all([loadTenants(), loadOverview(), loadAudit()]);
+            } catch (err) { showNotice(err.message, true); }
+          });
+          body.appendChild(row([
+            cell(tenant.id),
+            cell(tenant.publicHost + '\n' + tenant.controlHost),
+            cell(tenant.state),
+            cell(fmt(tenant.createdAt)),
+            action
+          ]));
+        });
+        if (!body.children.length) {
+          var tr = document.createElement('tr');
+          var td = cell('还没有租户。先创建一个邀请码。');
+          td.colSpan = 5;
+          tr.appendChild(td);
+          body.appendChild(tr);
+        }
+      }
+      async function loadInvites() {
+        var data = await api('/admin/api/invites');
+        var body = document.getElementById('invite-rows');
+        clear(body);
+        (data.invites || []).forEach(function (invite) {
+          body.appendChild(row([
+            invite.id, invite.state, fmt(invite.createdAt), fmt(invite.expiresAt), invite.usedByTenantId
+          ]));
+        });
+        if (!body.children.length) {
+          var tr = document.createElement('tr');
+          var td = cell('还没有邀请码。');
+          td.colSpan = 5;
+          tr.appendChild(td);
+          body.appendChild(tr);
+        }
+      }
+      async function loadConfig() {
+        var data = await api('/admin/api/config');
+        document.getElementById('allow-registration').checked = Boolean(data.allowRegistration);
+        document.getElementById('invite-required').checked = Boolean(data.inviteRequired);
+        document.getElementById('max-tenants').value = data.maxTenants;
+      }
+      async function loadAudit() {
+        var data = await api('/admin/api/audit');
+        var body = document.getElementById('audit-rows');
+        clear(body);
+        (data.audit || []).forEach(function (item) {
+          body.appendChild(row([
+            fmt(item.createdAt), item.actor, item.action, item.target,
+            item.detail ? JSON.stringify(item.detail) : '—'
+          ]));
+        });
+        if (!body.children.length) {
+          var tr = document.createElement('tr');
+          var td = cell('还没有审计记录。');
+          td.colSpan = 5;
+          tr.appendChild(td);
+          body.appendChild(tr);
+        }
+      }
+      async function refreshAll() {
+        try {
+          await Promise.all([loadOverview(), loadTenants(), loadInvites(), loadConfig(), loadAudit()]);
+        } catch (err) { showNotice(err.message, true); }
+      }
+      document.getElementById('tabs').addEventListener('click', function (event) {
+        var button = event.target.closest('button[data-tab]');
+        if (!button) return;
+        document.querySelectorAll('#tabs button').forEach(function (one) { one.classList.remove('active'); });
+        document.querySelectorAll('main section').forEach(function (one) { one.classList.remove('active'); });
+        button.classList.add('active');
+        document.getElementById(button.dataset.tab).classList.add('active');
+      });
+      document.getElementById('create-invite').addEventListener('click', async function () {
+        var days = Number(document.getElementById('invite-days').value);
+        try {
+          var data = await api('/admin/api/invites', { method: 'POST', body: JSON.stringify({ expiresInDays: days }) });
+          document.getElementById('invite-code').textContent = data.code;
+          showNotice('邀请码已创建。请立刻复制；它只显示这一次。', false);
+          await Promise.all([loadInvites(), loadOverview(), loadAudit()]);
+        } catch (err) { showNotice(err.message, true); }
+      });
+      document.getElementById('config-form').addEventListener('submit', async function (event) {
+        event.preventDefault();
+        try {
+          await api('/admin/api/config', {
+            method: 'POST',
+            body: JSON.stringify({
+              allowRegistration: document.getElementById('allow-registration').checked,
+              inviteRequired: document.getElementById('invite-required').checked,
+              maxTenants: Number(document.getElementById('max-tenants').value)
+            })
+          });
+          showNotice('配置已保存。', false);
+          await Promise.all([loadOverview(), loadConfig(), loadAudit()]);
+        } catch (err) { showNotice(err.message, true); }
+      });
+      refreshAll();
+    })();
+  </script>
+</body>
+</html>

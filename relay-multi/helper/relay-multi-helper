@@ -1,0 +1,265 @@
+#!/usr/bin/env python3
+"""relay-multi root helper：只接受 create-tenant / delete-tenant / reload-nginx。"""
+
+from __future__ import annotations
+
+import grp
+import json
+import os
+import re
+import secrets
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+TENANT_DIR = Path("/etc/relay-multi/tenants")
+NGINX_DIR = Path("/etc/nginx/conf.d")
+TEMPLATE_DIR = Path("/usr/local/lib/relay-multi/templates")
+HELPER_CONFIG = Path("/etc/relay-multi/helper.json")
+ID_RE = re.compile(r"^[a-z2-7]{26}$")
+HOST_RE = re.compile(r"^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$")
+
+
+def fail(message: str) -> None:
+    print(json.dumps({"ok": False, "error": message}, ensure_ascii=False), file=sys.stderr)
+    raise SystemExit(1)
+
+
+def run(command: list[str]) -> subprocess.CompletedProcess:
+    try:
+        completed = subprocess.run(
+            command,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=180,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise RuntimeError("command failed") from exc
+    if completed.returncode != 0:
+        raise RuntimeError("command failed")
+    return completed
+
+
+def load_helper_config() -> dict:
+    try:
+        data = json.loads(HELPER_CONFIG.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError("helper config missing") from exc
+    domain = str(data.get("domain", "")).lower()
+    email = str(data.get("email", "")).strip()
+    acme_root = str(data.get("acme_root", "")).strip()
+    if not HOST_RE.fullmatch(domain) or "." not in domain:
+        raise RuntimeError("helper domain invalid")
+    if "@" not in email or not acme_root.startswith("/"):
+        raise RuntimeError("helper email or acme root invalid")
+    return {"domain": domain, "email": email, "acme_root": acme_root}
+
+
+def render(template_name: str, replacements: dict[str, str]) -> str:
+    path = TEMPLATE_DIR / template_name
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise RuntimeError("template missing") from exc
+    for key, value in replacements.items():
+        text = text.replace("${" + key + "}", value)
+    if "${" in text:
+        raise RuntimeError("template placeholder missing")
+    return text
+
+
+def atomic_write(path: Path, content: str, mode: int, uid: int, gid: int) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp = path.with_name(path.name + ".tmp-" + secrets.token_hex(6))
+    fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, mode)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chmod(temp, mode)
+        os.chown(temp, uid, gid)
+        os.replace(temp, path)
+    finally:
+        try:
+            temp.unlink()
+        except FileNotFoundError:
+            pass
+
+
+def ensure_certificate(host: str, email: str, acme_root: str) -> None:
+    live = Path("/etc/letsencrypt/live") / host / "fullchain.pem"
+    if live.exists():
+        return
+    run([
+        shutil.which("certbot") or "certbot",
+        "certonly",
+        "--webroot",
+        "-w", acme_root,
+        "-d", host,
+        "--cert-name", host,
+        "--email", email,
+        "--agree-tos",
+        "-n",
+        "--keep-until-expiring",
+    ])
+
+
+def reload_nginx() -> None:
+    run([shutil.which("nginx") or "nginx", "-t"])
+    run([shutil.which("systemctl") or "systemctl", "reload", "nginx"])
+
+
+def create_tenant(tenant_id: str, control_port: int, vhost_port: int) -> None:
+    if not ID_RE.fullmatch(tenant_id):
+        fail("invalid tenant id")
+    if not (7100 <= control_port <= 7199) or not (8100 <= vhost_port <= 8199):
+        fail("port outside allowed range")
+    if vhost_port != control_port + 1000:
+        fail("vhost port must be control port + 1000")
+
+    config = load_helper_config()
+    public_host = f"{tenant_id}.{config['domain']}"
+    control_host = f"frp-{tenant_id}.{config['domain']}"
+    if not HOST_RE.fullmatch(public_host) or not HOST_RE.fullmatch(control_host):
+        fail("host invalid")
+
+    tenant_file = TENANT_DIR / f"{tenant_id}.toml"
+    control_file = NGINX_DIR / f"zz-relay-{tenant_id}-control.conf"
+    data_file = NGINX_DIR / f"zz-relay-{tenant_id}-data.conf"
+    if tenant_file.exists() or control_file.exists() or data_file.exists():
+        fail("tenant already exists")
+
+    relay_group = grp.getgrnam("relay")
+    token = secrets.token_urlsafe(32)
+    written: list[Path] = []
+    service_started = False
+    try:
+        ensure_certificate(public_host, config["email"], config["acme_root"])
+        ensure_certificate(control_host, config["email"], config["acme_root"])
+
+        tenant_text = render("frps.toml", {
+            "CONTROL_PORT": str(control_port),
+            "VHOST_PORT": str(vhost_port),
+            "FRP_TOKEN": token,
+        })
+        control_text = render("nginx-control.conf", {
+            "TENANT_ID": tenant_id,
+            "CONTROL_HOST": control_host,
+            "CONTROL_PORT": str(control_port),
+        })
+        data_text = render("nginx-data.conf", {
+            "TENANT_ID": tenant_id,
+            "PUBLIC_HOST": public_host,
+            "VHOST_PORT": str(vhost_port),
+        })
+
+        atomic_write(tenant_file, tenant_text, 0o640, 0, relay_group.gr_gid)
+        written.append(tenant_file)
+        atomic_write(control_file, control_text, 0o644, 0, 0)
+        written.append(control_file)
+        atomic_write(data_file, data_text, 0o644, 0, 0)
+        written.append(data_file)
+
+        run([shutil.which("systemctl") or "systemctl", "enable", "--now", f"frps@{tenant_id}.service"])
+        service_started = True
+        reload_nginx()
+    except Exception:
+        if service_started:
+            try:
+                run([shutil.which("systemctl") or "systemctl", "disable", "--now", f"frps@{tenant_id}.service"])
+            except Exception:
+                pass
+        for path in written:
+            try:
+                path.unlink()
+            except FileNotFoundError:
+                pass
+        try:
+            reload_nginx()
+        except Exception:
+            pass
+        fail("create tenant failed")
+
+    print(json.dumps({"ok": True, "token": token}))
+
+
+def delete_tenant(tenant_id: str) -> None:
+    if not ID_RE.fullmatch(tenant_id):
+        fail("invalid tenant id")
+    config = load_helper_config()
+    public_host = f"{tenant_id}.{config['domain']}"
+    control_host = f"frp-{tenant_id}.{config['domain']}"
+
+    try:
+        run([shutil.which("systemctl") or "systemctl", "disable", "--now", f"frps@{tenant_id}.service"])
+    except Exception:
+        pass
+
+    for path in (
+        TENANT_DIR / f"{tenant_id}.toml",
+        NGINX_DIR / f"zz-relay-{tenant_id}-control.conf",
+        NGINX_DIR / f"zz-relay-{tenant_id}-data.conf",
+    ):
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            pass
+
+    for host in (public_host, control_host):
+        try:
+            run([
+                shutil.which("certbot") or "certbot",
+                "delete",
+                "--cert-name", host,
+                "-n",
+            ])
+        except Exception:
+            pass
+
+    try:
+        reload_nginx()
+    except Exception:
+        fail("nginx reload failed after delete")
+    print(json.dumps({"ok": True}))
+
+
+def main() -> None:
+    if os.geteuid() != 0:
+        fail("helper must run as root")
+    args = sys.argv[1:]
+    if not args:
+        fail("missing action")
+
+    action = args[0]
+    if action == "create-tenant":
+        if len(args) != 4:
+            fail("create-tenant needs id, control port, vhost port")
+        try:
+            control_port = int(args[2])
+            vhost_port = int(args[3])
+        except ValueError:
+            fail("ports must be integers")
+        create_tenant(args[1], control_port, vhost_port)
+        return
+    if action == "delete-tenant":
+        if len(args) != 2:
+            fail("delete-tenant needs id")
+        delete_tenant(args[1])
+        return
+    if action == "reload-nginx":
+        if len(args) != 1:
+            fail("reload-nginx takes no arguments")
+        try:
+            reload_nginx()
+        except Exception:
+            fail("nginx reload failed")
+        print(json.dumps({"ok": True}))
+        return
+    fail("unknown action")
+
+
+if __name__ == "__main__":
+    main()

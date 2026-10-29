@@ -1,0 +1,23 @@
+[Unit]
+Description=relay-multi control plane
+After=network-online.target nginx.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=relay
+Group=relay
+WorkingDirectory=/opt/relay-multi
+EnvironmentFile=/etc/relay-multi/relay.env
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/relay-multi/venv/bin/uvicorn control.main:app --host 127.0.0.1 --port 8787
+Restart=always
+RestartSec=3
+PrivateTmp=true
+ProtectHome=true
+# 不能使用 full/strict：控制面通过 sudo helper 写 /etc/nginx 与证书目录。
+ProtectSystem=yes
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

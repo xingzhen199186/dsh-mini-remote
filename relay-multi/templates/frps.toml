@@ -1,0 +1,11 @@
+# 由一个 relay-multi 租户独占。所有监听都只在本机回环。
+bindAddr = "127.0.0.1"
+bindPort = ${CONTROL_PORT}
+vhostHTTPPort = ${VHOST_PORT}
+
+auth.method = "token"
+auth.token = "${FRP_TOKEN}"
+
+# TLS 由 Nginx 终止；frps 只接收来自 127.0.0.1 的明文代理连接。
+transport.tls.force = false
+transport.tcpMux = true
