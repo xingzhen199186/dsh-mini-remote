@@ -1427,7 +1427,7 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
     assert.ok(ticketInput, '默认要有邀请票输入框');
     assert.match(ticketInput.props.placeholder, /邀请票/);
     assert.ok(!byType(tree10, 'input').some((n) => n.props.type === 'url'), '默认不暴露控制台地址');
-    const advanced = byType(tree10, 'button').find((b) => textOf(b) === '高级模式：手动填控制台地址和邀请码');
+    const advanced = byType(tree10, 'button').find((b) => textOf(b) === '高级模式：管理员自用（地址 + 密码）');
     assert.ok(advanced, '要有高级模式入口');
     advanced.props.onClick();
     await tick();
@@ -1435,9 +1435,10 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
     const urlInput = inputs.find((n) => n.props.type === 'url');
     assert.ok(urlInput, '高级模式要有控制台地址输入框');
     assert.equal(urlInput.props.value, MULTI_CONTROL);
-    const codeInput = inputs.find((n) => n.props.type === 'password' && String(n.props.placeholder).includes('一次性邀请码'));
-    assert.ok(codeInput, '高级模式要有邀请码密码框');
-    codeInput.props.onChange({ target: { value: 'invite-code-123' } });
+    assert.ok(!inputs.some((n) => String(n.props.placeholder).includes('一次性邀请码')), '高级模式不再有邀请码输入框');
+    const adminInput = inputs.find((n) => n.props.type === 'password' && String(n.props.placeholder).includes('管理员自用'));
+    assert.ok(adminInput, '高级模式要有管理员密码输入框');
+    adminInput.props.onChange({ target: { value: 'admin-secret' } });
     await tick();
     const start = byType(tree10, 'button').find((b) => textOf(b) === '开通并连接');
     assert.ok(start, '要有开通并连接按钮');
@@ -1447,12 +1448,12 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
     assert.deepEqual(posted10[0], {
       action: 'start',
       controlUrl: MULTI_CONTROL,
-      inviteCode: 'invite-code-123',
+      adminPassword: 'admin-secret',
     });
     assert.ok(byType(tree10, 'input').some((n) => String(n.props.value).includes(MULTI_HOST)),
       '开通成功后要显示固定地址');
     const passwordAfter = byType(tree10, 'input').find((n) => n.props.type === 'password');
-    assert.equal(passwordAfter.props.value, '', '开通成功后邀请码要清空');
+    assert.equal(passwordAfter.props.value, '', '开通成功后管理员密码要清空');
     assert.doesNotMatch(textOf(tree10), /frpToken/i, '界面不显示 token');
     h10.unmount();
   });

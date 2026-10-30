@@ -688,9 +688,6 @@ window.__ModuleLoader__.load({
       var multiControlState = useState('');
       var multiControl = multiControlState[0];
       var setMultiControl = multiControlState[1];
-      var multiInviteState = useState('');
-      var multiInvite = multiInviteState[0];
-      var setMultiInvite = multiInviteState[1];
       var multiErrState = useState(null);
       var multiRelayError = multiErrState[0];
       var setMultiRelayError = multiErrState[1];
@@ -1051,7 +1048,6 @@ window.__ModuleLoader__.load({
           if (ticket) body.ticket = ticket;
           else {
             body.controlUrl = multiControl.trim();
-            body.inviteCode = multiInvite.trim();
             if (multiAdminPassword) body.adminPassword = multiAdminPassword;
           }
         }
@@ -1076,7 +1072,6 @@ window.__ModuleLoader__.load({
                 setMultiControl(payload.multiRelay.controlUrl);
               }
               if (action === 'start' && payload.multiRelay.reconnectable) {
-                setMultiInvite('');
                 setMultiTicket('');
                 setMultiAdminPassword('');
               }
@@ -2392,8 +2387,6 @@ window.__ModuleLoader__.load({
         }, {
           controlUrl: multiControl,
           setControlUrl: setMultiControl,
-          inviteCode: multiInvite,
-          setInviteCode: setMultiInvite,
           ticket: multiTicket,
           setTicket: setMultiTicket,
           adminPassword: multiAdminPassword,
@@ -3871,7 +3864,7 @@ window.__ModuleLoader__.load({
           type: 'button',
           style: Object.assign({}, styles.link, { marginTop: 8, background: 'transparent', border: 0, padding: 0, cursor: 'pointer' }),
           onClick: relay.toggleAdvanced,
-        }, relay.advancedOpen ? '收起高级模式' : '高级模式：手动填控制台地址和邀请码'),
+        }, relay.advancedOpen ? '收起高级模式' : '高级模式：管理员自用（地址 + 密码）'),
         relay.advancedOpen ? h('div', {},
           h('label', { style: { display: 'block', marginTop: 10 } },
             h('div', { style: styles.muted }, '控制台地址'),
@@ -3886,18 +3879,6 @@ window.__ModuleLoader__.load({
             }),
           ),
           h('label', { style: { display: 'block', marginTop: 10 } },
-            h('div', { style: styles.muted }, '邀请码'),
-            h('input', {
-              type: 'password',
-              value: relay.inviteCode || '',
-              placeholder: relay.adminPassword ? '管理员密码已填，邀请码可留空' : (st.reconnectable ? '已有身份，无需再填' : '一次性邀请码'),
-              spellCheck: false,
-              disabled: Boolean(busy) || running || claiming || Boolean(relay.adminPassword),
-              onChange: function (e) { relay.setInviteCode(e.target.value); },
-              style: Object.assign({}, styles.monoInput, { marginTop: 4 }),
-            }),
-          ),
-          h('label', { style: { display: 'block', marginTop: 10 } },
             h('div', { style: styles.muted }, '管理员密码（仅自用）'),
             h('input', {
               type: 'password',
@@ -3908,7 +3889,7 @@ window.__ModuleLoader__.load({
               onChange: function (e) { relay.setAdminPassword(e.target.value); },
               style: Object.assign({}, styles.monoInput, { marginTop: 4 }),
             }),
-            h('div', { style: styles.muted }, '填了管理员密码，邀请码可以留空；控制台地址仍需填（除非上面用了邀请票）。密码不落盘。'),
+            h('div', { style: styles.muted }, '高级模式只给管理员用：填控制台地址和管理员密码即可开通，不需要邀请码。密码不落盘。'),
           ),
         ) : null,
         h('div', { style: { display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 12 } },
