@@ -107,8 +107,17 @@ window.__ModuleLoader__.load({
       muted: { color: 'var(--dsw-alias-label-tertiary,#8b93a1)', fontSize: 12, lineHeight: 1.6 },
       warn: { color: 'var(--dsw-alias-state-warn-primary,#b45309)', fontSize: 12, lineHeight: 1.5, marginTop: 4 },
       loading: { color: 'var(--dsw-alias-label-tertiary,#8b93a1)', fontSize: 13, marginTop: 12 },
-      error: { color: 'var(--dsw-alias-state-error-primary,#dc2626)', fontSize: 13, lineHeight: 1.6, marginTop: 12 },
-      block: { marginTop: 24 },
+      error: { color: 'var(--dsw-alias-state-error-primary,#dc2626)', fontSize: 13, lineHeight: 1.6, marginTop: 8, whiteSpace: 'pre-wrap', wordBreak: 'break-word' },
+      block: { marginTop: 18 },
+      group: { marginTop: 20, paddingTop: 14, borderTop: '1px solid var(--dsw-alias-border-l2,#e5e7eb)' },
+      topGroup: { marginTop: 24 },
+      groupHead: { display: 'flex', alignItems: 'center', gap: 12 },
+      groupText: { flex: '1 1 auto', minWidth: 0 },
+      groupTitle: { fontWeight: 600, fontSize: 15, lineHeight: 1.45 },
+      groupSummary: { color: 'var(--dsw-alias-label-tertiary,#8b93a1)', fontSize: 12, lineHeight: 1.6, marginTop: 2 },
+      groupToggle: { font: 'inherit', cursor: 'pointer', flex: 'none', height: 30, padding: '0 12px', borderRadius: 8, fontSize: 12, border: '1px solid var(--dsw-alias-button-ghost-active-border,var(--dsw-alias-border-l2,#d1d5db))', background: 'var(--dsw-alias-bg-layer-1,#fff)', color: 'var(--dsw-alias-label-primary,inherit)' },
+      groupBody: { marginTop: 2 },
+      statusPill: { display: 'inline-flex', alignItems: 'center', padding: '2px 8px', borderRadius: 999, fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap' },
       entryTitle: { fontWeight: 600, fontSize: 14, lineHeight: 1.5 },
       // 连接方式条目（内网/Tailscale/公网…）的次级标题：组→项两级，和区块标题拉开。
       entryTitleSub: { fontWeight: 500, fontSize: 13, lineHeight: 1.5 },
@@ -224,6 +233,12 @@ window.__ModuleLoader__.load({
     styles.btnDanger = Object.assign({}, styles.btn, {
       border: '1px solid var(--dsw-alias-state-error-primary,#dc2626)',
       color: 'var(--dsw-alias-state-error-primary,#dc2626)',
+    });
+    // 所有复制入口共用这一套样式和“已复制”反馈（1.5 秒后恢复原标签）。
+    styles.btnCopy = Object.assign({}, styles.btn, { minWidth: 72, flex: 'none' });
+    styles.btnCopyDone = Object.assign({}, styles.btnCopy, {
+      color: '#15803d',
+      borderColor: '#86efac',
     });
     // 等宽输入框：只给地址、口令、配对码、文件路径这类要逐字符核对的内容。
     // 名字、飞书配置这类普通文本用 styles.input（正文字体）。
@@ -576,17 +591,23 @@ window.__ModuleLoader__.load({
       var guideState = useState(false);
       var guideOpen = guideState[0];
       var setGuideOpen = guideState[1];
-      // 页面分组的展开状态：外部访问默认展开；B 端协作、飞书默认收起。
+      // 页面分组的展开状态：**全部默认收起**，只有顶部链接与二维码常显。
       // 只留在本次设置页会话里，不持久化，也不做异常自动展开。
-      var externalGroupState = useState(true);
+      var externalGroupState = useState(false);
       var externalGroupOpen = externalGroupState[0];
       var setExternalGroupOpen = externalGroupState[1];
+      var computersGroupState = useState(false);
+      var computersGroupOpen = computersGroupState[0];
+      var setComputersGroupOpen = computersGroupState[1];
       var agentGroupState = useState(false);
       var agentGroupOpen = agentGroupState[0];
       var setAgentGroupOpen = agentGroupState[1];
       var feishuGroupState = useState(false);
       var feishuGroupOpen = feishuGroupState[0];
       var setFeishuGroupOpen = feishuGroupState[1];
+      var diagnosticsGroupState = useState(false);
+      var diagnosticsGroupOpen = diagnosticsGroupState[0];
+      var setDiagnosticsGroupOpen = diagnosticsGroupState[1];
       // 设备名册（第三步）：服务端那份名单、读不到时的原因，以及"正在改名"和
       // "正在二次确认撤销"这两个**一次只可能有一处**的状态。
       // 两个都存 id，不存整条记录——记录会随每次刷新变，存下来就会拿着一份旧名字去改。
@@ -908,7 +929,7 @@ window.__ModuleLoader__.load({
         return function () { alive = false; clearInterval(timer); };
       }, [Boolean(info && info.bRelay && info.bRelay.enabled)]);
 
-      // 「已复制」只停留一会儿，然后自己变回「复制」。
+      // 「已复制」只停留一会儿，然后自己变回该按钮原来的标签。
       useEffect(function () {
         if (!copied) return undefined;
         var timer = setTimeout(function () { setCopied(null); }, 1500);
@@ -2344,10 +2365,14 @@ window.__ModuleLoader__.load({
         }, {
           externalOpen: externalGroupOpen,
           toggleExternal: function () { setExternalGroupOpen(function (v) { return !v; }); },
+          computersOpen: computersGroupOpen,
+          toggleComputers: function () { setComputersGroupOpen(function (v) { return !v; }); },
           agentOpen: agentGroupOpen,
           toggleAgent: function () { setAgentGroupOpen(function (v) { return !v; }); },
           feishuOpen: feishuGroupOpen,
           toggleFeishu: function () { setFeishuGroupOpen(function (v) { return !v; }); },
+          diagnosticsOpen: diagnosticsGroupOpen,
+          toggleDiagnostics: function () { setDiagnosticsGroupOpen(function (v) { return !v; }); },
         }, {
           draft: relayDraft,
           info: relayInfo,
@@ -2413,6 +2438,7 @@ window.__ModuleLoader__.load({
       var computers = [];
       var agentGroup = [];
       var feishuGroup = [];
+      var diagnostics = [];
       var relayUi = {
         enabled: Boolean(info.relay && info.relay.enabled),
         state: info.relay && info.relay.state,
@@ -2472,7 +2498,7 @@ window.__ModuleLoader__.load({
           start: relay.start,
           test: relay.test,
           stop: relay.stop,
-        }));
+        }, copied, copy));
       }
       if (info.multiRelay && multiRelay) {
         external.push(multiRelayBlock(info.multiRelay, multiRelay, busy, copied));
@@ -2494,35 +2520,75 @@ window.__ModuleLoader__.load({
       if (info.agent && agent) agentGroup.push(agentBlock(info.agent, agent));
       if (info.bAgent && bAgent) agentGroup.push(bAgentBlock(info.bAgent, bAgent));
       if (info.agent && bProject && info.agent.allowed) agentGroup.push(bProjectBlock(info.agent, bProject));
+      if (self) diagnostics.push(selfcheckBlock(self));
 
       return h('div', null, [
-        settingsGroup('mobile', '手机连接', true, null, mobile),
-        settingsGroup('external', '外部访问', groups.externalOpen, groups.toggleExternal, external),
-        settingsGroup('computers', '电脑与设备', true, null, computers),
-        settingsGroup('agent', 'A/B 端协作', groups.agentOpen, groups.toggleAgent, agentGroup),
-        settingsGroup('feishu', '飞书', groups.feishuOpen, groups.toggleFeishu, feishuGroup, true),
-        // 自检沿用自身的展开/收起，不再套一层组折叠；永远排在最末。
-        self ? selfcheckBlock(self) : null,
+        // 顶部链接与二维码常显，不提供折叠按钮。
+        settingsGroup('mobile', '手机连接', true, null, mobile,
+          '二维码、连接地址与密码始终显示。', true),
+        settingsGroup('external', '连接与固定地址', groups.externalOpen, groups.toggleExternal, external,
+          '公网隧道、A/B 固定地址、自建中继，以及 Tailscale HTTPS。'),
+        settingsGroup('computers', '电脑与设备', groups.computersOpen, groups.toggleComputers, computers,
+          '允许哪些电脑连接、已登记的设备，以及你能连的电脑。'),
+        settingsGroup('agent', 'A/B 端协作', groups.agentOpen, groups.toggleAgent, agentGroup,
+          '作为 A 端配对、作为 B 端执行，以及 B 项目文件。'),
+        settingsGroup('feishu', '通知与集成', groups.feishuOpen, groups.toggleFeishu, feishuGroup,
+          '飞书长连接、应用凭据与来源名单。'),
+        settingsGroup('diagnostics', '诊断与高级', groups.diagnosticsOpen, groups.toggleDiagnostics, diagnostics,
+          '版本、进程、接口、服务与最近错误。'),
       ]);
     }
 
     /**
-     * 设置页的组壳：只加标题和折叠按钮，各区块内部结构与 key 原样保留。
-     * 单区块组展开时复用区块自己的标题，不在组壳上重复显示同一个标题。
+     * 设置页的大类外壳：统一标题、摘要和展开/收起。顶部组永远展开。
+     * 各区块内部结构与 key 原样保留；子块自己的标题降一级显示。
      */
-    function settingsGroup(key, title, open, toggle, children, single) {
+    function settingsGroup(key, title, open, toggle, children, summary, alwaysOpen) {
       if (!children.length) return null;
-      return h('div', { key: 'group-' + key, style: { marginTop: 24 } },
-        h('div', { style: { display: 'flex', alignItems: 'center', gap: 8 } },
-          single && open ? null : h('div', { style: styles.entryTitle }, title),
+      return h('div', {
+        key: 'group-' + key,
+        style: alwaysOpen ? styles.topGroup : styles.group,
+      },
+        h('div', { style: styles.groupHead },
+          h('div', { style: styles.groupText },
+            h('div', { style: styles.groupTitle }, title),
+            summary ? h('div', { style: styles.groupSummary }, summary) : null,
+          ),
           toggle ? h('button', {
             type: 'button',
             onClick: toggle,
-            style: Object.assign({}, styles.btn, { marginLeft: 'auto' }),
+            style: styles.groupToggle,
           }, open ? '收起' : '展开') : null,
         ),
-        open ? h('div', null, children) : null,
+        alwaysOpen || open ? h('div', { style: styles.groupBody }, children) : null,
       );
+    }
+
+    /** 状态标签统一入口：已连接 / 连接中 / 失败 / 未开启。 */
+    function statusPill(text, tone) {
+      var colors = tone === 'connected'
+        ? { color: '#15803d', background: '#dcfce7' }
+        : tone === 'pending'
+          ? { color: '#b45309', background: '#fef3c7' }
+          : tone === 'error'
+            ? { color: '#b91c1c', background: '#fee2e2' }
+            : { color: '#6b7280', background: '#f3f4f6' };
+      return h('span', { style: Object.assign({}, styles.statusPill, colors) }, text);
+    }
+
+    /** 所有复制入口共用：同一套样式、同一个 1.5 秒“已复制”状态。 */
+    function copyButton(opts) {
+      var o = opts || {};
+      var value = typeof o.value === 'string' ? o.value : '';
+      var done = Boolean(value && o.copied === value);
+      return h('button', {
+        type: 'button',
+        disabled: !value,
+        onClick: function () {
+          if (value && typeof o.copy === 'function') o.copy(value);
+        },
+        style: Object.assign({}, done ? styles.btnCopyDone : styles.btnCopy, o.style || {}),
+      }, done ? '已复制' : (o.label || '复制'));
     }
 
     /** 时间戳 → 「2026-10-16 14:20」。取不到（0/坏值）回 null，由调用方去说「还没有记录」。 */
@@ -3008,7 +3074,7 @@ window.__ModuleLoader__.load({
         h('div', { style: st.error ? styles.detail : styles.muted }, status),
         // 上一次保存之后长连接没起来的原因，原文照登。**开关即使被关掉也留着它**——
         // 那正说明用户刚才为什么把它关了，抹掉反而不好排查。
-        st.error ? h('div', { style: styles.detail }, st.error) : null,
+        st.error ? h('div', { style: styles.error }, st.error) : null,
         // 上一次被白名单挡住的来源。**这一行是新用户能不能自己配通的关键**：
         // 名单默认是空的（谁都不认），而他不可能凭空知道自己的 open_id 长什么样——
         // 发一句、回到这一页刷新、照着抄进名单，再发一次就通了。
@@ -3332,7 +3398,7 @@ window.__ModuleLoader__.load({
           h('button', { type: 'button', style: styles.btn, disabled: Boolean(a && a.busy), onClick: a.makeCode }, '生成配对码'),
           code && code.ok ? h('span', { style: styles.detail }, '配对码：' + code.code + '（10 分钟内有效）') : null,
         ) : null,
-        a && a.error ? h('div', { style: styles.warn }, a.error) : null,
+        a && a.error ? h('div', { style: styles.error }, a.error) : null,
         on
           ? (agents.length
             ? h('div', null, agents.map(function (one) {
@@ -3383,8 +3449,8 @@ window.__ModuleLoader__.load({
         ),
         h('div', { style: on ? styles.detail : styles.muted }, status),
         h('div', { style: styles.muted }, pollText),
-        st && st.lastError ? h('div', { style: styles.detail }, '最后一次错误：' + st.lastError) : null,
-        a && a.error ? h('div', { style: styles.warn }, a.error) : null,
+        st && st.lastError ? h('div', { style: styles.error }, '最后一次错误：' + st.lastError) : null,
+        a && a.error ? h('div', { style: styles.error }, a.error) : null,
         h('div', { style: styles.muted, marginTop: 10 }, 'A 的地址（例如 http://100.x.x.x:3090）'),
         h('input', {
           value: a ? a.url : '',
@@ -3505,7 +3571,7 @@ window.__ModuleLoader__.load({
             h('button', { type: 'button', style: styles.btn, onClick: function () { a.setView(null); } }, '收起文件面板'),
           ),
           view.loading ? h('div', { style: styles.muted }, '正在读 B…') : null,
-          view.error ? h('div', { style: styles.warn }, view.error) : null,
+          view.error ? h('div', { style: styles.error }, view.error) : null,
           view.file
             ? h('div', null,
               h('div', { style: styles.detail }, view.file.path),
@@ -3710,21 +3776,18 @@ window.__ModuleLoader__.load({
       var hostname = typeof st.hostname === 'string' ? st.hostname : '';
       var url = typeof st.url === 'string' ? st.url : (hostname ? 'https://' + hostname : '');
       var errorText = relay.error || st.lastError || null;
+      var failed = st.state === 'error' || Boolean(errorText);
       var statusText;
       if (running) statusText = '已连接。手机可以用下面的固定地址。';
       else if (claiming) statusText = '正在开通并连接专属固定地址…';
-      else if (st.state === 'released') statusText = '已停止。服务方仍保留固定地址对应的资源。';
+      else if (st.state === 'released') statusText = '未开启。服务方仍保留固定地址对应的资源。';
       else if (st.state === 'error') statusText = st.reconnectable ? '没有连接成功。关掉代理后可点“重新连接”。' : '没有连接成功。';
       else if (st.enabled) statusText = '已开启，正在准备。';
       else statusText = '未开启。有激活码就填；已开放自服务时可直接开启。';
-      var pill = h('span', {
-        style: {
-          display: 'inline-flex', alignItems: 'center', padding: '2px 8px', borderRadius: 999,
-          fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap',
-          color: running ? '#15803d' : (errorText ? '#b91c1c' : '#6b7280'),
-          background: running ? '#dcfce7' : (errorText ? '#fee2e2' : '#f3f4f6'),
-        },
-      }, running ? '已连接' : (claiming ? '连接中' : (errorText ? '未连接' : '未开启')));
+      var pill = statusPill(
+        running ? '已连接' : (claiming ? '连接中' : (failed ? '失败' : '未开启')),
+        running ? 'connected' : (claiming ? 'pending' : (failed ? 'error' : 'idle')),
+      );
       var canStart = true;
       var codeInput = running ? null : h('label', { style: { display: 'block', marginTop: 10 } },
         h('div', { style: styles.muted }, '激活码'),
@@ -3747,7 +3810,7 @@ window.__ModuleLoader__.load({
       var actions = running || claiming
         ? h('button', {
           type: 'button', disabled: Boolean(busy),
-          style: Object.assign({}, styles.btn, { color: '#b91c1c' }),
+          style: styles.btnDanger,
           onClick: relay.stop,
         }, '停止专属固定地址')
         : h('div', { style: { display: 'flex', gap: 8, flexWrap: 'wrap' } },
@@ -3776,7 +3839,7 @@ window.__ModuleLoader__.load({
         h('div', { style: { display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 12 } }, actions),
         h('div', { style: { marginTop: 10 } },
           h('div', { style: styles.muted }, statusText),
-          errorText ? h('div', { style: styles.detail }, errorText) : null,
+          errorText ? h('div', { style: styles.error }, errorText) : null,
           errorText && st.errorCode ? h('div', { style: styles.muted }, '错误码：' + st.errorCode) : null,
           st.restarting && st.nextRetryAt
             ? h('div', { style: styles.muted }, 'cloudflared 退出后会按退避自动重连。')
@@ -3788,11 +3851,7 @@ window.__ModuleLoader__.load({
             onFocus: function (e) { try { e.target.select(); } catch (err) { /* 忽略 */ } },
             style: Object.assign({}, styles.monoInput, { flex: '1 1 260px', width: 'auto', minWidth: 0 }),
           }),
-          h('button', {
-            type: 'button',
-            style: copied === url ? Object.assign({}, styles.btn, { color: '#15803d', borderColor: '#86efac' }) : styles.btn,
-            onClick: function () { relay.copy(url); },
-          }, copied === url ? '已复制' : '复制专属地址'),
+          copyButton({ value: url, label: '复制地址', copied: copied, copy: relay.copy }),
         ) : null,
         running ? h('div', { style: styles.warn },
           '流量经 Cloudflare，不是端到端加密。停止会释放租约，但不会自动删除已建好的隧道和解析记录。') : null,
@@ -3810,6 +3869,7 @@ window.__ModuleLoader__.load({
       var hostname = typeof st.publicHost === 'string' ? st.publicHost : '';
       var url = typeof st.url === 'string' ? st.url : (hostname ? 'https://' + hostname : '');
       var errorText = relay.error || st.lastError || null;
+      var failed = st.state === 'error' || Boolean(errorText);
       var statusText;
       if (running) statusText = '已连接。手机可以用下面的固定地址。';
       else if (claiming) statusText = '正在开通或连接中…';
@@ -3819,17 +3879,13 @@ window.__ModuleLoader__.load({
       else if (st.state === 'released') statusText = '已释放。需要管理员重新发邀请码才能再开通。';
       else if (st.enabled) statusText = '已开启，等待连接。';
       else statusText = '未开启。首次开通需要控制台地址和邀请码。';
-      var pill = h('span', {
-        style: {
-          display: 'inline-flex', alignItems: 'center', padding: '2px 8px', borderRadius: 999,
-          fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap',
-          color: running ? '#15803d' : (errorText ? '#b91c1c' : '#6b7280'),
-          background: running ? '#dcfce7' : (errorText ? '#fee2e2' : '#f3f4f6'),
-        },
-      }, running ? '已连接' : (claiming ? '连接中' : (errorText ? '未连接' : '未开启')));
+      var pill = statusPill(
+        running ? '已连接' : (claiming ? '连接中' : (failed ? '失败' : '未开启')),
+        running ? 'connected' : (claiming ? 'pending' : (failed ? 'error' : 'idle')),
+      );
       var stopButton = running || claiming ? h('button', {
         type: 'button', disabled: Boolean(busy),
-        style: Object.assign({}, styles.btn, { color: '#b91c1c' }),
+        style: styles.btnDanger,
         onClick: relay.stop,
       }, '停止') : null;
       var reconnectButton = st.reconnectable ? h('button', {
@@ -3896,7 +3952,7 @@ window.__ModuleLoader__.load({
           stopButton, reconnectButton, startButton),
         h('div', { style: { marginTop: 10 } },
           h('div', { style: styles.muted }, statusText),
-          errorText ? h('div', { style: styles.detail }, errorText) : null,
+          errorText ? h('div', { style: styles.error }, errorText) : null,
           errorText && st.errorCode ? h('div', { style: styles.muted }, '错误码：' + st.errorCode) : null,
           st.restarting && st.nextRetryAt
             ? h('div', { style: styles.muted }, 'frpc 退出后会按退避自动重连。')
@@ -3908,11 +3964,7 @@ window.__ModuleLoader__.load({
             onFocus: function (e) { try { e.target.select(); } catch (err) { /* 忽略 */ } },
             style: Object.assign({}, styles.monoInput, { flex: '1 1 260px', width: 'auto', minWidth: 0 }),
           }),
-          h('button', {
-            type: 'button',
-            style: copied === url ? Object.assign({}, styles.btn, { color: '#15803d', borderColor: '#86efac' }) : styles.btn,
-            onClick: function () { relay.copy(url); },
-          }, copied === url ? '已复制' : '复制地址'),
+          copyButton({ value: url, label: '复制地址', copied: copied, copy: relay.copy }),
         ) : null,
         running ? h('div', { style: styles.warn },
           '停止只停这台电脑上的 frpc，固定地址和中继服务器上的资源会保留。'
@@ -3992,7 +4044,7 @@ window.__ModuleLoader__.load({
      * 这一块只负责“填四项、保存、开启、测试”。服务器那一半由 relay-server/
      * 的一次性安装脚本完成，不在这里做远程安装。
      */
-    function selfRelayBlock(relay, busy, run) {
+    function selfRelayBlock(relay, busy, run, copied, copy) {
       var draft = relay.draft;
       if (!draft) return null;
       var info = relay.info || {};
@@ -4018,35 +4070,19 @@ window.__ModuleLoader__.load({
           }),
         );
       };
-      var pill = function (text, fg, bg) {
-        return h('span', {
-          style: {
-            display: 'inline-flex', alignItems: 'center', padding: '2px 8px',
-            borderRadius: 999, fontSize: 12, fontWeight: 600, color: fg, background: bg,
-            whiteSpace: 'nowrap',
-          },
-        }, text);
-      };
-      var statePill = !configured
-        ? pill('未配置', '#6b7280', '#f3f4f6')
-        : running && connected
-          ? pill('已连接', '#15803d', '#dcfce7')
-          : running
-            ? pill('连接中', '#b45309', '#fef3c7')
-            : pill('已停止', '#6b7280', '#f3f4f6');
-      var copyUrl = function () {
-        try {
-          if (navigator && navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
-            navigator.clipboard.writeText(info.url);
-          }
-        } catch (err) { /* 剪贴板不可用：输入框里仍可手动复制 */ }
-      };
+      var statePill = running && connected
+        ? statusPill('已连接', 'connected')
+        : running
+          ? statusPill('连接中', 'pending')
+          : info.error
+            ? statusPill('失败', 'error')
+            : statusPill('未开启', 'idle');
       var actions = running
         ? [
           h('button', { type: 'button', disabled: Boolean(busy), style: styles.btn, onClick: function () { run.test(); } }, '测试连接'),
           h('button', {
             type: 'button', disabled: Boolean(busy),
-            style: Object.assign({}, styles.btn, { color: '#b91c1c' }),
+            style: styles.btnDanger,
             onClick: function () { run.stop(); },
           }, '停止'),
         ]
@@ -4111,10 +4147,10 @@ window.__ModuleLoader__.load({
             onFocus: function (e) { try { e.target.select(); } catch (err) { /* 忽略 */ } },
             style: Object.assign({}, styles.monoInput, { flex: '1 1 240px', width: 'auto', minWidth: 0 }),
           }),
-          h('button', { type: 'button', style: styles.btn, onClick: copyUrl }, '复制'),
+          copyButton({ value: info.url, label: '复制地址', copied: copied, copy: copy }),
         ) : null,
         relay.note ? h('div', { style: styles.muted, marginTop: 8 }, relay.note) : null,
-        relay.error ? h('div', { style: styles.detail }, relay.error) : null,
+        relay.error ? h('div', { style: styles.error }, relay.error) : null,
         h('div', { style: { marginTop: 8, color: 'var(--dsw-alias-label-tertiary,#8b93a1)', fontSize: 12, lineHeight: 1.6 } },
           '公网入口受 token/Bearer/票据保护；域名对外提供服务前，请确认备案和当地要求。'),
         // 配置指引默认收起：配过的人不用看，第一次配的人被服务器和 DNS 绕住时，
@@ -4125,7 +4161,7 @@ window.__ModuleLoader__.load({
           h('button', { type: 'button', onClick: relay.toggleGuide, style: styles.btn },
             relay.guideOpen ? '收起配置指引' : '配置指引（服务器 + 域名 + frpc）'),
         ),
-        relay.guideOpen ? selfRelayGuide() : null,
+        relay.guideOpen ? selfRelayGuide(copied, copy) : null,
       );
     }
 
@@ -4135,7 +4171,7 @@ window.__ModuleLoader__.load({
      * 面向“第一次装插件、有一台干净服务器和域名”的用户；步骤和
      * `relay-server/README.md` 对齐，不在界面里另编一套。
      */
-    function selfRelayGuide() {
+    function selfRelayGuide(copied, copy) {
       var aiPrompt = [
         '我已经能通过 SSH 登录服务器。如果当前会话还没有 SSH 连接，请先问我要登录命令，不要猜密码。',
         '服务器 IP、系统版本、80/443 占用、已装软件，请你自己登录后检查，不要让我重复填。',
@@ -4158,14 +4194,6 @@ window.__ModuleLoader__.load({
         '',
         '如果缺少主域名、DNS 权限或 SSH 登录方式，先问我，不要自己编一个域名或密码。',
       ].join('\n');
-
-      var copyPrompt = function () {
-        try {
-          if (navigator && navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
-            navigator.clipboard.writeText(aiPrompt);
-          }
-        } catch (err) { /* 剪贴板不可用：下面的文本框仍可手动全选 */ }
-      };
 
       var sections = [
         ['方法一：自己在服务器上执行（推荐先看这一种）', [
@@ -4273,7 +4301,7 @@ window.__ModuleLoader__.load({
         }),
       }));
       out.push(h('div', { key: 'self-relay-ai-copy', style: { marginTop: 8 } },
-        h('button', { type: 'button', style: styles.btn, onClick: copyPrompt }, '复制提示词'),
+        copyButton({ value: aiPrompt, label: '复制提示词', copied: copied, copy: copy }),
       ));
       return h('div', { key: 'self-relay-guide' }, out);
     }
@@ -4332,7 +4360,7 @@ window.__ModuleLoader__.load({
           h('span', null, quickEnabled ? '已开启' : '开启'),
         ),
         h('div', { style: quickEnabled && tunnel.error ? styles.detail : styles.muted }, quickStatus),
-        quickEnabled && tunnel.error ? h('div', { style: styles.detail }, tunnel.error) : null,
+        quickEnabled && tunnel.error ? h('div', { style: styles.error }, tunnel.error) : null,
         quickEnabled ? h('div', { style: styles.muted }, '每次重启 DSH 后地址会变化，需重新扫码。') : null,
         quickEnabled ? h('div', { style: styles.warn }, '开着的时候这个服务就挂在公网上了。密码仍然是唯一的门，别把地址或二维码发出去。') : null,
 
@@ -4381,7 +4409,7 @@ window.__ModuleLoader__.load({
           tunnel.hasToken ? '已经存过一份了，留空就不改动它' : '粘贴 cloudflared tunnel run --token 的值',
           named.setToken, 'password', true),
         h('div', { style: namedActive && tunnel.error ? styles.detail : styles.muted }, namedStatus),
-        namedActive && tunnel.error ? h('div', { style: styles.detail }, tunnel.error) : null,
+        namedActive && tunnel.error ? h('div', { style: styles.error }, tunnel.error) : null,
         h('div', { style: { marginTop: 10, display: 'flex', gap: 8, flexWrap: 'wrap' } },
           h('button', {
             type: 'button',
@@ -4392,7 +4420,7 @@ window.__ModuleLoader__.load({
           h('button', {
             type: 'button',
             disabled: working || !namedActive,
-            style: styles.btn,
+            style: styles.btnDanger,
             onClick: named.stop,
           }, '停止'),
           (tunnel.phase === 'paused' || tunnel.phase === 'failed'
@@ -4487,7 +4515,6 @@ window.__ModuleLoader__.load({
     function passwordBlock(info, copied, copy, pwd) {
       var token = typeof info.token === 'string' ? info.token : '';
       var shown = pwd.showPwd ? token : token.replace(/./g, '•');
-      var done = token !== '' && copied === token;
       var pending = typeof info.pendingToken === 'string' ? info.pendingToken : '';
       return h('div', { key: 'password', style: styles.block },
         h('div', { style: styles.entryTitle }, '密码'),
@@ -4506,7 +4533,7 @@ window.__ModuleLoader__.load({
             onClick: function () { pwd.setShowPwd(!pwd.showPwd); },
             style: styles.btn,
           }, pwd.showPwd ? '藏起来' : '显示'),
-          h('button', { type: 'button', onClick: function () { copy(token); }, style: styles.btn }, done ? '已复制' : '复制'),
+          copyButton({ value: token, label: '复制密码', copied: copied, copy: copy }),
         ),
         // 服务端刚存下、但还没重启，所以还没生效的那个。**必须和上面显示的那个分开说**：
         // 上面那串是此刻真正在用的，重启前手机上认的还是它。
@@ -4536,7 +4563,6 @@ window.__ModuleLoader__.load({
 
     function entryBlock(entry, index, copied, copy) {
       var url = typeof entry.url === 'string' ? entry.url : '';
-      var done = url !== '' && copied === url;
       return h('div', { key: entry.kind || String(index), style: styles.block },
         h('div', { style: styles.entryTitleSub }, entry.label || entry.kind || '手机'),
         entry.hint ? h('div', { style: styles.muted }, entry.hint) : null,
@@ -4556,7 +4582,7 @@ window.__ModuleLoader__.load({
               onFocus: function (e) { try { e.target.select(); } catch (err) { /* 忽略 */ } },
               style: Object.assign({}, styles.monoInput, { flex: '1 1 180px', width: 'auto', minWidth: 180 }),
             }),
-            h('button', { type: 'button', onClick: function () { copy(url); }, style: styles.btn }, done ? '已复制' : '复制'),
+            copyButton({ value: url, label: '复制地址', copied: copied, copy: copy }),
           ),
         ),
       );

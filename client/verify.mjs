@@ -80,6 +80,16 @@ const expandSettingsGroup = async (tree, key) => {
   }
 };
 
+const collapseSettingsGroup = async (tree, key) => {
+  const group = walk(tree).find((n) => n && n.props && n.props.key === 'group-' + key);
+  assert.ok(group, `设置页应有分组 group-${key}`);
+  const button = byType(group, 'button').find((b) => textOf(b) === '收起');
+  if (button) {
+    button.props.onClick();
+    await tick();
+  }
+};
+
 /**
  * 最小 React 替身 + 最小渲染循环。
  * createElement 返回普通对象；useState 真的能改状态并触发重渲染；
@@ -862,12 +872,14 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
     assert.match(textOf(tree), /二维码没画出来/);
   });
 
-  await check('每条链接各有一个「复制」按钮，初始文案是「复制」', () => {
-    // 同样按文案找，不数总数：密码那一块也有「复制」。
-    const copies = byType(tree, 'button').filter((b) => textOf(b) === '复制');
-    assert.ok(copies.length >= 2, '两条链接各要有一个「复制」按钮');
-    assert.equal(textOf(copies[0]), '复制');
-    assert.equal(textOf(copies[1]), '复制');
+  await check('每条链接各有一个「复制地址」按钮，样式统一', () => {
+    const copies = byType(tree, 'button').filter((b) => textOf(b) === '复制地址');
+    assert.ok(copies.length >= 2, '两条链接各要有一个「复制地址」按钮');
+    const style = copies[0].props.style;
+    for (const one of copies) {
+      assert.deepEqual(one.props.style, style, '所有复制按钮共用同一套样式');
+      assert.equal(style.minWidth, 72);
+    }
   });
 
   // 2026-09-22 用户报：「手机遥控页面里似乎根本没有密码，也无法自定义密码」。
@@ -896,25 +908,25 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
     assert.ok(byType(tree, 'input').some((n) => n.props.value === masked), '再点一次该变回打码');
   });
 
-  await check('点密码旁边的「复制」→ 复制的是密码本身', async () => {
+  await check('点密码旁边的「复制密码」→ 复制的是密码本身', async () => {
     const written = [];
     setGlobal('navigator', { clipboard: { writeText: async (text) => { written.push(text); } } });
-    // 链接那两个「复制」在前，密码那个在最后
-    const copies = byType(tree, 'button').filter((b) => textOf(b) === '复制');
-    copies[copies.length - 1].props.onClick();
+    const copyPwd = byType(tree, 'button').find((b) => textOf(b) === '复制密码');
+    assert.ok(copyPwd, '密码旁边要有独立的复制入口');
+    copyPwd.props.onClick();
     await tick();
     assert.deepEqual(written, [TOKEN]);
   });
 
-  await check('点「复制」→ navigator.clipboard.writeText(url)，文案变「已复制」', async () => {
+  await check('点「复制地址」→ navigator.clipboard.writeText(url)，文案变「已复制」', async () => {
     const written = [];
     setGlobal('navigator', { clipboard: { writeText: async (text) => { written.push(text); } } });
-    byType(tree, 'button')[0].props.onClick();
+    const first = byType(tree, 'button').find((b) => textOf(b) === '复制地址');
+    first.props.onClick();
     await tick();
     assert.deepEqual(written, [URL_LAN]);
-    const buttons = byType(tree, 'button');
-    assert.equal(textOf(buttons[0]), '已复制');
-    assert.equal(textOf(buttons[1]), '复制', '只改被点的那一个');
+    assert.equal(textOf(byType(tree, 'button').find((b) => textOf(b) === '已复制')), '已复制');
+    assert.ok(byType(tree, 'button').some((b) => textOf(b) === '复制密码'), '只改被点的那一个');
   });
 
   await check('复制失败时不谎报「已复制」', async () => {
@@ -925,9 +937,9 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
     h5.runEffects();
     await tick();
     setGlobal('navigator', { clipboard: { writeText: async () => { throw new Error('NotAllowedError'); } } });
-    byType(tree5, 'button')[0].props.onClick();
+    byType(tree5, 'button').find((b) => textOf(b) === '复制地址').props.onClick();
     await tick();
-    assert.equal(textOf(byType(tree5, 'button')[0]), '复制');
+    assert.equal(textOf(byType(tree5, 'button').find((b) => textOf(b) === '复制地址')), '复制地址');
   });
 }
 
@@ -957,6 +969,7 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
     tree6 = h6.draw(Comp);
     h6.runEffects();
     await tick();
+    await expandSettingsGroup(tree6, 'external');
   };
 
   await check('公网没开时：开关是未选中的，并且说明「出门进不来」', async () => {
@@ -1087,6 +1100,7 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
   await tick();
   h7.runEffects();
   await tick();
+  await expandSettingsGroup(tree7, 'external');
 
   await check('固定域名隧道：地址回填，保存时带 mode=named', async () => {
     const text = textOf(tree7);
@@ -1157,6 +1171,7 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
   await tick();
   h8.runEffects();
   await tick();
+  await expandSettingsGroup(tree8, 'external');
 
   await check('命名隧道恢复中：说正在恢复，并给立即重试', async () => {
     const text = textOf(tree8);
@@ -1229,6 +1244,7 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
     await tick();
     h9.runEffects();
     await tick();
+    await expandSettingsGroup(tree9, 'external');
   };
 
   await check('B 固定地址 running：显示固定地址，停止按钮 POST action=stop', async () => {
@@ -1245,7 +1261,7 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
     await tick();
     assert.equal(posted9.length, 1);
     assert.deepEqual(posted9[0], { action: 'stop' });
-    assert.match(textOf(tree9), /已停止/);
+    assert.match(textOf(tree9), /未开启/);
     h9.unmount();
   });
 
@@ -1366,6 +1382,7 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
     await tick();
     h10.runEffects();
     await tick();
+    await expandSettingsGroup(tree10, 'external');
   };
 
   await check('自建多用户中继 running：显示固定地址、重连/停止按钮和复制反馈', async () => {
@@ -1395,11 +1412,13 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
 
     const written = [];
     setGlobal('navigator', { clipboard: { writeText: async (value) => { written.push(value); } } });
-    const copy = byType(tree10, 'button').find((b) => textOf(b) === '复制地址');
+    const multiBlock = walk(tree10).find((n) => n && n.props && n.props.key === 'multi-relay');
+    const copy = byType(multiBlock, 'button').find((b) => textOf(b) === '复制地址');
     copy.props.onClick();
     await tick();
     assert.deepEqual(written, ['https://' + MULTI_HOST]);
-    assert.equal(textOf(byType(tree10, 'button').find((b) => textOf(b) === '已复制')), '已复制');
+    const refreshed = walk(tree10).find((n) => n && n.props && n.props.key === 'multi-relay');
+    assert.equal(textOf(byType(refreshed, 'button').find((b) => textOf(b) === '已复制')), '已复制');
 
     const stop = byType(tree10, 'button').find((b) => textOf(b) === '停止');
     stop.props.onClick();
@@ -1523,6 +1542,7 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
     tree7 = h.draw(Comp);
     h.runEffects();
     await tick();
+    await expandSettingsGroup(tree7, 'external');
   };
 
   await check('HTTPS 没开时：开关未选中，并说清楚开了能换来什么', async () => {
@@ -1719,7 +1739,7 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
   // 这一块里的按钮不止一个（密码那一块也叫「保存」），所以先按标题框出这一块，
   // 再在块内找——按文案在全树里找会抓到别人家的按钮。
   const feishuSel = () => {
-    const block = walk(tree8).find((n) => n.type === 'div' && textOf(n).trim().startsWith('飞书'));
+    const block = walk(tree8).find((n) => n && n.props && n.props.key === 'feishu');
     assert.ok(block, '面板上该有飞书那一块');
     const inputs = byType(block, 'input');
     return {
@@ -1969,6 +1989,7 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
     await tick();
     hh.runEffects();   // 配对信息到了 → 读设备名单
     await tick();
+    await expandSettingsGroup(state.tree, 'computers');
     await expandDevices(state.tree);
     return state;
   };
@@ -2115,6 +2136,7 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
     await tick();
     hh.runEffects();
     await tick();
+    await expandSettingsGroup(tree, 'computers');
     assert.match(textOf(tree), /读设备名单失败/, '读不到要说出来，不能假装"一台都没有"');
   });
 
@@ -2175,6 +2197,8 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
     tree = h.draw(Comp);
     h.runEffects();
     await tick();
+    const computers = walk(tree).find((n) => n && n.props && n.props.key === 'group-computers');
+    if (computers) await expandSettingsGroup(tree, 'computers');
     return tree;
   };
 
@@ -2340,6 +2364,7 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
     await tick();
     hh.runEffects();   // 配对信息到了 → 读设备名单 + 读「其他电脑」
     await tick();
+    await expandSettingsGroup(state.tree, 'computers');
     return state;
   };
 
@@ -2837,21 +2862,23 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
   await check('自建中继的配置指引能展开', async () => {
     fresh();
     const st = await mountRemotes(listOf([]), () => ({ ok: true }));
-    assert.match(textOf(st.tree), /未配置。展开后/, '自建中继默认收起');
-    const expandBtn = buttonIn(st.tree, '展开');
+    await expandSettingsGroup(st.tree, 'external');
+    const selfBlock = () => walk(st.tree).find((n) => n && n.props && n.props.key === 'self-relay');
+    assert.match(textOf(selfBlock()), /未配置。展开后/, '自建中继默认收起');
+    const expandBtn = buttonIn(selfBlock(), '展开');
     assert.ok(expandBtn, '自建中继要有展开按钮');
     expandBtn.props.onClick();
     await settle();
-    const guideBtn = buttonIn(st.tree, '配置指引（服务器 + 域名 + frpc）');
+    const guideBtn = buttonIn(selfBlock(), '配置指引（服务器 + 域名 + frpc）');
     assert.ok(guideBtn, '自建中继末尾要有配置指引按钮');
     guideBtn.props.onClick();
     await settle();
-    assert.match(textOf(st.tree), /准备服务器和端口/, '点开之后要看到第一步');
-    assert.match(textOf(st.tree), /收起配置指引/, '按钮要变成收起');
-    const prompt = walk(st.tree).find((n) => n && n.type === 'textarea');
+    assert.match(textOf(selfBlock()), /准备服务器和端口/, '点开之后要看到第一步');
+    assert.match(textOf(selfBlock()), /收起配置指引/, '按钮要变成收起');
+    const prompt = walk(selfBlock()).find((n) => n && n.type === 'textarea');
     assert.ok(prompt, '第二种方法要提供可复制的提示词');
     assert.match(prompt.props.value, /通过 SSH 登录服务器/);
-    assert.ok(buttonIn(st.tree, '复制提示词'), '提示词旁边要有复制按钮');
+    assert.ok(buttonIn(selfBlock(), '复制提示词'), '提示词旁边要有复制按钮');
     st.harness.unmount();
   });
 }
@@ -2912,6 +2939,8 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
     hh.runEffects();      // 配对信息到了 → 设备 / 其他电脑 / 自检 同一趟
     await tick();
     await tick();
+    await expandSettingsGroup(state.tree, 'computers');
+    await expandSettingsGroup(state.tree, 'diagnostics');
     state.harness = hh;
     return state;
   };
@@ -3146,7 +3175,8 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
   await check('有 B 项目时设置页不白屏，项目块和 B 文件入口都在', async () => {
     const collapsed = walk(tree).find((n) => n && n.props && n.props.key === 'group-agent');
     assert.ok(collapsed, 'B 端协作组要在');
-    assert.doesNotMatch(textOf(collapsed), /B 项目/, 'B 端协作默认收起，项目块不摊在页面上');
+    assert.equal(walk(collapsed).find((n) => n && n.props && n.props.key === 'bProject'), undefined,
+      'B 端协作默认收起，项目块不摊在页面上');
     assert.ok(byType(collapsed, 'button').some((b) => textOf(b) === '展开'), '收起时保留展开入口');
     await expandSettingsGroup(tree, 'agent');
     assert.doesNotMatch(textOf(tree), /选择 B 文件夹/, '新建创建区默认收起，目录选择入口不直接摊出来');
@@ -3161,6 +3191,171 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
     assert.match(text, /选择 B 文件夹/, '展开创建区后，目录选择入口要出现');
     assert.match(text, /D:\\work\\测试/);
   });
+  hh.unmount();
+}
+
+// 4j. 分组与统一交互：顶部常显、所有大类默认收起、复制与危险按钮一致
+{
+  console.log('\n[4j] 设置页分组与统一交互');
+
+  const ALL = {
+    ok: true,
+    port: 3090,
+    token: TOKEN,
+    entries: [{ kind: 'lan', label: '内网', hint: '手机连同一个 Wi-Fi 时用这个', url: URL_LAN, qr: QR }],
+    tailscale: { installed: true, download: 'https://tailscale.com/download' },
+    tunnel: { enabled: true, mode: 'quick', up: true, starting: false, error: null, publicUrl: null, hasToken: false },
+    serve: { installed: true, on: false, url: null, urlOfOtherPort: null, error: null, needsLogin: false },
+    bRelay: {
+      enabled: true, state: 'running', configured: true, hasActivationCode: true,
+      hostname: 'abcdefghijklmnopqrstuvwxyz.dsh-everywhere.com',
+      url: 'https://abcdefghijklmnopqrstuvwxyz.dsh-everywhere.com',
+      lastError: null, error: null, errorCode: null, reconnectable: true,
+    },
+    selfRelay: {
+      enabled: false, running: false, connected: false, url: '', error: null,
+      frpcPath: '', version: '', configured: false, serverAddr: '',
+      serverPort: 443, publicHost: '', transport: 'wss',
+    },
+    multiRelay: {
+      enabled: true, state: 'running', controlUrl: 'https://admin.relay.example.com',
+      publicHost: 'abcdefghijklmnopqrstuvwxyz.relay.example.com',
+      url: 'https://abcdefghijklmnopqrstuvwxyz.relay.example.com',
+      reconnectable: true, lastError: null, error: null, errorCode: null,
+    },
+    remote: { allowed: false },
+    agent: { allowed: false, agents: [], projects: [], presetRegistered: false, presetError: null },
+    bAgent: {
+      mode: false, connected: false, url: '', roots: [], allowWrite: false,
+      allowShell: false, allowManage: false, lastPollAt: 0, lastError: null, error: null,
+    },
+    feishu: {
+      enabled: false, appId: '', openIds: '', chatIds: '', hasSecret: false,
+      starting: false, running: false, connected: false, rejected: null, error: null,
+    },
+  };
+
+  const SELF = {
+    ok: true,
+    version: '9.9.9',
+    code: { version: '9.9.9', file: null, modifiedAtMs: null, stale: false, message: null },
+    process: { startedAtMs: Date.now() - 120000, uptimeSec: 120, pid: 1234 },
+    routes: [],
+    allowRemoteComputers: false,
+    phoneService: { listening: false, port: null, addresses: [], error: null, hostHalf: { pair: false, remoteWindow: false } },
+    dataDir: 'C:\\Users\\me\\.dsh\\dsh-mini-remote',
+    rosters: { devices: 0, remotes: 0 },
+  };
+
+  const hh = useHarness();
+  let tree = null;
+  hh.onUpdate(() => { tree = hh.draw(Comp); });
+  setGlobal('fetch', async (url) => {
+    if (url === '/mini-remote/devices') return jsonResponse(200, { ok: true, devices: [] });
+    if (url === '/mini-remote/remotes') return jsonResponse(200, { ok: true, remotes: [] });
+    if (url === '/mini-remote/selfcheck') return jsonResponse(200, SELF);
+    return jsonResponse(200, ALL);
+  });
+  tree = hh.draw(Comp);
+  hh.runEffects();
+  await tick();
+  hh.runEffects();
+  await tick();
+  hh.runEffects();
+  await tick();
+
+  const groupOf = (key) => walk(tree).find((n) => n && n.props && n.props.key === 'group-' + key);
+  const hasKey = (node, key) => Boolean(walk(node).find((n) => n && n.props && n.props.key === key));
+
+  await check('顶部链接与二维码常显，五个大类全部默认收起', () => {
+    const mobile = groupOf('mobile');
+    assert.ok(mobile, '顶部手机连接组要在');
+    assert.match(textOf(mobile), /内网/);
+    assert.match(textOf(mobile), /复制地址/);
+    assert.equal(byType(mobile, 'button').filter((b) => /^(展开|收起)$/.test(textOf(b))).length, 0,
+      '顶部链接区不提供折叠按钮');
+
+    const keys = ['external', 'computers', 'agent', 'feishu', 'diagnostics'];
+    const children = {
+      external: ['tunnel', 'serve', 'b-relay', 'self-relay', 'multi-relay', 'tailscale'],
+      computers: ['remote', 'devices', 'remotes'],
+      agent: ['agent', 'bAgent'],
+      feishu: ['feishu'],
+      diagnostics: ['selfcheck'],
+    };
+    for (const key of keys) {
+      const group = groupOf(key);
+      assert.ok(group, `大类 group-${key} 要在`);
+      assert.ok(byType(group, 'button').some((b) => textOf(b) === '展开'), `group-${key} 收起时要有展开入口`);
+      for (const child of children[key]) {
+        assert.equal(hasKey(group, child), false, `group-${key} 默认收起，不该渲染 ${child}`);
+      }
+    }
+    assert.match(textOf(tree), /连接与固定地址/);
+    assert.match(textOf(tree), /电脑与设备/);
+    assert.match(textOf(tree), /A\/B 端协作/);
+    assert.match(textOf(tree), /通知与集成/);
+    assert.match(textOf(tree), /诊断与高级/);
+    const order = walk(tree)
+      .map((n) => n && n.props && n.props.key)
+      .filter((key) => typeof key === 'string' && key.startsWith('group-'));
+    assert.deepEqual(order, ['group-mobile', 'group-external', 'group-computers', 'group-agent', 'group-feishu', 'group-diagnostics'],
+      '顶部链接区保持第一，大类顺序固定');
+  });
+
+  await check('每个大类都能展开和收起，内容只在展开后出现', async () => {
+    const cases = [
+      ['external', 'tunnel'],
+      ['computers', 'remotes'],
+      ['agent', 'bAgent'],
+      ['feishu', 'feishu'],
+      ['diagnostics', 'selfcheck'],
+    ];
+    for (const [key, child] of cases) {
+      await expandSettingsGroup(tree, key);
+      assert.ok(hasKey(tree, child), `group-${key} 展开后要能看到 ${child}`);
+      assert.ok(byType(groupOf(key), 'button').some((b) => textOf(b) === '收起'), '展开后按钮要变收起');
+      await collapseSettingsGroup(tree, key);
+      assert.equal(hasKey(tree, child), false, `group-${key} 收起后 ${child} 要消失`);
+    }
+  });
+
+  await check('所有复制按钮样式一致，点击后只改自己且 1.5 秒恢复', async () => {
+    await expandSettingsGroup(tree, 'external');
+    const copies = byType(tree, 'button').filter((b) => b.props.style && b.props.style.minWidth === 72);
+    assert.ok(copies.length >= 4, '顶部地址/密码、B 固定地址、多用户中继都该有复制按钮');
+    const firstStyle = copies[0].props.style;
+    for (const one of copies) assert.deepEqual(one.props.style, firstStyle, '复制按钮样式要完全一致');
+    const firstLabel = textOf(copies[0]);
+
+    const written = [];
+    setGlobal('navigator', { clipboard: { writeText: async (value) => { written.push(value); } } });
+    copies[0].props.onClick();
+    await tick();
+    hh.runEffects();
+    await tick();
+    assert.equal(written.length, 1);
+    const done = byType(tree, 'button').filter((b) => textOf(b) === '已复制');
+    assert.equal(done.length, 1, '只改被点的那一个');
+    assert.equal(byType(tree, 'button').filter((b) => b.props.style && b.props.style.minWidth === 72).length, copies.length,
+      '别的复制按钮还在');
+
+    await new Promise((resolve) => setTimeout(resolve, 1600));
+    await tick();
+    assert.equal(byType(tree, 'button').filter((b) => textOf(b) === '已复制').length, 0, '1.5 秒后要恢复');
+    assert.ok(byType(tree, 'button').some((b) => textOf(b) === firstLabel), '恢复成原来的标签');
+  });
+
+  await check('停止等危险动作统一使用危险按钮样式', () => {
+    const bStop = byType(tree, 'button').find((b) => textOf(b) === '停止专属固定地址');
+    const multiStop = byType(tree, 'button').find((b) => textOf(b) === '停止');
+    assert.ok(bStop, 'B 固定地址要有停止按钮');
+    assert.ok(multiStop, '自建多用户中继要有停止按钮');
+    assert.deepEqual(bStop.props.style, multiStop.props.style, '所有停止按钮必须是同一套危险样式');
+    assert.match(String(bStop.props.style.color), /state-error/);
+    assert.match(String(bStop.props.style.border), /state-error/);
+  });
+
   hh.unmount();
 }
 
