@@ -3982,10 +3982,6 @@ window.__ModuleLoader__.load({
               whiteSpace: 'pre-wrap', wordBreak: 'break-word',
             }),
           }, 'cd /opt/relay-multi\nprintf \'%s\' \'新的至少12位密码\' | sudo -u relay env PYTHONPATH=/opt/relay-multi /opt/relay-multi/venv/bin/python -m control.cli set-admin --db /var/lib/relay-multi/control.db --username admin --password-stdin'),
-          h('div', { style: Object.assign({}, styles.muted, { marginTop: 8 }) },
-            '如果你是在我们这台测试服务器上试：https://admin.relay-test.tzxwdscb.icu/admin'),
-          h('div', { style: Object.assign({}, styles.muted, { marginTop: 8 }) },
-            '邀请票里已经带了控制台地址和邀请码；高级模式才需要手动填地址。frp token 只留在本机，不会显示在页面上。'),
         ) : null,
       );
     }
