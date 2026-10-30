@@ -1,2 +1,3 @@
 fastapi>=0.110,<1
 uvicorn[standard]>=0.29,<1
+qrcode[pil]>=7.4,<9

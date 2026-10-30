@@ -76,6 +76,7 @@
         <button id="create-invite" class="primary" type="button">创建邀请码</button>
       </div>
       <p>新邀请链接：<code id="invite-join">尚未创建</code></p>
+      <p><img id="invite-qr" alt="邀请链接二维码" style="display:none;width:180px;height:180px;border:1px solid #e5e7eb;border-radius:8px;background:#fff"></p>
       <p>新邀请票：<code id="invite-ticket">尚未创建</code></p>
       <p>新邀请码（高级）：<code id="invite-code">尚未创建</code></p>
       <p class="muted">邀请票把控制台地址和邀请码打包在一起；只显示这一次。服务端只保存邀请码哈希。</p>
@@ -273,6 +274,13 @@
           document.getElementById('invite-code').textContent = data.code;
           document.getElementById('invite-ticket').textContent = data.ticket || '（旧版控制面没有返回邀请票）';
           document.getElementById('invite-join').textContent = data.joinUrl || '（旧版控制面没有返回邀请链接）';
+          var qr = document.getElementById('invite-qr');
+          if (data.joinUrl) {
+            qr.src = '/admin/api/qr?data=' + encodeURIComponent(data.joinUrl);
+            qr.style.display = 'block';
+          } else {
+            qr.style.display = 'none';
+          }
           showNotice('邀请票已创建。请立刻复制；它只显示这一次。', false);
           await Promise.all([loadInvites(), loadOverview(), loadAudit()]);
         } catch (err) { showNotice(err.message, true); }

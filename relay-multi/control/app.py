@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import Depends, FastAPI, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from pydantic import BaseModel
 
 from .database import Database, consume_rate
@@ -226,6 +226,20 @@ def create_app(settings: Settings, helper=None) -> FastAPI:
     @app.get("/admin", response_class=HTMLResponse, dependencies=[Depends(require_admin)])
     def admin_page():
         return HTMLResponse(ADMIN_HTML, headers={"Cache-Control": "no-store"})
+
+    @app.get("/admin/api/qr")
+    def admin_qr(data: str, _actor: str = Depends(require_admin)):
+        if not data.startswith("https://") or len(data) > 2048:
+            raise AppError(400, "invalid_request", "二维码内容必须是 https 链接")
+        try:
+            import io
+            import qrcode
+            image = qrcode.make(data)
+            buffer = io.BytesIO()
+            image.save(buffer, format="PNG")
+            return Response(content=buffer.getvalue(), media_type="image/png")
+        except Exception:
+            raise AppError(503, "qr_unavailable", "二维码生成组件未安装，请安装 qrcode[pil]")
 
     @app.get("/admin/api/overview")
     def admin_overview(_actor: str = Depends(require_admin)):
