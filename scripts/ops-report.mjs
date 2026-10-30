@@ -2,14 +2,16 @@
 /**
  * 只读运维日报。
  *
- * 只调用 /admin/relay/v1/ops/snapshot，不写任何资源。
+ * 只调用 /admin/relay/v1/ops/snapshot，不写任何云端资源；--archive 只写本地报告文件。
  * token 从环境变量 OPS_READ_TOKEN 读；没有就退回本机文件。
  */
-import { readFileSync, existsSync } from 'node:fs'
+import { readFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
 const BASE = process.env.OPS_BASE_URL || 'https://relay.dsh-mini-remote.com'
+const ARCHIVE = process.argv.includes('--archive')
+const ARCHIVE_DIR = process.env.OPS_ARCHIVE_DIR || 'D:/X/X/16-DSH/运维/固定地址运维/日报'
 const TOKEN = process.env.OPS_READ_TOKEN
   || (existsSync(join(homedir(), '.dsh', 'dsh-mini-remote', 'ops-read-token.txt'))
     ? readFileSync(join(homedir(), '.dsh', 'dsh-mini-remote', 'ops-read-token.txt'), 'utf8').trim()
@@ -25,9 +27,18 @@ function time(ms) {
   try { return new Date(Number(ms)).toLocaleString('zh-CN', { hour12: false }) } catch { return '—' }
 }
 
-const response = await fetch(BASE + '/ops/v1/snapshot', {
-  headers: { authorization: 'Bearer ' + TOKEN },
-})
+let response
+try {
+  response = await fetch(BASE + '/ops/v1/snapshot', {
+    headers: { authorization: 'Bearer ' + TOKEN },
+    signal: AbortSignal.timeout(20_000),
+  })
+} catch (error) {
+  const text = '# 固定地址运维日报\n\n生成失败：读不到运维快照。\n\n' + String(error?.message ?? error)
+  if (ARCHIVE) archiveText(text)
+  console.error(text)
+  process.exit(1)
+}
 const body = await response.json().catch(() => ({}))
 if (!response.ok || body.ok !== true) {
   console.error('读取快照失败：HTTP ' + response.status + ' ' + (body.error || ''))
@@ -36,7 +47,9 @@ if (!response.ok || body.ok !== true) {
 
 const snap = body.snapshot
 if (!snap) {
-  console.log('# 固定地址运维日报\n\n还没有采集快照。先到运维台“可视化”页点“立即采集”。')
+  const text = '# 固定地址运维日报\n\n还没有采集快照。先到运维台“可视化”页点“立即采集”。'
+  if (ARCHIVE) archiveText(text)
+  console.log(text)
   process.exit(0)
 }
 
@@ -47,36 +60,53 @@ const ac = a.counts || {}
 const bc = b.counts || {}
 const pct = (value, limit) => limit ? (Number(value || 0) / limit * 100).toFixed(1) + '%' : '—'
 
-console.log('# 固定地址运维日报')
-console.log('')
-console.log('采集时间：' + time(snap.collectedAt))
-console.log('')
-console.log('## 共享固定地址')
-console.log('')
-console.log('| 项目 | 数值 |')
-console.log('|---|---|')
-console.log('| 活跃实例 | ' + (ac.active ?? '—') + ' |')
-console.log('| 已撤销 | ' + (ac.revoked ?? '—') + ' |')
-console.log('| 未用邀请 | ' + (ac.unusedInvites ?? '—') + ' |')
-console.log('| Workers 请求 | ' + (usage.workers?.requests ?? 0) + ' / 100000（' + pct(usage.workers?.requests, 100000) + '） |')
-console.log('| KV 请求 | ' + (usage.kv?.requests ?? 0) + ' / 100000（' + pct(usage.kv?.requests, 100000) + '） |')
-console.log('| D1 读取行 | ' + (usage.d1?.rowsRead ?? 0) + ' / 5000000 |')
-console.log('| D1 写入行 | ' + (usage.d1?.rowsWritten ?? 0) + ' / 100000 |')
-console.log('')
-console.log('## 专属固定地址')
-console.log('')
-console.log('| 项目 | 数值 |')
-console.log('|---|---|')
-console.log('| 租约总数 | ' + (bc.total ?? '—') + ' |')
-console.log('| 已连接 | ' + (bc.active ?? '—') + ' |')
-console.log('| 已释放 | ' + (bc.released ?? '—') + ' |')
-console.log('| 已退休 | ' + (bc.retired ?? '—') + ' |')
-console.log('| 控制面 | ' + (b.ok ? '正常' : (b.error || '读不到')) + ' |')
-console.log('')
-console.log('## 异常')
-console.log('')
+function archiveText(text) {
+  const date = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(new Date())
+  mkdirSync(ARCHIVE_DIR, { recursive: true })
+  const file = join(ARCHIVE_DIR, date + '.md')
+  writeFileSync(file, text.endsWith('\n') ? text : text + '\n', 'utf8')
+  console.error('已归档：' + file)
+}
+
+const lines = []
+const out = (line = '') => lines.push(line)
+out('# 固定地址运维日报')
+out('')
+out('采集时间：' + time(snap.collectedAt))
+out('')
+out('## 共享固定地址')
+out('')
+out('| 项目 | 数值 |')
+out('|---|---|')
+out('| 活跃实例 | ' + (ac.active ?? '—') + ' |')
+out('| 已撤销 | ' + (ac.revoked ?? '—') + ' |')
+out('| 未用邀请 | ' + (ac.unusedInvites ?? '—') + ' |')
+out('| Workers 请求 | ' + (usage.workers?.requests ?? 0) + ' / 100000（' + pct(usage.workers?.requests, 100000) + '） |')
+out('| KV 请求 | ' + (usage.kv?.requests ?? 0) + ' / 100000（' + pct(usage.kv?.requests, 100000) + '） |')
+out('| D1 读取行 | ' + (usage.d1?.rowsRead ?? 0) + ' / 5000000 |')
+out('| D1 写入行 | ' + (usage.d1?.rowsWritten ?? 0) + ' / 100000 |')
+out('')
+out('## 专属固定地址')
+out('')
+out('| 项目 | 数值 |')
+out('|---|---|')
+out('| 租约总数 | ' + (bc.total ?? '—') + ' |')
+out('| 已连接 | ' + (bc.active ?? '—') + ' |')
+out('| 已释放 | ' + (bc.released ?? '—') + ' |')
+out('| 已退休 | ' + (bc.retired ?? '—') + ' |')
+out('| 控制面 | ' + (b.ok ? '正常' : (b.error || '读不到')) + ' |')
+out('')
+out('## 异常')
+out('')
 const anomalies = snap.anomalies || []
-if (!anomalies.length) console.log('没有异常。')
-else for (const item of anomalies) console.log('- [' + item.level + '] ' + item.text)
-console.log('')
-console.log('> 只读日报，没有修改任何资源。')
+if (!anomalies.length) out('没有异常。')
+else for (const item of anomalies) out('- [' + item.level + '] ' + item.text)
+out('')
+out('> 只读日报，没有修改任何资源。')
+
+
+const report = lines.join('\n')
+if (ARCHIVE) archiveText(report)
+console.log(report)
