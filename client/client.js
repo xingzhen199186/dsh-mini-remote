@@ -117,6 +117,10 @@ window.__ModuleLoader__.load({
       groupSummary: { color: 'var(--dsw-alias-label-tertiary,#8b93a1)', fontSize: 12, lineHeight: 1.6, marginTop: 2 },
       groupToggle: { font: 'inherit', cursor: 'pointer', flex: 'none', height: 30, padding: '0 12px', borderRadius: 8, fontSize: 12, border: '1px solid var(--dsw-alias-button-ghost-active-border,var(--dsw-alias-border-l2,#d1d5db))', background: 'var(--dsw-alias-bg-layer-1,#fff)', color: 'var(--dsw-alias-label-primary,inherit)' },
       groupBody: { marginTop: 2 },
+      subGroup: { marginTop: 12, paddingTop: 10, borderTop: '1px solid var(--dsw-alias-border-l2,#e5e7eb)' },
+      subGroupHead: { display: 'flex', alignItems: 'center', gap: 10 },
+      subGroupTitle: { flex: '1 1 auto', minWidth: 0, fontWeight: 500, fontSize: 13, lineHeight: 1.5 },
+      subGroupBody: { marginTop: 6 },
       statusPill: { display: 'inline-flex', alignItems: 'center', padding: '2px 8px', borderRadius: 999, fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap' },
       entryTitle: { fontWeight: 600, fontSize: 14, lineHeight: 1.5 },
       // 连接方式条目（内网/Tailscale/公网…）的次级标题：组→项两级，和区块标题拉开。
@@ -596,6 +600,19 @@ window.__ModuleLoader__.load({
       var externalGroupState = useState(false);
       var externalGroupOpen = externalGroupState[0];
       var setExternalGroupOpen = externalGroupState[1];
+      var externalSubState = useState({
+        tailscale: false, tunnel: false, bRelay: false,
+        selfRelay: false, multiRelay: false, serve: false,
+      });
+      var externalSubs = externalSubState[0];
+      var setExternalSubs = externalSubState[1];
+      var toggleExternalSub = function (key) {
+        setExternalSubs(function (prev) {
+          var next = Object.assign({}, prev);
+          next[key] = !next[key];
+          return next;
+        });
+      };
       var computersGroupState = useState(false);
       var computersGroupOpen = computersGroupState[0];
       var setComputersGroupOpen = computersGroupState[1];
@@ -2365,6 +2382,8 @@ window.__ModuleLoader__.load({
         }, {
           externalOpen: externalGroupOpen,
           toggleExternal: function () { setExternalGroupOpen(function (v) { return !v; }); },
+          externalSubs: externalSubs,
+          toggleExternalSub: toggleExternalSub,
           computersOpen: computersGroupOpen,
           toggleComputers: function () { setComputersGroupOpen(function (v) { return !v; }); },
           agentOpen: agentGroupOpen,
@@ -2465,10 +2484,10 @@ window.__ModuleLoader__.load({
       // Tailscale 那一行：**没探到的时候也要出现**。原来它是直接不显示的，
       // 用户看到的不是「你没有 Tailscale」，而是「这里什么都没有」——他不知道
       // 自己缺了什么，也就不会去装。而他恰恰是最需要这条路的人。
-      if (info.tailscale) external.push(tailscaleBlock(info.tailscale));
+      if (info.tailscale) external.push(collapsibleSub('tailscale', 'Tailscale 提示', groups.externalSubs.tailscale, groups.toggleExternalSub, tailscaleBlock(info.tailscale)));
       // 出错时也要把开关露出来：不然「隧道起不来」会让整个面板变成一条报错，
       // 用户连关掉它的地方都找不到。
-      if (info.tunnel) external.push(tunnelBlock(info.tunnel, busy, toggle, {
+      if (info.tunnel) external.push(collapsibleSub('tunnel', '公网访问', groups.externalSubs.tunnel, groups.toggleExternalSub, tunnelBlock(info.tunnel, busy, toggle, {
         token: named.token,
         publicUrl: named.publicUrl,
         setToken: named.setToken,
@@ -2480,10 +2499,10 @@ window.__ModuleLoader__.load({
           toggle(true, { mode: 'named', namedToken: named.token, publicUrl: named.publicUrl });
         },
         stop: function () { toggle(false, { mode: 'named' }); },
-      }, relayUi));
-      if (info.bRelay && bRelay) external.push(bRelayBlock(info.bRelay, bRelay, busy, copied));
+      }, relayUi)));
+      if (info.bRelay && bRelay) external.push(collapsibleSub('bRelay', '专属固定地址', groups.externalSubs.bRelay, groups.toggleExternalSub, bRelayBlock(info.bRelay, bRelay, busy, copied)));
       if (info.selfRelay && relay) {
-        external.push(selfRelayBlock({
+        external.push(collapsibleSub('selfRelay', '自建中继（单用户）', groups.externalSubs.selfRelay, groups.toggleExternalSub, selfRelayBlock({
           draft: relay.draft,
           info: relay.info || info.selfRelay,
           note: relay.note,
@@ -2498,15 +2517,15 @@ window.__ModuleLoader__.load({
           start: relay.start,
           test: relay.test,
           stop: relay.stop,
-        }, copied, copy));
+        }, copied, copy)));
       }
       if (info.multiRelay && multiRelay) {
-        external.push(multiRelayBlock(info.multiRelay, multiRelay, busy, copied));
+        external.push(collapsibleSub('multiRelay', '自建多用户中继', groups.externalSubs.multiRelay, groups.toggleExternalSub, multiRelayBlock(info.multiRelay, multiRelay, busy, copied)));
       }
       // HTTPS 那一块：**不管配对信息成功还是失败都要出现**。失败时尤其要出现——
       // tailnet 没开 Serve 的时候，用户需要的正是那条开启链接，而那时候面板上
       // 其它东西多半也在报错，正好是他最需要指路的时候。
-      if (info.serve || serve.error) external.push(serveBlock(info.serve, serve, busy));
+      if (info.serve || serve.error) external.push(collapsibleSub('serve', 'Tailscale HTTPS', groups.externalSubs.serve, groups.toggleExternalSub, serveBlock(info.serve, serve, busy)));
       // 飞书那一块：**只要服务端带了 feishu 就出现**（成功、失败、服务还没起来那几条
       // 路径上都带着它）。它是独立的一条通路，手机服务有没有起来都不该拦着用户改它。
       // 草稿还没填好时 feishuBlock 返回 null：不摆一个只有标题的空组。
@@ -2537,6 +2556,22 @@ window.__ModuleLoader__.load({
         settingsGroup('diagnostics', '诊断与高级', groups.diagnosticsOpen, groups.toggleDiagnostics, diagnostics,
           '版本、进程、接口、服务与最近错误。'),
       ]);
+    }
+
+    /** 大类内部的小分类：默认收起，标题旁只留展开/收起。 */
+    function collapsibleSub(key, title, open, toggle, child) {
+      if (!child) return null;
+      return h('div', { key: 'sub-' + key, style: styles.subGroup },
+        h('div', { style: styles.subGroupHead },
+          h('div', { style: styles.subGroupTitle }, title),
+          h('button', {
+            type: 'button',
+            onClick: function () { toggle(key); },
+            style: styles.groupToggle,
+          }, open ? '收起：' + title : '展开：' + title),
+        ),
+        open ? h('div', { style: styles.subGroupBody }, child) : null,
+      );
     }
 
     /**

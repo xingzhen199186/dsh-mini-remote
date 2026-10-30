@@ -80,6 +80,21 @@ const expandSettingsGroup = async (tree, key) => {
   }
 };
 
+/** 展开连接与固定地址内部的全部小分类。传入 getTree，确保每次点击后拿到最新树。 */
+const expandExternalSubs = async (getTree) => {
+  const titles = ['Tailscale 提示', '公网访问', '专属固定地址', '自建中继（单用户）', '自建多用户中继', 'Tailscale HTTPS'];
+  for (const title of titles) {
+    const tree = getTree();
+    const group = walk(tree).find((n) => n && n.props && n.props.key === 'group-external');
+    if (!group) continue;
+    const button = byType(group, 'button').find((b) => textOf(b) === '展开：' + title);
+    if (button) {
+      button.props.onClick();
+      await tick();
+    }
+  }
+};
+
 const collapseSettingsGroup = async (tree, key) => {
   const group = walk(tree).find((n) => n && n.props && n.props.key === 'group-' + key);
   assert.ok(group, `设置页应有分组 group-${key}`);
@@ -970,6 +985,7 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
     h6.runEffects();
     await tick();
     await expandSettingsGroup(tree6, 'external');
+    await expandExternalSubs(() => tree6);
   };
 
   await check('公网没开时：开关是未选中的，并且说明「出门进不来」', async () => {
@@ -1101,6 +1117,7 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
   h7.runEffects();
   await tick();
   await expandSettingsGroup(tree7, 'external');
+    await expandExternalSubs(() => tree7);
 
   await check('固定域名隧道：地址回填，保存时带 mode=named', async () => {
     const text = textOf(tree7);
@@ -1172,6 +1189,7 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
   h8.runEffects();
   await tick();
   await expandSettingsGroup(tree8, 'external');
+    await expandExternalSubs(() => tree8);
 
   await check('命名隧道恢复中：说正在恢复，并给立即重试', async () => {
     const text = textOf(tree8);
@@ -1245,6 +1263,7 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
     h9.runEffects();
     await tick();
     await expandSettingsGroup(tree9, 'external');
+    await expandExternalSubs(() => tree9);
   };
 
   await check('B 固定地址 running：显示固定地址，停止按钮 POST action=stop', async () => {
@@ -1383,6 +1402,7 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
     h10.runEffects();
     await tick();
     await expandSettingsGroup(tree10, 'external');
+    await expandExternalSubs(() => tree10);
   };
 
   await check('自建多用户中继 running：显示固定地址、重连/停止按钮和复制反馈', async () => {
@@ -1543,6 +1563,7 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
     h.runEffects();
     await tick();
     await expandSettingsGroup(tree7, 'external');
+    await expandExternalSubs(() => tree7);
   };
 
   await check('HTTPS 没开时：开关未选中，并说清楚开了能换来什么', async () => {
@@ -2863,6 +2884,7 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
     fresh();
     const st = await mountRemotes(listOf([]), () => ({ ok: true }));
     await expandSettingsGroup(st.tree, 'external');
+    await expandExternalSubs(() => st.tree);
     const selfBlock = () => walk(st.tree).find((n) => n && n.props && n.props.key === 'self-relay');
     assert.match(textOf(selfBlock()), /未配置。展开后/, '自建中继默认收起');
     const expandBtn = buttonIn(selfBlock(), '展开');
@@ -3303,6 +3325,27 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
       '顶部链接区保持第一，大类顺序固定');
   });
 
+  await check('连接与固定地址内部的小分类默认收起，展开后才出现', async () => {
+    const group = groupOf('external');
+    const top = byType(group, 'button').find((b) => textOf(b) === '展开');
+    assert.ok(top, '大类本身要能展开');
+    top.props.onClick();
+    await tick();
+    const expandedGroup = groupOf('external');
+    assert.ok(byType(expandedGroup, 'button').some((b) => textOf(b) === '展开：公网访问'), '内部小分类要有展开入口');
+    assert.equal(hasKey(expandedGroup, 'tunnel'), false, '内部小分类默认收起，不应渲染公网访问内容');
+    const sub = byType(expandedGroup, 'button').find((b) => textOf(b) === '展开：公网访问');
+    sub.props.onClick();
+    await tick();
+    assert.ok(hasKey(groupOf('external'), 'tunnel'), '展开小分类后才出现公网访问内容');
+    const closeSub = byType(groupOf('external'), 'button').find((b) => textOf(b) === '收起：公网访问');
+    assert.ok(closeSub, '小分类展开后要能收起');
+    closeSub.props.onClick();
+    await tick();
+    assert.equal(hasKey(groupOf('external'), 'tunnel'), false, '小分类收起后内容消失');
+    await collapseSettingsGroup(tree, 'external');
+  });
+
   await check('每个大类都能展开和收起，内容只在展开后出现', async () => {
     const cases = [
       ['external', 'tunnel'],
@@ -3313,6 +3356,7 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
     ];
     for (const [key, child] of cases) {
       await expandSettingsGroup(tree, key);
+      if (key === 'external') await expandExternalSubs(() => tree);
       assert.ok(hasKey(tree, child), `group-${key} 展开后要能看到 ${child}`);
       assert.ok(byType(groupOf(key), 'button').some((b) => textOf(b) === '收起'), '展开后按钮要变收起');
       await collapseSettingsGroup(tree, key);
@@ -3322,6 +3366,7 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
 
   await check('所有复制按钮样式一致，点击后只改自己且 1.5 秒恢复', async () => {
     await expandSettingsGroup(tree, 'external');
+    await expandExternalSubs(() => tree);
     const copies = byType(tree, 'button').filter((b) => b.props.style && b.props.style.minWidth === 72);
     assert.ok(copies.length >= 4, '顶部地址/密码、B 固定地址、多用户中继都该有复制按钮');
     const firstStyle = copies[0].props.style;
