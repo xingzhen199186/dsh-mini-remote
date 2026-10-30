@@ -1423,12 +1423,20 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
       errorCode: null,
     });
     await mount10(off);
+    const ticketInput = byType(tree10, 'input').find((n) => n.props.type === 'password');
+    assert.ok(ticketInput, '默认要有邀请票输入框');
+    assert.match(ticketInput.props.placeholder, /邀请票/);
+    assert.ok(!byType(tree10, 'input').some((n) => n.props.type === 'url'), '默认不暴露控制台地址');
+    const advanced = byType(tree10, 'button').find((b) => textOf(b) === '高级模式：手动填控制台地址和邀请码');
+    assert.ok(advanced, '要有高级模式入口');
+    advanced.props.onClick();
+    await tick();
     const inputs = byType(tree10, 'input');
     const urlInput = inputs.find((n) => n.props.type === 'url');
-    assert.ok(urlInput, '要有控制台地址输入框');
+    assert.ok(urlInput, '高级模式要有控制台地址输入框');
     assert.equal(urlInput.props.value, MULTI_CONTROL);
-    const codeInput = inputs.find((n) => n.props.type === 'password');
-    assert.ok(codeInput, '要有邀请码密码框');
+    const codeInput = inputs.find((n) => n.props.type === 'password' && String(n.props.placeholder).includes('一次性邀请码'));
+    assert.ok(codeInput, '高级模式要有邀请码密码框');
     codeInput.props.onChange({ target: { value: 'invite-code-123' } });
     await tick();
     const start = byType(tree10, 'button').find((b) => textOf(b) === '开通并连接');
@@ -1446,6 +1454,31 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
     const passwordAfter = byType(tree10, 'input').find((n) => n.props.type === 'password');
     assert.equal(passwordAfter.props.value, '', '开通成功后邀请码要清空');
     assert.doesNotMatch(textOf(tree10), /frpToken/i, '界面不显示 token');
+    h10.unmount();
+  });
+
+  await check('自建多用户中继：粘贴邀请票后只 POST ticket，不需要控制台地址', async () => {
+    posted10 = [];
+    const off = withMulti({
+      enabled: false,
+      state: 'idle',
+      controlUrl: '',
+      publicHost: '',
+      url: null,
+      reconnectable: false,
+      lastError: null,
+      error: null,
+      errorCode: null,
+    });
+    await mount10(off);
+    const ticketInput = byType(tree10, 'input').find((n) => n.props.type === 'password');
+    ticketInput.props.onChange({ target: { value: 'relay1.test-ticket' } });
+    await tick();
+    const start = byType(tree10, 'button').find((b) => textOf(b) === '开通并连接');
+    start.props.onClick();
+    await tick();
+    assert.equal(posted10.length, 1);
+    assert.deepEqual(posted10[0], { action: 'start', ticket: 'relay1.test-ticket' });
     h10.unmount();
   });
 }

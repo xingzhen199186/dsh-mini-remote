@@ -697,6 +697,12 @@ window.__ModuleLoader__.load({
       var multiGuideState = useState(false);
       var multiGuideOpen = multiGuideState[0];
       var setMultiGuideOpen = multiGuideState[1];
+      var multiTicketState = useState('');
+      var multiTicket = multiTicketState[0];
+      var setMultiTicket = multiTicketState[1];
+      var multiAdvancedState = useState(false);
+      var multiAdvancedOpen = multiAdvancedState[0];
+      var setMultiAdvancedOpen = multiAdvancedState[1];
       var multiInitRef = useRef(false);
       // Cloudflare 命名隧道：固定域名 + token。token 不回显，留空表示沿用已保存的。
       var namedTunnelState = useState({ token: '', publicUrl: '' });
@@ -1038,8 +1044,12 @@ window.__ModuleLoader__.load({
         setMultiRelayError(null);
         var body = { action: action };
         if (action === 'start') {
-          body.controlUrl = multiControl.trim();
-          body.inviteCode = multiInvite.trim();
+          var ticket = multiTicket.trim();
+          if (ticket) body.ticket = ticket;
+          else {
+            body.controlUrl = multiControl.trim();
+            body.inviteCode = multiInvite.trim();
+          }
         }
         fetch(MULTI_RELAY_PATH, {
           method: 'POST',
@@ -1061,7 +1071,10 @@ window.__ModuleLoader__.load({
               if (action === 'start' && payload.multiRelay.controlUrl) {
                 setMultiControl(payload.multiRelay.controlUrl);
               }
-              if (action === 'start' && payload.multiRelay.reconnectable) setMultiInvite('');
+              if (action === 'start' && payload.multiRelay.reconnectable) {
+                setMultiInvite('');
+                setMultiTicket('');
+              }
             }
             if (!payload || !payload.ok) {
               setMultiRelayError(
@@ -2376,6 +2389,10 @@ window.__ModuleLoader__.load({
           setControlUrl: setMultiControl,
           inviteCode: multiInvite,
           setInviteCode: setMultiInvite,
+          ticket: multiTicket,
+          setTicket: setMultiTicket,
+          advancedOpen: multiAdvancedOpen,
+          toggleAdvanced: function () { setMultiAdvancedOpen(function (v) { return !v; }); },
           guideOpen: multiGuideOpen,
           toggleGuide: function () { setMultiGuideOpen(function (v) { return !v; }); },
           error: multiRelayError,
@@ -3832,29 +3849,48 @@ window.__ModuleLoader__.load({
           '连接你自己或管理员搭建的 relay-multi 控制台。填 https 控制台地址和一次性邀请码，'
           + '开通后得到固定地址。服务器、域名和流量都由服务方自己持有。'),
         h('label', { style: { display: 'block', marginTop: 10 } },
-          h('div', { style: styles.muted }, '控制台地址'),
-          h('input', {
-            type: 'url',
-            value: relay.controlUrl || '',
-            placeholder: 'https://admin.relay.example.com',
-            spellCheck: false,
-            disabled: Boolean(busy) || running || claiming,
-            onChange: function (e) { relay.setControlUrl(e.target.value); },
-            style: Object.assign({}, styles.monoInput, { marginTop: 4 }),
-          }),
-        ),
-        h('label', { style: { display: 'block', marginTop: 10 } },
-          h('div', { style: styles.muted }, '邀请码'),
+          h('div', { style: styles.muted }, '邀请票'),
           h('input', {
             type: 'password',
-            value: relay.inviteCode || '',
-            placeholder: st.reconnectable ? '已有身份，无需再填' : '一次性邀请码',
+            value: relay.ticket || '',
+            placeholder: st.reconnectable ? '已有身份，无需再填' : '粘贴管理员发来的邀请票',
             spellCheck: false,
             disabled: Boolean(busy) || running || claiming,
-            onChange: function (e) { relay.setInviteCode(e.target.value); },
+            onChange: function (e) { relay.setTicket(e.target.value); },
             style: Object.assign({}, styles.monoInput, { marginTop: 4 }),
           }),
         ),
+        h('button', {
+          type: 'button',
+          style: Object.assign({}, styles.link, { marginTop: 8, background: 'transparent', border: 0, padding: 0, cursor: 'pointer' }),
+          onClick: relay.toggleAdvanced,
+        }, relay.advancedOpen ? '收起高级模式' : '高级模式：手动填控制台地址和邀请码'),
+        relay.advancedOpen ? h('div', {},
+          h('label', { style: { display: 'block', marginTop: 10 } },
+            h('div', { style: styles.muted }, '控制台地址'),
+            h('input', {
+              type: 'url',
+              value: relay.controlUrl || '',
+              placeholder: 'https://admin.relay.example.com',
+              spellCheck: false,
+              disabled: Boolean(busy) || running || claiming,
+              onChange: function (e) { relay.setControlUrl(e.target.value); },
+              style: Object.assign({}, styles.monoInput, { marginTop: 4 }),
+            }),
+          ),
+          h('label', { style: { display: 'block', marginTop: 10 } },
+            h('div', { style: styles.muted }, '邀请码'),
+            h('input', {
+              type: 'password',
+              value: relay.inviteCode || '',
+              placeholder: st.reconnectable ? '已有身份，无需再填' : '一次性邀请码',
+              spellCheck: false,
+              disabled: Boolean(busy) || running || claiming,
+              onChange: function (e) { relay.setInviteCode(e.target.value); },
+              style: Object.assign({}, styles.monoInput, { marginTop: 4 }),
+            }),
+          ),
+        ) : null,
         h('div', { style: { display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 12 } },
           stopButton, reconnectButton, startButton),
         h('div', { style: { marginTop: 10 } },
@@ -3932,11 +3968,11 @@ window.__ModuleLoader__.load({
           h('div', { style: styles.muted },
             '5. 安装完会打印管理后台网址、管理员用户名 admin 和初始密码；密码只显示一次，先保存。打开后台时如果显示 Not Found，就在地址后面加 /admin。'),
           h('div', { style: styles.muted },
-            '6. 回到这里，控制台地址填管理后台网址，邀请码填刚创建的，点「开通并连接」。'),
+            '6. 回到这里，粘贴管理员给的邀请票，点「开通并连接」。普通用户不需要知道控制台地址。'),
           h('div', { style: Object.assign({}, styles.muted, { marginTop: 8 }) },
             '如果你不会登录服务器：把这一页截图发给服务器管理员，让他做第 1～5 步；你只做第 6 步。'),
           h('div', { style: styles.muted },
-            '被邀请的人不需要管理员用户名和密码，只需要控制台地址和邀请码。'),
+            '被邀请的人不需要管理员用户名和密码，只需要一张邀请票。'),
           h('div', { style: styles.muted },
             '如果管理员密码丢了：在服务器上执行下面的命令重置（新密码至少 12 位）。'),
           h('div', {
@@ -3948,7 +3984,7 @@ window.__ModuleLoader__.load({
           h('div', { style: Object.assign({}, styles.muted, { marginTop: 8 }) },
             '如果你是在我们这台测试服务器上试：https://admin.relay-test.tzxwdscb.icu/admin'),
           h('div', { style: Object.assign({}, styles.muted, { marginTop: 8 }) },
-            '控制台地址填管理后台，不要填租户地址。frp token 只留在本机，不会显示在页面上。'),
+            '邀请票里已经带了控制台地址和邀请码；高级模式才需要手动填地址。frp token 只留在本机，不会显示在页面上。'),
         ) : null,
       );
     }

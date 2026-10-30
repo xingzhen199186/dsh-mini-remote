@@ -266,6 +266,7 @@ if [ ! -f "$ENV_FILE" ]; then
 RELAY_DB=${DB_FILE}
 RELAY_PEPPER=${PEPPER}
 RELAY_DOMAIN=${DOMAIN}
+RELAY_ADMIN_URL=https://${ADMIN_HOST}
 RELAY_ADMIN_USER=admin
 RELAY_DEFAULT_MAX_TENANTS=${MAX_TENANTS}
 RELAY_HELPER=${HELPER_BIN}
@@ -397,6 +398,12 @@ nginx -t >/dev/null || die "Nginx 自检失败。"
 DB_CHECK="$(cd "$APP_DIR" && runuser -u relay -- "$APP_DIR/venv/bin/python" -m control.cli check-db --db "$DB_FILE")"
 [ "$DB_CHECK" = "ok" ] || die "SQLite 自检失败：${DB_CHECK}"
 
+ADMIN_TICKET=""
+if [ "$ADMIN_CREATED" -eq 1 ]; then
+  PEPPER_VALUE="$(sed -n 's/^RELAY_PEPPER=//p' "$ENV_FILE" | head -n1)"
+  ADMIN_TICKET="$(cd "$APP_DIR" && runuser -u relay -- env RELAY_PEPPER="$PEPPER_VALUE"     "$APP_DIR/venv/bin/python" -m control.cli create-invite     --db "$DB_FILE" --admin-url "https://${ADMIN_HOST}" --expires-days 1 2>/dev/null     | sed -n 's/.*"ticket": "\([^"]*\)".*/\1/p' | head -n1)"
+fi
+
 say ""
 say "安装完成。"
 say "管理后台：https://${ADMIN_HOST}"
@@ -404,6 +411,10 @@ if [ "$ADMIN_CREATED" -eq 1 ]; then
   say "管理员用户名：admin"
   say "管理员初始密码：${ADMIN_PASSWORD}"
   say "密码只显示这一次；请立刻保存到密码管理器。"
+  if [ -n "$ADMIN_TICKET" ]; then
+    say "管理员自用邀请票：${ADMIN_TICKET}"
+    say "自用邀请票 24 小时有效，只显示这一次；可直接粘贴到插件。"
+  fi
 else
   say "管理员账号已存在，本次没有改动密码。"
 fi

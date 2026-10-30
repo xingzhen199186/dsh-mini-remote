@@ -11,6 +11,7 @@ class Settings:
     db_path: str
     pepper: str
     domain: str = "relay.local"
+    admin_url: str = ""
     admin_user: str = "admin"
     default_max_tenants: int = 20
     helper_path: str = "/usr/local/lib/relay-multi/helper"
@@ -31,6 +32,7 @@ class Settings:
             db_path=os.environ.get("RELAY_DB", "/var/lib/relay-multi/control.db"),
             pepper=pepper,
             domain=domain,
+            admin_url=os.environ.get("RELAY_ADMIN_URL", f"https://admin.{domain}").rstrip("/"),
             admin_user=os.environ.get("RELAY_ADMIN_USER", "admin"),
             default_max_tenants=max_tenants,
             helper_path=os.environ.get("RELAY_HELPER", "/usr/local/lib/relay-multi/helper"),

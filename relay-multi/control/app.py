@@ -20,6 +20,7 @@ from .database import Database, consume_rate
 from .helper import HelperError, SudoHelper
 from .security import random_tenant_id, random_token, secret_hash, verify_password
 from .settings import Settings
+from .ticket import build_ticket
 
 TENANT_ID_RE = re.compile(r"^[a-z2-7]{26}$")
 SECRET_RE = re.compile(r"^[A-Za-z0-9_-]{43}$")
@@ -348,7 +349,13 @@ def create_app(settings: Settings, helper=None) -> FastAPI:
             )
             audit(conn, actor, "invite.create", invite_id, {"expiresAt": expires})
             conn.commit()
-            return {"ok": True, "id": invite_id, "code": code, "expiresAt": expires}
+            return {
+                "ok": True,
+                "id": invite_id,
+                "code": code,
+                "ticket": build_ticket(settings.admin_url, code, expires),
+                "expiresAt": expires,
+            }
         finally:
             conn.close()
 

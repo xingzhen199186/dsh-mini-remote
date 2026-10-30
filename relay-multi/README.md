@@ -126,8 +126,8 @@ Let's Encrypt 证书目录不会由脚本删除，避免影响同一台机器上
 1. 浏览器打开 `https://admin.relay.example.com`。
 2. 浏览器弹出 Basic Auth，输入安装时打印的 `admin` 和密码。
 3. 在「邀请」页创建邀请码。邀请码只显示一次，服务端只保存哈希。
-4. 把邀请码发给朋友。
-5. 朋友在插件里选择自建中继路线，填入邀请码。
+4. 把邀请票发给朋友；管理员自己也可以用安装时打印的自用邀请票。
+5. 朋友在插件里粘贴邀请票，不需要知道控制台地址。
 6. 控制面创建租户，root helper 创建 frps、Nginx、证书，返回：
 
 ```json
@@ -184,7 +184,7 @@ GET  /admin/api/invites
 GET  /admin/api/audit
 GET  /admin/api/config
 POST /admin/api/config
-POST /admin/api/invites
+POST /admin/api/invites  → { code, ticket, expiresAt }
 POST /admin/api/tenants/{id}/revoke
 ```
 

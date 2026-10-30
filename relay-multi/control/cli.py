@@ -3,9 +3,15 @@
 from __future__ import annotations
 
 import argparse
+import json
+import os
 import sys
+import time
+import uuid
 
 from .database import Database
+from .security import random_token, secret_hash
+from .ticket import build_ticket
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -24,6 +30,12 @@ def main(argv: list[str] | None = None) -> int:
     set_admin.add_argument("--db", required=True)
     set_admin.add_argument("--username", default="admin")
     set_admin.add_argument("--password-stdin", action="store_true")
+
+    create_invite = sub.add_parser("create-invite")
+    create_invite.add_argument("--db", required=True)
+    create_invite.add_argument("--admin-url", required=True)
+    create_invite.add_argument("--expires-days", type=int, default=1)
+    create_invite.add_argument("--pepper", default=os.environ.get("RELAY_PEPPER", ""))
 
     check = sub.add_parser("check-db")
     check.add_argument("--db", required=True)
@@ -54,6 +66,34 @@ def main(argv: list[str] | None = None) -> int:
         db.initialize()
         db.set_admin(args.username, password=password)
         print("admin updated")
+        return 0
+
+    if args.command == "create-invite":
+        if not args.pepper:
+            print("缺少 RELAY_PEPPER", file=sys.stderr)
+            return 2
+        if not 1 <= args.expires_days <= 30:
+            print("expires-days 必须在 1..30", file=sys.stderr)
+            return 2
+        code = random_token(32)
+        invite_id = str(uuid.uuid4())
+        created = int(time.time() * 1000)
+        expires = created + args.expires_days * 24 * 60 * 60 * 1000
+        db.initialize()
+        conn = db.connect()
+        try:
+            conn.execute(
+                "INSERT INTO invites (invite_id, code_hash, created_at, expires_at) VALUES (?, ?, ?, ?)",
+                (invite_id, secret_hash(args.pepper, "invite", code), created, expires),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        print(json.dumps({
+            "ticket": build_ticket(args.admin_url, code, expires),
+            "code": code,
+            "expiresAt": expires,
+        }, ensure_ascii=False))
         return 0
 
     if args.command == "check-db":

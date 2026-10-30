@@ -51,6 +51,7 @@ def build_context(tmp_path, name="app", **overrides):
         "db_path": str(base / "control.db"),
         "pepper": "test-pepper",
         "domain": "relay.example.com",
+        "admin_url": "https://admin.relay.example.com",
         "admin_user": ADMIN_USER,
         "default_max_tenants": 5,
         "claim_ip_limit": 100,
@@ -162,6 +163,12 @@ def test_invite_creation_and_listing_do_not_expose_plaintext(tmp_path):
     _, _, db, client = build_context(tmp_path, name="invite")
     invite = make_invite(client)
     assert len(invite["code"]) >= 32
+    assert invite["ticket"].startswith("relay1.")
+    payload = json.loads(base64.urlsafe_b64decode(
+        invite["ticket"][len("relay1."):] + "=" * (-len(invite["ticket"][len("relay1."):]) % 4)
+    ))
+    assert payload["u"] == "https://admin.relay.example.com"
+    assert payload["c"] == invite["code"]
     conn = db.connect()
     try:
         row = conn.execute("SELECT * FROM invites").fetchone()

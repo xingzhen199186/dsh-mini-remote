@@ -75,8 +75,9 @@
         </label>
         <button id="create-invite" class="primary" type="button">创建邀请码</button>
       </div>
-      <p>新邀请码：<code id="invite-code">尚未创建</code></p>
-      <p class="muted">邀请码只显示这一次。服务端只保存哈希。</p>
+      <p>新邀请票：<code id="invite-ticket">尚未创建</code></p>
+      <p>新邀请码（高级）：<code id="invite-code">尚未创建</code></p>
+      <p class="muted">邀请票把控制台地址和邀请码打包在一起；只显示这一次。服务端只保存邀请码哈希。</p>
       <table>
         <thead><tr><th>邀请 ID</th><th>状态</th><th>创建时间</th><th>过期时间</th><th>使用租户</th></tr></thead>
         <tbody id="invite-rows"></tbody>
@@ -269,7 +270,8 @@
         try {
           var data = await api('/admin/api/invites', { method: 'POST', body: JSON.stringify({ expiresInDays: days }) });
           document.getElementById('invite-code').textContent = data.code;
-          showNotice('邀请码已创建。请立刻复制；它只显示这一次。', false);
+          document.getElementById('invite-ticket').textContent = data.ticket || '（旧版控制面没有返回邀请票）';
+          showNotice('邀请票已创建。请立刻复制；它只显示这一次。', false);
           await Promise.all([loadInvites(), loadOverview(), loadAudit()]);
         } catch (err) { showNotice(err.message, true); }
       });
