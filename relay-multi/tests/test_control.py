@@ -112,6 +112,10 @@ def test_health_public_and_admin_basic_auth(tmp_path):
     )
     assert wrong.status_code == 401
 
+    root = client.get("/", follow_redirects=False)
+    assert root.status_code == 307
+    assert root.headers["location"] == "/admin"
+
     page = client.get("/admin", headers=admin_header())
     assert page.status_code == 200
     text = page.text

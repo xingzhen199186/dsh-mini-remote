@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import Depends, FastAPI, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel
 
 from .database import Database, consume_rate
@@ -194,6 +194,10 @@ def create_app(settings: Settings, helper=None) -> FastAPI:
         view = tenant_view(row)
         view.update({"ok": True, "tokenIssued": False})
         return view
+
+    @app.get("/", include_in_schema=False)
+    def root():
+        return RedirectResponse("/admin", status_code=307)
 
     @app.get("/health")
     def health():
