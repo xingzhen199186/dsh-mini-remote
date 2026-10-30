@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import html
 import json
 import re
 import secrets
@@ -20,7 +21,7 @@ from .database import Database, consume_rate
 from .helper import HelperError, SudoHelper
 from .security import random_tenant_id, random_token, secret_hash, verify_password
 from .settings import Settings
-from .ticket import build_ticket
+from .ticket import build_join_url, build_ticket
 
 TENANT_ID_RE = re.compile(r"^[a-z2-7]{26}$")
 SECRET_RE = re.compile(r"^[A-Za-z0-9_-]{43}$")
@@ -200,6 +201,19 @@ def create_app(settings: Settings, helper=None) -> FastAPI:
     def root():
         return RedirectResponse("/admin", status_code=307)
 
+    @app.get("/join/{code}", response_class=HTMLResponse, include_in_schema=False)
+    def join_page(code: str):
+        safe = html.escape(code)
+        return HTMLResponse(
+            "<!doctype html><meta charset='utf-8'><title>加入中继</title>"
+            "<style>body{font:16px/1.6 system-ui;max-width:680px;margin:12vh auto;padding:0 24px}"
+            "code{background:#f3f4f6;padding:3px 6px;border-radius:5px;word-break:break-all}</style>"
+            "<h1>加入这个中继</h1>"
+            "<p>请在 DSH 的「自建多用户中继」里粘贴下面这条邀请链接：</p>"
+            f"<p><code>https://{html.escape(settings.admin_url.split('://')[-1])}/join/{safe}</code></p>"
+            "<p class='muted'>链接一次性使用，过期失效。不要在公开群里转发。</p>"
+        )
+
     @app.get("/health")
     def health():
         conn = get_conn()
@@ -354,6 +368,7 @@ def create_app(settings: Settings, helper=None) -> FastAPI:
                 "id": invite_id,
                 "code": code,
                 "ticket": build_ticket(settings.admin_url, code, expires),
+                "joinUrl": build_join_url(settings.admin_url, code),
                 "expiresAt": expires,
             }
         finally:

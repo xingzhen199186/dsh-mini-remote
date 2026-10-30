@@ -122,3 +122,32 @@ test('网络错误和非法控制台地址返回可读错误', async () => {
   assert.equal(bad.code, 'invalid_control_url')
   assert.match(bad.message, /只填 https/)
 })
+
+test('管理员密码先创建自用邀请，再 claim；密码只用于 Basic Auth', async () => {
+  const calls = []
+  const client = createMultiRelayClient({
+    identity: { ...IDENTITY, id: null, publicHost: null, controlHost: null, frpToken: null },
+    controlUrl: CONTROL,
+    fetchFn: async (url, init) => {
+      calls.push({ url, init })
+      if (url.endsWith('/admin/api/invites')) {
+        return response(200, { ok: true, code: 'self-use-code-1234567890' })
+      }
+      return response(200, {
+        ok: true,
+        id: IDENTITY.id,
+        publicHost: IDENTITY.publicHost,
+        controlHost: IDENTITY.controlHost,
+        frpsPort: 443,
+        transport: 'wss',
+        frpToken: IDENTITY.frpToken,
+        tokenIssued: true,
+      })
+    },
+  })
+  const result = await client.claimAsAdmin({ adminPassword: 'admin-secret', originPort: 3090 })
+  assert.equal(result.ok, true)
+  assert.equal(calls.length, 2)
+  assert.match(calls[0].init.headers.authorization, /^Basic /)
+  assert.equal(JSON.parse(calls[1].init.body).inviteCode, 'self-use-code-1234567890')
+})

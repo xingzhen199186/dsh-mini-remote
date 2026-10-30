@@ -169,6 +169,7 @@ def test_invite_creation_and_listing_do_not_expose_plaintext(tmp_path):
     ))
     assert payload["u"] == "https://admin.relay.example.com"
     assert payload["c"] == invite["code"]
+    assert invite["joinUrl"] == "https://admin.relay.example.com/join/" + invite["code"]
     conn = db.connect()
     try:
         row = conn.execute("SELECT * FROM invites").fetchone()

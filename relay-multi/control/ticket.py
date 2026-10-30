@@ -17,3 +17,7 @@ def build_ticket(admin_url: str, code: str, expires_at: int) -> str:
     }
     raw = json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
     return PREFIX + base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+
+def build_join_url(admin_url: str, code: str) -> str:
+    return f"{str(admin_url).rstrip('/')}/join/{code}"

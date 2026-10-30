@@ -703,6 +703,9 @@ window.__ModuleLoader__.load({
       var multiAdvancedState = useState(false);
       var multiAdvancedOpen = multiAdvancedState[0];
       var setMultiAdvancedOpen = multiAdvancedState[1];
+      var multiAdminPasswordState = useState('');
+      var multiAdminPassword = multiAdminPasswordState[0];
+      var setMultiAdminPassword = multiAdminPasswordState[1];
       var multiInitRef = useRef(false);
       // Cloudflare 命名隧道：固定域名 + token。token 不回显，留空表示沿用已保存的。
       var namedTunnelState = useState({ token: '', publicUrl: '' });
@@ -1049,6 +1052,7 @@ window.__ModuleLoader__.load({
           else {
             body.controlUrl = multiControl.trim();
             body.inviteCode = multiInvite.trim();
+            if (multiAdminPassword) body.adminPassword = multiAdminPassword;
           }
         }
         fetch(MULTI_RELAY_PATH, {
@@ -1074,6 +1078,7 @@ window.__ModuleLoader__.load({
               if (action === 'start' && payload.multiRelay.reconnectable) {
                 setMultiInvite('');
                 setMultiTicket('');
+                setMultiAdminPassword('');
               }
             }
             if (!payload || !payload.ok) {
@@ -2391,6 +2396,8 @@ window.__ModuleLoader__.load({
           setInviteCode: setMultiInvite,
           ticket: multiTicket,
           setTicket: setMultiTicket,
+          adminPassword: multiAdminPassword,
+          setAdminPassword: setMultiAdminPassword,
           advancedOpen: multiAdvancedOpen,
           toggleAdvanced: function () { setMultiAdvancedOpen(function (v) { return !v; }); },
           guideOpen: multiGuideOpen,
@@ -3890,6 +3897,19 @@ window.__ModuleLoader__.load({
               style: Object.assign({}, styles.monoInput, { marginTop: 4 }),
             }),
           ),
+          h('label', { style: { display: 'block', marginTop: 10 } },
+            h('div', { style: styles.muted }, '管理员密码（仅自用）'),
+            h('input', {
+              type: 'password',
+              value: relay.adminPassword || '',
+              placeholder: '管理员自用时可填；不会保存',
+              spellCheck: false,
+              disabled: Boolean(busy) || running || claiming,
+              onChange: function (e) { relay.setAdminPassword(e.target.value); },
+              style: Object.assign({}, styles.monoInput, { marginTop: 4 }),
+            }),
+            h('div', { style: styles.muted }, '用管理员密码开通时，控制台会临时创建一张自用邀请；密码不落盘。'),
+          ),
         ) : null,
         h('div', { style: { display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 12 } },
           stopButton, reconnectButton, startButton),
@@ -3968,7 +3988,7 @@ window.__ModuleLoader__.load({
           h('div', { style: styles.muted },
             '5. 安装完会打印管理后台网址、管理员用户名 admin 和初始密码；密码只显示一次，先保存。打开后台时如果显示 Not Found，就在地址后面加 /admin。'),
           h('div', { style: styles.muted },
-            '6. 回到这里，粘贴管理员给的邀请票，点「开通并连接」。普通用户不需要知道控制台地址。'),
+            '6. 回到这里，粘贴管理员给的邀请票，点「开通并连接」。普通用户不需要知道控制台地址；管理员自用也可以在高级模式里填管理员密码。'),
           h('div', { style: Object.assign({}, styles.muted, { marginTop: 8 }) },
             '如果你不会登录服务器：把这一页截图发给服务器管理员，让他做第 1～5 步；你只做第 6 步。'),
           h('div', { style: styles.muted },

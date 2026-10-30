@@ -27,3 +27,13 @@ test('拒绝过期票、坏地址和非 https', () => {
   })).code, 'ticket_invalid')
   assert.equal(parseMultiRelayTicket('not-a-ticket').code, 'ticket_invalid')
 })
+
+
+test('邀请链接拆出控制台地址和邀请码', async () => {
+  const { parseMultiRelayJoinUrl } = await import('../lib/multi-relay-ticket.js')
+  const parsed = parseMultiRelayJoinUrl('https://admin.relay.example.com/join/' + 'b'.repeat(43))
+  assert.equal(parsed.ok, true)
+  assert.equal(parsed.controlUrl, 'https://admin.relay.example.com')
+  assert.equal(parsed.inviteCode, 'b'.repeat(43))
+  assert.equal(parseMultiRelayJoinUrl('https://admin.relay.example.com/other/' + 'b'.repeat(43)).ok, false)
+})
