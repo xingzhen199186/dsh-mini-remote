@@ -6,8 +6,11 @@
  * token 从环境变量 OPS_READ_TOKEN 读；没有就退回本机文件。
  */
 import { readFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs'
+import dns from 'node:dns'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
+
+dns.setDefaultResultOrder('ipv4first')
 
 const BASE = process.env.OPS_BASE_URL || 'https://relay.dsh-mini-remote.com'
 const ARCHIVE = process.argv.includes('--archive')
