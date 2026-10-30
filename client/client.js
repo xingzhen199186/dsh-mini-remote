@@ -3938,7 +3938,13 @@ window.__ModuleLoader__.load({
           h('div', { style: styles.muted },
             '被邀请的人不需要管理员用户名和密码，只需要控制台地址和邀请码。'),
           h('div', { style: styles.muted },
-            '如果管理员密码丢了：让服务器管理员在服务器上重置，README 里有命令。'),
+            '如果管理员密码丢了：在服务器上执行下面的命令重置（新密码至少 12 位）。'),
+          h('div', {
+            style: Object.assign({}, styles.muted, {
+              marginTop: 4, fontFamily: 'ui-monospace, SFMono-Regular, Consolas, monospace',
+              whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+            }),
+          }, 'cd /opt/relay-multi\nprintf \'%s\' \'新的至少12位密码\' | sudo -u relay env PYTHONPATH=/opt/relay-multi /opt/relay-multi/venv/bin/python -m control.cli set-admin --db /var/lib/relay-multi/control.db --username admin --password-stdin'),
           h('div', { style: Object.assign({}, styles.muted, { marginTop: 8 }) },
             '如果你是在我们这台测试服务器上试：https://admin.relay-test.tzxwdscb.icu/admin'),
           h('div', { style: Object.assign({}, styles.muted, { marginTop: 8 }) },

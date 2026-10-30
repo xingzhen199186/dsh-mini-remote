@@ -1391,6 +1391,7 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
     assert.match(textOf(tree10), /cd relay-multi/, '要给可执行的命令');
     assert.match(textOf(tree10), /admin\.relay-test\.tzxwdscb\.icu\/admin/, '要给当前测试实例的完整后台地址');
     assert.match(textOf(tree10), /Not Found/, '要提醒根路径不是管理页');
+    assert.match(textOf(tree10), /PYTHONPATH=\/opt\/relay-multi/, '重置命令要带正确的模块路径');
     assert.ok(byType(tree10, 'button').find((b) => textOf(b) === '收起配置指引'), '按钮要变成收起');
 
     const written = [];
