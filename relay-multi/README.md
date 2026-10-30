@@ -91,10 +91,14 @@ sudo ./install.sh --existing-nginx \
 密码只以 PBKDF2 哈希存进 SQLite，不写明文文件。忘记密码时，在服务器上重置：
 
 ```bash
-sudo sh -c 'printf "%s" "新的至少12位密码" | \
-  runuser -u relay -- /opt/relay-multi/venv/bin/python -m control.cli \
-  set-admin --db /var/lib/relay-multi/control.db --username admin --password-stdin'
+cd /opt/relay-multi
+printf '%s' '新的至少12位密码' | \
+  sudo -u relay env PYTHONPATH=/opt/relay-multi \
+  /opt/relay-multi/venv/bin/python -m control.cli \
+  set-admin --db /var/lib/relay-multi/control.db --username admin --password-stdin
 ```
+
+关键在 `cd /opt/relay-multi` 和 `PYTHONPATH=/opt/relay-multi`：`control` 是 `/opt/relay-multi` 下的包，不在 Python 默认搜索路径里。
 
 ### 卸载
 
