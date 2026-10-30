@@ -1278,6 +1278,30 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
       '开通成功后要显示固定地址');
     h9.unmount();
   });
+
+  await check('B 固定地址失败：显示立即重试按钮，点击 POST action=retry', async () => {
+    posted9 = [];
+    const failed = base({
+      enabled: true,
+      state: 'error',
+      configured: true,
+      hasActivationCode: true,
+      hostname: B_HOST,
+      url: 'https://' + B_HOST,
+      lastError: 'cloudflared 启动超时，没有连上 Cloudflare。',
+      error: { code: 'cloudflared_start_failed', retryable: false, message: 'cloudflared 启动超时，没有连上 Cloudflare。' },
+      errorCode: 'cloudflared_start_failed',
+      reconnectable: false,
+    });
+    await mount9(failed);
+    const retry = byType(tree9, 'button').find((b) => textOf(b) === '立即重试');
+    assert.ok(retry, '失败状态要有立即重试按钮');
+    retry.props.onClick();
+    await tick();
+    assert.equal(posted9.length, 1);
+    assert.deepEqual(posted9[0], { action: 'retry' });
+    h9.unmount();
+  });
 }
 
 // 4d-5. 自建多用户中继：控制台地址、邀请码、停止/重连、复制固定地址

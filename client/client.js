@@ -1002,7 +1002,7 @@ window.__ModuleLoader__.load({
         setBusy(true);
         setBRelayError(null);
         var body = { action: action };
-        if (action === 'start' && bActivation.trim()) body.activationCode = bActivation.trim();
+        if ((action === 'start' || action === 'retry') && bActivation.trim()) body.activationCode = bActivation.trim();
         fetch(B_RELAY_PATH, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
@@ -1021,7 +1021,7 @@ window.__ModuleLoader__.load({
                 return prev ? Object.assign({}, prev, { bRelay: payload.bRelay }) : prev;
               });
             }
-            if (payload && payload.ok && action === 'start') setBActivation('');
+            if (payload && payload.ok && (action === 'start' || action === 'retry')) setBActivation('');
             if (!payload || !payload.ok) {
               setBRelayError((payload && payload.error) || ('专属固定地址操作失败：HTTP ' + r.status));
             }
@@ -2367,6 +2367,7 @@ window.__ModuleLoader__.load({
           setActivationCode: setBActivation,
           error: bRelayError,
           start: function () { runBRelay('start'); },
+          retry: function () { runBRelay('retry'); },
           reconnect: function () { runBRelay('reconnect'); },
           stop: function () { runBRelay('stop'); },
           copy: copy,
@@ -3720,6 +3721,12 @@ window.__ModuleLoader__.load({
           style: Object.assign({}, styles.monoInput, { marginTop: 4 }),
         }),
       );
+      var retryButton = !running && !claiming && (st.state === 'error' || Boolean(errorText))
+        ? h('button', {
+          type: 'button', disabled: Boolean(busy),
+          style: styles.btnPrimary,
+          onClick: relay.retry,
+        }, '立即重试') : null;
       var actions = running || claiming
         ? h('button', {
           type: 'button', disabled: Boolean(busy),
@@ -3727,16 +3734,17 @@ window.__ModuleLoader__.load({
           onClick: relay.stop,
         }, '停止专属固定地址')
         : h('div', { style: { display: 'flex', gap: 8, flexWrap: 'wrap' } },
-          st.reconnectable ? h('button', {
+          retryButton,
+          !retryButton && st.reconnectable ? h('button', {
             type: 'button', disabled: Boolean(busy),
             style: styles.btnPrimary,
             onClick: relay.reconnect,
           }, '重新连接') : null,
-          h('button', {
+          !retryButton ? h('button', {
             type: 'button', disabled: Boolean(busy) || !canStart,
             style: st.reconnectable ? styles.btn : styles.btnPrimary,
             onClick: relay.start,
-          }, claiming ? '连接中…' : '开启专属固定地址'),
+          }, claiming ? '连接中…' : '开启专属固定地址') : null,
         );
 
       return h('div', { key: 'b-relay', style: styles.block },
