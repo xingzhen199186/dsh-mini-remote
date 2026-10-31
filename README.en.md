@@ -211,7 +211,7 @@ Pick one route that works before adding a fixed address. Use LAN when the phone 
 | **Notifications & Integrations** | Feishu, credentials, allowlists, setup guide |
 | **Diagnostics & Advanced** | Self-check, recent errors |
 
-All copy actions use the same short **Copied** feedback. The multi-user relay's **Clear local configuration** removes only this computer's identity and frpc configuration; it does not release the server tenant or fixed address. An administrator must reclaim those in the backend. For full settings details, see [14-Self-check and Advanced Settings](docs/guide/14-自检与进阶设置.md) and [16-Parameters and Timing](docs/guide/16-参数与生效方式.md).
+For full settings details, see [14-Self-check and Advanced Settings](docs/guide/14-自检与进阶设置.md) and [16-Parameters and Timing](docs/guide/16-参数与生效方式.md).
 
 ---
 
