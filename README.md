@@ -116,9 +116,12 @@ dsh plugin --profile web add C:\path\to\dsh-mini-remote
 ## 效果预览
 
 <div align="center">
-  <img width="290" alt="手机聊天界面（深色）：按气泡排列历史" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/screen-chat-dark.png" />
-  <img width="290" alt="手机聊天界面（浅色）：同一段对话在浅色主题下按气泡排列" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/screen-chat-light.png" />
-  <img width="290" alt="手机完整模式：工具调用与对话按时间顺序展开" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/screen-full-dark.png" />
+  <img width="240" alt="手机聊天界面（深色）：按气泡排列历史" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/screen-chat-dark.png" />
+  <img width="240" alt="手机聊天界面（浅色）：同一段对话在浅色主题下按气泡排列" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/screen-chat-light.png" />
+</div>
+
+<div align="center">
+  <img width="240" alt="手机完整模式：工具调用与对话按时间顺序展开" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/screen-full-dark.png" />
 </div>
 
 <div align="center">

@@ -116,9 +116,12 @@ dsh plugin --profile web add C:\path\to\dsh-mini-remote
 ## Preview
 
 <div align="center">
-  <img width="290" alt="Phone chat view (dark): history arranged as bubbles" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/screen-chat-dark.png" />
-  <img width="290" alt="Phone chat view (light): the same conversation history as bubbles in the light theme" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/screen-chat-light.png" />
-  <img width="290" alt="Phone full view: tool calls and conversation in chronological order" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/screen-full-dark.png" />
+  <img width="240" alt="Phone chat view (dark): history arranged as bubbles" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/screen-chat-dark.png" />
+  <img width="240" alt="Phone chat view (light): the same conversation history as bubbles in the light theme" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/screen-chat-light.png" />
+</div>
+
+<div align="center">
+  <img width="240" alt="Phone full view: tool calls and conversation in chronological order" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/screen-full-dark.png" />
 </div>
 
 <div align="center">
