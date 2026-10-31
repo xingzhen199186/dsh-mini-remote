@@ -82,7 +82,7 @@ const expandSettingsGroup = async (tree, key) => {
 
 /** 展开连接与固定地址内部的全部小分类。传入 getTree，确保每次点击后拿到最新树。 */
 const expandExternalSubs = async (getTree) => {
-  const titles = ['Tailscale 提示', '公网访问', '专属固定地址', '自建中继（单用户）', '自建多用户中继', 'Tailscale HTTPS'];
+  const titles = ['Tailscale 提示', '公网访问', '手动公网地址', '专属固定地址', '自建中继（单用户）', '自建多用户中继', 'Tailscale HTTPS'];
   for (const title of titles) {
     const tree = getTree();
     const group = walk(tree).find((n) => n && n.props && n.props.key === 'group-external');
@@ -1147,6 +1147,50 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
       namedToken: '',
       publicUrl: 'https://dsh.example.com',
     });
+  });
+}
+
+// 4d-2b. 手动公网地址：只展示/保存，不建立隧道
+{
+  const payload = {
+    ok: true,
+    port: 3090,
+    token: TOKEN,
+    entries: [{ kind: 'lan', label: '内网', hint: '手机连同一个 Wi-Fi 时用这个', url: URL_LAN, qr: QR }],
+    tunnel: { enabled: false, mode: 'quick', publicUrl: null, hasToken: false, up: false, starting: false, error: null },
+    manualPublicUrl: 'https://machine.tailnet.ts.net:10000',
+  };
+  const hManual = useHarness();
+  let treeManual = null;
+  const postedManual = [];
+  hManual.onUpdate(() => { treeManual = hManual.draw(Comp); });
+  setGlobal('fetch', async (url, init) => {
+    if (init && init.method === 'POST') {
+      postedManual.push({ url, body: JSON.parse(init.body) });
+      return jsonResponse(200, payload);
+    }
+    return jsonResponse(200, payload);
+  });
+  treeManual = hManual.draw(Comp);
+  hManual.runEffects();
+  await tick();
+  hManual.runEffects();
+  await tick();
+  await expandSettingsGroup(treeManual, 'external');
+  await expandExternalSubs(() => treeManual);
+
+  await check('手动公网地址：回填、保存到独立路由，不碰隧道', async () => {
+    const text = textOf(treeManual);
+    assert.match(text, /手动公网地址/);
+    const input = byType(treeManual, 'input').find((n) => n.props.value === 'https://machine.tailnet.ts.net:10000');
+    assert.ok(input, '手动公网地址要回填');
+    const saveBtn = byType(treeManual, 'button').find((b) => textOf(b) === '保存地址');
+    assert.ok(saveBtn, '要有保存地址按钮');
+    saveBtn.props.onClick();
+    await tick();
+    assert.equal(postedManual.length, 1);
+    assert.equal(postedManual[0].url, '/mini-remote/manual-url');
+    assert.deepEqual(postedManual[0].body, { publicUrl: 'https://machine.tailnet.ts.net:10000' });
   });
 }
 

@@ -44,6 +44,7 @@ window.__ModuleLoader__.load({
     var PAIRING_PATH = '/mini-remote/pairing';
     var TOKEN_PATH = '/mini-remote/token';
     var TUNNEL_PATH = '/mini-remote/tunnel';
+    var MANUAL_URL_PATH = '/mini-remote/manual-url';
     var SELF_RELAY_PATH = '/mini-remote/self-relay';
     var B_RELAY_PATH = '/mini-remote/b-relay';
     var MULTI_RELAY_PATH = '/mini-remote/multi-relay';
@@ -603,7 +604,7 @@ window.__ModuleLoader__.load({
       var setExternalGroupOpen = externalGroupState[1];
       var externalSubState = useState({
         tailscale: false, tunnel: false, bRelay: false,
-        selfRelay: false, multiRelay: false, serve: false,
+        manualUrl: false, selfRelay: false, multiRelay: false, serve: false,
       });
       var externalSubs = externalSubState[0];
       var setExternalSubs = externalSubState[1];
@@ -753,6 +754,16 @@ window.__ModuleLoader__.load({
       var namedGuideState = useState(false);
       var namedGuideOpen = namedGuideState[0];
       var setNamedGuideOpen = namedGuideState[1];
+      // 手动公网地址：用户自己配好的 Funnel / 反向代理；插件只展示，不建立链路。
+      var manualUrlState = useState('');
+      var manualPublicUrl = manualUrlState[0];
+      var setManualPublicUrl = manualUrlState[1];
+      var manualBusyState = useState(false);
+      var manualBusy = manualBusyState[0];
+      var setManualBusy = manualBusyState[1];
+      var manualErrorState = useState(null);
+      var manualError = manualErrorState[0];
+      var setManualError = manualErrorState[1];
       var aRelayInviteState = useState('');
       var aRelayInvite = aRelayInviteState[0];
       var setARelayInvite = aRelayInviteState[1];
@@ -834,6 +845,7 @@ window.__ModuleLoader__.load({
             if (!alive) return;
             if (r.body && typeof r.body === 'object') {
               setInfo(r.body);
+              setManualPublicUrl(typeof r.body.manualPublicUrl === 'string' ? r.body.manualPublicUrl : '');
               if (r.body.bAgent) {
                 setBUrl(r.body.bAgent.url || '');
                 setBRoots((r.body.bAgent.roots || []).join('\n'));
@@ -2233,6 +2245,34 @@ window.__ModuleLoader__.load({
           .then(function () { setBusy(false); });
       };
 
+      var saveManualPublicUrl = function (value) {
+        if (manualBusy) return;
+        setManualBusy(true);
+        setManualError(null);
+        fetch(MANUAL_URL_PATH, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ publicUrl: String(value || '') }),
+        })
+          .then(function (res) {
+            return res.json().then(
+              function (body) { return { status: res.status, body: body }; },
+              function () { return { status: res.status, body: null }; },
+            );
+          })
+          .then(function (r) {
+            if (!r.body || r.body.ok !== true) {
+              throw new Error((r.body && r.body.error) || ('HTTP ' + r.status));
+            }
+            setInfo(r.body);
+            setManualPublicUrl(typeof r.body.manualPublicUrl === 'string' ? r.body.manualPublicUrl : '');
+          })
+          .catch(function (err) {
+            setManualError('保存手动公网地址失败：' + ((err && err.message) || String(err)));
+          })
+          .then(function () { setManualBusy(false); });
+      };
+
       var startAiSetup = function () {
         // 新会话只负责把提示词填进输入框，用户按发送即可；不替用户直接发消息。
         if (uiWorkspaceFace && typeof uiWorkspaceFace.startSession === 'function') {
@@ -2444,6 +2484,12 @@ window.__ModuleLoader__.load({
           guideOpen: namedGuideOpen,
           toggleGuide: function () { setNamedGuideOpen(function (v) { return !v; }); },
         }, {
+          url: manualPublicUrl,
+          setUrl: setManualPublicUrl,
+          busy: manualBusy,
+          error: manualError,
+          save: saveManualPublicUrl,
+        }, {
           invite: aRelayInvite,
           setInvite: setARelayInvite,
           save: function (enabled) {
@@ -2482,7 +2528,7 @@ window.__ModuleLoader__.load({
       );
     }
 
-    function content(info, failure, copied, copy, busy, toggle, pwd, serve, feishu, dev, remote, agent, bAgent, bProject, rmt, self, groups, relay, named, aRelay, bRelay, multiRelay) {
+    function content(info, failure, copied, copy, busy, toggle, pwd, serve, feishu, dev, remote, agent, bAgent, bProject, rmt, self, groups, relay, named, manual, aRelay, bRelay, multiRelay) {
       if (failure) return h('div', { style: styles.error }, failure);
       if (!info) return h('div', { style: styles.loading }, '正在读取配对信息…');
 
@@ -2534,6 +2580,7 @@ window.__ModuleLoader__.load({
         },
         stop: function () { toggle(false, { mode: 'named' }); },
       }, relayUi)));
+      external.push(collapsibleSub('manualUrl', '手动公网地址', groups.externalSubs.manualUrl, groups.toggleExternalSub, manualBlock(manual)));
       if (info.bRelay && bRelay) external.push(collapsibleSub('bRelay', '专属固定地址', groups.externalSubs.bRelay, groups.toggleExternalSub, bRelayBlock(info.bRelay, bRelay, busy, copied)));
       if (info.selfRelay && relay) {
         external.push(collapsibleSub('selfRelay', '自建中继（单用户）', groups.externalSubs.selfRelay, groups.toggleExternalSub, selfRelayBlock({
@@ -3830,6 +3877,40 @@ window.__ModuleLoader__.load({
         createUi,
         list,
         browseModal,
+      );
+    }
+
+    /**
+     * 手动公网地址：用户已经在插件外配好 Funnel / 反向代理，只想让插件
+     * 把这个地址显示出来并生成二维码。它不建立、不探测、不修复链路。
+     */
+    function manualBlock(manual) {
+      var saved = typeof manual.url === 'string' && manual.url.trim() !== '';
+      return h('div', { key: 'manual-public', style: styles.block },
+        h('div', { style: styles.entryTitle }, '手动公网地址'),
+        h('div', { style: styles.muted },
+          '如果你已经在插件外配好 Tailscale Funnel、反向代理或其他固定入口，把基础地址填在这里。'
+          + '插件只负责显示和生成二维码，不建立、不探测、也不修复这条链路。'),
+        field('公网基础地址', manual.url, 'https://machine.tailnet.ts.net:10000', manual.setUrl, 'text', true),
+        h('div', { style: { marginTop: 10, display: 'flex', gap: 8, flexWrap: 'wrap' } },
+          h('button', {
+            type: 'button',
+            disabled: Boolean(manual.busy),
+            style: styles.btnPrimary,
+            onClick: function () { manual.save(manual.url); },
+          }, manual.busy ? '保存中…' : '保存地址'),
+          saved ? h('button', {
+            type: 'button',
+            disabled: Boolean(manual.busy),
+            style: styles.btn,
+            onClick: function () { manual.save(''); },
+          }, '清除') : null,
+        ),
+        manual.error ? h('div', { style: styles.error }, manual.error) : null,
+        h('div', { style: styles.muted },
+          saved
+            ? '已保存。手机连接方式里会多一条「公网（手动地址）」；如果打不开，先检查外部入口，不要先改插件。'
+            : '保存后，手机连接方式里会多一条手动地址；不影响其他连接方式。'),
       );
     }
 

@@ -263,6 +263,21 @@ test('隧道起来之后，配对面板多出一条公网地址，排在最后',
   assert.deepEqual(payload.tunnel, { enabled: true, mode: 'quick', publicUrl: null, hasToken: false, phase: null, attempts: 0, nextRetryAt: null, lastErrorKind: null, publicHealthy: null, up: true, starting: false, error: null, relay: null })
 })
 
+test('手动公网地址只展示，不要求插件自己建立隧道', async () => {
+  const payload = await buildPairing({
+    port: 3090,
+    token: 'abc123',
+    bound: [],
+    manualPublicUrl: 'https://machine.tailnet.ts.net:10000',
+  })
+  assert.equal(payload.ok, true)
+  assert.equal(payload.manualPublicUrl, 'https://machine.tailnet.ts.net:10000')
+  assert.equal(payload.entries.length, 1)
+  assert.equal(payload.entries[0].kind, 'manual-public')
+  assert.equal(payload.entries[0].url, 'https://machine.tailnet.ts.net:10000/mini?token=abc123')
+  assert.match(payload.entries[0].hint, /插件只显示/)
+})
+
 test('A 中继 active 时，配对面板给固定中继地址而不是裸 quick', async () => {
   const payload = await buildPairing({
     port: 3090,
