@@ -1191,7 +1191,7 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
     assert.doesNotMatch(text, /tailscale funnel --bg/, '配置指引默认收起');
     guideBtn.props.onClick();
     await tick();
-    assert.match(textOf(treeManual), /tailscale funnel --bg --https=8443 3090/);
+    assert.match(textOf(treeManual), /tailscale funnel --bg --https=10000 3090/);
     assert.ok(byType(treeManual, 'button').find((b) => textOf(b) === '收起配置指引'), '按钮要变成收起');
     saveBtn.props.onClick();
     await tick();

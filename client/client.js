@@ -3937,14 +3937,14 @@ window.__ModuleLoader__.load({
           '本机手机服务端口以自检显示为准，通常是 3090。',
         ]],
         ['二、在电脑上开 Funnel', [
-          '打开 PowerShell 或终端，执行：tailscale funnel --bg --https=8443 3090。',
-          '把 3090 换成插件实际端口；8443 也可以换成 443 或 10000。',
-          '命令会输出一个 https://<机器>.<tailnet>.ts.net:8443/ 地址。',
+          '打开 PowerShell 或终端，执行例如：tailscale funnel --bg --https=10000 3090。',
+          '把 3090 换成插件实际端口；443 是标准 HTTPS，一般默认指向这个端口，10000 和 8443 为备用端口。',
+          '命令会输出一个 https://<机器>.<tailnet>.ts.net:10000/ 地址。',
         ]],
         ['三、填回插件', [
-          '把完整地址填进上面的「公网基础地址」，例如 https://machine.tailnet.ts.net:8443。',
+          '把完整地址填进上面的「公网基础地址」，例如 https://machine.tailnet.ts.net:10000。',
           '点「保存地址」；手机连接里会出现「公网（手动地址）」和二维码。',
-          '不要只填 8443；这个字段是通用入口，插件不替你猜域名。',
+          '不要只填端口；这个字段是通用入口，插件不替你猜域名。',
         ]],
         ['四、验证是不是真的公网', [
           '先确认 tailscale funnel status 显示 Funnel on。',
@@ -3957,8 +3957,8 @@ window.__ModuleLoader__.load({
           '仍然不行就改用 Cloudflare 命名隧道或自建中继；不要把 Funnel 当成国内稳定的固定地址。',
         ]],
         ['六、不用时关掉', [
-          '执行：tailscale funnel --https=8443 off。',
-          '把 8443 换成你实际开的端口；关掉后这个公网入口立即失效。',
+          '执行：tailscale funnel --https=10000 off。',
+          '把 10000 换成你实际开的端口；关掉后这个公网入口立即失效。',
         ]],
       ];
       var out = [h('div', { key: 'manual-guide-intro', style: Object.assign({}, styles.muted, { marginTop: 12 }) },
