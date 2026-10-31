@@ -49,3 +49,53 @@ node --test worker-b/test/*.test.mjs
 - `<id>.dsh-everywhere.com/mini/api/version`：200；
 - 说明数据不经过 A Worker；
 - retire 第一次因 Tunnel 仍有活动连接返回 502；等待连接关闭后重试/直接清理成功。
+
+## 自助申请邀请码（2026-11-01）
+
+公开申请页：
+
+```text
+https://control.dsh-everywhere.com/request
+```
+
+流程：
+
+1. 用户填邮箱；
+2. 服务器发 6 位验证码（10 分钟有效）；
+3. 用户回填验证码；
+4. 服务器创建 `invited` 租约并返回邀请码；
+5. 用户把邀请码粘贴到 DSH「专属固定地址」里 claim。
+
+限制：
+
+- 一个邮箱只能申请一次（Gmail 会去掉 `+tag` 和点号再比较）；
+- 一个 IP 只能申请一次；
+- 一次性邮箱域名直接拒绝；
+- 申请接口每 IP 每天 3 次、全局每天 100 次；
+- 验证码最多试 5 次；
+- 租约仍受 `SELF_SERVICE_CAPACITY = 900` 限制。
+
+需要配置的 Secrets：
+
+```text
+RESEND_API_KEY      Resend 发信 key
+TURNSTILE_SECRET    Turnstile 服务端校验 key（不配则不校验）
+```
+
+需要配置的 Vars：
+
+```text
+B_MAIL_FROM               发信人，例如 dsh-mini-remote <no-reply@dsh-everywhere.com>
+B_TURNSTILE_SITE_KEY      申请页的 Turnstile site key；留空则不显示人机验证
+```
+
+管理接口：
+
+```text
+GET    /admin/b/v1/requests
+DELETE /admin/b/v1/requests/{applicationId}
+```
+
+删除申请记录只删申请本身，不删已经生成的租约；已 fulfilled 的申请删掉后，同一邮箱/IP 可以重新申请（管理员显式操作）。
+
+注意：IP 唯一会把同一 NAT/公司网络下的其他人挡住，这是按“尽量杜绝薅羊毛”做的取舍；需要放行时由管理员删除申请记录。

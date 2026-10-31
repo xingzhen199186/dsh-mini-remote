@@ -16,7 +16,10 @@
     "B_SUFFIX": "dsh-everywhere.com",
     "B_CONTROL_HOST": "control.dsh-everywhere.com",
     "B_ACCOUNT_ID": "c388ee35863086d5ffbcee0bb4b63e0b",
-    "B_ZONE_ID": "f2cc2bd5058c743656e938494cdee309"
+    "B_ZONE_ID": "f2cc2bd5058c743656e938494cdee309",
+    // 自助申请页：Resend 发信地址和 Turnstile 站点 key；没有就留空。
+    "B_MAIL_FROM": "dsh-mini-remote <no-reply@dsh-everywhere.com>",
+    "B_TURNSTILE_SITE_KEY": ""
   },
   "routes": [
     { "pattern": "control.dsh-everywhere.com", "custom_domain": true }

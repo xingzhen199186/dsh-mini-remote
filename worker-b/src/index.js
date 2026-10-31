@@ -1,4 +1,5 @@
 import { CloudflareError, cloudflareApiOf } from './cloudflare.js'
+import { requestPageHtml } from './request-page.js'
 
 const ID_RE = /^[a-z2-7]{26}$/
 const SECRET_RE = /^[A-Za-z0-9_-]{43}$/
@@ -11,6 +12,10 @@ const OPS_RETIRE_LIMIT = 10
 const OPS_RECONCILE_LIMIT = 50
 const OPS_FINDINGS_LIMIT = 500
 const SELF_SERVICE_CAPACITY = 900
+const VERIFY_TTL_MS = 10 * 60 * 1000
+const VERIFY_MAX_ATTEMPTS = 5
+const REQUEST_RESEND_MS = 60 * 1000
+const REQUEST_DAILY_LIMIT = 100
 
 class ControlError extends Error {
   constructor(code, status = 409, retryable = false) {
@@ -62,6 +67,12 @@ function randomId() {
 
 function randomSecret() {
   return base64url(crypto.getRandomValues(new Uint8Array(32)))
+}
+
+function randomCode() {
+  const value = new Uint32Array(1)
+  crypto.getRandomValues(value)
+  return String(value[0] % 1_000_000).padStart(6, '0')
 }
 
 async function hmac(env, purpose, value) {
@@ -183,6 +194,186 @@ async function authenticatedLease(env, id, clientSecret) {
   if (!lease?.client_secret_hash) return undefined
   const hash = await hmac(env, 'client', id + ':' + clientSecret)
   return timingSafeEqual(lease.client_secret_hash, hash) ? lease : undefined
+}
+
+const DISPOSABLE_EMAIL_DOMAINS = new Set([
+  'mailinator.com', 'guerrillamail.com', '10minutemail.com', 'temp-mail.org',
+  'yopmail.com', 'throwawaymail.com', 'getnada.com', 'sharklasers.com',
+])
+
+/** 归一化邮箱；只返回可入库的形状，不把原文写进数据库。 */
+function normalizeEmail(value) {
+  const raw = String(value ?? '').trim().toLowerCase()
+  const at = raw.lastIndexOf('@')
+  if (at <= 0 || at === raw.length - 1 || raw.length > 254) return null
+  let local = raw.slice(0, at)
+  let domain = raw.slice(at + 1)
+  if (!/^[a-z0-9.!#$%&'*+/=?^_`{|}~-]+$/.test(local)) return null
+  if (!/^[a-z0-9.-]+\.[a-z]{2,}$/.test(domain)) return null
+  if (DISPOSABLE_EMAIL_DOMAINS.has(domain)) return null
+  if (domain === 'gmail.com' || domain === 'googlemail.com') {
+    local = local.split('+')[0].replace(/\./g, '')
+    domain = 'gmail.com'
+  } else {
+    local = local.split('+')[0]
+  }
+  if (!local) return null
+  const normalized = local + '@' + domain
+  const masked = local.slice(0, 1) + '***@' + domain
+  return { normalized, masked }
+}
+
+async function sendMail(env, { to, subject, text }) {
+  if (typeof env.MAIL_SEND === 'function') return await env.MAIL_SEND({ to, subject, text })
+  if (!env.RESEND_API_KEY) return { ok: false, code: 'mail_not_configured' }
+  try {
+    const response = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: { authorization: 'Bearer ' + env.RESEND_API_KEY, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        from: env.B_MAIL_FROM || 'dsh-mini-remote <no-reply@dsh-everywhere.com>',
+        to: [to],
+        subject,
+        text,
+      }),
+    })
+    if (!response.ok) return { ok: false, code: 'mail_failed' }
+    return { ok: true }
+  } catch {
+    return { ok: false, code: 'mail_failed' }
+  }
+}
+
+async function verifyTurnstile(env, token, ip) {
+  const secret = typeof env.TURNSTILE_SECRET === 'string' ? env.TURNSTILE_SECRET : ''
+  if (!secret) return true
+  if (typeof token !== 'string' || !token) return false
+  try {
+    const body = new URLSearchParams({ secret, response: token, remoteip: ip })
+    const response = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', { method: 'POST', body })
+    const result = await response.json().catch(() => null)
+    return result?.success === true
+  } catch {
+    return false
+  }
+}
+
+async function createInvite(env, { note = null, days = 7, actor = 'admin-token', requestId }) {
+  const count = await env.DB.prepare(
+    'SELECT COUNT(*) AS n FROM b_leases WHERE state IN (\'invited\', \'active\', \'claimed\', \'released\')',
+  ).first()
+  if (Number(count?.n || 0) >= SELF_SERVICE_CAPACITY) return { ok: false, code: 'self_service_capacity' }
+  const id = randomId()
+  const code = randomSecret()
+  const codeId = crypto.randomUUID()
+  const now = Date.now()
+  const expiresAt = now + days * DAY_MS
+  const hostname = hostnameOf(env, id)
+  await env.DB.batch([
+    env.DB.prepare('INSERT INTO b_leases (lease_id, hostname, state, tunnel_name, created_at) VALUES (?, ?, \'invited\', ?, ?)')
+      .bind(id, hostname, tunnelNameOf(id), now),
+    env.DB.prepare(
+      'INSERT INTO b_activation_codes (code_id, code_hash, lease_id, state, note, created_at, expires_at) VALUES (?, ?, ?, \'invited\', ?, ?, ?)',
+    ).bind(codeId, await hmac(env, 'activation', code), id, note, now, expiresAt),
+    auditStatement(env, { actor, action: 'invite.create', leaseId: id, codeId, requestId, after: 'invited', result: 'succeeded' }),
+  ])
+  return { ok: true, code, codeId, id, hostname, expiresAt }
+}
+
+async function handleInviteRequest(request, env, requestId) {
+  if (request.method !== 'POST') return fail(requestId, 'method_not_allowed', 405)
+  const body = await readJson(request)
+  if (body.error) return fail(requestId, body.error, 400)
+  const email = normalizeEmail(body.email)
+  if (!email) return fail(requestId, 'invalid_email', 400)
+  const ip = clientIp(request)
+  if (!(await verifyTurnstile(env, body.turnstileToken, ip))) return fail(requestId, 'turnstile_failed', 403)
+  const emailHash = await hmac(env, 'email', email.normalized)
+  const ipHash = await hmac(env, 'ip', ip)
+
+  let retryAfter = await spendRate(env, 'invite-request:ip:' + ipHash, 3, 86400)
+  if (!retryAfter) retryAfter = await spendRate(env, 'invite-request:global', REQUEST_DAILY_LIMIT, 86400)
+  if (retryAfter) return fail(requestId, 'rate_limited', 429, true, retryAfter)
+
+  const existing = await env.DB.prepare(
+    'SELECT * FROM b_invite_requests WHERE email_hash = ? OR ip_hash = ? ORDER BY created_at DESC LIMIT 1',
+  ).bind(emailHash, ipHash).first()
+  if (existing) {
+    if (!timingSafeEqual(existing.email_hash, emailHash)) return fail(requestId, 'already_requested', 409)
+    if (existing.state === 'pending' && Number(existing.expires_at) > Date.now()) {
+      const retry = await spendRate(env, 'invite-resend:' + existing.request_id, 1, 60)
+      if (retry) return fail(requestId, 'rate_limited', 429, true, retry)
+      const code = randomCode()
+      await env.DB.prepare('UPDATE b_invite_requests SET verify_hash = ?, verify_attempts = 0, last_sent_at = ?, expires_at = ? WHERE request_id = ?')
+        .bind(await hmac(env, 'verify:' + existing.request_id, code), Date.now(), Date.now() + VERIFY_TTL_MS, existing.request_id).run()
+      const mailed = await sendMail(env, {
+        to: email.normalized,
+        subject: '固定地址邀请码：邮箱验证码',
+        text: '你的验证码是：' + code + '\n10 分钟内有效。',
+      })
+      if (!mailed.ok) return fail(requestId, mailed.code || 'mail_failed', 503, true, 60)
+      return ok(requestId, { applicationId: existing.request_id, expiresAt: Date.now() + VERIFY_TTL_MS, resent: true })
+    }
+    return fail(requestId, 'already_requested', 409)
+  }
+
+  const newRequestId = crypto.randomUUID()
+  const code = randomCode()
+  const now = Date.now()
+  try {
+    await env.DB.prepare(
+      'INSERT INTO b_invite_requests (request_id, email_hash, email_masked, ip_hash, state, verify_hash, last_sent_at, created_at, expires_at) '
+      + 'VALUES (?, ?, ?, ?, \'pending\', ?, ?, ?, ?)',
+    ).bind(
+      newRequestId, emailHash, email.masked, ipHash,
+      await hmac(env, 'verify:' + newRequestId, code), now, now, now + VERIFY_TTL_MS,
+    ).run()
+  } catch {
+    return fail(requestId, 'already_requested', 409)
+  }
+  const mailed = await sendMail(env, {
+    to: email.normalized,
+    subject: '固定地址邀请码：邮箱验证码',
+    text: '你的验证码是：' + code + '\n10 分钟内有效。',
+  })
+  if (!mailed.ok) {
+    await env.DB.prepare('DELETE FROM b_invite_requests WHERE request_id = ?').bind(newRequestId).run().catch(() => undefined)
+    return fail(requestId, mailed.code || 'mail_failed', 503, true, 60)
+  }
+  return ok(requestId, { applicationId: newRequestId, expiresAt: now + VERIFY_TTL_MS })
+}
+
+async function handleInviteVerify(request, env, requestId) {
+  if (request.method !== 'POST') return fail(requestId, 'method_not_allowed', 405)
+  const body = await readJson(request)
+  if (body.error) return fail(requestId, body.error, 400)
+  const id = typeof body.applicationId === 'string' ? body.applicationId.trim() : (typeof body.requestId === 'string' ? body.requestId.trim() : '')
+  const code = typeof body.code === 'string' ? body.code.trim() : ''
+  if (!/^[0-9a-f-]{36}$/i.test(id) || !/^\d{6}$/.test(code)) return fail(requestId, 'invalid_request', 400)
+  const row = await env.DB.prepare('SELECT * FROM b_invite_requests WHERE request_id = ?').bind(id).first()
+  if (!row || row.state !== 'pending') return fail(requestId, 'request_not_found', 404)
+  if (Number(row.expires_at) <= Date.now()) return fail(requestId, 'request_expired', 410)
+  if (Number(row.verify_attempts) >= VERIFY_MAX_ATTEMPTS) return fail(requestId, 'too_many_attempts', 429)
+  const expected = await hmac(env, 'verify:' + id, code)
+  if (!timingSafeEqual(expected, row.verify_hash)) {
+    await env.DB.prepare('UPDATE b_invite_requests SET verify_attempts = verify_attempts + 1 WHERE request_id = ?').bind(id).run()
+    return fail(requestId, 'invalid_code', 403)
+  }
+  const created = await createInvite(env, {
+    note: 'self-service:' + row.email_masked,
+    days: 7,
+    actor: 'self-service',
+    requestId,
+  })
+  if (!created.ok) return fail(requestId, created.code, 503)
+  const now = Date.now()
+  await env.DB.batch([
+    env.DB.prepare('UPDATE b_invite_requests SET state = \'fulfilled\', lease_id = ?, code_id = ?, verified_at = ?, fulfilled_at = ? WHERE request_id = ?')
+      .bind(created.id, created.codeId, now, now, id),
+    auditStatement(env, { actor: 'self-service', action: 'invite.request.fulfilled', leaseId: created.id, codeId: created.codeId, requestId, after: 'fulfilled', result: 'succeeded' }),
+  ])
+  // 邀请码直接回给刚通过邮箱验证的页面；不把明文邮箱落库，所以不再二次发信。
+  return ok(requestId, { code: created.code, hostname: created.hostname, expiresAt: created.expiresAt })
 }
 
 async function recordOperationFailure(env, leaseId, operationId, step, code, requestId) {
@@ -971,21 +1162,20 @@ async function handleAdmin(request, env, url, requestId) {
     if (!Number.isInteger(days) || days < 1 || days > 90 || (body.note !== undefined && (typeof body.note !== 'string' || body.note.length > 200))) {
       return fail(requestId, 'invalid_request', 400)
     }
-    const id = randomId()
-    const code = randomSecret()
-    const codeId = crypto.randomUUID()
-    const now = Date.now()
-    const expiresAt = now + days * DAY_MS
-    const hostname = hostnameOf(env, id)
-    await env.DB.batch([
-      env.DB.prepare('INSERT INTO b_leases (lease_id, hostname, state, tunnel_name, created_at) VALUES (?, ?, \'invited\', ?, ?)')
-        .bind(id, hostname, tunnelNameOf(id), now),
-      env.DB.prepare(
-        'INSERT INTO b_activation_codes (code_id, code_hash, lease_id, state, note, created_at, expires_at) VALUES (?, ?, ?, \'invited\', ?, ?, ?)',
-      ).bind(codeId, await hmac(env, 'activation', code), id, body.note ?? null, now, expiresAt),
-      auditStatement(env, { actor: 'admin-token', action: 'invite.create', leaseId: id, codeId, requestId, after: 'invited', result: 'succeeded' }),
-    ])
-    return ok(requestId, { code, codeId, id, hostname, expiresAt })
+    const created = await createInvite(env, {
+      note: body.note ?? null,
+      days,
+      actor: 'admin-token',
+      requestId,
+    })
+    if (!created.ok) return fail(requestId, created.code, 503)
+    return ok(requestId, {
+      code: created.code,
+      codeId: created.codeId,
+      id: created.id,
+      hostname: created.hostname,
+      expiresAt: created.expiresAt,
+    })
   }
   if (url.pathname === '/admin/b/v1/leases') {
     if (request.method !== 'GET') return fail(requestId, 'method_not_allowed', 405)
@@ -997,6 +1187,24 @@ async function handleAdmin(request, env, url, requestId) {
       + 'released_at AS releasedAt, retired_at AS retiredAt, row_version AS rowVersion FROM b_leases ORDER BY created_at DESC LIMIT ?',
     ).bind(limit).all()
     return ok(requestId, { leases: rows.results || [] })
+  }
+  if (url.pathname === '/admin/b/v1/requests') {
+    if (request.method !== 'GET') return fail(requestId, 'method_not_allowed', 405)
+    const limit = Math.max(1, Math.min(100, Number(url.searchParams.get('limit')) || 50))
+    const rows = await env.DB.prepare(
+      'SELECT request_id AS id, email_masked AS email, state, lease_id AS leaseId, code_id AS codeId, '
+      + 'created_at AS createdAt, expires_at AS expiresAt, verified_at AS verifiedAt, fulfilled_at AS fulfilledAt '
+      + 'FROM b_invite_requests ORDER BY created_at DESC LIMIT ?',
+    ).bind(limit).all()
+    return ok(requestId, { requests: rows.results || [] })
+  }
+  if (url.pathname.startsWith('/admin/b/v1/requests/')) {
+    if (request.method !== 'DELETE') return fail(requestId, 'method_not_allowed', 405)
+    const requestKey = url.pathname.slice('/admin/b/v1/requests/'.length)
+    if (!/^[0-9a-f-]{36}$/i.test(requestKey)) return fail(requestId, 'invalid_request', 400)
+    const result = await env.DB.prepare('DELETE FROM b_invite_requests WHERE request_id = ?').bind(requestKey).run()
+    if (Number(result?.meta?.changes || 0) !== 1) return fail(requestId, 'not_found', 404)
+    return ok(requestId, { deleted: true })
   }
   if (url.pathname === '/admin/b/v1/ops/run') {
     if (request.method !== 'POST') return fail(requestId, 'method_not_allowed', 405)
@@ -1028,10 +1236,24 @@ export async function handleRequest(request, env) {
   try {
     const url = new URL(request.url)
     if (url.hostname !== (env.B_CONTROL_HOST || 'control.dsh-everywhere.com')) return fail(requestId, 'not_found', 404)
+    if (url.pathname === '/request') {
+      return new Response(requestPageHtml({ turnstileSiteKey: env.B_TURNSTILE_SITE_KEY || '' }), {
+        headers: {
+          'content-type': 'text/html; charset=utf-8',
+          'cache-control': 'no-store',
+          'x-content-type-options': 'nosniff',
+          'x-frame-options': 'DENY',
+          'referrer-policy': 'no-referrer',
+          'content-security-policy': "default-src 'none'; script-src 'unsafe-inline' https://challenges.cloudflare.com; frame-src https://challenges.cloudflare.com; style-src 'unsafe-inline'; connect-src 'self' https://challenges.cloudflare.com; img-src 'self' data:; base-uri 'none'",
+        },
+      })
+    }
     if (url.pathname.startsWith('/api/b/v1/')) {
       const retryAfter = await spendRate(env, 'api:ip:' + clientIp(request), 120, 60)
       if (retryAfter) return fail(requestId, 'rate_limited', 429, true, retryAfter)
     }
+    if (url.pathname === '/api/b/v1/invite-request') return await handleInviteRequest(request, env, requestId)
+    if (url.pathname === '/api/b/v1/invite-verify') return await handleInviteVerify(request, env, requestId)
     if (url.pathname === '/api/b/v1/claim') return await handleClaim(request, env, requestId)
     for (const route of ['status', 'renew', 'release', 'retire']) {
       if (url.pathname === '/api/b/v1/' + route) return await pluginRequest(request, env, requestId, route)
