@@ -3918,7 +3918,7 @@ window.__ModuleLoader__.load({
             : '保存后，手机连接方式里会多一条手动地址；不影响其他连接方式。'),
         h('div', { style: { marginTop: 12 } },
           h('button', { type: 'button', style: styles.btn, onClick: manual.toggleGuide },
-            manual.guideOpen ? '收起配置指引' : '配置指引（Tailscale Funnel）'),
+            manual.guideOpen ? '收起配置指引' : '配置指引'),
         ),
         manual.guideOpen ? manualPublicUrlGuide() : null,
       );

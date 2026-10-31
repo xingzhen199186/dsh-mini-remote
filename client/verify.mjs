@@ -1186,7 +1186,7 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
     assert.ok(input, '手动公网地址要回填');
     const saveBtn = byType(treeManual, 'button').find((b) => textOf(b) === '保存地址');
     assert.ok(saveBtn, '要有保存地址按钮');
-    const guideBtn = byType(treeManual, 'button').find((b) => textOf(b) === '配置指引（Tailscale Funnel）');
+    const guideBtn = byType(treeManual, 'button').find((b) => textOf(b) === '配置指引');
     assert.ok(guideBtn, '要有 Tailscale Funnel 配置指引');
     assert.doesNotMatch(text, /tailscale funnel --bg/, '配置指引默认收起');
     guideBtn.props.onClick();
