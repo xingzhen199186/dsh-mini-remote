@@ -196,6 +196,10 @@ ${CONTROL_HOST} {
 # 手机/B/远程窗口的网页流量。
 ${PUBLIC_HOST} {
   encode zstd gzip
+  header {
+    X-Content-Type-Options nosniff
+    Referrer-Policy no-referrer
+  }
   reverse_proxy 127.0.0.1:8080
 }
 EOF

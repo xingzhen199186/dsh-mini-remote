@@ -285,3 +285,12 @@ test('rate limit and error envelope are machine readable', async () => {
   assert.equal('tunnelToken' in limited.body, false)
   assert.equal(CLAIM_ID.length >= 8, true)
 })
+
+test('控制面响应带安全头', async () => {
+  const { env } = createEnv()
+  const result = await request(env, 'GET', '/admin/b/v1/leases', undefined, { admin: true })
+  assert.equal(result.status, 200)
+  assert.equal(result.response.headers.get('x-content-type-options'), 'nosniff')
+  assert.equal(result.response.headers.get('x-frame-options'), 'DENY')
+  assert.equal(result.response.headers.get('referrer-policy'), 'no-referrer')
+})

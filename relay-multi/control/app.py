@@ -11,6 +11,7 @@ import sqlite3
 import time
 import uuid
 from pathlib import Path
+from urllib.parse import urlsplit
 from typing import Any
 
 from fastapi import Depends, FastAPI, Request
@@ -29,6 +30,8 @@ REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9_-]{8,128}$")
 DAY_MS = 24 * 60 * 60 * 1000
 STATE_COUNTED = ("active", "provisioning", "released", "failed")
 ADMIN_HTML = Path(__file__).with_name("admin.html").read_text(encoding="utf-8")
+ADMIN_IP_LIMIT = 240
+ADMIN_UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 
 
 class AppError(Exception):
@@ -129,6 +132,39 @@ def create_app(settings: Settings, helper=None) -> FastAPI:
     app.state.db = db
     app.state.helper = helper
 
+    def same_origin(value: str, expected: str) -> bool:
+        try:
+            left = urlsplit(value)
+            right = urlsplit(expected)
+        except ValueError:
+            return False
+        return (left.scheme, left.netloc) == (right.scheme, right.netloc)
+
+    def admin_origin_ok(request: Request) -> bool:
+        origin = request.headers.get("origin")
+        if origin:
+            return same_origin(origin, settings.admin_url)
+        referer = request.headers.get("referer")
+        if referer:
+            return same_origin(referer, settings.admin_url)
+        # Non-browser clients (curl / CLI) do not send Origin/Referer.
+        return True
+
+    @app.middleware("http")
+    async def security_middleware(request: Request, call_next):
+        if request.method in ADMIN_UNSAFE_METHODS and request.url.path.startswith("/admin/"):
+            if not admin_origin_ok(request):
+                return JSONResponse(
+                    {"ok": False, "error": "origin_denied", "message": "管理请求来源不正确"},
+                    status_code=403,
+                )
+        response = await call_next(request)
+        response.headers.setdefault("x-content-type-options", "nosniff")
+        response.headers.setdefault("x-frame-options", "DENY")
+        response.headers.setdefault("referrer-policy", "no-referrer")
+        response.headers.setdefault("permissions-policy", "camera=(), microphone=(), geolocation=()")
+        return response
+
     @app.exception_handler(AppError)
     async def app_error(_request: Request, exc: AppError):
         payload = {"ok": False, "error": exc.code, "message": exc.message}
@@ -146,11 +182,14 @@ def create_app(settings: Settings, helper=None) -> FastAPI:
 
         conn = db.connect()
         try:
+            ip = request.client.host if request.client else "unknown"
+            retry = consume_rate(conn, f"admin-request:{ip}", ADMIN_IP_LIMIT, 60)
+            if retry:
+                raise AppError(429, "rate_limited", "管理请求太频繁，稍后再试", {"Retry-After": str(retry)})
             row = conn.execute("SELECT password_hash FROM admins WHERE username = ?", (username,)).fetchone()
             valid = bool(row) and verify_password(password, row["password_hash"])
             if valid:
                 return username
-            ip = request.client.host if request.client else "unknown"
             retry = consume_rate(conn, f"admin-auth:{ip}", settings.auth_failure_limit, 600)
             if retry:
                 raise AppError(429, "rate_limited", "登录失败次数太多，稍后再试", {"Retry-After": str(retry)})

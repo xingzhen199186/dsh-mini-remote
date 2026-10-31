@@ -593,3 +593,12 @@ test('admin 无 token 被拒绝，列表不返回 secret', async () => {
   assert.equal(body.identities.length, 1)
   assert.equal(JSON.stringify(body).includes(secret), false)
 })
+
+test('管理响应带安全头', async () => {
+  const env = makeEnv()
+  const response = await handleRequest(req('/admin/relay/v1/invites', { token: ADMIN }), env)
+  assert.equal(response.status, 200)
+  assert.equal(response.headers.get('x-content-type-options'), 'nosniff')
+  assert.equal(response.headers.get('x-frame-options'), 'DENY')
+  assert.equal(response.headers.get('referrer-policy'), 'no-referrer')
+})

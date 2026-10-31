@@ -24,7 +24,15 @@ class ControlError extends Error {
 function json(data, status = 200, headers = {}) {
   return new Response(JSON.stringify(data), {
     status,
-    headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', ...headers },
+    headers: {
+      'content-type': 'application/json; charset=utf-8',
+      'cache-control': 'no-store',
+      'x-content-type-options': 'nosniff',
+      'x-frame-options': 'DENY',
+      'referrer-policy': 'no-referrer',
+      'permissions-policy': 'camera=(), microphone=(), geolocation=()',
+      ...headers,
+    },
   })
 }
 
@@ -1020,6 +1028,10 @@ export async function handleRequest(request, env) {
   try {
     const url = new URL(request.url)
     if (url.hostname !== (env.B_CONTROL_HOST || 'control.dsh-everywhere.com')) return fail(requestId, 'not_found', 404)
+    if (url.pathname.startsWith('/api/b/v1/')) {
+      const retryAfter = await spendRate(env, 'api:ip:' + clientIp(request), 120, 60)
+      if (retryAfter) return fail(requestId, 'rate_limited', 429, true, retryAfter)
+    }
     if (url.pathname === '/api/b/v1/claim') return await handleClaim(request, env, requestId)
     for (const route of ['status', 'renew', 'release', 'retire']) {
       if (url.pathname === '/api/b/v1/' + route) return await pluginRequest(request, env, requestId, route)

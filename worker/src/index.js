@@ -26,7 +26,14 @@ const RATE_PER_ID = 6
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), {
     status,
-    headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' },
+    headers: {
+      'content-type': 'application/json; charset=utf-8',
+      'cache-control': 'no-store',
+      'x-content-type-options': 'nosniff',
+      'x-frame-options': 'DENY',
+      'referrer-policy': 'no-referrer',
+      'permissions-policy': 'camera=(), microphone=(), geolocation=()',
+    },
   })
 }
 
@@ -508,6 +515,8 @@ async function opsWeeklyPayload(env) {
 }
 
 async function handleAdmin(request, env, url) {
+  const ip = clientIp(request)
+  if (!(await spendRate(env, 'admin:' + ip, 120))) return fail('rate-limited', 429)
   const auth = await requireAdmin(request, env)
   if (!auth.ok) return auth.response
   const path = url.pathname

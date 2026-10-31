@@ -324,3 +324,31 @@ nginx -t
 - claim 返回 `capacity_exhausted`：撤销不用租户，或在后台提高上限；
 - helper 失败：检查 `journalctl -u relay-control`，再手工确认 `sudo -u relay sudo -n /usr/local/lib/relay-multi/helper reload-nginx`；
 - 租户证书失败：确认 `*.<domain>` DNS、80 端口和 Let's Encrypt 请求次数。
+
+## 上线前的安全边界
+
+这版已经补了这些基础防护：
+
+- 管理后台的写操作会校验 `Origin` / `Referer`，拒绝跨站提交；
+- 管理请求按 IP 限速，登录失败另有更严格的限速；
+- 控制面响应带 `nosniff`、`DENY`、`no-referrer` 等安全头；
+- 每个租户的 frps 限制最多 10 个代理；
+- 租户数据页带 `nosniff` 和 `no-referrer`，但不加 `DENY`，否则远程窗口的 iframe 会被挡。
+
+仍然建议在 Nginx 或云防火墙前加一层：
+
+```text
+管理域名只允许固定 IP / Cloudflare Access / VPN 访问
+```
+
+不要把管理后台直接暴露给所有人。Basic Auth 不是 MFA，管理密码泄露等于所有租户失守。
+
+当前仍未做：
+
+- 多管理员与角色权限；
+- 管理后台 MFA；
+- 每租户带宽/连接数配额；
+- 自动 token 轮换；
+- 失败登录告警。
+
+这些是下一步，不要把它们误认为已经具备。

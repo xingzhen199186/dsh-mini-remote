@@ -136,3 +136,31 @@ sudo bash install.sh --uninstall
 - 域名对外提供服务涉及备案；请按当地要求办理。
 - 不要把 frp token 发到公开地方。
 - 自建中继改善的是“地址固定、稳定可达”，不是带宽；4Mbps 下远程窗口冷加载仍然要十几秒。
+
+## 安装后安全自检
+
+装完后按这几条确认，不通过就先别把地址发出去：
+
+```bash
+# 1. 7000 只应监听 127.0.0.1，不能出现在公网
+ss -ltnp | grep -E ':(80|443|7000)\b'
+
+# 2. 只放行 80/443；云厂商安全组也照此设置
+sudo ufw status
+
+# 3. 两个域名都应返回有效证书
+curl -sS -o /dev/null -w '%{http_code}\n' https://remote.example.com/
+curl -sS -o /dev/null -w '%{http_code}\n' https://frp.example.com/
+
+# 4. frps 配置权限必须是 600
+sudo stat -c '%a %n' /etc/frp/frps.toml
+```
+
+如果 token 可能泄露，按下面顺序轮换：
+
+```bash
+sudo sed -i 's/^auth.token = .*/auth.token = "新token"/' /etc/frp/frps.toml
+sudo systemctl restart frps
+```
+
+然后把新 token 填回插件，旧 token 立即失效。不要把 token 写进群聊、截图或公开仓库。

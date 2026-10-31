@@ -9,3 +9,6 @@ auth.token = "${FRP_TOKEN}"
 # TLS 由 Nginx 终止；frps 只接收来自 127.0.0.1 的明文代理连接。
 transport.tls.force = false
 transport.tcpMux = true
+
+# 每个租户最多同时挂 10 个代理；超过就由 frps 拒绝，避免一个租户无限加代理。
+maxPortsPerClient = 10

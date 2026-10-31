@@ -327,3 +327,28 @@ def test_admin_revoke_calls_helper_and_keeps_audit(tmp_path):
     assert "frpToken" not in json.dumps(tenants)
     audit = client.get("/admin/api/audit", headers=admin_header()).json()["audit"]
     assert any(item["action"] == "tenant.revoke" for item in audit)
+
+
+def test_admin_csrf_origin_guard_and_security_headers(tmp_path):
+    _, _, _, client = build_context(tmp_path, name="csrf")
+
+    denied = client.post(
+        "/admin/api/config",
+        json={"allowRegistration": True},
+        headers={**admin_header(), "Origin": "https://evil.example"},
+    )
+    assert denied.status_code == 403
+    assert denied.json()["error"] == "origin_denied"
+
+    allowed = client.post(
+        "/admin/api/config",
+        json={"allowRegistration": True},
+        headers={**admin_header(), "Origin": "https://admin.relay.example.com"},
+    )
+    assert allowed.status_code == 200
+    assert allowed.json()["allowRegistration"] is True
+
+    health = client.get("/health")
+    assert health.headers["x-content-type-options"] == "nosniff"
+    assert health.headers["x-frame-options"] == "DENY"
+    assert health.headers["referrer-policy"] == "no-referrer"
