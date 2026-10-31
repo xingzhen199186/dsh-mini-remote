@@ -253,7 +253,7 @@ node client/verify.mjs
 - `node client/verify.mjs`：验证客户端模块、设置页、两级折叠、远程窗口和 B 项目面板。当前 **162 通过，0 失败**。
 - 发布前可运行 `npm pack --dry-run` 检查打包内容。
 
-详细变更见 [CHANGELOG.md](CHANGELOG.md)，发版流程见 [发版清单](docs/发版清单.md)。
+详细变更见 [CHANGELOG.md](CHANGELOG.md)。
 
 ---
 

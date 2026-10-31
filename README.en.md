@@ -253,7 +253,7 @@ node client/verify.mjs
 - `node client/verify.mjs`: verifies the client module, settings page, two-level collapsing, Remote Window, and B project panel. Currently **162 passed, 0 failed**.
 - Run `npm pack --dry-run` before release to inspect the package contents.
 
-See [CHANGELOG.md](CHANGELOG.md) for detailed changes and [docs/发版清单.md](docs/发版清单.md) for the release checklist.
+See [CHANGELOG.md](CHANGELOG.md) for detailed changes.
 
 ---
 
