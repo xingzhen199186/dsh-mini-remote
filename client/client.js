@@ -3912,7 +3912,7 @@ window.__ModuleLoader__.load({
           }, '清除') : null,
         ),
         manual.error ? h('div', { style: styles.error }, manual.error) : null,
-        h('div', { style: styles.muted },
+        h('div', { style: Object.assign({}, styles.muted, { marginTop: 8 }) },
           saved
             ? '已保存。手机连接方式里会多一条「公网（手动地址）」；如果打不开，先检查外部入口，不要先改插件。'
             : '保存后，手机连接方式里会多一条手动地址；不影响其他连接方式。'),
