@@ -47,6 +47,7 @@ window.__ModuleLoader__.load({
     var SELF_RELAY_PATH = '/mini-remote/self-relay';
     var B_RELAY_PATH = '/mini-remote/b-relay';
     var MULTI_RELAY_PATH = '/mini-remote/multi-relay';
+    var AI_SETUP_PROMPT = '请使用 dsh-mini-remote-setup 技能，帮我配置手机遥控。先问我在什么场景用，一次只问一个问题，不要一次把所有方案都列出来。';
     var SERVE_PATH = '/mini-remote/serve';
     var FEISHU_PATH = '/mini-remote/feishu';
     // **这里原来有一条本机取票的地址常量**：面板点开时拿它去换一张「本机电脑端界面」的票。
@@ -2232,10 +2233,30 @@ window.__ModuleLoader__.load({
           .then(function () { setBusy(false); });
       };
 
+      var startAiSetup = function () {
+        // 新会话只负责把提示词填进输入框，用户按发送即可；不替用户直接发消息。
+        if (uiWorkspaceFace && typeof uiWorkspaceFace.startSession === 'function') {
+          uiWorkspaceFace.startSession(undefined, { prompt: AI_SETUP_PROMPT, whenDraftExists: 'append' });
+          return;
+        }
+        copy(AI_SETUP_PROMPT);
+      };
+
       return h('div', { style: styles.card },
         h('div', { style: styles.title }, '遥控设置'),
         h('div', { style: styles.muted }, '手机扫码即可连接，密码已编入二维码。'),
         h('div', { style: styles.warn }, '本页包含连接密码，请勿截图或转发。'),
+        h('div', { style: { marginTop: 10 } },
+          h('button', {
+            type: 'button',
+            style: styles.btnPrimary,
+            onClick: startAiSetup,
+          }, '让 AI 带我配置'),
+          h('div', { style: styles.muted },
+            copied === AI_SETUP_PROMPT
+              ? '提示词已复制；打开一个新会话粘贴即可。'
+              : '会打开新会话并填好提示词，按发送即可。'),
+        ),
         content(info, failure, copied, copy, busy, toggleTunnel, {
           showPwd: showPwd,
           setShowPwd: setShowPwd,

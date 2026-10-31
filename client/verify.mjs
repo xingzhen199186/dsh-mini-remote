@@ -3361,6 +3361,18 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
   const groupOf = (key) => walk(tree).find((n) => n && n.props && n.props.key === 'group-' + key);
   const hasKey = (node, key) => Boolean(walk(node).find((n) => n && n.props && n.props.key === key));
 
+  await check('顶部有「让 AI 带我配置」；没有会话界面时复制提示词', async () => {
+    const button = byType(tree, 'button').find((b) => textOf(b) === '让 AI 带我配置');
+    assert.ok(button, '设置页顶部要有 AI 配置入口');
+    const written = [];
+    setGlobal('navigator', { clipboard: { writeText: async (value) => { written.push(value); } } });
+    button.props.onClick();
+    await tick();
+    assert.equal(written.length, 1);
+    assert.match(written[0], /dsh-mini-remote-setup/);
+    assert.match(written[0], /帮我配置手机遥控/);
+  });
+
   await check('顶部链接与二维码常显，五个大类全部默认收起', () => {
     const mobile = groupOf('mobile');
     assert.ok(mobile, '顶部手机连接组要在');

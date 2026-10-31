@@ -16,6 +16,8 @@
   "files": [
     "lib",
     "client/client.js",
+    "SKILL.md",
+    "docs/guide",
     "relay-server",
     "cordis.patch.yml",
     "README.md",
