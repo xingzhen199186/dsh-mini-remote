@@ -3889,9 +3889,9 @@ window.__ModuleLoader__.load({
       return h('div', { key: 'manual-public', style: styles.block },
         h('div', { style: styles.entryTitle }, '手动公网地址'),
         h('div', { style: styles.muted },
-          '如果你已经在插件外配好 Tailscale Funnel、反向代理或其他固定入口，把基础地址填在这里。'
+          '如果你已经在插件外配好 Tailscale Funnel、反向代理或其他固定入口，把基础地址填在这里；也可以只填端口，插件会用当前 Tailscale HTTPS 地址的域名补全。'
           + '插件只负责显示和生成二维码，不建立、不探测、也不修复这条链路。'),
-        field('公网基础地址', manual.url, 'https://machine.tailnet.ts.net:10000', manual.setUrl, 'text', true),
+        field('公网基础地址', manual.url, 'https://machine.tailnet.ts.net:8443 或 8443', manual.setUrl, 'text', true),
         h('div', { style: { marginTop: 10, display: 'flex', gap: 8, flexWrap: 'wrap' } },
           h('button', {
             type: 'button',
