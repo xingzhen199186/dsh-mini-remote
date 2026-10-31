@@ -3914,13 +3914,14 @@ window.__ModuleLoader__.load({
     function multiRelayBlock(st, relay, busy, copied) {
       var running = st.state === 'running';
       var claiming = st.state === 'claiming' || Boolean(st.busy);
+      var working = claiming || Boolean(busy);
       var hostname = typeof st.publicHost === 'string' ? st.publicHost : '';
       var url = typeof st.url === 'string' ? st.url : (hostname ? 'https://' + hostname : '');
       var errorText = relay.error || st.lastError || null;
       var failed = st.state === 'error' || Boolean(errorText);
       var statusText;
       if (running) statusText = '已连接。手机可以用下面的固定地址。';
-      else if (claiming) statusText = '正在开通或连接中…';
+      else if (working) statusText = '正在开通或连接中…首次开通可能要几十秒，请先留在这个页面。';
       else if (st.state === 'error') statusText = st.reconnectable
         ? '连接断了。本地已有身份，可以点「重新连接」。'
         : '没有开通成功，检查控制台地址和邀请码。';
@@ -3928,8 +3929,8 @@ window.__ModuleLoader__.load({
       else if (st.enabled) statusText = '已开启，等待连接。';
       else statusText = '未开启。首次开通需要控制台地址和邀请码。';
       var pill = statusPill(
-        running ? '已连接' : (claiming ? '连接中' : (failed ? '失败' : '未开启')),
-        running ? 'connected' : (claiming ? 'pending' : (failed ? 'error' : 'idle')),
+        running ? '已连接' : (working ? '连接中' : (failed ? '失败' : '未开启')),
+        running ? 'connected' : (working ? 'pending' : (failed ? 'error' : 'idle')),
       );
       var stopButton = running || claiming ? h('button', {
         type: 'button', disabled: Boolean(busy),
@@ -3943,7 +3944,7 @@ window.__ModuleLoader__.load({
       }, '重新连接') : null;
       var startButton = !st.reconnectable && !running && !claiming ? h('button', {
         type: 'button', disabled: Boolean(busy), style: styles.btnPrimary, onClick: relay.start,
-      }, '开通并连接') : null;
+      }, busy ? '正在连接…' : '开通并连接') : null;
       var resetButton = (st.reconnectable || st.enabled || st.id || st.controlUrl) ? h('button', {
         type: 'button', disabled: Boolean(busy) || claiming,
         style: styles.btnDanger,

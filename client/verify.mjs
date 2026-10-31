@@ -1536,6 +1536,39 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
     h10.unmount();
   });
 
+  await check('自建多用户中继：点击开通后立刻显示连接中，不等请求回来才有反馈', async () => {
+    const offPayload = withMulti({
+      enabled: false,
+      state: 'idle',
+      controlUrl: '',
+      publicHost: '',
+      url: null,
+      reconnectable: false,
+      lastError: null,
+      error: null,
+      errorCode: null,
+    });
+    await mount10(offPayload);
+    let resolveFetch = null;
+    const pending = new Promise((resolve) => { resolveFetch = resolve; });
+    setGlobal('fetch', async (url, init) => {
+      if (url === '/mini-remote/multi-relay' && init && init.method === 'POST') return pending;
+      return jsonResponse(200, offPayload);
+    });
+    const ticketInput = byType(tree10, 'input').find((n) => n.props.type === 'password');
+    ticketInput.props.onChange({ target: { value: 'relay1.pending' } });
+    await tick();
+    const start = byType(tree10, 'button').find((b) => textOf(b) === '开通并连接');
+    start.props.onClick();
+    await tick();
+    assert.ok(byType(tree10, 'button').some((b) => textOf(b) === '正在连接…'), '请求未回来时按钮要立刻变成正在连接');
+    assert.match(textOf(tree10), /正在开通或连接中/, '状态要立刻显示连接中');
+    resolveFetch(jsonResponse(200, runningMulti));
+    await tick();
+    assert.match(textOf(tree10), /已连接/, '请求成功后要变成已连接');
+    h10.unmount();
+  });
+
   await check('自建多用户中继：清空本地配置要二次确认，确认后回到空白状态', async () => {
     posted10 = [];
     await mount10(runningMulti);
