@@ -142,6 +142,14 @@ dsh plugin --profile web add C:\path\to\dsh-mini-remote
   <img width="290" alt="执行中（浅色）：同一次执行，鲸鱼娘正在跑、已计时 14 秒、排队中 1 条" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/running-light-phone.jpg" />
 </div>
 
+### 远程窗口
+
+在另一台电脑的 DSH 桌面端直接打开这台电脑的完整界面：
+
+<div align="center">
+  <img width="680" alt="远程窗口：在另一台电脑的 DSH 面板中嵌入完整界面" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/remote-window.png" />
+</div>
+
 ---
 
 ## AI 配置向导

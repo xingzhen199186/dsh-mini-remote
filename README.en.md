@@ -142,6 +142,14 @@ During a task, the page shows the animated running state, an elapsed timer, and 
   <img width="290" alt="Running (light): the same run in the light theme, 14 seconds elapsed, one instruction queued" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/running-light-phone.jpg" />
 </div>
 
+### Remote Window
+
+Open this computer's complete DSH interface directly inside another computer's DSH desktop:
+
+<div align="center">
+  <img width="680" alt="Remote Window: the complete interface embedded in another computer's DSH panel" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/remote-window.png" />
+</div>
+
 ---
 
 ## AI Setup Guide
