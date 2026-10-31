@@ -2252,7 +2252,7 @@ window.__ModuleLoader__.load({
             style: styles.btnPrimary,
             onClick: startAiSetup,
           }, '让 AI 带我配置'),
-          h('div', { style: styles.muted },
+          h('div', { style: Object.assign({}, styles.muted, { marginTop: 8 }) },
             copied === AI_SETUP_PROMPT
               ? '提示词已复制；打开一个新会话粘贴即可。'
               : '会打开新会话并填好提示词，按发送即可。'),
