@@ -1367,6 +1367,20 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
     error: null,
     errorCode: null,
   });
+  const resetMulti = {
+    ok: true,
+    multiRelay: {
+      enabled: false,
+      state: 'idle',
+      controlUrl: '',
+      publicHost: '',
+      url: null,
+      reconnectable: false,
+      lastError: null,
+      error: null,
+      errorCode: null,
+    },
+  };
   const stoppedMulti = {
     ok: true,
     multiRelay: {
@@ -1392,6 +1406,7 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
         const body = JSON.parse(init.body);
         posted10.push(body);
         if (body.action === 'stop') return jsonResponse(200, stoppedMulti);
+        if (body.action === 'reset') return jsonResponse(200, resetMulti);
         return jsonResponse(200, runningMulti);
       }
       return jsonResponse(200, payload);
@@ -1520,6 +1535,28 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
     assert.deepEqual(posted10[0], { action: 'start', ticket: 'relay1.test-ticket' });
     h10.unmount();
   });
+
+  await check('自建多用户中继：清空本地配置要二次确认，确认后回到空白状态', async () => {
+    posted10 = [];
+    await mount10(runningMulti);
+    const reset = byType(tree10, 'button').find((b) => textOf(b) === '清空本地配置');
+    assert.ok(reset, '已配置时要有清空本地配置入口');
+    reset.props.onClick();
+    await tick();
+    assert.match(textOf(tree10), /不会删除服务器上的租户/, '清空前要说清服务端资源不删');
+    const confirm = byType(tree10, 'button').find((b) => textOf(b) === '确认清空');
+    assert.ok(confirm, '要有确认按钮');
+    confirm.props.onClick();
+    await tick();
+    assert.deepEqual(posted10, [{ action: 'reset' }]);
+    assert.equal(byType(tree10, 'input').some((n) => String(n.props.value).includes(MULTI_HOST)), false,
+      '清空后不再显示旧固定地址');
+    assert.ok(byType(tree10, 'input').some((n) => n.props.type === 'password' && String(n.props.placeholder).includes('邀请票')),
+      '清空后要回到可以粘贴邀请票的空白状态');
+    assert.match(textOf(tree10), /未开启/);
+    h10.unmount();
+  });
+
 }
 
 // 4e. Tailscale 的 HTTPS 地址：开关、状态、以及「tailnet 没开 Serve」那条路

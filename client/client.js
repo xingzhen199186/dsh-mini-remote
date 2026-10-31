@@ -741,6 +741,9 @@ window.__ModuleLoader__.load({
       var multiAdminPasswordState = useState('');
       var multiAdminPassword = multiAdminPasswordState[0];
       var setMultiAdminPassword = multiAdminPasswordState[1];
+      var multiResetAskState = useState(false);
+      var multiResetAsk = multiResetAskState[0];
+      var setMultiResetAsk = multiResetAskState[1];
       var multiInitRef = useRef(false);
       // Cloudflare 命名隧道：固定域名 + token。token 不回显，留空表示沿用已保存的。
       var namedTunnelState = useState({ token: '', publicUrl: '' });
@@ -1112,6 +1115,12 @@ window.__ModuleLoader__.load({
               if (action === 'start' && payload.multiRelay.reconnectable) {
                 setMultiTicket('');
                 setMultiAdminPassword('');
+              }
+              if (action === 'reset' && payload.ok) {
+                setMultiControl('');
+                setMultiTicket('');
+                setMultiAdminPassword('');
+                setMultiResetAsk(false);
               }
             }
             if (!payload || !payload.ok) {
@@ -2443,6 +2452,10 @@ window.__ModuleLoader__.load({
           start: function () { runMultiRelay('start'); },
           reconnect: function () { runMultiRelay('reconnect'); },
           stop: function () { runMultiRelay('stop'); },
+          resetAsk: multiResetAsk,
+          askReset: function () { setMultiResetAsk(true); },
+          cancelReset: function () { setMultiResetAsk(false); },
+          reset: function () { runMultiRelay('reset'); },
           copy: copy,
         }),
       );
@@ -3931,6 +3944,11 @@ window.__ModuleLoader__.load({
       var startButton = !st.reconnectable && !running && !claiming ? h('button', {
         type: 'button', disabled: Boolean(busy), style: styles.btnPrimary, onClick: relay.start,
       }, '开通并连接') : null;
+      var resetButton = (st.reconnectable || st.enabled || st.id || st.controlUrl) ? h('button', {
+        type: 'button', disabled: Boolean(busy) || claiming,
+        style: styles.btnDanger,
+        onClick: relay.askReset,
+      }, '清空本地配置') : null;
       return h('div', { key: 'multi-relay', style: styles.block },
         h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' } },
           h('div', { style: styles.entryTitle }, '自建多用户中继'),
@@ -3984,7 +4002,14 @@ window.__ModuleLoader__.load({
           ),
         ) : null,
         h('div', { style: { display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 12 } },
-          stopButton, reconnectButton, startButton),
+          stopButton, reconnectButton, startButton, resetButton),
+        relay.resetAsk ? h('div', { style: Object.assign({}, styles.warn, { marginTop: 10 }) },
+          '清空只删这台电脑上的身份和 frpc 配置，不会删除服务器上的租户。旧固定地址仍占着服务器名额，需要管理员在后台撤销。',
+          h('div', { style: { display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' } },
+            h('button', { type: 'button', disabled: Boolean(busy), style: styles.btnDanger, onClick: relay.reset }, '确认清空'),
+            h('button', { type: 'button', disabled: Boolean(busy), style: styles.btn, onClick: relay.cancelReset }, '取消'),
+          ),
+        ) : null,
         h('div', { style: { marginTop: 10 } },
           h('div', { style: styles.muted }, statusText),
           errorText ? h('div', { style: styles.error }, errorText) : null,
