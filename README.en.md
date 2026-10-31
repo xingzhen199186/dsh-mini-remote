@@ -184,7 +184,6 @@ Pick one route that works before adding a fixed address. Use LAN when the phone 
 | **Self-hosted multi-user relay** | Several people each need access | An administrator deploys `relay-multi` and issues invite tickets; traffic goes only through that server | [07-Multi-user Relay](docs/guide/07-自建多用户中继.md) |
 | **Feishu** | Control through enterprise IM only | Configure a Feishu custom app; no inbound public port; currently text and approvals in direct messages | [13-Feishu](docs/guide/13-飞书通知.md) |
 
-> “B relay” means the provider's B control plane, not the B computer in A/B collaboration. See [00-Choose a Route](docs/guide/00-先选一条路.md) for the full decision logic.
 
 ---
 
