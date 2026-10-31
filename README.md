@@ -115,17 +115,31 @@ dsh plugin --profile web add C:\path\to\dsh-mini-remote
 
 ## 效果预览
 
-<div align="center">
-  <img width="240" alt="手机聊天界面（深色）：按气泡排列历史" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/screen-chat-dark.png" />
-  <img width="240" alt="手机聊天界面（浅色）：同一段对话在浅色主题下按气泡排列" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/screen-chat-light.png" />
-</div>
+### 对话界面（单帧 / 聊天 / 完整）
+
+移动端页面使用原生 JavaScript 开发，无前端构建负担，支持深海墨蓝（深色）与冰蓝宝蓝（浅色）两套高对比度主题。同一场对话有三种看法：单帧整屏只留最新一条结论，聊天把历史一条条排成气泡，完整再把每一轮的执行轨迹插回对话原位：
 
 <div align="center">
-  <img width="240" alt="手机完整模式：工具调用与对话按时间顺序展开" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/screen-full-dark.png" />
+  <img width="290" alt="聊天（深色）：一来一回排成气泡，一屏看得到多条历史" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/screen-chat-dark.png" />
+  <img width="290" alt="聊天（浅色）：同一段对话的浅色版" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/screen-chat-light.png" />
 </div>
 
+### 设置面板与外观切换
+
+通过右上角设置随时切换呈现模式、外观主题与网络重连控制：
+
 <div align="center">
-  <img width="680" alt="远程窗口：在另一台电脑的 DSH 面板中嵌入完整界面" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/remote-window.png" />
+  <img width="290" alt="设置（深色）：显示模式三选一、外观选中深色" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/settings-dark.png" />
+  <img width="290" alt="设置（浅色）：选中态和主按钮都跟着换成宝蓝" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/settings-light.png" />
+</div>
+
+### 执行动画状态
+
+任务运行中动态展示拟人化跑动状态、耗时计时器与排队刻度尺，消除不可知等待：
+
+<div align="center">
+  <img width="290" alt="执行中（深色）：鲸鱼娘正在跑、已计时 14 秒、队列刻度上排着一条" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/running-dark-phone.jpg" />
+  <img width="290" alt="执行中（浅色）：同一次执行，鲸鱼娘正在跑、已计时 14 秒、排队中 1 条" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/running-light-phone.jpg" />
 </div>
 
 ---

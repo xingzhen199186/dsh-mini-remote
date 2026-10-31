@@ -115,17 +115,31 @@ dsh plugin --profile web add C:\path\to\dsh-mini-remote
 
 ## Preview
 
-<div align="center">
-  <img width="240" alt="Phone chat view (dark): history arranged as bubbles" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/screen-chat-dark.png" />
-  <img width="240" alt="Phone chat view (light): the same conversation history as bubbles in the light theme" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/screen-chat-light.png" />
-</div>
+### Conversation views (Single frame / Chat / Full)
+
+The phone page is built with vanilla JavaScript and has no front-end build step. It provides two high-contrast themes: deep ocean blue (dark) and ice blue with royal blue (light). One conversation can be read three ways: Single frame leaves only the latest conclusion on screen, Chat arranges history as bubbles, and Full puts each turn's execution trail back in place:
 
 <div align="center">
-  <img width="240" alt="Phone full view: tool calls and conversation in chronological order" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/screen-full-dark.png" />
+  <img width="290" alt="Chat (dark): turns arranged as back-and-forth bubbles, with several visible at once" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/screen-chat-dark.png" />
+  <img width="290" alt="Chat (light): the same conversation in the light theme" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/screen-chat-light.png" />
 </div>
 
+### Settings and appearance
+
+Use the settings button in the upper-right corner to switch presentation mode, theme, and network reconnection controls:
+
 <div align="center">
-  <img width="680" alt="Remote Window: the complete interface embedded in another computer's DSH panel" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/remote-window.png" />
+  <img width="290" alt="Settings (dark): three display modes with dark appearance selected" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/settings-dark.png" />
+  <img width="290" alt="Settings (light): selected states and the primary button use royal blue" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/settings-light.png" />
+</div>
+
+### Execution status
+
+During a task, the page shows the animated running state, an elapsed timer, and the queue scale without inventing progress that is not known:
+
+<div align="center">
+  <img width="290" alt="Running (dark): the whale mascot running, 14 seconds elapsed, one instruction on the queue scale" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/running-dark-phone.jpg" />
+  <img width="290" alt="Running (light): the same run in the light theme, 14 seconds elapsed, one instruction queued" src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/running-light-phone.jpg" />
 </div>
 
 ---
