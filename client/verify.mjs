@@ -2765,6 +2765,8 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
     assert.equal(inputs.length, 3, '地址 + 口令 + 名字（名字可留空）');
     assert.deepEqual(inputs.map((n) => n.props.type), ['text', 'password', 'text'],
       '口令那一格必须打码');
+    assert.match(textOf(remotesBlockOf(st.tree)), /遥控设置」-连接方式内复制【密码】/,
+      '口令说明要指到「遥控设置 → 连接方式」里的密码');
     assert.ok(buttonIn(remotesBlockOf(st.tree), '确认添加'));
     st.harness.unmount();
   });

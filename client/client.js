@@ -2865,7 +2865,7 @@ window.__ModuleLoader__.load({
         field('那台电脑的地址（它「遥控设置」页那条，不带 /mini）', r.add.baseUrl, 'http://…', function (v) {
           r.setAddDraft(Object.assign({}, r.add, { baseUrl: v }));
         }, 'text', true),
-        field('那台电脑的口令（在它的「遥控设置」里复制）', r.add.token, '', function (v) {
+        field('那台电脑的口令（在它的「遥控设置」-连接方式内复制【密码】）', r.add.token, '', function (v) {
           r.setAddDraft(Object.assign({}, r.add, { token: v }));
         }, 'password', true),
         field('给它起个名字（可留空，留空就用地址当名字）', r.add.name, '', function (v) {
