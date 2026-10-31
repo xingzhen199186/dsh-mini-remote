@@ -3962,7 +3962,7 @@ window.__ModuleLoader__.load({
         ]],
       ];
       var out = [h('div', { key: 'manual-guide-intro', style: Object.assign({}, styles.muted, { marginTop: 12 }) },
-        '按下面顺序做；域名、端口和机器名换成你自己的。')];
+        '以 Tailscale Funnel 为例；按下面顺序做，域名、端口和机器名换成你自己的。')];
       for (var i = 0; i < sections.length; i += 1) {
         out.push(h('div', { key: 'manual-guide-' + i, style: Object.assign({}, styles.entryTitle, { marginTop: 12 }) }, sections[i][0]));
         for (var j = 0; j < sections[i][1].length; j += 1) {
