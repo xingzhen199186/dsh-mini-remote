@@ -764,6 +764,9 @@ window.__ModuleLoader__.load({
       var manualErrorState = useState(null);
       var manualError = manualErrorState[0];
       var setManualError = manualErrorState[1];
+      var manualGuideState = useState(false);
+      var manualGuideOpen = manualGuideState[0];
+      var setManualGuideOpen = manualGuideState[1];
       var aRelayInviteState = useState('');
       var aRelayInvite = aRelayInviteState[0];
       var setARelayInvite = aRelayInviteState[1];
@@ -2489,6 +2492,8 @@ window.__ModuleLoader__.load({
           busy: manualBusy,
           error: manualError,
           save: saveManualPublicUrl,
+          guideOpen: manualGuideOpen,
+          toggleGuide: function () { setManualGuideOpen(function (v) { return !v; }); },
         }, {
           invite: aRelayInvite,
           setInvite: setARelayInvite,
@@ -3911,7 +3916,60 @@ window.__ModuleLoader__.load({
           saved
             ? '已保存。手机连接方式里会多一条「公网（手动地址）」；如果打不开，先检查外部入口，不要先改插件。'
             : '保存后，手机连接方式里会多一条手动地址；不影响其他连接方式。'),
+        h('div', { style: { marginTop: 12 } },
+          h('button', { type: 'button', style: styles.btn, onClick: manual.toggleGuide },
+            manual.guideOpen ? '收起配置指引' : '配置指引（Tailscale Funnel）'),
+        ),
+        manual.guideOpen ? manualPublicUrlGuide() : null,
       );
+    }
+
+    /**
+     * 手动公网地址的配置指引，以 Tailscale Funnel 为例。
+     * 只写可判断的步骤；最后一条明确告诉用户：关掉手机 Tailscale
+     * 还打不开，就说明公网入口不通，不要继续把它当固定地址。
+     */
+    function manualPublicUrlGuide() {
+      var sections = [
+        ['一、先确认 Tailscale 能用', [
+          '电脑和手机都安装 Tailscale，并登录同一个 tailnet。',
+          '在 Tailscale 管理后台确认 MagicDNS 和 HTTPS 已开启；Funnel 还需要 tailnet 策略里有 funnel 节点属性。',
+          '本机手机服务端口以自检显示为准，通常是 3090。',
+        ]],
+        ['二、在电脑上开 Funnel', [
+          '打开 PowerShell 或终端，执行：tailscale funnel --bg --https=8443 3090。',
+          '把 3090 换成插件实际端口；8443 也可以换成 443 或 10000。',
+          '命令会输出一个 https://<机器>.<tailnet>.ts.net:8443/ 地址。',
+        ]],
+        ['三、填回插件', [
+          '把完整地址填进上面的「公网基础地址」，例如 https://machine.tailnet.ts.net:8443。',
+          '点「保存地址」；手机连接里会出现「公网（手动地址）」和二维码。',
+          '不要只填 8443；这个字段是通用入口，插件不替你猜域名。',
+        ]],
+        ['四、验证是不是真的公网', [
+          '先确认 tailscale funnel status 显示 Funnel on。',
+          '把手机关掉 Tailscale（不是只断开，最好从后台划掉），用移动网络打开二维码。',
+          '能打开，说明 Funnel 公网链路可用；打不开但开着 Tailscale 能开，说明走的是 tailnet，不是 Funnel。',
+        ]],
+        ['五、打不开时', [
+          '如果关掉 Tailscale 后 TLS 握手失败或一直转圈，先不要继续调插件；这是公网入口不可达。',
+          '换 8443 或 10000 再试；如果 443 也被占用，不要硬切。',
+          '仍然不行就改用 Cloudflare 命名隧道或自建中继；不要把 Funnel 当成国内稳定的固定地址。',
+        ]],
+        ['六、不用时关掉', [
+          '执行：tailscale funnel --https=8443 off。',
+          '把 8443 换成你实际开的端口；关掉后这个公网入口立即失效。',
+        ]],
+      ];
+      var out = [h('div', { key: 'manual-guide-intro', style: Object.assign({}, styles.muted, { marginTop: 12 }) },
+        '按下面顺序做；域名、端口和机器名换成你自己的。')];
+      for (var i = 0; i < sections.length; i += 1) {
+        out.push(h('div', { key: 'manual-guide-' + i, style: Object.assign({}, styles.entryTitle, { marginTop: 12 }) }, sections[i][0]));
+        for (var j = 0; j < sections[i][1].length; j += 1) {
+          out.push(h('div', { key: 'manual-guide-' + i + '-' + j, style: styles.muted }, sections[i][1][j]));
+        }
+      }
+      return h('div', { key: 'manual-guide' }, out);
     }
 
     /**
