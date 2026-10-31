@@ -84,3 +84,27 @@ dsh-session-*.zip
 
 # A staging Worker 的本地 secret（不进仓库）
 worker/.staging-secrets.json
+
+# 内部设计与运维文档：只留在本机，不发布到公开仓库。
+# 这些不是用户使用指南；包含实施过程、容量估算、运维记录、验收记录和内部方案。
+docs/A-*.md
+docs/B-*.md
+docs/C-*.md
+docs/中继方案-C-A.md
+docs/固定地址运维手册.md
+docs/b-agent-acceptance.md
+docs/自建多用户中继-安装包设计.md
+docs/国内中继方案框架.md
+docs/验收记录-*.md
+docs/character.md
+docs/art-refs/
+
+# 未使用或已过时的配图：保留本机文件，不再作为公开文档资源。
+docs/approval-card-*.png
+docs/promo.png
+docs/promo-legacy.*
+docs/screen-dark.png
+docs/screen-light.png
+docs/screen-full-light.png
+docs/settings-dark.png
+docs/settings-light.png
