@@ -59,14 +59,16 @@ test('自助申请：一个邮箱只能申请一次，验证后能拿到邀请�
   assert.equal(again.body.code, 'already_requested')
 })
 
-test('自助申请：同一 IP 换邮箱也不能重复申请', async () => {
+test('自助申请：同一 IP 30 天内最多 2 个邮箱', async () => {
   const { env } = createEnv()
   env.MAIL_SEND = async () => ({ ok: true })
   const first = await request(env, 'POST', REQUEST_PATH, { email: 'one@example.com' }, { ip: '198.51.100.20' })
   assert.equal(first.status, 200)
   const second = await request(env, 'POST', REQUEST_PATH, { email: 'two@example.com' }, { ip: '198.51.100.20' })
-  assert.equal(second.status, 409)
-  assert.equal(second.body.code, 'already_requested')
+  assert.equal(second.status, 200)
+  const third = await request(env, 'POST', REQUEST_PATH, { email: 'three@example.com' }, { ip: '198.51.100.20' })
+  assert.equal(third.status, 409)
+  assert.equal(third.body.code, 'ip_limit_reached')
 })
 
 test('自助申请：一次性邮箱被拒绝', async () => {

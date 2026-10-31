@@ -16,6 +16,8 @@ const VERIFY_TTL_MS = 10 * 60 * 1000
 const VERIFY_MAX_ATTEMPTS = 5
 const REQUEST_RESEND_MS = 60 * 1000
 const REQUEST_DAILY_LIMIT = 100
+const IP_REQUEST_LIMIT = 2
+const IP_REQUEST_WINDOW_MS = 30 * DAY_MS
 
 class ControlError extends Error {
   constructor(code, status = 409, retryable = false) {
@@ -296,10 +298,9 @@ async function handleInviteRequest(request, env, requestId) {
   if (retryAfter) return fail(requestId, 'rate_limited', 429, true, retryAfter)
 
   const existing = await env.DB.prepare(
-    'SELECT * FROM b_invite_requests WHERE email_hash = ? OR ip_hash = ? ORDER BY created_at DESC LIMIT 1',
-  ).bind(emailHash, ipHash).first()
+    'SELECT * FROM b_invite_requests WHERE email_hash = ? LIMIT 1',
+  ).bind(emailHash).first()
   if (existing) {
-    if (!timingSafeEqual(existing.email_hash, emailHash)) return fail(requestId, 'already_requested', 409)
     if (existing.state === 'pending' && Number(existing.expires_at) > Date.now()) {
       const retry = await spendRate(env, 'invite-resend:' + existing.request_id, 1, 60)
       if (retry) return fail(requestId, 'rate_limited', 429, true, retry)
@@ -315,6 +316,13 @@ async function handleInviteRequest(request, env, requestId) {
       return ok(requestId, { applicationId: existing.request_id, expiresAt: Date.now() + VERIFY_TTL_MS, resent: true })
     }
     return fail(requestId, 'already_requested', 409)
+  }
+
+  const ipCount = await env.DB.prepare(
+    'SELECT COUNT(*) AS n FROM b_invite_requests WHERE ip_hash = ? AND created_at > ?',
+  ).bind(ipHash, Date.now() - IP_REQUEST_WINDOW_MS).first()
+  if (Number(ipCount?.n || 0) >= IP_REQUEST_LIMIT) {
+    return fail(requestId, 'ip_limit_reached', 409)
   }
 
   const newRequestId = crypto.randomUUID()

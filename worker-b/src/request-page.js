@@ -34,14 +34,14 @@ ${turnstile}
 </head>
 <body>
 <h1>申请固定地址邀请码</h1>
-<p>免费申请。一个邮箱、一个 IP 只能申请一次；验证邮箱后才会发放邀请码。</p>
+<p>免费申请。一个邮箱只能申请一次；同一网络 30 天内最多 2 个邮箱；验证邮箱后才会发放邀请码。</p>
 <div class="card">
   <div id="step1">
     <label for="email">邮箱</label>
     <input id="email" type="email" autocomplete="email" placeholder="you@example.com">
     ${widget}
     <button id="send" type="button">发送验证码</button>
-    <div class="note">验证码 10 分钟内有效。不要用一次性邮箱；同一邮箱/IP 不能重复申请。</div>
+    <div class="note">验证码 10 分钟内有效。不要用一次性邮箱；同一邮箱不能重复申请，同一网络 30 天内最多 2 个。</div>
   </div>
   <div id="step2" class="hidden">
     <label for="code">邮箱验证码</label>
