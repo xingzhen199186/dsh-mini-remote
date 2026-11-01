@@ -1473,7 +1473,7 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
   });
 
   await check('B 身份错误：仅清本地身份按钮经过确认后 POST purge-local', async () => {
-    for (const errorCode of ['auth_failed', 'identity_mismatch']) {
+    for (const errorCode of ['auth_failed', 'identity_mismatch', 'cf_api_unavailable']) {
       posted9 = [];
       await mount9(base({
         enabled: true,

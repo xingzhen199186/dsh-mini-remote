@@ -4065,7 +4065,7 @@ window.__ModuleLoader__.load({
             if (window.confirm('会删除服务器上的旧 Tunnel、DNS 和租约，并清空本机身份。这个操作不可恢复。确定继续？')) relay.purge();
           },
         }, '彻底清除旧租约') : null;
-      var purgeLocalButton = (st.errorCode === 'auth_failed' || st.errorCode === 'identity_mismatch')
+      var purgeLocalButton = (st.errorCode === 'auth_failed' || st.errorCode === 'identity_mismatch' || st.errorCode === 'cf_api_unavailable')
         ? h('button', {
           type: 'button',
           disabled: Boolean(busy),
