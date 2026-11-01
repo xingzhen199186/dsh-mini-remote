@@ -4643,7 +4643,7 @@ window.__ModuleLoader__.load({
         } else if (proxyCompat.systemProxy) {
           proxyMessage = '检测到系统代理；cloudflared 通常直连，不需要额外处理。若插件自身连不上，请检查代理软件是否强制透明代理或 DNS 劫持。';
         } else {
-          proxyMessage = '检测到本机代理；如果隧道连不上，请复制下面的直连规则到代理软件。';
+          proxyMessage = '检测到本机代理；如果隧道连不上，请检查代理软件是否强制透明代理或 DNS 劫持。';
         }
       }
 
