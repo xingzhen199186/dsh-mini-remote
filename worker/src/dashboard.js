@@ -129,7 +129,7 @@ code{background:#f3f4f6;padding:2px 6px;border-radius:4px;word-break:break-all}
         <div class="muted small">每日任务在 Worker Cron 中运行；需要配置 CF_ANALYTICS_TOKEN 才能查到 Cloudflare 用量。</div>
       </div>
       <div class="card"><h3>今日用量</h3><div class="row"><button class="btn" id="refreshUsage">立即采集</button><span class="muted small">每天自动采集可在上方开关。</span></div><div id="usage" class="muted" style="margin-top:10px">还没有用量快照。</div></div>
-      <div class="card"><h3>邀请</h3><div class="row"><button class="btn primary" id="newInvite">新建 7 天邀请码</button><span class="muted small">未使用、未过期的邀请码会列在下面。</span></div><div id="inviteResult" class="notice hidden"></div><div class="table-wrap"><table><thead><tr><th>邀请码</th><th>备注</th><th>到期</th></tr></thead><tbody id="invites"></tbody></table></div></div>
+      <div class="card"><h3>邀请</h3><div class="row"><button class="btn primary" id="newInvite">新建 30 分钟邀请码</button><span class="muted small">未使用、未过期的邀请码会列在下面。</span></div><div id="inviteResult" class="notice hidden"></div><div class="table-wrap"><table><thead><tr><th>邀请码</th><th>备注</th><th>到期</th></tr></thead><tbody id="invites"></tbody></table></div></div>
       <div class="card"><h3>实例</h3><div class="muted small" id="identityMeta"></div><div class="table-wrap"><table><thead><tr><th>id</th><th>状态</th><th>最近登记</th><th>创建</th><th></th></tr></thead><tbody id="identities"></tbody></table></div></div>
       <div class="card"><h3>最近审计</h3><div class="table-wrap"><table><thead><tr><th>时间</th><th>操作</th><th>目标</th><th>原因</th><th>操作者</th></tr></thead><tbody id="audit"></tbody></table></div></div>
     </section>
@@ -142,7 +142,7 @@ code{background:#f3f4f6;padding:2px 6px;border-radius:4px;word-break:break-all}
         <div class="metric"><div class="k">已释放</div><div class="v" id="bdReleased">—</div></div>
         <div class="metric"><div class="k">已退休</div><div class="v" id="bdRetired">—</div></div>
       </div></div>
-      <div class="card"><h3>新建激活码</h3><div class="row"><button class="btn primary" id="newBInvite">新建 7 天激活码</button><span class="muted small">给用户一次性开通专属固定地址；7 天内有效。</span></div><div id="bInviteResult" class="notice hidden"></div></div>
+      <div class="card"><h3>新建激活码</h3><div class="row"><button class="btn primary" id="newBInvite">新建 30 分钟激活码</button><span class="muted small">给用户一次性开通专属固定地址；30 分钟内有效。</span></div><div id="bInviteResult" class="notice hidden"></div></div>
       <div class="card"><h3>注册开关</h3>
         <label class="switch"><input type="checkbox" id="bRegistrationEnabled"> 允许新实例注册</label>
         <label class="switch"><input type="checkbox" id="bInviteRequired"> 新实例必须带邀请码（关闭后为自服务注册）</label>
@@ -265,8 +265,8 @@ $('proxyEnabled').addEventListener('change',(e)=>saveConfig('proxyEnabled',e.tar
 $('dailyReportEnabled').addEventListener('change',(e)=>saveConfig('dailyReportEnabled',e.target.checked));
 $('saveMaxActive').addEventListener('click',()=>{const n=Number($('maxActive').value);if(!Number.isInteger(n)||n<1||n>10000){showError('上限必须是 1 到 10000 的整数');return}saveConfig('maxActive',n)});
 $('saveMonthlyLimit').addEventListener('click',()=>{const n=Number($('monthlyRequestLimit').value);if(!Number.isInteger(n)||n<0||n>10000000){showError('硬上限必须是 0 到 10000000 的整数');return}saveConfig('monthlyRequestLimit',n)});
-$('newInvite').addEventListener('click',async()=>{try{const r=await api('/admin/relay/v1/invites',{method:'POST',body:JSON.stringify({expiresInDays:7})});$('inviteResult').classList.remove('hidden');$('inviteResult').innerHTML='新邀请码（只显示这一次）：<br><code>'+esc(r.code)+'</code>';await load()}catch(e){showError('创建邀请失败：'+e.message)}});
-$('newBInvite').addEventListener('click',async()=>{try{const r=await api('/admin/relay/v1/b/invites',{method:'POST',body:JSON.stringify({expiresInDays:7,note:'ops-console'})});$('bInviteResult').classList.remove('hidden');$('bInviteResult').innerHTML='新激活码（只显示这一次）：<br><code>'+esc(r.code)+'</code><br><span class="small">固定地址：<code>'+esc(r.hostname)+'</code></span>';await load()}catch(e){showError('创建激活码失败：'+e.message)}});
+$('newInvite').addEventListener('click',async()=>{try{const r=await api('/admin/relay/v1/invites',{method:'POST',body:JSON.stringify({expiresInMinutes:30})});$('inviteResult').classList.remove('hidden');$('inviteResult').innerHTML='新邀请码（只显示这一次）：<br><code>'+esc(r.code)+'</code>';await load()}catch(e){showError('创建邀请失败：'+e.message)}});
+$('newBInvite').addEventListener('click',async()=>{try{const r=await api('/admin/relay/v1/b/invites',{method:'POST',body:JSON.stringify({expiresInMinutes:30,note:'ops-console'})});$('bInviteResult').classList.remove('hidden');$('bInviteResult').innerHTML='新激活码（只显示这一次）：<br><code>'+esc(r.code)+'</code><br><span class="small">固定地址：<code>'+esc(r.hostname)+'</code></span>';await load()}catch(e){showError('创建激活码失败：'+e.message)}});
 document.addEventListener('click',async(e)=>{const copy=e.target?.dataset?.copy;if(copy){try{await navigator.clipboard.writeText(copy);e.target.textContent='已复制'}catch{}return}const id=e.target?.dataset?.revoke;if(!id)return;if(!confirm('确定撤销 '+id+'？撤销后固定地址立即失效。'))return;try{await api('/admin/relay/v1/revoke',{method:'POST',body:JSON.stringify({id,reason:'ops-console'})});await load()}catch(err){showError('撤销失败：'+err.message)}});
 $('bRegistrationEnabled').addEventListener('change',(e)=>saveBConfig('registrationEnabled',e.target.checked));
 $('bInviteRequired').addEventListener('change',(e)=>saveBConfig('inviteRequired',e.target.checked));

@@ -379,6 +379,17 @@ test('触发月度硬上限时会发通知邮件', async () => {
   assert.match(mails[0].subject, /月度请求上限/)
 })
 
+test('邀请码默认 30 分钟过期', async () => {
+  const env = makeEnv()
+  const before = Date.now()
+  const code = await createInvite(env)
+  const row = await env.DB.prepare('SELECT expires_at FROM relay_invites WHERE code_hash IS NOT NULL').first()
+  assert.ok(row?.expires_at)
+  const ttl = Number(row.expires_at) - before
+  assert.ok(ttl > 29 * 60_000 && ttl < 31 * 60_000, `TTL 应约 30 分钟，实际 ${ttl}ms`)
+  assert.ok(code)
+})
+
 test('没有邀请不能创建身份', async () => {
   const env = makeEnv()
   const response = await handleRequest(req('/api/relay/v1/register', {

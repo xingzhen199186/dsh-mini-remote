@@ -6,7 +6,7 @@
  *   RELAY_ADMIN_URL=https://relay.example.com \
  *   RELAY_ADMIN_TOKEN=... \
  *   node worker/scripts/relay-admin.mjs list
- *   ... invite --note "首批"
+ *   ... invite --note "首批" --minutes 30
  *   ... revoke <id> --reason "abuse"
  *   ... config --registration=false
  *   ... audit
@@ -59,7 +59,7 @@ try {
     console.log(JSON.stringify(await call('GET', '/admin/relay/v1/audit?limit=100'), null, 2))
   } else if (command === 'invite') {
     console.log(JSON.stringify(await call('POST', '/admin/relay/v1/invites', {
-      note: flag('note'), expiresInDays: Number(flag('days')) || 7,
+      note: flag('note'), expiresInMinutes: Number(flag('minutes')) || 30,
     }), null, 2))
   } else if (command === 'revoke') {
     const id = rest[0]

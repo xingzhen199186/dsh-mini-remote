@@ -15,6 +15,8 @@ const DEFAULT_MAX_LEASES = 900
 const VERIFY_TTL_MS = 10 * 60 * 1000
 const REVEAL_TTL_MS = 15 * 60 * 1000
 const VERIFY_MAX_ATTEMPTS = 5
+const INVITE_TTL_MS = 30 * 60 * 1000
+const VERIFY_IP_LIMIT = 10
 const FULFILL_RESERVATION_TTL_MS = 5 * 60 * 1000
 const REQUEST_RESEND_MS = 60 * 1000
 const REQUEST_DAILY_LIMIT = 100
@@ -316,7 +318,7 @@ async function retireExpiredInvites(env, { now, actor, requestId }) {
   ])
 }
 
-async function createInvite(env, { note = null, days = 7, actor = 'admin-token', requestId, fulfillRequest = null }) {
+async function createInvite(env, { note = null, days, ttlMs = INVITE_TTL_MS, actor = 'admin-token', requestId, fulfillRequest = null }) {
   const now = Date.now()
   await retireExpiredInvites(env, { now, actor, requestId })
   const config = await readBConfig(env)
@@ -327,7 +329,7 @@ async function createInvite(env, { note = null, days = 7, actor = 'admin-token',
   const id = randomId()
   const code = randomSecret()
   const codeId = crypto.randomUUID()
-  const expiresAt = now + days * DAY_MS
+  const expiresAt = now + (Number.isFinite(days) && days > 0 ? days * DAY_MS : ttlMs)
   const hostname = hostnameOf(env, id)
   const reveal = fulfillRequest ? await sealReveal(env, fulfillRequest.id, fulfillRequest.code, code) : null
   const statements = [
@@ -435,6 +437,9 @@ async function handleInviteVerify(request, env, requestId) {
   const id = typeof body.applicationId === 'string' ? body.applicationId.trim() : (typeof body.requestId === 'string' ? body.requestId.trim() : '')
   const code = typeof body.code === 'string' ? body.code.trim() : ''
   if (!/^[0-9a-f-]{36}$/i.test(id) || !/^\d{6}$/.test(code)) return fail(requestId, 'invalid_request', 400)
+  const verifyIpHash = await hmac(env, 'ip', clientIp(request))
+  const verifyRetry = await spendRate(env, 'invite-verify:ip:' + verifyIpHash, VERIFY_IP_LIMIT, 60)
+  if (verifyRetry) return fail(requestId, 'rate_limited', 429, true, verifyRetry)
   const row = await env.DB.prepare('SELECT * FROM b_invite_requests WHERE request_id = ?').bind(id).first()
   if (row?.state === 'fulfilled') {
     if (!row.fulfilled_at || Number(row.fulfilled_at) + REVEAL_TTL_MS <= Date.now()) return fail(requestId, 'request_expired', 410)
@@ -471,7 +476,7 @@ async function handleInviteVerify(request, env, requestId) {
   try {
     created = await createInvite(env, {
       note: 'self-service:' + row.email_masked,
-      days: 7,
+      ttlMs: INVITE_TTL_MS,
       actor: 'self-service',
       requestId,
       fulfillRequest: { id, verifiedAt, code },
@@ -1278,13 +1283,13 @@ async function handleAdmin(request, env, url, requestId) {
     if (request.method !== 'POST') return fail(requestId, 'method_not_allowed', 405)
     const body = await readJson(request)
     if (body.error) return fail(requestId, body.error, 400)
-    const days = body.expiresInDays === undefined ? 7 : body.expiresInDays
-    if (!Number.isInteger(days) || days < 1 || days > 90 || (body.note !== undefined && (typeof body.note !== 'string' || body.note.length > 200))) {
+    const minutes = body.expiresInMinutes === undefined ? 30 : Number(body.expiresInMinutes)
+    if (!Number.isInteger(minutes) || minutes < 1 || minutes > 1440 || (body.note !== undefined && (typeof body.note !== 'string' || body.note.length > 200))) {
       return fail(requestId, 'invalid_request', 400)
     }
     const created = await createInvite(env, {
       note: body.note ?? null,
-      days,
+      ttlMs: minutes * 60_000,
       actor: 'admin-token',
       requestId,
     })

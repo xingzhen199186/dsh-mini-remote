@@ -1303,12 +1303,33 @@ test('配对路由：本机读得到，别的来源一律挡住', async (t) => {
     assert.equal(payload.token, p.token)
     assert.ok(payload.entries.length > 0, '至少要有一个手机能用的地址')
     for (const entry of payload.entries) {
-      assert.ok(entry.url.includes(p.token), '二维码地址里要带 token，扫完才不用手敲密码')
-      assert.match(entry.url, /^http:\/\/\d+\.\d+\.\d+\.\d+:\d+\/mini\?token=/, '地址形状要能被手机直接打开')
+      assert.ok(!entry.url.includes(p.token), '二维码地址里不能再出现长期 token')
+      assert.match(entry.url, /^http:\/\/\d+\.\d+\.\d+\.\d+:\d+\/mini\/pair\?grant=/, '二维码应走一次性配对入口')
       assert.match(entry.qr, /^data:image\/png;base64,/, '二维码要能直接塞进 img src')
       assert.ok(entry.label && entry.hint, '要有给人看的标题和说明')
     }
   }
+})
+
+test('二维码用一次性 grant 换 token cookie，长期 token 不进 URL', async (t) => {
+  const p = await bootPlugin({ config: { bindAddress: 'auto' } })
+  t.after(p.stop)
+  const res = fakeRes()
+  await p.routes.get('/mini-remote/pairing').handler(fakeReq('127.0.0.1'), res)
+  const payload = JSON.parse(res.out.body)
+  const target = new URL(payload.entries[0].url)
+  assert.equal(target.pathname, '/mini/pair')
+  assert.ok(target.searchParams.get('grant'))
+  assert.ok(!payload.entries[0].url.includes(p.token))
+
+  const first = await fetch(target, { redirect: 'manual' })
+  assert.equal(first.status, 302)
+  assert.equal(first.headers.get('location'), '/mini')
+  assert.match(first.headers.get('set-cookie') || '', /dsh_mini_token=/)
+  assert.match(first.headers.get('set-cookie') || '', /HttpOnly/)
+
+  const second = await fetch(target, { redirect: 'manual' })
+  assert.equal(second.status, 403, '同一个 grant 不能再用第二次')
 })
 
 test('配对数据包含安全的 proxyCompat，且不自动改系统绕过列表', async (t) => {
@@ -1661,7 +1682,8 @@ test('改密码：落盘两处，但重启前手机认的还是旧的', async (t
   assert.equal(payload.token, p.token, '重启前，面板上显示的必须仍是当前有效的那个')
   assert.equal(payload.pendingToken, NEXT, '新密码要单独带出来，界面才说得清「还没生效」')
   for (const entry of payload.entries) {
-    assert.ok(entry.url.includes(p.token), '二维码还是旧密码编的——重启前它们确实还能用')
+    assert.ok(!entry.url.includes(p.token), '二维码里不再放长期 token')
+    assert.match(entry.url, /\/mini\/pair\?grant=/, '二维码应走一次性配对入口')
   }
 })
 
@@ -4414,7 +4436,7 @@ test('自检：没有一个字节是凭据（口令 / 设备密钥哈希 / 名�
     files: {
       'devices.json': {
         version: 1,
-        devices: [{ id: 'dev-pre', name: '妈妈那台', kind: 'phone', keyHash: KEY_HASH, createdAt: 1, lastSeen: 2 }],
+        devices: [{ id: 'dev-pre', name: '妈妈那台', kind: 'phone', keyHash: KEY_HASH, createdAt: Date.now(), lastSeen: Date.now() }],
       },
       'remotes.json': {
         version: 1,

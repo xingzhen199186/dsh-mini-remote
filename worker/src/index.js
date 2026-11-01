@@ -28,6 +28,8 @@ const REVEAL_TTL_MS = 15 * 60 * 1000
 const VERIFY_MAX_ATTEMPTS = 5
 const FULFILL_RESERVATION_TTL_MS = 5 * 60 * 1000
 const IP_REQUEST_LIMIT = 2
+const INVITE_TTL_MS = 30 * 60 * 1000
+const VERIFY_IP_LIMIT = 10
 const IP_REQUEST_WINDOW_MS = 30 * 24 * 60 * 60 * 1000
 const REQUEST_DAILY_LIMIT = 100
 
@@ -342,11 +344,11 @@ async function verifyTurnstile(env, token, ip) {
   }
 }
 
-async function createRelayInvite(env, { code, days = 7, note = null, actor = 'admin-token', fulfillRequest = null }) {
+async function createRelayInvite(env, { code, days, ttlMs = INVITE_TTL_MS, note = null, actor = 'admin-token', fulfillRequest = null }) {
   const value = typeof code === 'string' && code ? code : base64url(crypto.getRandomValues(new Uint8Array(24)))
   const hash = await hmac(env, 'invite', value)
   const now = Date.now()
-  const expiresAt = now + days * 86_400_000
+  const expiresAt = now + (Number.isFinite(days) && days > 0 ? days * 86_400_000 : ttlMs)
   const reveal = fulfillRequest ? await sealReveal(env, fulfillRequest.id, fulfillRequest.code, value) : null
   const statements = [
     env.DB.prepare('INSERT INTO relay_invites (code_hash, code, created_at, expires_at, note) VALUES (?, NULL, ?, ?, ?)')
@@ -432,6 +434,8 @@ async function handleInviteVerify(request, env) {
   const applicationId = typeof body.applicationId === 'string' ? body.applicationId.trim() : ''
   const code = typeof body.code === 'string' ? body.code.trim() : ''
   if (!/^[0-9a-f-]{36}$/i.test(applicationId) || !/^\d{6}$/.test(code)) return fail('invalid-params', 400)
+  const ipHash = await hmac(env, 'ip', clientIp(request))
+  if (!(await spendRate(env, 'invite-verify:ip:' + ipHash, VERIFY_IP_LIMIT, 60_000))) return fail('rate-limited', 429)
   const row = await env.DB.prepare('SELECT * FROM relay_invite_requests WHERE request_id = ?').bind(applicationId).first()
   if (row?.state === 'fulfilled') {
     if (!row.fulfilled_at || Number(row.fulfilled_at) + REVEAL_TTL_MS <= Date.now()) return fail('request-expired', 410)
@@ -467,7 +471,7 @@ async function handleInviteVerify(request, env) {
   let invite
   try {
     invite = await createRelayInvite(env, {
-      days: 7,
+      ttlMs: INVITE_TTL_MS,
       note: 'self-service:' + row.email_masked,
       actor: 'self-service',
       fulfillRequest: { id: applicationId, verifiedAt, code },
@@ -895,10 +899,11 @@ async function handleAdmin(request, env, url) {
   if (request.method === 'POST' && path === '/admin/relay/v1/b/invites') {
     const body = await readJson(request)
     if (body.error) return fail(body.error, 400)
-    const days = Math.max(1, Math.min(30, Number(body.expiresInDays) || 7))
+    const minutes = body.expiresInMinutes === undefined ? 30 : Number(body.expiresInMinutes)
+    if (!Number.isInteger(minutes) || minutes < 1 || minutes > 1440) return fail('invalid-params', 400)
     const result = await bAdminFetch(env, '/admin/b/v1/invites', {
       method: 'POST',
-      body: JSON.stringify({ expiresInDays: days, note: typeof body.note === 'string' ? body.note : 'ops-console' }),
+      body: JSON.stringify({ expiresInMinutes: minutes, note: typeof body.note === 'string' ? body.note : 'ops-console' }),
     })
     return json(result, result.ok ? 200 : 502)
   }
@@ -943,14 +948,15 @@ async function handleAdmin(request, env, url) {
   if (request.method === 'POST' && path === '/admin/relay/v1/invites') {
     const body = await readJson(request)
     if (body.error) return fail(body.error, 400)
-    const days = Math.max(1, Math.min(90, Number(body.expiresInDays) || 7))
+    const minutes = body.expiresInMinutes === undefined ? 30 : Number(body.expiresInMinutes)
+    if (!Number.isInteger(minutes) || minutes < 1 || minutes > 1440) return fail('invalid-params', 400)
     const created = await createRelayInvite(env, {
       code: typeof body.code === 'string' && body.code ? body.code : undefined,
-      days,
+      ttlMs: minutes * 60_000,
       note: typeof body.note === 'string' ? body.note : null,
       actor: auth.actor,
     })
-    return json({ ok: true, code: created.code, expiresInDays: days })
+    return json({ ok: true, code: created.code, expiresInMinutes: minutes, expiresAt: created.expiresAt })
   }
 
   if (request.method === 'GET' && path === '/admin/relay/v1/invite-requests') {
