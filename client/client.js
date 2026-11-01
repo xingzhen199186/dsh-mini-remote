@@ -2578,9 +2578,12 @@ window.__ModuleLoader__.load({
         publicUrl: info.relay && info.relay.publicUrl,
         error: info.relay && info.relay.error,
         hasInviteCode: Boolean(info.relay && info.relay.hasInviteCode),
+        id: info.relay && info.relay.id ? info.relay.id : null,
         invite: aRelay ? aRelay.invite : '',
         setInvite: aRelay ? aRelay.setInvite : function () {},
         save: aRelay ? aRelay.save : function () {},
+        stop: aRelay ? aRelay.stop : function () {},
+        reset: aRelay ? aRelay.reset : function () {},
       };
       if (info.ok === false) {
         mobile.push(h('div', { key: 'err', style: styles.error }, info.error || '读取配对信息失败。'));

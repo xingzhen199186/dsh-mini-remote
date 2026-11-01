@@ -1070,6 +1070,33 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
     assert.equal(posted[0].body.mode, 'quick');
   });
 
+  await check('A 固定中继：停止和清空按钮会发对应 action', async () => {
+    posted = [];
+    await mount(withTunnel(
+      { enabled: true, up: true, starting: false, error: null },
+      { relay: { enabled: true, state: 'active', publicUrl: 'https://abcdefghijklmnopqrstuvwxyz.relay.example.com', error: null, hasInviteCode: true, id: 'abcdefghijklmnopqrstuvwxyz' } },
+    ));
+    const stop = byType(tree6, 'button').find((n) => textOf(n) === '停止共享固定地址');
+    assert.ok(stop, '要有停止按钮');
+    stop.props.onClick();
+    await tick();
+    assert.deepEqual(posted[0], { url: '/mini-remote/tunnel', body: { action: 'relay-stop' } });
+
+    posted = [];
+    await mount(withTunnel(
+      { enabled: true, up: true, starting: false, error: null },
+      { relay: { enabled: true, state: 'active', publicUrl: 'https://abcdefghijklmnopqrstuvwxyz.relay.example.com', error: null, hasInviteCode: true, id: 'abcdefghijklmnopqrstuvwxyz' } },
+    ));
+    const reset = byType(tree6, 'button').find((n) => textOf(n) === '清空本地共享身份');
+    assert.ok(reset, '要有清空按钮');
+    const oldWindow = globalThis.window;
+    globalThis.window = { confirm: () => true };
+    reset.props.onClick();
+    globalThis.window = oldWindow;
+    await tick();
+    assert.deepEqual(posted[0], { url: '/mini-remote/tunnel', body: { action: 'relay-reset' } });
+  });
+
   await check('整块面板报错时，公网开关仍然露得出来', async () => {
     // 否则「隧道起不来」会把面板变成一条报错，用户连关掉它的地方都找不到
     await mount(withTunnel(
