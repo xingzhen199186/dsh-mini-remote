@@ -1639,6 +1639,30 @@ window.__ModuleLoader__.load({
           .then(function () { setBusy(false); });
       };
 
+      var runRelayAction = function (action) {
+        if (busy) return;
+        setBusy(true);
+        fetch(TUNNEL_PATH, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ action: action }),
+        })
+          .then(function (res) {
+            return res.json().then(
+              function (body) { return { status: res.status, body: body }; },
+              function () { return { status: res.status, body: null }; },
+            );
+          })
+          .then(function (r) {
+            if (r.body && typeof r.body === 'object') { setInfo(r.body); setFailure(null); }
+            else setFailure('共享固定地址操作失败：服务返回了 HTTP ' + r.status + '。');
+          })
+          .catch(function (err) {
+            setFailure('共享固定地址操作失败：' + ((err && err.message) || String(err)));
+          })
+          .then(function () { setBusy(false); });
+      };
+
       /**
        * 开/关「允许别的电脑连接」。
        *
@@ -2499,6 +2523,10 @@ window.__ModuleLoader__.load({
           setInvite: setARelayInvite,
           save: function (enabled) {
             toggleTunnel(true, { mode: 'quick', relayEnabled: enabled, relayInviteCode: aRelayInvite });
+          },
+          stop: function () { runRelayAction('relay-stop'); },
+          reset: function () {
+            if (window.confirm('会停止共享固定地址，并删除本机共享身份；下次需要重新填邀请码。云端旧身份不会自动撤销。确定继续？')) runRelayAction('relay-reset');
           },
         }, {
           activationCode: bActivation,
@@ -4631,13 +4659,25 @@ window.__ModuleLoader__.load({
             style: styles.input,
           }),
         ),
-        h('div', { style: { marginTop: 8 } },
+        h('div', { style: { marginTop: 8, display: 'flex', gap: 8, flexWrap: 'wrap' } },
           h('button', {
             type: 'button',
             disabled: Boolean(busy || namedActive || !quickEnabled),
             style: styles.btn,
             onClick: function () { aRelay.save(true); },
           }, '保存固定中继'),
+          aRelay && aRelay.enabled ? h('button', {
+            type: 'button',
+            disabled: Boolean(busy),
+            style: styles.btnDanger,
+            onClick: aRelay.stop,
+          }, '停止共享固定地址') : null,
+          aRelay && (aRelay.id || aRelay.enabled || aRelay.hasInviteCode) ? h('button', {
+            type: 'button',
+            disabled: Boolean(busy),
+            style: styles.btnDanger,
+            onClick: aRelay.reset,
+          }, '清空本地共享身份') : null,
         ),
         aRelay && aRelay.enabled ? h('div', { style: styles.warn }, '共享中转会看到明文流量；它不是端到端加密。别把地址或二维码发出去。') : null,
 
