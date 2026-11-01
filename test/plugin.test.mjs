@@ -1311,7 +1311,7 @@ test('配对路由：本机读得到，别的来源一律挡住', async (t) => {
   }
 })
 
-test('配对数据包含安全的 proxyCompat，并在卸载时恢复插件改过的绕过列表', async (t) => {
+test('配对数据包含安全的 proxyCompat，且不自动改系统绕过列表', async (t) => {
   let override = '<local>'
   const regCalls = []
   const execFileSync = (file, args) => {
@@ -1344,17 +1344,17 @@ test('配对数据包含安全的 proxyCompat，并在卸载时恢复插件改�
   assert.equal(payload.proxyCompat.systemProxy, true)
   assert.equal(payload.proxyCompat.envProxy, true)
   assert.equal(payload.proxyCompat.tun, false)
-  assert.equal(payload.proxyCompat.bypassApplied, true)
+  assert.equal(payload.proxyCompat.bypassApplied, false)
   assert.equal(payload.proxyCompat.bypassError, null)
   assert.match(payload.proxyCompat.rulesText, /PROCESS-NAME,cloudflared\.exe,DIRECT/)
   const serialized = JSON.stringify(payload.proxyCompat)
   assert.ok(!serialized.includes('proxy-password') && !serialized.includes('env-password'))
   assert.ok(!('proxyServer' in payload.proxyCompat) && !('original' in payload.proxyCompat))
-  assert.equal(override.includes('dsh-everywhere.com'), true)
+  assert.equal(override.includes('dsh-everywhere.com'), false, '不应自动修改系统绕过列表')
 
   p.stop()
-  assert.equal(override, '<local>', '卸载只恢复本次插件修改前的 ProxyOverride')
-  assert.equal(regCalls.filter((args) => args[0] === 'add').length, 2, '启动追加一次，卸载恢复一次')
+  assert.equal(override, '<local>', '退出后仍保持原 ProxyOverride')
+  assert.equal(regCalls.filter((args) => args[0] === 'add').length, 0, '不应写注册表')
 })
 
 test('检测到 TUN 时只暴露状态，不写系统代理配置', async (t) => {

@@ -1000,15 +1000,15 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
     assert.equal(byType(tree6, 'button').some((b) => textOf(b) === '复制直连规则'), false);
   });
 
-  await check('系统代理已处理时显示代理兼容，并能复制直连规则', async () => {
+  await check('系统代理时显示代理兼容，并能复制直连规则', async () => {
     const rules = 'PROCESS-NAME,cloudflared.exe,DIRECT\nDOMAIN-SUFFIX,trycloudflare.com,DIRECT';
     await mount(withTunnel(
       { enabled: false, up: false, starting: false, error: null },
-      { proxyCompat: { detected: true, systemProxy: true, envProxy: false, tun: false, bypassApplied: true, rulesText: rules } },
+      { proxyCompat: { detected: true, systemProxy: true, envProxy: false, tun: false, bypassApplied: false, rulesText: rules } },
     ));
     const text = textOf(tree6);
     assert.match(text, /代理兼容/);
-    assert.match(text, /已自动处理/);
+    assert.match(text, /cloudflared 通常直连/);
     assert.doesNotMatch(text, /127\.0\.0\.1:7890|proxy-password/);
     const written = [];
     setGlobal('navigator', { clipboard: { writeText: async (value) => { written.push(value); } } });

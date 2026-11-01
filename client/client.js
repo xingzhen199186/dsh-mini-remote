@@ -4640,10 +4640,8 @@ window.__ModuleLoader__.load({
       if (proxyCompat && proxyCompat.detected) {
         if (proxyCompat.tun) {
           proxyMessage = 'TUN 模式无法由插件自动改规则；如果隧道连不上，复制下面的直连规则到代理软件，或改用专属固定地址。';
-        } else if (proxyCompat.systemProxy && proxyCompat.bypassApplied) {
-          proxyMessage = '系统代理已自动加入直连域名：已自动处理。';
-        } else if (proxyCompat.systemProxy && proxyCompat.bypassError) {
-          proxyMessage = '系统代理未能自动处理；如果隧道连不上，请复制下面的直连规则到代理软件。';
+        } else if (proxyCompat.systemProxy) {
+          proxyMessage = '检测到系统代理；cloudflared 通常直连，不需要自动改绕过。若插件自身连不上，复制下面的规则。';
         } else {
           proxyMessage = '检测到本机代理；如果隧道连不上，请复制下面的直连规则到代理软件。';
         }
