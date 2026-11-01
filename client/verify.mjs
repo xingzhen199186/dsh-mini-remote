@@ -1012,14 +1012,14 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
     assert.doesNotMatch(text, /127\.0\.0\.1:7890|proxy-password/);
   });
 
-  await check('检测到 TUN 时诚实提示规则限制和专属固定地址替代路线', async () => {
+  await check('检测到 TUN 时明确说明不会自动改规则，并给专属固定地址替代路线', async () => {
     await mount(withTunnel(
       { enabled: true, up: false, starting: false, error: '连接超时' },
       { proxyCompat: { detected: true, systemProxy: true, envProxy: true, tun: true, bypassApplied: false } },
     ));
     const text = textOf(tree6);
-    assert.match(text, /TUN 模式无法由插件自动改规则/);
-    assert.match(text, /需要在代理软件里让 cloudflared 直连，或改用专属固定地址/);
+    assert.match(text, /TUN 模式：插件不会自动改代理规则/);
+    assert.match(text, /请在代理软件里让 cloudflared 直连，或改用专属固定地址/);
     assert.equal(byType(tree6, 'button').some((b) => textOf(b) === '复制直连规则'), false);
   });
 

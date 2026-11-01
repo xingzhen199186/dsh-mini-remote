@@ -4645,7 +4645,7 @@ window.__ModuleLoader__.load({
       var proxyMessage = '';
       if (proxyCompat && proxyCompat.detected) {
         if (proxyCompat.tun) {
-          proxyMessage = 'TUN 模式无法由插件自动改规则；如果隧道连不上，需要在代理软件里让 cloudflared 直连，或改用专属固定地址。';
+          proxyMessage = 'TUN 模式：插件不会自动改代理规则。如果隧道连不上，请在代理软件里让 cloudflared 直连，或改用专属固定地址。';
         } else if (proxyCompat.systemProxy) {
           proxyMessage = '检测到系统代理；cloudflared 通常直连，不需要额外处理。若插件自身连不上，请检查代理软件是否强制透明代理或 DNS 劫持。';
         } else {
