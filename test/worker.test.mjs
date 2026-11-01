@@ -365,6 +365,20 @@ test('月度请求达到硬上限会自动关闭数据面和新注册', async ()
   assert.equal((await env.DB.prepare('SELECT COUNT(*) AS n FROM relay_audit WHERE action = ?').bind('budget.trip').first()).n, 1)
 })
 
+test('触发月度硬上限时会发通知邮件', async () => {
+  const env = makeEnv()
+  const mails = []
+  env.ADMIN_EMAILS = 'owner@example.com'
+  env.MAIL_SEND = async (mail) => { mails.push(mail); return { ok: true } }
+  await env.RELAY_KV.put('relay-config', JSON.stringify({ monthlyRequestLimit: 2 }))
+  const state = await enforceBudgetGuard(env, { monthStart: '2026-11-01', workers: { requests: 2 } })
+  assert.equal(state.tripped, true)
+  assert.equal(state.notified, 1)
+  assert.equal(mails.length, 1)
+  assert.equal(mails[0].to, 'owner@example.com')
+  assert.match(mails[0].subject, /月度请求上限/)
+})
+
 test('没有邀请不能创建身份', async () => {
   const env = makeEnv()
   const response = await handleRequest(req('/api/relay/v1/register', {

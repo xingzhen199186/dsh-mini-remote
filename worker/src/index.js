@@ -708,6 +708,29 @@ export async function enforceBudgetGuard(env, usage) {
     await setConfig(env, { proxyEnabled: false, registrationEnabled: false })
     await audit(env, 'budget-guard', 'budget.trip', null, `workers=${requests} limit=${limit}`)
     state.tripped = true
+    const recipients = String(env.ADMIN_EMAILS || '')
+      .split(',')
+      .map((value) => value.trim())
+      .filter(Boolean)
+    let notified = 0
+    const notifyErrors = []
+    for (const to of recipients) {
+      try {
+        const mailed = await sendMail(env, {
+          to,
+          subject: '共享固定地址已触发月度请求上限',
+          text: `本月 Workers 请求已达到 ${requests}，上限 ${limit}。\n`
+            + '系统已自动关闭共享固定地址的数据面和新注册。\n'
+            + '请到 Cloudflare 后台检查用量，确认后再手动恢复。',
+        })
+        if (mailed?.ok) notified += 1
+        else notifyErrors.push(mailed?.error || 'mail-failed')
+      } catch (error) {
+        notifyErrors.push(error?.message ?? String(error))
+      }
+    }
+    state.notified = notified
+    state.notifyErrors = notifyErrors
   }
   await env.RELAY_KV.put('relay-budget:last', JSON.stringify(state)).catch(() => undefined)
   return state
