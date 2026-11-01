@@ -4663,12 +4663,12 @@ window.__ModuleLoader__.load({
           }),
         ),
         h('div', { style: { marginTop: 8, display: 'flex', gap: 8, flexWrap: 'wrap' } },
-          h('button', {
+          !aRelay || !aRelay.enabled ? h('button', {
             type: 'button',
             disabled: Boolean(busy || namedActive || !quickEnabled),
             style: styles.btn,
             onClick: function () { aRelay.save(true); },
-          }, '保存固定中继'),
+          }, '保存固定中继') : null,
           aRelay && aRelay.enabled ? h('button', {
             type: 'button',
             disabled: Boolean(busy),

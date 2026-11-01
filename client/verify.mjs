@@ -1076,6 +1076,7 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
       { enabled: true, up: true, starting: false, error: null },
       { relay: { enabled: true, state: 'active', publicUrl: 'https://abcdefghijklmnopqrstuvwxyz.relay.example.com', error: null, hasInviteCode: true, id: 'abcdefghijklmnopqrstuvwxyz' } },
     ));
+    assert.equal(byType(tree6, 'button').some((n) => textOf(n) === '保存固定中继'), false, '已启用后不该再显示保存按钮');
     const stop = byType(tree6, 'button').find((n) => textOf(n) === '停止共享固定地址');
     assert.ok(stop, '要有停止按钮');
     stop.props.onClick();
