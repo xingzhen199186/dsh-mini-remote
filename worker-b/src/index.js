@@ -11,7 +11,7 @@ const TUNNEL_PREFIX = 'dsh-b-relay-'
 const OPS_RETIRE_LIMIT = 10
 const OPS_RECONCILE_LIMIT = 50
 const OPS_FINDINGS_LIMIT = 500
-const SELF_SERVICE_CAPACITY = 900
+const DEFAULT_MAX_LEASES = 900
 const VERIFY_TTL_MS = 10 * 60 * 1000
 const REVEAL_TTL_MS = 15 * 60 * 1000
 const VERIFY_MAX_ATTEMPTS = 5
@@ -180,9 +180,12 @@ function configValue(rows, key) {
 
 async function readBConfig(env) {
   const rows = await env.DB.prepare('SELECT key, value FROM b_config').all()
+  const maxLeasesRow = (rows.results || []).find((item) => item.key === 'maxLeases')
+  const maxLeases = Number(maxLeasesRow?.value)
   return {
     registrationEnabled: configValue(rows.results, 'registrationEnabled'),
     inviteRequired: configValue(rows.results, 'inviteRequired'),
+    maxLeases: Number.isInteger(maxLeases) && maxLeases > 0 ? Math.min(maxLeases, 1000) : DEFAULT_MAX_LEASES,
   }
 }
 
@@ -316,10 +319,11 @@ async function retireExpiredInvites(env, { now, actor, requestId }) {
 async function createInvite(env, { note = null, days = 7, actor = 'admin-token', requestId, fulfillRequest = null }) {
   const now = Date.now()
   await retireExpiredInvites(env, { now, actor, requestId })
+  const config = await readBConfig(env)
   const count = await env.DB.prepare(
     'SELECT COUNT(*) AS n FROM b_leases WHERE state IN (\'invited\', \'active\', \'claimed\', \'released\')',
   ).first()
-  if (Number(count?.n || 0) >= SELF_SERVICE_CAPACITY) return { ok: false, code: 'self_service_capacity' }
+  if (Number(count?.n || 0) >= config.maxLeases) return { ok: false, code: 'self_service_capacity' }
   const id = randomId()
   const code = randomSecret()
   const codeId = crypto.randomUUID()
@@ -708,7 +712,7 @@ async function handleSelfServiceClaim(env, {
         + 'config_version, credential_version, created_at, claimed_at, last_seen_at, row_version) '
         + 'SELECT ?, ?, \'claimed\', ?, 1, ?, ?, ?, 0, 1, ?, ?, ?, 0 '
         + 'WHERE (SELECT COUNT(*) FROM b_leases WHERE state IN (\'active\', \'claimed\', \'released\')) < ?',
-      ).bind(id, hostname, secretHash, originPort, tunnelName, claimRequestId, now, now, now, SELF_SERVICE_CAPACITY),
+      ).bind(id, hostname, secretHash, originPort, tunnelName, claimRequestId, now, now, now, config.maxLeases),
       env.DB.prepare(
         'INSERT INTO b_operations (operation_id, lease_id, type, request_fingerprint, state, current_step, retry_count, created_at, updated_at) '
         + 'SELECT ?, ?, \'claim\', ?, \'running\', \'tunnel\', 0, ?, ? '
@@ -741,7 +745,7 @@ async function handleSelfServiceClaim(env, {
     const count = await env.DB.prepare(
       'SELECT COUNT(*) AS n FROM b_leases WHERE state IN (\'active\', \'claimed\', \'released\')',
     ).first()
-    if (Number(count?.n || 0) >= SELF_SERVICE_CAPACITY) {
+    if (Number(count?.n || 0) >= config.maxLeases) {
       return fail(requestId, 'self_service_capacity', 503)
     }
     return fail(requestId, 'storage_unavailable', 503, true, 5)
@@ -1246,6 +1250,10 @@ async function handleAdmin(request, env, url, requestId) {
       if (typeof body[key] !== 'boolean') return fail(requestId, 'invalid_request', 400)
       patch[key] = body[key]
     }
+    if (body.maxLeases !== undefined) {
+      if (!Number.isInteger(body.maxLeases) || body.maxLeases < 1 || body.maxLeases > 1000) return fail(requestId, 'invalid_request', 400)
+      patch.maxLeases = body.maxLeases
+    }
     if (!Object.keys(patch).length) return fail(requestId, 'invalid_request', 400)
 
     const before = await readBConfig(env)
@@ -1254,7 +1262,7 @@ async function handleAdmin(request, env, url, requestId) {
     const statements = Object.entries(patch).map(([key, value]) => env.DB.prepare(
       'INSERT INTO b_config (key, value, updated_at) VALUES (?, ?, ?) '
       + 'ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at',
-    ).bind(key, value ? '1' : '0', now))
+    ).bind(key, typeof value === 'boolean' ? (value ? '1' : '0') : String(value), now))
     statements.push(auditStatement(env, {
       actor: 'admin-token',
       action: 'config.update',

@@ -874,6 +874,10 @@ async function handleAdmin(request, env, url) {
     const patch = {}
     if (typeof body.registrationEnabled === 'boolean') patch.registrationEnabled = body.registrationEnabled
     if (typeof body.inviteRequired === 'boolean') patch.inviteRequired = body.inviteRequired
+    if (body.maxLeases !== undefined) {
+      if (!Number.isInteger(body.maxLeases) || body.maxLeases < 1 || body.maxLeases > 1000) return fail('invalid-params', 400)
+      patch.maxLeases = body.maxLeases
+    }
     return json(await bAdminFetch(env, '/admin/b/v1/config', {
       method: 'POST',
       body: JSON.stringify(patch),

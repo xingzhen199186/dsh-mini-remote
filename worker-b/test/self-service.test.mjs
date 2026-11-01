@@ -59,18 +59,22 @@ test('admin config：默认 true，可切换，非法值拒绝并留下审计', 
   assert.equal(first.status, 200)
   assert.equal(first.body.registrationEnabled, true)
   assert.equal(first.body.inviteRequired, true)
+  assert.equal(first.body.maxLeases, 900)
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM b_config').get().n, 2)
 
   const changed = await request(env, 'POST', '/admin/b/v1/config', {
     registrationEnabled: true,
     inviteRequired: false,
+    maxLeases: 500,
   }, { admin: true })
   assert.equal(changed.status, 200)
   assert.equal(changed.body.registrationEnabled, true)
   assert.equal(changed.body.inviteRequired, false)
+  assert.equal(changed.body.maxLeases, 500)
 
   const again = await request(env, 'GET', '/admin/b/v1/config', undefined, { admin: true })
   assert.equal(again.body.inviteRequired, false)
+  assert.equal(again.body.maxLeases, 500)
   assert.equal(db.prepare("SELECT value FROM b_config WHERE key = 'inviteRequired'").get().value, '0')
   assert.equal(db.prepare("SELECT COUNT(*) AS n FROM b_admin_audit WHERE action = 'config.update'").get().n, 1)
 
@@ -79,6 +83,9 @@ test('admin config：默认 true，可切换，非法值拒绝并留下审计', 
   }, { admin: true })
   assert.equal(invalid.status, 400)
   assert.equal(invalid.body.code, 'invalid_request')
+  const badLimit = await request(env, 'POST', '/admin/b/v1/config', { maxLeases: 1001 }, { admin: true })
+  assert.equal(badLimit.status, 400)
+  assert.equal(badLimit.body.code, 'invalid_request')
   const empty = await request(env, 'POST', '/admin/b/v1/config', {}, { admin: true })
   assert.equal(empty.status, 400)
   const wrongMethod = await request(env, 'PUT', '/admin/b/v1/config', {}, { admin: true })
@@ -189,10 +196,13 @@ test('自服务全局每天最多 50 次：计数已满时拒绝', async () => {
   assert.equal(cf.createdTunnelCount, 0)
 })
 
-test('容量上限 900：active+claimed+released 已满时拒绝 self_service_capacity', async () => {
+test('容量上限可改：设成 2 后，active+claimed+released 已满时拒绝', async () => {
   const { env, db, cf } = createEnv()
   await openSelfService(env)
-  seedActiveLeases(db, 900)
+  const saved = await request(env, 'POST', '/admin/b/v1/config', { maxLeases: 2 }, { admin: true })
+  assert.equal(saved.status, 200)
+  assert.equal(saved.body.maxLeases, 2)
+  seedActiveLeases(db, 2)
 
   const result = await selfClaim(env, {
     requestId: 'self-capacity-0001',
@@ -202,7 +212,7 @@ test('容量上限 900：active+claimed+released 已满时拒绝 self_service_ca
   assert.equal(result.body.code, 'self_service_capacity')
   assert.equal(result.body.retryable, false)
   assert.equal(cf.createdTunnelCount, 0)
-  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM b_leases').get().n, 900)
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM b_leases').get().n, 2)
 })
 
 test('缺激活码但带着无效激活码形状：仍按 invalid_request 拒绝，不落到自服务', async () => {

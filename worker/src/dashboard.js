@@ -146,6 +146,7 @@ code{background:#f3f4f6;padding:2px 6px;border-radius:4px;word-break:break-all}
       <div class="card"><h3>注册开关</h3>
         <label class="switch"><input type="checkbox" id="bRegistrationEnabled"> 允许新实例注册</label>
         <label class="switch"><input type="checkbox" id="bInviteRequired"> 新实例必须带邀请码（关闭后为自服务注册）</label>
+        <div class="row" style="margin-top:10px;align-items:center"><label for="bMaxLeases">专属租约上限</label><input id="bMaxLeases" type="number" min="1" max="1000" style="width:120px"><button class="btn" id="saveBMaxLeases">保存上限</button><span class="muted small">默认 900；Cloudflare 账号 Tunnel 上限 1000。</span></div>
         <div class="muted small">默认两项都开。关闭“必须邀请码”后，插件可以不带激活码开通；关闭“允许注册”后，所有新开通都会被拒绝。</div>
       </div>
       <div class="card"><h3>最近对账</h3><div class="row"><button class="btn" id="runBOps">立即对账</button><span class="muted small">只读核对；会顺带退休 released 超过 30 天的租约。</span></div><div class="muted small" id="bOpsMeta" style="margin-top:8px">读取中…</div><div id="bOpsFindings"></div></div>
@@ -172,6 +173,7 @@ function usageHtml(u){
 function setBChecks(config){
   $('bRegistrationEnabled').checked=config?.registrationEnabled!==false;
   $('bInviteRequired').checked=config?.inviteRequired!==false;
+  $('bMaxLeases').value=config?.maxLeases??900;
 }
 function renderBOps(ops){
   const run=ops?.run;
@@ -268,6 +270,7 @@ $('newBInvite').addEventListener('click',async()=>{try{const r=await api('/admin
 document.addEventListener('click',async(e)=>{const copy=e.target?.dataset?.copy;if(copy){try{await navigator.clipboard.writeText(copy);e.target.textContent='已复制'}catch{}return}const id=e.target?.dataset?.revoke;if(!id)return;if(!confirm('确定撤销 '+id+'？撤销后固定地址立即失效。'))return;try{await api('/admin/relay/v1/revoke',{method:'POST',body:JSON.stringify({id,reason:'ops-console'})});await load()}catch(err){showError('撤销失败：'+err.message)}});
 $('bRegistrationEnabled').addEventListener('change',(e)=>saveBConfig('registrationEnabled',e.target.checked));
 $('bInviteRequired').addEventListener('change',(e)=>saveBConfig('inviteRequired',e.target.checked));
+$('saveBMaxLeases').addEventListener('click',()=>{const n=Number($('bMaxLeases').value);if(!Number.isInteger(n)||n<1||n>1000){showError('专属租约上限必须是 1 到 1000 的整数');return}saveBConfig('maxLeases',n)});
 $('runBOps').addEventListener('click',async()=>{if(!confirm('立即对账会只读核对 Tunnel/CNAME，并尝试退休 released 超过 30 天的租约。继续？'))return;try{await api('/admin/relay/v1/b/ops/run',{method:'POST'});await load()}catch(e){showError('对账失败：'+e.message)}});
 $('refreshOps').addEventListener('click',async()=>{try{const r=await api('/admin/relay/v1/ops/refresh',{method:'POST'});renderVisual(await api('/admin/relay/v1/overview'),await api('/admin/relay/v1/b/leases'),r);await load()}catch(e){showError('采集失败：'+e.message)}});
 load();
