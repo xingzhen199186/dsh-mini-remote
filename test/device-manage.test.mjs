@@ -107,7 +107,7 @@ async function bootHost() {
   }, ['agents', 'logger', 'on', 'effect'], disposers)
 
   const mod = await import(new URL(`lib/index.js?t=${Date.now()}`, ROOT_URL).href)
-  mod.apply(ctx, { port, bindAddress: '127.0.0.1' })
+  mod.apply(ctx, { port, bindAddress: '127.0.0.1' }, { proxyCompat: { platform: 'linux', env: {}, networkInterfaces: () => ({}) } })
 
   const base = `http://127.0.0.1:${port}`
   const token = readFileSync(join(home, 'dsh-mini-remote', 'token'), 'utf8').trim()

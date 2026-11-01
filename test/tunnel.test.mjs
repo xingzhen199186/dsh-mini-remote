@@ -21,6 +21,13 @@ test('命名隧道的 token 不放进命令行参数', () => {
   assert.ok(!args.includes('--token'), 'token 必须走 TUNNEL_TOKEN 环境变量，不能出现在 ps 里')
 })
 
+test('命名隧道可选绑定物理网卡，不传时保持原参数', () => {
+  assert.deepEqual(namedTunnelArgs(), ['tunnel', '--no-autoupdate', '--protocol', 'http2', 'run'])
+  assert.deepEqual(namedTunnelArgs({ edgeBindAddress: '192.168.1.20' }), [
+    'tunnel', '--no-autoupdate', '--protocol', 'http2', '--edge-bind-address', '192.168.1.20', 'run',
+  ])
+})
+
 test('命名隧道能识别 Cloudflare 的注册成功日志', () => {
   assert.equal(NAMED_TUNNEL_READY_RE.test('INF Registered tunnel connection connIndex=0'), true)
   assert.equal(NAMED_TUNNEL_READY_RE.test('Connection abc registered'), true)

@@ -2625,7 +2625,7 @@ window.__ModuleLoader__.load({
           toggle(true, { mode: 'named', namedToken: named.token, publicUrl: named.publicUrl });
         },
         stop: function () { toggle(false, { mode: 'named' }); },
-      }, relayUi)));
+      }, relayUi, info.proxyCompat, copied, copy)));
       external.push(collapsibleSub('manualUrl', '手动公网地址', groups.externalSubs.manualUrl, groups.toggleExternalSub, manualBlock(manual)));
       if (info.bRelay && bRelay) external.push(collapsibleSub('bRelay', '专属固定地址', groups.externalSubs.bRelay, groups.toggleExternalSub, bRelayBlock(info.bRelay, bRelay, busy, copied)));
       if (info.selfRelay && relay) {
@@ -4596,7 +4596,7 @@ window.__ModuleLoader__.load({
       return h('div', { key: 'self-relay-guide' }, out);
     }
 
-    function tunnelBlock(tunnel, busy, toggle, named, aRelay) {
+    function tunnelBlock(tunnel, busy, toggle, named, aRelay, proxyCompat, copied, copy) {
       var namedActive = Boolean(tunnel.enabled && tunnel.mode === 'named');
       var quickEnabled = Boolean(tunnel.enabled && !namedActive);
       var working = Boolean(busy || tunnel.starting);
@@ -4636,9 +4636,33 @@ window.__ModuleLoader__.load({
         : '固定隧道已开启，但还没连上 Cloudflare。';
       else namedStatus = '未启用。需要先在 Cloudflare 创建命名隧道，把 Public Hostname 指向本机端口。';
 
+      var proxyMessage = '';
+      if (proxyCompat && proxyCompat.detected) {
+        if (proxyCompat.tun) {
+          proxyMessage = 'TUN 模式无法由插件自动改规则；如果隧道连不上，复制下面的直连规则到代理软件，或改用专属固定地址。';
+        } else if (proxyCompat.systemProxy && proxyCompat.bypassApplied) {
+          proxyMessage = '系统代理已自动加入直连域名：已自动处理。';
+        } else if (proxyCompat.systemProxy && proxyCompat.bypassError) {
+          proxyMessage = '系统代理未能自动处理；如果隧道连不上，请复制下面的直连规则到代理软件。';
+        } else {
+          proxyMessage = '检测到本机代理；如果隧道连不上，请复制下面的直连规则到代理软件。';
+        }
+      }
+
       return h('div', { key: 'tunnel', style: styles.block },
         h('div', { style: styles.entryTitle }, '公网访问'),
         h('div', { style: styles.muted }, '不想装 Tailscale 的话就打开这个：走 Cloudflare 的免费隧道，手机在外面用流量也能连进来。'),
+        proxyMessage ? h('div', { key: 'proxy-compat' },
+          h('div', { style: Object.assign({}, styles.muted, { marginTop: 10 }) }, '代理兼容：' + proxyMessage),
+          h('div', { style: { marginTop: 8 } },
+            h('button', {
+              type: 'button',
+              disabled: !proxyCompat.rulesText,
+              style: styles.btn,
+              onClick: function () { if (proxyCompat.rulesText) copy(proxyCompat.rulesText); },
+            }, proxyCompat.rulesText && copied === proxyCompat.rulesText ? '已复制' : '复制直连规则'),
+          ),
+        ) : null,
         h('div', { style: Object.assign({}, styles.entryTitle, { marginTop: 14 }) }, '临时地址（快速隧道）'),
         h('label', { style: styles.toggleRow },
           h('input', {

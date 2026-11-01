@@ -243,6 +243,7 @@ test('cloudflared 参数不含 token，token 只从子进程环境变量传入',
     binPath: 'cloudflared-test',
     token: TOKEN,
     publicUrl: 'https://' + HOSTNAME,
+    edgeBindAddress: '192.168.1.20',
     spawnFn: (bin, argv, options) => {
       spawned = { bin, argv, options }
       return child
@@ -253,10 +254,19 @@ test('cloudflared 参数不含 token，token 只从子进程环境变量传入',
   const handle = await pending
   assert.equal(spawned.bin, 'cloudflared-test')
   assert.equal(spawned.argv.join(' ').includes(TOKEN), false, 'token 不许出现在命令行参数')
+  assert.equal(spawned.argv[spawned.argv.indexOf('--edge-bind-address') + 1], '192.168.1.20')
   assert.equal(spawned.options.env.TUNNEL_TOKEN, TOKEN)
   assert.equal(handle.url, 'https://' + HOSTNAME)
   handle.stop()
   assert.equal(child.killed, true)
+})
+
+test('B cloudflared 可选绑定物理网卡', () => {
+  assert.deepEqual(bTunnelArgs(), ['tunnel', '--no-autoupdate', '--protocol', 'http2', '--edge-ip-version', '4', 'run'])
+  assert.deepEqual(bTunnelArgs({ edgeBindAddress: '192.168.1.20' }), [
+    'tunnel', '--no-autoupdate', '--protocol', 'http2', '--edge-ip-version', '4',
+    '--edge-bind-address', '192.168.1.20', 'run',
+  ])
 })
 
 test('没有激活码时也交给服务端判断，本地不再直接拒绝', async () => {

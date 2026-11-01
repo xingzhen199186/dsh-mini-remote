@@ -159,7 +159,7 @@ async function bootHost(config = {}) {
   // `bindAddress: 'auto'`（真机上的默认值，照 test/plugin.test.mjs）：配对信息那条路
   // 在"只绑了本机"时会回 `ok:false`（那是在说"手机没有能连上的地址"），而我们这一条
   // 要的是它正常那份。
-  mod.apply(ctx, { port, bindAddress: 'auto', ...config })
+  mod.apply(ctx, { port, bindAddress: 'auto', ...config }, { proxyCompat: { platform: 'linux', env: {}, networkInterfaces: () => ({}) } })
 
   const base = `http://127.0.0.1:${port}`
   const token = readFileSync(join(home, 'dsh-mini-remote', 'token'), 'utf8').trim()

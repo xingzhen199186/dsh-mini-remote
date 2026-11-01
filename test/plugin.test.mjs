@@ -151,7 +151,7 @@ function mockCtx({ attachments, sessionQuery, commands, sessionController, subag
 }
 
 /** 起一个被测插件实例，返回访问它所需的一切。 */
-async function bootPlugin({ agents = {}, config = {}, attachments = null, sessionQuery = null, commands = null, stored = null, sessionController = null, subagents = null, sessionProjections = null, sessions = null, agentPresets = null, workspaceRegistry = null, pluginManager = null, loader = null, pluginPackages = null, settings = null, files = null, pluginDir = null } = {}) {
+async function bootPlugin({ agents = {}, config = {}, attachments = null, sessionQuery = null, commands = null, stored = null, sessionController = null, subagents = null, sessionProjections = null, sessions = null, agentPresets = null, workspaceRegistry = null, pluginManager = null, loader = null, pluginPackages = null, settings = null, files = null, pluginDir = null, proxyCompat = { platform: 'linux', env: {}, networkInterfaces: () => ({}) } } = {}) {
   const home = mkdtempSync(join(tmpdir(), 'dsh-mini-home-'))
   process.env.DSH_HOME = home
 
@@ -180,7 +180,7 @@ async function bootPlugin({ agents = {}, config = {}, attachments = null, sessio
   const mod = pluginDir
     ? await import(`${pathToFileURL(join(pluginDir, 'lib', 'index.js')).href}?t=${Date.now()}`)
     : await import(new URL(`lib/index.js?t=${Date.now()}`, ROOT_URL).href)
-  mod.apply(ctx, { port, bindAddress: '127.0.0.1', ...config })
+  mod.apply(ctx, { port, bindAddress: '127.0.0.1', ...config }, { proxyCompat })
 
   const base = `http://127.0.0.1:${port}`
   const token = readFileSync(join(home, 'dsh-mini-remote', 'token'), 'utf8').trim()
@@ -1309,6 +1309,79 @@ test('配对路由：本机读得到，别的来源一律挡住', async (t) => {
       assert.ok(entry.label && entry.hint, '要有给人看的标题和说明')
     }
   }
+})
+
+test('配对数据包含安全的 proxyCompat，并在卸载时恢复插件改过的绕过列表', async (t) => {
+  let override = '<local>'
+  const regCalls = []
+  const execFileSync = (file, args) => {
+    regCalls.push(args)
+    if (args[0] === 'query') {
+      return '    ProxyEnable    REG_DWORD    0x1\r\n'
+        + '    ProxyServer    REG_SZ    http://user:proxy-password@127.0.0.1:7890\r\n'
+        + `    ProxyOverride    REG_SZ    ${override}\r\n`
+    }
+    if (args[0] === 'add') {
+      override = args[7]
+      return ''
+    }
+    throw new Error('unexpected reg call')
+  }
+  const p = await bootPlugin({
+    config: { bindAddress: 'auto' },
+    proxyCompat: {
+      platform: 'win32',
+      env: { HTTPS_PROXY: 'http://user:env-password@127.0.0.1:7890' },
+      execFileSync,
+      networkInterfaces: () => ({ Ethernet: [{ family: 'IPv4', address: '192.168.1.20', internal: false }] }),
+    },
+  })
+  t.after(p.stop)
+  const res = fakeRes()
+  await p.routes.get('/mini-remote/pairing').handler(fakeReq('127.0.0.1'), res)
+  const payload = JSON.parse(res.out.body)
+  assert.equal(payload.proxyCompat.detected, true)
+  assert.equal(payload.proxyCompat.systemProxy, true)
+  assert.equal(payload.proxyCompat.envProxy, true)
+  assert.equal(payload.proxyCompat.tun, false)
+  assert.equal(payload.proxyCompat.bypassApplied, true)
+  assert.equal(payload.proxyCompat.bypassError, null)
+  assert.match(payload.proxyCompat.rulesText, /PROCESS-NAME,cloudflared\.exe,DIRECT/)
+  const serialized = JSON.stringify(payload.proxyCompat)
+  assert.ok(!serialized.includes('proxy-password') && !serialized.includes('env-password'))
+  assert.ok(!('proxyServer' in payload.proxyCompat) && !('original' in payload.proxyCompat))
+  assert.equal(override.includes('dsh-everywhere.com'), true)
+
+  p.stop()
+  assert.equal(override, '<local>', '卸载只恢复本次插件修改前的 ProxyOverride')
+  assert.equal(regCalls.filter((args) => args[0] === 'add').length, 2, '启动追加一次，卸载恢复一次')
+})
+
+test('检测到 TUN 时只暴露状态，不写系统代理配置', async (t) => {
+  const regCalls = []
+  const p = await bootPlugin({
+    config: { bindAddress: 'auto' },
+    proxyCompat: {
+      platform: 'win32',
+      env: {},
+      execFileSync: (file, args) => {
+        regCalls.push(args)
+        return '    ProxyEnable    REG_DWORD    0x1\r\n    ProxyOverride    REG_SZ    <local>\r\n'
+      },
+      networkInterfaces: () => ({
+        'Clash TUN': [{ family: 'IPv4', address: '198.18.0.1', internal: false }],
+        WLAN: [{ family: 'IPv4', address: '192.168.1.20', internal: false }],
+      }),
+    },
+  })
+  t.after(p.stop)
+  const res = fakeRes()
+  await p.routes.get('/mini-remote/pairing').handler(fakeReq('127.0.0.1'), res)
+  const payload = JSON.parse(res.out.body)
+  assert.equal(payload.proxyCompat.tun, true)
+  assert.deepEqual(payload.proxyCompat.tunNames, ['Clash TUN'])
+  assert.equal(payload.proxyCompat.bypassApplied, false)
+  assert.equal(regCalls.filter((args) => args[0] === 'add').length, 0)
 })
 
 test('只绑本机时，配对面板说清楚是配置问题而不是网络问题', async (t) => {
