@@ -2572,11 +2572,13 @@ window.__ModuleLoader__.load({
       var agentGroup = [];
       var feishuGroup = [];
       var diagnostics = [];
+      var relayErrorText = info.relay && info.relay.error;
+      if (relayErrorText === 'rate-limited') relayErrorText = '共享中继限流：一分钟内重试太多，稍等再试。';
       var relayUi = {
         enabled: Boolean(info.relay && info.relay.enabled),
         state: info.relay && info.relay.state,
         publicUrl: info.relay && info.relay.publicUrl,
-        error: info.relay && info.relay.error,
+        error: relayErrorText,
         hasInviteCode: Boolean(info.relay && info.relay.hasInviteCode),
         id: info.relay && info.relay.id ? info.relay.id : null,
         invite: aRelay ? aRelay.invite : '',

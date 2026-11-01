@@ -461,7 +461,7 @@ test('关闭注册只挡新身份，已有身份仍可心跳', async () => {
   assert.equal(fresh.status, 403)
 })
 
-test('同一 id 一分钟超过 6 次登记会被 429', async () => {
+test('同一 id 一分钟超过 12 次登记会被 429', async () => {
   const env = makeEnv()
   const code = await createInvite(env)
   const first = await handleRequest(req('/api/relay/v1/register', {
@@ -469,7 +469,7 @@ test('同一 id 一分钟超过 6 次登记会被 429', async () => {
   }), env)
   assert.equal(first.status, 200)
   let last
-  for (let i = 0; i < 6; i += 1) {
+  for (let i = 0; i < 12; i += 1) {
     last = await handleRequest(req('/api/relay/v1/register', {
       method: 'PUT', body: { id, secret, target },
     }), env)
