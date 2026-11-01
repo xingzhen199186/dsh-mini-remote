@@ -4656,7 +4656,7 @@ window.__ModuleLoader__.load({
       return h('div', { key: 'tunnel', style: styles.block },
         h('div', { style: styles.entryTitle }, '公网访问'),
         h('div', { style: styles.muted }, '不想装 Tailscale 的话就打开这个：走 Cloudflare 的免费隧道，手机在外面用流量也能连进来。'),
-        proxyMessage ? h('div', { key: 'proxy-compat', style: Object.assign({}, styles.muted, { marginTop: 10 }) }, '代理兼容：' + proxyMessage) : null,
+        proxyMessage ? h('div', { key: 'proxy-compat', style: Object.assign({}, styles.muted, { marginTop: 10 }) }, proxyMessage) : null,
         h('div', { style: Object.assign({}, styles.entryTitle, { marginTop: 14 }) }, '临时地址（快速隧道）'),
         h('label', { style: styles.toggleRow },
           h('input', {

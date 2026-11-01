@@ -996,17 +996,17 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
     const text = textOf(tree6);
     assert.match(text, /公网访问/);
     assert.match(text, /手机与电脑不在同一网络时无法连接；可改用 Tailscale 或下面的固定地址。/);
-    assert.doesNotMatch(text, /代理兼容/, '没有 proxyCompat 时不显示代理提示');
+    assert.doesNotMatch(text, /检测到系统代理|检测到本机代理|当前代理是 TUN/, '没有 proxyCompat 时不显示代理提示');
     assert.equal(byType(tree6, 'button').some((b) => textOf(b) === '复制直连规则'), false);
   });
 
-  await check('系统代理时显示代理兼容提示', async () => {
+  await check('系统代理时显示代理提示', async () => {
     await mount(withTunnel(
       { enabled: false, up: false, starting: false, error: null },
       { proxyCompat: { detected: true, systemProxy: true, envProxy: false, tun: false, bypassApplied: false } },
     ));
     const text = textOf(tree6);
-    assert.match(text, /代理兼容/);
+    assert.match(text, /cloudflared 通常直连/);
     assert.match(text, /cloudflared 通常直连/);
     assert.doesNotMatch(text, /复制直连规则/);
     assert.doesNotMatch(text, /127\.0\.0\.1:7890|proxy-password/);
