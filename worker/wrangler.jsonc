@@ -25,7 +25,9 @@
     "ACCESS_ADMIN": "1",
     "ADMIN_EMAILS": "xingzhen19910806@gmail.com",
     "RELAY_ACCOUNT_ID": "c388ee35863086d5ffbcee0bb4b63e0b",
-    "B_CONTROL_URL": "https://control.dsh-everywhere.com"
+    "B_CONTROL_URL": "https://control.dsh-everywhere.com",
+    "RELAY_MAIL_FROM": "dsh-mini-remote <no-reply@dsh-everywhere.com>",
+    "RELAY_TURNSTILE_SITE_KEY": "0x4AAAAAAFupdzaetdJZQX1-"
   },
   "triggers": { "crons": ["10 0 * * *"] },
   "observability": { "enabled": true },

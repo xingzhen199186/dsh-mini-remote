@@ -13,6 +13,7 @@
  */
 
 import { dashboardHtml } from './dashboard.js'
+import { requestPageHtml } from './request-page.js'
 
 const ID_RE = /^[a-z2-7]{26}$/
 const SECRET_RE = /^[A-Za-z0-9_-]{43}$/
@@ -22,6 +23,11 @@ const MAX_BODY_BYTES = 8 * 1024
 const RATE_WINDOW_MS = 60_000
 const RATE_PER_IP = 30
 const RATE_PER_ID = 6
+const VERIFY_TTL_MS = 10 * 60 * 1000
+const VERIFY_MAX_ATTEMPTS = 5
+const IP_REQUEST_LIMIT = 2
+const IP_REQUEST_WINDOW_MS = 30 * 24 * 60 * 60 * 1000
+const REQUEST_DAILY_LIMIT = 100
 
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), {
@@ -229,6 +235,161 @@ async function handleUnregister(request, env) {
   return json({ ok: true })
 }
 
+
+const DISPOSABLE_EMAIL_DOMAINS = new Set([
+  'mailinator.com', 'guerrillamail.com', '10minutemail.com', 'temp-mail.org',
+  'yopmail.com', 'throwawaymail.com', 'getnada.com', 'sharklasers.com',
+])
+
+function normalizeEmail(value) {
+  const raw = String(value ?? '').trim().toLowerCase()
+  const at = raw.lastIndexOf('@')
+  if (at <= 0 || at === raw.length - 1 || raw.length > 254) return null
+  let local = raw.slice(0, at)
+  let domain = raw.slice(at + 1)
+  if (!/^[a-z0-9.!#$%&'*+/=?^_`{|}~-]+$/.test(local)) return null
+  if (!/^[a-z0-9.-]+\.[a-z]{2,}$/.test(domain)) return null
+  if (DISPOSABLE_EMAIL_DOMAINS.has(domain)) return null
+  if (domain === 'gmail.com' || domain === 'googlemail.com') {
+    local = local.split('+')[0].replace(/\./g, '')
+    domain = 'gmail.com'
+  } else {
+    local = local.split('+')[0]
+  }
+  if (!local) return null
+  return { normalized: local + '@' + domain, masked: local.slice(0, 1) + '***@' + domain }
+}
+
+async function sendMail(env, { to, subject, text }) {
+  if (typeof env.MAIL_SEND === 'function') return await env.MAIL_SEND({ to, subject, text })
+  if (!env.RESEND_API_KEY) return { ok: false, error: 'mail-not-configured' }
+  try {
+    const response = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: { authorization: 'Bearer ' + env.RESEND_API_KEY, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        from: env.RELAY_MAIL_FROM || 'dsh-mini-remote <no-reply@dsh-everywhere.com>',
+        to: [to],
+        subject,
+        text,
+      }),
+    })
+    if (!response.ok) return { ok: false, error: 'mail-failed' }
+    return { ok: true }
+  } catch {
+    return { ok: false, error: 'mail-failed' }
+  }
+}
+
+async function verifyTurnstile(env, token, ip) {
+  const secret = typeof env.RELAY_TURNSTILE_SECRET === 'string' ? env.RELAY_TURNSTILE_SECRET : ''
+  if (!secret) return true
+  if (typeof token !== 'string' || !token) return false
+  try {
+    const body = new URLSearchParams({ secret, response: token, remoteip: ip })
+    const response = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', { method: 'POST', body })
+    const result = await response.json().catch(() => null)
+    return result?.success === true
+  } catch {
+    return false
+  }
+}
+
+async function createRelayInvite(env, { code, days = 7, note = null, actor = 'admin-token' }) {
+  const value = typeof code === 'string' && code ? code : base64url(crypto.getRandomValues(new Uint8Array(24)))
+  const hash = await hmac(env, 'invite', value)
+  const now = Date.now()
+  const expiresAt = now + days * 86_400_000
+  await env.DB.prepare('INSERT INTO relay_invites (code_hash, code, created_at, expires_at, note) VALUES (?, ?, ?, ?, ?)')
+    .bind(hash, value, now, expiresAt, note).run()
+  await audit(env, actor, 'invite.create', null, note)
+  return { code: value, hash, expiresAt }
+}
+
+async function handleInviteRequest(request, env) {
+  if (request.method !== 'POST') return fail('method-not-allowed', 405)
+  const body = await readJson(request)
+  if (body.error) return fail(body.error, 400)
+  const email = normalizeEmail(body.email)
+  if (!email) return fail('invalid-email', 400)
+  const ip = clientIp(request)
+  if (!(await verifyTurnstile(env, body.turnstileToken, ip))) return fail('turnstile-failed', 403)
+  const emailHash = await hmac(env, 'email', email.normalized)
+  const ipHash = await hmac(env, 'ip', ip)
+  if (!(await spendRate(env, 'invite-request:ip:' + ipHash, 3))) return fail('rate-limited', 429)
+
+  const now = Date.now()
+  const daily = await env.DB.prepare('SELECT COUNT(*) AS n FROM relay_invite_requests WHERE created_at > ?').bind(now - 86_400_000).first()
+  if (Number(daily?.n || 0) >= REQUEST_DAILY_LIMIT) return fail('rate-limited', 429)
+
+  const existing = await env.DB.prepare('SELECT * FROM relay_invite_requests WHERE email_hash = ?').bind(emailHash).first()
+  if (existing) {
+    if (existing.state === 'pending' && Number(existing.expires_at) > now) {
+      if (!(await spendRate(env, 'invite-resend:' + existing.request_id, 1))) return fail('rate-limited', 429)
+      const code = randomCode()
+      await env.DB.prepare('UPDATE relay_invite_requests SET verify_hash = ?, verify_attempts = 0, last_sent_at = ?, expires_at = ? WHERE request_id = ?')
+        .bind(await hmac(env, 'verify:' + existing.request_id, code), now, now + VERIFY_TTL_MS, existing.request_id).run()
+      const mailed = await sendMail(env, { to: email.normalized, subject: '共享固定地址：邮箱验证码', text: '你的验证码是：' + code + '\n10 分钟内有效。' })
+      if (!mailed.ok) return fail(mailed.error || 'mail-failed', 503)
+      return json({ ok: true, applicationId: existing.request_id, expiresAt: now + VERIFY_TTL_MS, resent: true })
+    }
+    return fail('already-requested', 409)
+  }
+
+  const ipCount = await env.DB.prepare('SELECT COUNT(*) AS n FROM relay_invite_requests WHERE ip_hash = ? AND created_at > ?')
+    .bind(ipHash, now - IP_REQUEST_WINDOW_MS).first()
+  if (Number(ipCount?.n || 0) >= IP_REQUEST_LIMIT) return fail('ip-limit-reached', 409)
+
+  const applicationId = crypto.randomUUID()
+  const code = randomCode()
+  try {
+    await env.DB.prepare(
+      'INSERT INTO relay_invite_requests (request_id, email_hash, email_masked, ip_hash, state, verify_hash, last_sent_at, created_at, expires_at) '
+      + 'VALUES (?, ?, ?, ?, \'pending\', ?, ?, ?, ?)',
+    ).bind(applicationId, emailHash, email.masked, ipHash, await hmac(env, 'verify:' + applicationId, code), now, now, now + VERIFY_TTL_MS).run()
+  } catch {
+    return fail('already-requested', 409)
+  }
+  const mailed = await sendMail(env, { to: email.normalized, subject: '共享固定地址：邮箱验证码', text: '你的验证码是：' + code + '\n10 分钟内有效。' })
+  if (!mailed.ok) {
+    await env.DB.prepare('DELETE FROM relay_invite_requests WHERE request_id = ?').bind(applicationId).run().catch(() => undefined)
+    return fail(mailed.error || 'mail-failed', 503)
+  }
+  return json({ ok: true, applicationId, expiresAt: now + VERIFY_TTL_MS })
+}
+
+async function handleInviteVerify(request, env) {
+  if (request.method !== 'POST') return fail('method-not-allowed', 405)
+  const body = await readJson(request)
+  if (body.error) return fail(body.error, 400)
+  const applicationId = typeof body.applicationId === 'string' ? body.applicationId.trim() : ''
+  const code = typeof body.code === 'string' ? body.code.trim() : ''
+  if (!/^[0-9a-f-]{36}$/i.test(applicationId) || !/^\d{6}$/.test(code)) return fail('invalid-params', 400)
+  const row = await env.DB.prepare('SELECT * FROM relay_invite_requests WHERE request_id = ?').bind(applicationId).first()
+  if (!row || row.state !== 'pending') return fail('request-not-found', 404)
+  if (Number(row.expires_at) <= Date.now()) return fail('request-expired', 410)
+  if (Number(row.verify_attempts) >= VERIFY_MAX_ATTEMPTS) return fail('too-many-attempts', 429)
+  const expected = await hmac(env, 'verify:' + applicationId, code)
+  if (!timingSafeEqual(expected, row.verify_hash)) {
+    await env.DB.prepare('UPDATE relay_invite_requests SET verify_attempts = verify_attempts + 1 WHERE request_id = ?').bind(applicationId).run()
+    return fail('invalid-code', 403)
+  }
+  const invite = await createRelayInvite(env, {
+    days: 7,
+    note: 'self-service:' + row.email_masked,
+    actor: 'self-service',
+  })
+  const now = Date.now()
+  await env.DB.prepare('UPDATE relay_invite_requests SET state = \'fulfilled\', invite_hash = ?, verified_at = ?, fulfilled_at = ? WHERE request_id = ?')
+    .bind(invite.hash, now, now, applicationId).run()
+  return json({ ok: true, code: invite.code, expiresAt: invite.expiresAt })
+}
+
+function randomCode() {
+  const value = new Uint32Array(1)
+  crypto.getRandomValues(value)
+  return String(value[0] % 1_000_000).padStart(6, '0')
+}
 
 /** `<id>.dsh-mini-remote.com` 的 id；只认一层，避免二级子域绕过。 */
 function relayIdOf(host, suffix) {
@@ -630,14 +791,32 @@ async function handleAdmin(request, env, url) {
   if (request.method === 'POST' && path === '/admin/relay/v1/invites') {
     const body = await readJson(request)
     if (body.error) return fail(body.error, 400)
-    const code = typeof body.code === 'string' && body.code ? body.code : base64url(crypto.getRandomValues(new Uint8Array(24)))
     const days = Math.max(1, Math.min(90, Number(body.expiresInDays) || 7))
-    let hash
-    try { hash = await hmac(env, 'invite', code) } catch { return fail('storage-unavailable', 503) }
-    await env.DB.prepare('INSERT INTO relay_invites (code_hash, code, created_at, expires_at, note) VALUES (?, ?, ?, ?, ?)')
-      .bind(hash, code, Date.now(), Date.now() + days * 86_400_000, typeof body.note === 'string' ? body.note : null).run()
-    await audit(env, auth.actor, 'invite.create', null, body.note ?? null)
-    return json({ ok: true, code, expiresInDays: days })
+    const created = await createRelayInvite(env, {
+      code: typeof body.code === 'string' && body.code ? body.code : undefined,
+      days,
+      note: typeof body.note === 'string' ? body.note : null,
+      actor: auth.actor,
+    })
+    return json({ ok: true, code: created.code, expiresInDays: days })
+  }
+
+  if (request.method === 'GET' && path === '/admin/relay/v1/invite-requests') {
+    const limit = Math.max(1, Math.min(100, Number(url.searchParams.get('limit')) || 50))
+    const rows = await env.DB.prepare(
+      'SELECT request_id AS id, email_masked AS email, state, invite_hash AS inviteHash, '
+      + 'created_at AS createdAt, expires_at AS expiresAt, verified_at AS verifiedAt, fulfilled_at AS fulfilledAt '
+      + 'FROM relay_invite_requests ORDER BY created_at DESC LIMIT ?',
+    ).bind(limit).all()
+    return json({ ok: true, requests: rows.results ?? [] })
+  }
+
+  if (request.method === 'DELETE' && path.startsWith('/admin/relay/v1/invite-requests/')) {
+    const key = path.slice('/admin/relay/v1/invite-requests/'.length)
+    if (!/^[0-9a-f-]{36}$/i.test(key)) return fail('invalid-params', 400)
+    const result = await env.DB.prepare('DELETE FROM relay_invite_requests WHERE request_id = ?').bind(key).run()
+    if (!result?.meta?.changes) return fail('not-found', 404)
+    return json({ ok: true, deleted: true })
   }
 
   if (request.method === 'POST' && path === '/admin/relay/v1/revoke') {
@@ -675,6 +854,18 @@ async function handleControl(request, env, url) {
   if (request.method === 'GET' && url.pathname === '/health') {
     return json({ ok: true, service: 'dsh-mini-relay', version: 1 })
   }
+  if (request.method === 'GET' && url.pathname === '/request') {
+    return new Response(requestPageHtml({ turnstileSiteKey: env.RELAY_TURNSTILE_SITE_KEY || '' }), {
+      headers: {
+        'content-type': 'text/html; charset=utf-8',
+        'cache-control': 'no-store',
+        'x-robots-tag': 'noindex',
+        'x-frame-options': 'DENY',
+        'referrer-policy': 'no-referrer',
+        'content-security-policy': "default-src 'none'; script-src 'unsafe-inline' https://challenges.cloudflare.com; frame-src https://challenges.cloudflare.com; style-src 'unsafe-inline'; connect-src 'self' https://challenges.cloudflare.com; img-src 'self' data:; base-uri 'none'",
+      },
+    })
+  }
   if (request.method === 'GET' && (url.pathname === '/admin' || url.pathname === '/admin/')) {
     const auth = await requireAdmin(request, env)
     if (!auth.ok) return auth.response
@@ -694,6 +885,8 @@ async function handleControl(request, env, url) {
   if (request.method === 'GET' && url.pathname === '/ops/v1/weekly' && opsReadAuthorized(request, env)) {
     return json(await opsWeeklyPayload(env))
   }
+  if (url.pathname === '/api/relay/v1/invite-request') return await handleInviteRequest(request, env)
+  if (url.pathname === '/api/relay/v1/invite-verify') return await handleInviteVerify(request, env)
   if (url.pathname === '/api/relay/v1/register') return handleRegister(request, env)
   if (url.pathname === '/api/relay/v1/unregister') return handleUnregister(request, env)
   if (url.pathname.startsWith('/admin/relay/v1/')) return handleAdmin(request, env, url)

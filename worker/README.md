@@ -103,3 +103,50 @@ CF-Access-Client-Secret
 ```
 
 详细步骤见 `docs/A-Cloudflare-Access-配置清单.md`。
+
+## 共享固定地址：邮箱自助申请（2026-11-01）
+
+公开申请页：
+
+```text
+https://relay.dsh-mini-remote.com/request
+```
+
+流程：
+
+1. 用户填邮箱；
+2. Resend 发 6 位验证码（10 分钟有效）；
+3. 用户回填验证码；
+4. Worker 生成一次性邀请码；
+5. 用户把邀请码填进插件「共享固定地址」。
+
+限制：
+
+- 一个邮箱只能申请一次（Gmail 去掉 `+tag` 和点号）；
+- 同一 IP 30 天内最多 2 个；
+- 一次性邮箱域名拒绝；
+- 申请接口每 IP 每分钟 3 次，全局每天 100 次；
+- 验证码最多试 5 次。
+
+需要配置的 Secrets：
+
+```text
+RESEND_API_KEY          Resend 发信 key
+RELAY_TURNSTILE_SECRET  Turnstile 服务端校验 key
+```
+
+需要配置的 Vars：
+
+```text
+RELAY_MAIL_FROM             发信人，默认 no-reply@dsh-everywhere.com
+RELAY_TURNSTILE_SITE_KEY    申请页的 Turnstile site key
+```
+
+管理接口：
+
+```text
+GET    /admin/relay/v1/invite-requests
+DELETE /admin/relay/v1/invite-requests/{applicationId}
+```
+
+Turnstile 的 widget 需要把 `relay.dsh-mini-remote.com` 加进 Hostnames；可以和 B 的申请页共用同一个 widget。

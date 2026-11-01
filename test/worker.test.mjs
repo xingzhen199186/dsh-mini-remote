@@ -9,6 +9,7 @@ import { dashboardHtml } from '../worker/src/dashboard.js'
 const MIGRATIONS = [
   readFileSync(new URL('../worker/migrations/0001_init.sql', import.meta.url), 'utf8'),
   readFileSync(new URL('../worker/migrations/0002_invite_code.sql', import.meta.url), 'utf8'),
+  readFileSync(new URL('../worker/migrations/0003_invite_requests.sql', import.meta.url), 'utf8'),
 ]
 const ADMIN = 'test-admin-token'
 const PEPPER = 'test-pepper'
@@ -601,4 +602,74 @@ test('管理响应带安全头', async () => {
   assert.equal(response.headers.get('x-content-type-options'), 'nosniff')
   assert.equal(response.headers.get('x-frame-options'), 'DENY')
   assert.equal(response.headers.get('referrer-policy'), 'no-referrer')
+})
+
+
+test('共享固定地址：邮箱申请、验证、拿邀请码并注册', async () => {
+  const env = makeEnv()
+  const mails = []
+  env.MAIL_SEND = async (message) => { mails.push(message); return { ok: true } }
+  const first = await handleRequest(req('/api/relay/v1/invite-request', {
+    method: 'POST', body: { email: 'Shared+test@gmail.com' }, ip: '198.51.100.10',
+  }), env)
+  assert.equal(first.status, 200, JSON.stringify(await first.clone().json()))
+  const firstBody = await first.json()
+  assert.equal(firstBody.ok, true)
+  assert.equal(mails.length, 1)
+  const code = (mails[0].text.match(/\b(\d{6})\b/) || [])[1]
+  assert.ok(code)
+
+  const wrong = await handleRequest(req('/api/relay/v1/invite-verify', {
+    method: 'POST', body: { applicationId: firstBody.applicationId, code: '000000' }, ip: '198.51.100.10',
+  }), env)
+  assert.equal(wrong.status, 403)
+  assert.equal((await wrong.json()).error, 'invalid-code')
+
+  const verified = await handleRequest(req('/api/relay/v1/invite-verify', {
+    method: 'POST', body: { applicationId: firstBody.applicationId, code }, ip: '198.51.100.10',
+  }), env)
+  assert.equal(verified.status, 200, JSON.stringify(await verified.clone().json()))
+  const invite = await verified.json()
+  assert.match(invite.code, /^[A-Za-z0-9_-]{32}$/)
+
+  const registered = await handleRequest(req('/api/relay/v1/register', {
+    method: 'PUT', body: { id, secret, target, inviteCode: invite.code }, ip: '198.51.100.10',
+  }), env)
+  assert.equal(registered.status, 200, JSON.stringify(await registered.clone().json()))
+  assert.equal((await registered.json()).ok, true)
+
+  const again = await handleRequest(req('/api/relay/v1/invite-request', {
+    method: 'POST', body: { email: 'shared@gmail.com' }, ip: '198.51.100.11',
+  }), env)
+  assert.equal(again.status, 409)
+  assert.equal((await again.json()).error, 'already-requested')
+})
+
+test('共享固定地址：同一 IP 30 天内最多 2 个邮箱', async () => {
+  const env = makeEnv()
+  env.MAIL_SEND = async () => ({ ok: true })
+  const one = await handleRequest(req('/api/relay/v1/invite-request', {
+    method: 'POST', body: { email: 'one@example.com' }, ip: '198.51.100.20',
+  }), env)
+  assert.equal(one.status, 200)
+  const two = await handleRequest(req('/api/relay/v1/invite-request', {
+    method: 'POST', body: { email: 'two@example.com' }, ip: '198.51.100.20',
+  }), env)
+  assert.equal(two.status, 200)
+  const three = await handleRequest(req('/api/relay/v1/invite-request', {
+    method: 'POST', body: { email: 'three@example.com' }, ip: '198.51.100.20',
+  }), env)
+  assert.equal(three.status, 409)
+  assert.equal((await three.json()).error, 'ip-limit-reached')
+})
+
+test('共享固定地址申请页可打开', async () => {
+  const env = makeEnv()
+  env.RELAY_TURNSTILE_SITE_KEY = '0x-test'
+  const page = await handleRequest(new Request('https://relay.example.com/request'), env)
+  assert.equal(page.status, 200)
+  const html = await page.text()
+  assert.match(html, /申请共享固定地址邀请码/)
+  assert.match(html, /invite-request/)
+  assert.match(html, /cf-turnstile/)
 })
