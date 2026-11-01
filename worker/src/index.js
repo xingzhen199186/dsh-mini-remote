@@ -147,6 +147,7 @@ async function configOf(env) {
     inviteRequired: raw?.inviteRequired !== undefined
       ? raw.inviteRequired !== false
       : env.RELAY_INVITE_REQUIRED !== '0',
+    maxActive: Number.isInteger(raw?.maxActive) && raw.maxActive > 0 ? raw.maxActive : 200,
   }
 }
 
@@ -217,6 +218,8 @@ async function handleRegister(request, env) {
   } else {
     const config = await configOf(env)
     if (!config.registrationEnabled) return fail('registration-disabled', 403)
+    const active = await env.DB.prepare('SELECT COUNT(*) AS n FROM relay_identities WHERE state = \'active\'').first()
+    if (Number(active?.n || 0) >= config.maxActive) return fail('capacity-full', 503)
     if (config.inviteRequired) {
       if (!inviteCode) return fail('invite-required', 403)
       let inviteHash
@@ -929,6 +932,10 @@ async function handleAdmin(request, env, url) {
     if (typeof body.proxyEnabled === 'boolean') patch.proxyEnabled = body.proxyEnabled
     if (typeof body.dailyReportEnabled === 'boolean') patch.dailyReportEnabled = body.dailyReportEnabled
     if (typeof body.inviteRequired === 'boolean') patch.inviteRequired = body.inviteRequired
+    if (body.maxActive !== undefined) {
+      if (!Number.isInteger(body.maxActive) || body.maxActive < 1 || body.maxActive > 10000) return fail('invalid-params', 400)
+      patch.maxActive = body.maxActive
+    }
     if (!Object.keys(patch).length) return fail('invalid-params', 400)
     const next = await setConfig(env, patch)
     await audit(env, auth.actor, 'config.update', null, JSON.stringify(patch))

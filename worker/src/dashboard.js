@@ -123,6 +123,7 @@ code{background:#f3f4f6;padding:2px 6px;border-radius:4px;word-break:break-all}
         <label class="switch"><input type="checkbox" id="inviteRequired"> 新实例必须带邀请码（关闭后为自服务注册）</label>
         <label class="switch"><input type="checkbox" id="proxyEnabled"> 数据面转发（关闭后所有固定地址返回离线页）</label>
         <label class="switch"><input type="checkbox" id="dailyReportEnabled"> 每天自动采集一次用量</label>
+        <div class="row" style="margin-top:10px;align-items:center"><label for="maxActive">共享实例上限</label><input id="maxActive" type="number" min="1" max="10000" style="width:120px"><button class="btn" id="saveMaxActive">保存上限</button><span class="muted small">默认 200；达到上限后拒绝新身份，不再消耗邀请码。</span></div>
         <div class="muted small">每日任务在 Worker Cron 中运行；需要配置 CF_ANALYTICS_TOKEN 才能查到 Cloudflare 用量。</div>
       </div>
       <div class="card"><h3>今日用量</h3><div class="row"><button class="btn" id="refreshUsage">立即采集</button><span class="muted small">每天自动采集可在上方开关。</span></div><div id="usage" class="muted" style="margin-top:10px">还没有用量快照。</div></div>
@@ -159,7 +160,7 @@ function showError(e){$('error').textContent=e;$('error').classList.remove('hidd
 function hideError(){$('error').classList.add('hidden')}
 async function api(path,init){const r=await fetch(path,{headers:{'content-type':'application/json'},...init});const b=await r.json().catch(()=>({}));if(!r.ok||b.ok===false)throw new Error(b.error||('HTTP '+r.status));return b}
 function page(p){state.page=p;document.querySelectorAll('.page').forEach((el)=>el.classList.toggle('active',el.id==='page-'+p));document.querySelectorAll('#nav button').forEach((b)=>b.classList.toggle('active',b.dataset.page===p));window.scrollTo({top:0,behavior:'smooth'})}
-function setChecks(config){$('registrationEnabled').checked=!!config.registrationEnabled;$('inviteRequired').checked=config.inviteRequired!==false;$('proxyEnabled').checked=!!config.proxyEnabled;$('dailyReportEnabled').checked=!!config.dailyReportEnabled}
+function setChecks(config){$('registrationEnabled').checked=!!config.registrationEnabled;$('inviteRequired').checked=config.inviteRequired!==false;$('proxyEnabled').checked=!!config.proxyEnabled;$('dailyReportEnabled').checked=!!config.dailyReportEnabled;$('maxActive').value=config.maxActive??200}
 function usageHtml(u){
   if(!u)return '<span class="muted">还没有用量快照。开启每日任务并配置 token 后，这里会出现。</span>';
   if(u.error)return '<div class="error">'+esc(u.error)+'</div>';
@@ -258,6 +259,7 @@ $('registrationEnabled').addEventListener('change',(e)=>saveConfig('registration
 $('inviteRequired').addEventListener('change',(e)=>saveConfig('inviteRequired',e.target.checked));
 $('proxyEnabled').addEventListener('change',(e)=>saveConfig('proxyEnabled',e.target.checked));
 $('dailyReportEnabled').addEventListener('change',(e)=>saveConfig('dailyReportEnabled',e.target.checked));
+$('saveMaxActive').addEventListener('click',()=>{const n=Number($('maxActive').value);if(!Number.isInteger(n)||n<1||n>10000){showError('上限必须是 1 到 10000 的整数');return}saveConfig('maxActive',n)});
 $('newInvite').addEventListener('click',async()=>{try{const r=await api('/admin/relay/v1/invites',{method:'POST',body:JSON.stringify({expiresInDays:7})});$('inviteResult').classList.remove('hidden');$('inviteResult').innerHTML='新邀请码（只显示这一次）：<br><code>'+esc(r.code)+'</code>';await load()}catch(e){showError('创建邀请失败：'+e.message)}});
 $('newBInvite').addEventListener('click',async()=>{try{const r=await api('/admin/relay/v1/b/invites',{method:'POST',body:JSON.stringify({expiresInDays:7,note:'ops-console'})});$('bInviteResult').classList.remove('hidden');$('bInviteResult').innerHTML='新激活码（只显示这一次）：<br><code>'+esc(r.code)+'</code><br><span class="small">固定地址：<code>'+esc(r.hostname)+'</code></span>';await load()}catch(e){showError('创建激活码失败：'+e.message)}});
 document.addEventListener('click',async(e)=>{const copy=e.target?.dataset?.copy;if(copy){try{await navigator.clipboard.writeText(copy);e.target.textContent='已复制'}catch{}return}const id=e.target?.dataset?.revoke;if(!id)return;if(!confirm('确定撤销 '+id+'？撤销后固定地址立即失效。'))return;try{await api('/admin/relay/v1/revoke',{method:'POST',body:JSON.stringify({id,reason:'ops-console'})});await load()}catch(err){showError('撤销失败：'+err.message)}});

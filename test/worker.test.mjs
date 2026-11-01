@@ -384,6 +384,25 @@ test('邀请只能消费一次，登记成功返回固定地址和 target TTL', 
   assert.equal((await second.json()).error, 'invite-invalid')
 })
 
+test('共享固定地址达到 maxActive 后拒绝新身份，且不消耗邀请', async () => {
+  const env = makeEnv()
+  await env.RELAY_KV.put('relay-config', JSON.stringify({ maxActive: 1 }))
+  const firstCode = await createInvite(env)
+  const first = await handleRequest(req('/api/relay/v1/register', {
+    method: 'PUT', body: { id, secret, target, inviteCode: firstCode },
+  }), env)
+  assert.equal(first.status, 200)
+
+  const secondCode = await createInvite(env)
+  const secondId = 'zyxwvutsrqponmlkjihgfedcba'
+  const second = await handleRequest(req('/api/relay/v1/register', {
+    method: 'PUT', body: { id: secondId, secret, target, inviteCode: secondCode },
+  }), env)
+  assert.equal(second.status, 503)
+  assert.equal((await second.json()).error, 'capacity-full')
+  assert.equal((await env.DB.prepare('SELECT COUNT(*) AS n FROM relay_invites WHERE used_at IS NULL').first()).n, 1)
+})
+
 test('两个邀请并发注册同一 id：只成功一个，另一枚邀请不被消费', async () => {
   const env = makeEnv()
   const firstCode = await createInvite(env)
