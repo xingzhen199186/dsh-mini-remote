@@ -1084,7 +1084,7 @@ window.__ModuleLoader__.load({
                 return prev ? Object.assign({}, prev, { bRelay: payload.bRelay }) : prev;
               });
             }
-            if (payload && payload.ok && (action === 'start' || action === 'retry' || action === 'purge')) setBActivation('');
+            if (payload && payload.ok && (action === 'start' || action === 'retry' || action === 'purge' || action === 'purge-local')) setBActivation('');
             if (!payload || !payload.ok) {
               setBRelayError((payload && payload.error) || ('专属固定地址操作失败：HTTP ' + r.status));
             }
@@ -1630,8 +1630,14 @@ window.__ModuleLoader__.load({
             );
           })
           .then(function (r) {
-            if (r.body && typeof r.body === 'object') { setInfo(r.body); setFailure(null); }
-            else setFailure('切换公网访问失败：服务返回了 HTTP ' + r.status + '。');
+            if (r.body && typeof r.body === 'object') {
+              setInfo(r.body);
+              setFailure(null);
+              if (r.body.relay && r.body.relay.state === 'active' && extra && extra.relayInviteCode) {
+                var submittedInvite = extra.relayInviteCode;
+                setARelayInvite(function (current) { return current === submittedInvite ? '' : current; });
+              }
+            } else setFailure('切换公网访问失败：服务返回了 HTTP ' + r.status + '。');
           })
           .catch(function (err) {
             setFailure('切换公网访问失败：' + ((err && err.message) || String(err)));
@@ -2537,6 +2543,7 @@ window.__ModuleLoader__.load({
           reconnect: function () { runBRelay('reconnect'); },
           stop: function () { runBRelay('stop'); },
           purge: function () { runBRelay('purge'); },
+          purgeLocal: function () { runBRelay('purge-local'); },
           copy: copy,
         }, {
           controlUrl: multiControl,
@@ -4058,6 +4065,15 @@ window.__ModuleLoader__.load({
             if (window.confirm('会删除服务器上的旧 Tunnel、DNS 和租约，并清空本机身份。这个操作不可恢复。确定继续？')) relay.purge();
           },
         }, '彻底清除旧租约') : null;
+      var purgeLocalButton = (st.errorCode === 'auth_failed' || st.errorCode === 'identity_mismatch')
+        ? h('button', {
+          type: 'button',
+          disabled: Boolean(busy),
+          style: styles.btnDanger,
+          onClick: function () {
+            if (window.confirm('只清除本机身份并停止本地隧道，不删除云端旧资源。云端旧 Tunnel、DNS 和租约可能仍然保留。确定继续？')) relay.purgeLocal();
+          },
+        }, '仅清本地身份（不删云端）') : null;
       var actions = running
         ? h('div', { style: { display: 'flex', gap: 8, flexWrap: 'wrap' } },
           h('button', {
@@ -4085,6 +4101,7 @@ window.__ModuleLoader__.load({
             onClick: relay.start,
           }, claiming ? '连接中…' : '开启专属固定地址') : null,
           purgeButton,
+          purgeLocalButton,
         );
 
       return h('div', { key: 'b-relay', style: styles.block },

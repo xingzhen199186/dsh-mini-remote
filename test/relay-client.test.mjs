@@ -56,6 +56,26 @@ test('注册用 PUT、带 inviteCode；注销用 POST', async () => {
   assert.equal(calls[1].init.method, 'POST')
 })
 
+test('身份建立后清空邀请码，后续登记不再发送旧邀请码', async () => {
+  const bodies = []
+  let inviteCode = 'invite-once'
+  const client = createRelayClient({
+    identity: { id: 'abcdefghijklmnopqrstuvwxyz', secret: 'A'.repeat(43) },
+    inviteCode: () => inviteCode,
+    fetchFn: async (_url, init) => {
+      bodies.push(JSON.parse(init.body))
+      return new Response(JSON.stringify({ ok: true, publicUrl: 'https://abc.dsh-mini-remote.com' }), {
+        status: 200, headers: { 'content-type': 'application/json' },
+      })
+    },
+  })
+  await client.register({ quickUrl: 'https://one.trycloudflare.com' })
+  inviteCode = ''
+  await client.register({ quickUrl: 'https://two.trycloudflare.com' })
+  assert.equal(bodies[0].inviteCode, 'invite-once')
+  assert.equal(Object.hasOwn(bodies[1], 'inviteCode'), false)
+})
+
 test('注册失败保留状态码和错误，不抛异常', async () => {
   const fetchFn = async () => new Response(JSON.stringify({ ok: false, error: 'rate-limited' }), {
     status: 429,

@@ -15,6 +15,7 @@ const SELF_SERVICE_CAPACITY = 900
 const VERIFY_TTL_MS = 10 * 60 * 1000
 const REVEAL_TTL_MS = 15 * 60 * 1000
 const VERIFY_MAX_ATTEMPTS = 5
+const FULFILL_RESERVATION_TTL_MS = 5 * 60 * 1000
 const REQUEST_RESEND_MS = 60 * 1000
 const REQUEST_DAILY_LIMIT = 100
 const IP_REQUEST_LIMIT = 2
@@ -188,12 +189,10 @@ async function readBConfig(env) {
 async function spendRate(env, bucket, maximum, windowSeconds) {
   const now = Date.now()
   const windowStart = Math.floor(now / (windowSeconds * 1000)) * windowSeconds * 1000
-  await env.DB.prepare(
+  const row = await env.DB.prepare(
     'INSERT INTO b_rate_limits (bucket, window_start, count) VALUES (?, ?, 1) '
-    + 'ON CONFLICT(bucket, window_start) DO UPDATE SET count = count + 1',
-  ).bind(bucket, windowStart).run()
-  const row = await env.DB.prepare('SELECT count FROM b_rate_limits WHERE bucket = ? AND window_start = ?')
-    .bind(bucket, windowStart).first()
+    + 'ON CONFLICT(bucket, window_start) DO UPDATE SET count = count + 1 RETURNING count',
+  ).bind(bucket, windowStart).first()
   if (Number(row?.count || 0) <= maximum) return 0
   return Math.max(1, Math.ceil((windowStart + windowSeconds * 1000 - now) / 1000))
 }
@@ -369,11 +368,13 @@ async function handleInviteRequest(request, env, requestId) {
     'SELECT * FROM b_invite_requests WHERE email_hash = ? LIMIT 1',
   ).bind(emailHash).first()
   if (existing) {
-    if (existing.state === 'pending') {
+    const staleVerification = existing.state === 'verified'
+      && Number(existing.verified_at) + FULFILL_RESERVATION_TTL_MS <= Date.now()
+    if (existing.state === 'pending' || staleVerification) {
       const retry = await spendRate(env, 'invite-resend:' + existing.request_id, 1, 60)
       if (retry) return fail(requestId, 'rate_limited', 429, true, retry)
       const code = randomCode()
-      await env.DB.prepare('UPDATE b_invite_requests SET verify_hash = ?, verify_attempts = 0, last_sent_at = ?, expires_at = ? WHERE request_id = ?')
+      await env.DB.prepare('UPDATE b_invite_requests SET state = \'pending\', verify_hash = ?, verify_attempts = 0, last_sent_at = ?, expires_at = ?, verified_at = NULL WHERE request_id = ?')
         .bind(await hmac(env, 'verify:' + existing.request_id, code), Date.now(), Date.now() + VERIFY_TTL_MS, existing.request_id).run()
       const mailed = await sendMail(env, {
         to: email.normalized,
@@ -392,6 +393,10 @@ async function handleInviteRequest(request, env, requestId) {
   if (Number(ipCount?.n || 0) >= IP_REQUEST_LIMIT) {
     return fail(requestId, 'ip_limit_reached', 409)
   }
+  const ipQuotaRetry = await spendRate(
+    env, 'invite-ip-30d:' + ipHash, IP_REQUEST_LIMIT, IP_REQUEST_WINDOW_MS / 1000,
+  )
+  if (ipQuotaRetry) return fail(requestId, 'ip_limit_reached', 409)
 
   const newRequestId = crypto.randomUUID()
   const code = randomCode()
@@ -779,8 +784,9 @@ async function handleClaim(request, env, requestId) {
   }
 
   const codeHash = await hmac(env, 'activation', activationCode)
-  let retryAfter = await spendRate(env, 'claim:ip:' + ipHash, 5, 3600)
-  if (!retryAfter) retryAfter = await spendRate(env, 'claim:code:' + codeHash, 10, 900)
+  const bound = await selfServiceLeaseOf(env, claimRequestId)
+  let retryAfter = await spendRate(env, (bound ? 'claim-recover:ip:' : 'claim:ip:') + ipHash, bound ? 30 : 5, 3600)
+  if (!retryAfter) retryAfter = await spendRate(env, (bound ? 'claim-recover:code:' : 'claim:code:') + codeHash, bound ? 30 : 10, 900)
   if (retryAfter) return fail(requestId, 'rate_limited', 429, true, retryAfter)
   const api = cloudflareApiOf(env)
   if (!api) return fail(requestId, 'cf_api_unavailable', 503, true, 5)
@@ -790,7 +796,6 @@ async function handleClaim(request, env, requestId) {
   if (invite.state === 'invited' && Number(invite.expires_at) <= Date.now()) return fail(requestId, 'activation_expired', 410)
   let lease = await leaseOf(env, invite.lease_id)
   if (!lease) return fail(requestId, 'storage_unavailable', 503, true, 5)
-  const bound = await selfServiceLeaseOf(env, claimRequestId)
   if (bound && bound.lease_id !== lease.lease_id) return fail(requestId, 'claim_request_conflict', 409)
   const secretHash = await hmac(env, 'client', lease.lease_id + ':' + clientSecret)
 

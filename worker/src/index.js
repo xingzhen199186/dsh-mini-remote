@@ -26,6 +26,7 @@ const RATE_PER_ID = 12
 const VERIFY_TTL_MS = 10 * 60 * 1000
 const REVEAL_TTL_MS = 15 * 60 * 1000
 const VERIFY_MAX_ATTEMPTS = 5
+const FULFILL_RESERVATION_TTL_MS = 5 * 60 * 1000
 const IP_REQUEST_LIMIT = 2
 const IP_REQUEST_WINDOW_MS = 30 * 24 * 60 * 60 * 1000
 const REQUEST_DAILY_LIMIT = 100
@@ -161,16 +162,13 @@ function clientIp(request) {
   return raw.split(',')[0].trim() || 'unknown'
 }
 
-async function spendRate(env, bucket, max) {
-  const windowStart = Math.floor(Date.now() / RATE_WINDOW_MS) * RATE_WINDOW_MS
-  const row = await env.DB.prepare('SELECT count FROM relay_rate_limit WHERE bucket = ? AND window_start = ?')
-    .bind(bucket, windowStart).first()
-  const count = Number(row?.count ?? 0) + 1
-  await env.DB.prepare(
+async function spendRate(env, bucket, max, windowMs = RATE_WINDOW_MS) {
+  const windowStart = Math.floor(Date.now() / windowMs) * windowMs
+  const row = await env.DB.prepare(
     'INSERT INTO relay_rate_limit (bucket, window_start, count) VALUES (?, ?, 1) '
-    + 'ON CONFLICT(bucket, window_start) DO UPDATE SET count = count + 1',
-  ).bind(bucket, windowStart).run()
-  return count <= max
+    + 'ON CONFLICT(bucket, window_start) DO UPDATE SET count = count + 1 RETURNING count',
+  ).bind(bucket, windowStart).first()
+  return Number(row?.count || 0) <= max
 }
 
 async function audit(env, actor, action, target, reason) {
@@ -223,17 +221,29 @@ async function handleRegister(request, env) {
       if (!inviteCode) return fail('invite-required', 403)
       let inviteHash
       try { inviteHash = await hmac(env, 'invite', inviteCode) } catch { return fail('storage-unavailable', 503) }
-      const invite = await env.DB.prepare(
-        'SELECT code_hash FROM relay_invites WHERE code_hash = ? AND used_at IS NULL AND expires_at > ?',
-      ).bind(inviteHash, Date.now()).first()
-      if (!invite) return fail('invite-invalid', 403)
-      const consumed = await env.DB.prepare('UPDATE relay_invites SET used_at = ? WHERE code_hash = ? AND used_at IS NULL')
-        .bind(Date.now(), inviteHash).run()
-      if (!consumed?.meta?.changes) return fail('invite-invalid', 403)
+      const now = Date.now()
+      let created
+      try {
+        created = await env.DB.batch([
+          env.DB.prepare(
+            'UPDATE relay_invites SET used_at = ? WHERE code_hash = ? AND used_at IS NULL AND expires_at > ?',
+          ).bind(now, inviteHash, now),
+          env.DB.prepare(
+            'INSERT INTO relay_identities (id, secret_hash, state, created_at, last_seen_at) '
+            + 'SELECT ?, ?, \'active\', ?, ? WHERE EXISTS ('
+            + 'SELECT 1 FROM relay_invites WHERE code_hash = ? AND used_at = ? AND expires_at > ?)',
+          ).bind(id, secretHash, now, now, inviteHash, now, now),
+        ])
+      } catch {
+        const raced = await env.DB.prepare('SELECT id FROM relay_identities WHERE id = ?').bind(id).first()
+        return raced ? fail('identity-exists', 409) : fail('storage-unavailable', 503)
+      }
+      if (created.some((result) => Number(result?.meta?.changes || 0) !== 1)) return fail('invite-invalid', 403)
+    } else {
+      await env.DB.prepare(
+        'INSERT INTO relay_identities (id, secret_hash, state, created_at, last_seen_at) VALUES (?, ?, \'active\', ?, ?)',
+      ).bind(id, secretHash, Date.now(), Date.now()).run()
     }
-    await env.DB.prepare(
-      'INSERT INTO relay_identities (id, secret_hash, state, created_at, last_seen_at) VALUES (?, ?, \'active\', ?, ?)',
-    ).bind(id, secretHash, Date.now(), Date.now()).run()
   }
 
   const now = Date.now()
@@ -365,10 +375,14 @@ async function handleInviteRequest(request, env) {
   const now = Date.now()
   const daily = await env.DB.prepare('SELECT COUNT(*) AS n FROM relay_invite_requests WHERE created_at > ?').bind(now - 86_400_000).first()
   if (Number(daily?.n || 0) >= REQUEST_DAILY_LIMIT) return fail('rate-limited', 429)
+  if (!(await spendRate(env, 'invite-request:global', REQUEST_DAILY_LIMIT, 86_400_000))) return fail('rate-limited', 429)
 
   const existing = await env.DB.prepare('SELECT * FROM relay_invite_requests WHERE email_hash = ?').bind(emailHash).first()
   if (existing) {
     if (existing.state === 'pending') {
+      if (existing.verified_at && Number(existing.verified_at) + FULFILL_RESERVATION_TTL_MS > now) {
+        return fail('already-requested', 409)
+      }
       if (!(await spendRate(env, 'invite-resend:' + existing.request_id, 1))) return fail('rate-limited', 429)
       const code = randomCode()
       await env.DB.prepare('UPDATE relay_invite_requests SET verify_hash = ?, verify_attempts = 0, last_sent_at = ?, expires_at = ?, verified_at = NULL WHERE request_id = ?')
@@ -383,6 +397,9 @@ async function handleInviteRequest(request, env) {
   const ipCount = await env.DB.prepare('SELECT COUNT(*) AS n FROM relay_invite_requests WHERE ip_hash = ? AND created_at > ?')
     .bind(ipHash, now - IP_REQUEST_WINDOW_MS).first()
   if (Number(ipCount?.n || 0) >= IP_REQUEST_LIMIT) return fail('ip-limit-reached', 409)
+  if (!(await spendRate(env, 'invite-ip-30d:' + ipHash, IP_REQUEST_LIMIT, IP_REQUEST_WINDOW_MS))) {
+    return fail('ip-limit-reached', 409)
+  }
 
   const applicationId = crypto.randomUUID()
   const code = randomCode()

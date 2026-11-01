@@ -65,6 +65,33 @@ test('same claim retry is idempotent and does not create another Tunnel', async 
   assert.equal(db.prepare('SELECT state FROM b_activation_codes').get().state, 'claimed')
 })
 
+test('同一身份反复恢复走 recovery 桶，不占用首次 claim 的 5/小时额度', async () => {
+  const { env, db } = createEnv()
+  const invitation = await invite(env)
+  const first = await claim(env, invitation.code)
+  assert.equal(first.status, 200)
+  for (let index = 0; index < 6; index += 1) {
+    const recovered = await claim(env, invitation.code)
+    assert.equal(recovered.status, 200, JSON.stringify(recovered.body))
+  }
+  assert.equal(db.prepare("SELECT count FROM b_rate_limits WHERE bucket LIKE 'claim:ip:%'").get().count, 1)
+  assert.equal(db.prepare("SELECT count FROM b_rate_limits WHERE bucket LIKE 'claim-recover:ip:%'").get().count, 6)
+})
+
+test('新身份仍受首次 claim 的 5/小时限制', async () => {
+  const { env, cf } = createEnv()
+  for (let index = 0; index < 6; index += 1) {
+    const invitation = await invite(env)
+    const result = await claim(env, invitation.code, { claimRequestId: 'new-claim-' + index })
+    if (index < 5) assert.equal(result.status, 200, JSON.stringify(result.body))
+    else {
+      assert.equal(result.status, 429)
+      assert.equal(result.body.code, 'rate_limited')
+    }
+  }
+  assert.equal(cf.createdTunnelCount, 5)
+})
+
 test('已有 claimRequestId 时换第二枚邀请：预检拒绝且不消费邀请、不建资源', async () => {
   const { env, db, cf } = createEnv()
   const first = await invite(env)

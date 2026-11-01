@@ -148,6 +148,46 @@ test('自助申请：过期验证码可复用原申请重发，旧码失效', as
   assert.equal(newResult.status, 200, JSON.stringify(newResult.body))
 })
 
+test('自助申请：verified 占位超过 5 分钟后回到 pending 并可重发恢复', async () => {
+  const { env, db } = createEnv()
+  const mail = mailRecorder()
+  env.MAIL_SEND = mail.send
+  const first = await request(env, 'POST', REQUEST_PATH, { email: 'stale-verified@example.com' }, { ip: '198.51.100.16' })
+  const applicationId = first.body.applicationId
+  db.prepare('UPDATE b_invite_requests SET state = \'verified\', verified_at = ? WHERE request_id = ?')
+    .run(Date.now() - 5 * 60 * 1000 - 1, applicationId)
+
+  const recovered = await request(env, 'POST', REQUEST_PATH, { email: 'stale-verified@example.com' }, { ip: '198.51.100.16' })
+  assert.equal(recovered.status, 200, JSON.stringify(recovered.body))
+  assert.equal(mail.mails.length, 2)
+  const row = db.prepare('SELECT state, verified_at FROM b_invite_requests WHERE request_id = ?').get(applicationId)
+  assert.equal(row.state, 'pending')
+  assert.equal(row.verified_at, null)
+  const verified = await request(env, 'POST', VERIFY_PATH, { applicationId, code: codeFrom(mail.mails[1]) })
+  assert.equal(verified.status, 200, JSON.stringify(verified.body))
+})
+
+test('自助申请：5 分钟内的 verified 占位不被再次申请打断', async () => {
+  const { env, db } = createEnv()
+  const mail = mailRecorder()
+  env.MAIL_SEND = mail.send
+  const first = await request(env, 'POST', REQUEST_PATH, { email: 'fresh-verified@example.com' }, { ip: '198.51.100.17' })
+  const applicationId = first.body.applicationId
+  const verifiedAt = Date.now()
+  db.prepare('UPDATE b_invite_requests SET state = \'verified\', verified_at = ? WHERE request_id = ?')
+    .run(verifiedAt, applicationId)
+  const before = db.prepare('SELECT verify_hash FROM b_invite_requests WHERE request_id = ?').get(applicationId)
+
+  const rejected = await request(env, 'POST', REQUEST_PATH, { email: 'fresh-verified@example.com' }, { ip: '198.51.100.17' })
+  assert.equal(rejected.status, 409)
+  assert.equal(rejected.body.code, 'already_requested')
+  assert.equal(mail.mails.length, 1)
+  const after = db.prepare('SELECT state, verify_hash, verified_at FROM b_invite_requests WHERE request_id = ?').get(applicationId)
+  assert.equal(after.state, 'verified')
+  assert.equal(after.verify_hash, before.verify_hash)
+  assert.equal(after.verified_at, verifiedAt)
+})
+
 test('自助申请：无 MAIL_SEND 且未配置 Turnstile 时失败关闭', async () => {
   const { env, db } = createEnv()
   const result = await request(env, 'POST', REQUEST_PATH, { email: 'turnstile@example.com' })
@@ -166,6 +206,19 @@ test('自助申请：同一 IP 30 天内最多 2 个邮箱', async () => {
   const third = await request(env, 'POST', REQUEST_PATH, { email: 'three@example.com' }, { ip: '198.51.100.20' })
   assert.equal(third.status, 409)
   assert.equal(third.body.code, 'ip_limit_reached')
+})
+
+test('自助申请：同一 IP 并发 3 个申请最多成功 2 个', async () => {
+  const { env, db } = createEnv()
+  env.MAIL_SEND = async () => ({ ok: true })
+  const results = await Promise.all(['one', 'two', 'three'].map((name) => request(
+    env, 'POST', REQUEST_PATH, { email: name + '@example.com' }, { ip: '198.51.100.21' },
+  )))
+  assert.equal(results.filter((result) => result.status === 200).length, 2)
+  const rejected = results.find((result) => result.status !== 200)
+  assert.equal(rejected.status, 409)
+  assert.equal(rejected.body.code, 'ip_limit_reached')
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM b_invite_requests').get().n, 2)
 })
 
 test('自助申请：一次性邮箱被拒绝', async () => {

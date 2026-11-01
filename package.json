@@ -25,7 +25,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "test": "node --test \"test/*.test.mjs\""
+    "test": "node --test \"test/*.test.mjs\" \"worker-b/test/*.test.mjs\""
   },
   "engines": {
     "node": "^22.19.0 || >=24.0.0",

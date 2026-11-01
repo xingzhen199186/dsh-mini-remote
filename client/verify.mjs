@@ -1070,6 +1070,40 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
     assert.equal(posted[0].body.mode, 'quick');
   });
 
+  await check('A 固定中继：登记成功后清空本机邀请码输入', async () => {
+    posted = [];
+    const runningTunnel = { enabled: true, up: true, starting: false, error: null };
+    const off = withTunnel(runningTunnel, {
+      relay: { enabled: false, state: 'waiting-tunnel', publicUrl: null, error: null, hasInviteCode: false },
+    });
+    await mount(off);
+    const draft = byType(tree6, 'input').find((n) => String(n.props.placeholder).includes('邀请码'));
+    draft.props.onChange({ target: { value: 'invite-once' } });
+    await tick();
+    const active = withTunnel(runningTunnel, {
+      relay: {
+        enabled: true,
+        state: 'active',
+        publicUrl: 'https://abcdefghijklmnopqrstuvwxyz.relay.example.com',
+        error: null,
+        hasInviteCode: false,
+        id: 'abcdefghijklmnopqrstuvwxyz',
+      },
+    });
+    setGlobal('fetch', async (url, init) => {
+      if (init && init.method === 'POST') {
+        posted.push({ url, body: JSON.parse(init.body) });
+        return jsonResponse(200, active);
+      }
+      return jsonResponse(200, off);
+    });
+    byType(tree6, 'button').find((n) => textOf(n) === '保存固定中继').props.onClick();
+    await tick();
+    assert.equal(posted[0].body.relayInviteCode, 'invite-once');
+    const cleared = byType(tree6, 'input').find((n) => String(n.props.placeholder).includes('邀请码'));
+    assert.equal(cleared.props.value, '');
+  });
+
   await check('A 固定中继：已有身份时禁用邀请码，保存不再发送旧邀请码', async () => {
     const runningTunnel = { enabled: true, up: true, starting: false, error: null };
     await mount(withTunnel(runningTunnel,
@@ -1436,6 +1470,39 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
     assert.equal(posted9.length, 1);
     assert.deepEqual(posted9[0], { action: 'retry' });
     h9.unmount();
+  });
+
+  await check('B 身份错误：仅清本地身份按钮经过确认后 POST purge-local', async () => {
+    for (const errorCode of ['auth_failed', 'identity_mismatch']) {
+      posted9 = [];
+      await mount9(base({
+        enabled: true,
+        state: 'error',
+        configured: true,
+        hasActivationCode: false,
+        hostname: B_HOST,
+        url: 'https://' + B_HOST,
+        lastError: '本机身份与云端租约不一致。',
+        error: { code: errorCode, retryable: false, message: '本机身份与云端租约不一致。' },
+        errorCode,
+        reconnectable: false,
+      }));
+      const purgeLocal = byType(tree9, 'button').find((b) => textOf(b) === '仅清本地身份（不删云端）');
+      assert.ok(purgeLocal, errorCode + ' 要显示仅清本地身份按钮');
+      let confirmation = '';
+      const previousConfirm = globalThis.window.confirm;
+      globalThis.window.confirm = (message) => { confirmation = message; return true; };
+      try {
+        purgeLocal.props.onClick();
+      } finally {
+        globalThis.window.confirm = previousConfirm;
+      }
+      await tick();
+      assert.match(confirmation, /不删除云端旧资源/);
+      assert.match(confirmation, /可能仍然保留/);
+      assert.deepEqual(posted9[0], { action: 'purge-local' });
+      h9.unmount();
+    }
   });
 }
 

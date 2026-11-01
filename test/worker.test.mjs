@@ -384,6 +384,61 @@ test('邀请只能消费一次，登记成功返回固定地址和 target TTL', 
   assert.equal((await second.json()).error, 'invite-invalid')
 })
 
+test('两个邀请并发注册同一 id：只成功一个，另一枚邀请不被消费', async () => {
+  const env = makeEnv()
+  const firstCode = await createInvite(env)
+  const secondCode = await createInvite(env)
+  const responses = await Promise.all([
+    handleRequest(req('/api/relay/v1/register', {
+      method: 'PUT', body: { id, secret, target, inviteCode: firstCode },
+    }), env),
+    handleRequest(req('/api/relay/v1/register', {
+      method: 'PUT', body: { id, secret, target, inviteCode: secondCode },
+    }), env),
+  ])
+  assert.equal(responses.filter((response) => response.status === 200).length, 1)
+  assert.equal(responses.filter((response) => response.status === 409).length, 1)
+  assert.equal((await env.DB.prepare('SELECT COUNT(*) AS n FROM relay_identities').first()).n, 1)
+  assert.equal((await env.DB.prepare('SELECT COUNT(*) AS n FROM relay_invites WHERE used_at IS NOT NULL').first()).n, 1)
+  assert.equal((await env.DB.prepare('SELECT COUNT(*) AS n FROM relay_invites WHERE used_at IS NULL').first()).n, 1)
+})
+
+test('注册事务的消费语句失败时，身份插入也会回滚', async () => {
+  const env = makeEnv()
+  const code = await createInvite(env)
+  const prepare = env.DB.prepare
+  env.DB.prepare = (sql) => {
+    if (sql.startsWith('UPDATE relay_invites SET used_at')) {
+      return { bind: () => ({ run: async () => { throw new Error('injected consume failure') } }) }
+    }
+    return prepare(sql)
+  }
+  const response = await handleRequest(req('/api/relay/v1/register', {
+    method: 'PUT', body: { id, secret, target, inviteCode: code },
+  }), env)
+  assert.equal(response.status, 503)
+  assert.equal((await env.DB.prepare('SELECT COUNT(*) AS n FROM relay_identities').first()).n, 0)
+  assert.equal((await env.DB.prepare('SELECT used_at FROM relay_invites').first()).used_at, null)
+})
+
+test('邀请消费为 0 行时不能留下身份', async () => {
+  const env = makeEnv()
+  const code = await createInvite(env)
+  const prepare = env.DB.prepare
+  env.DB.prepare = (sql) => {
+    if (sql.startsWith('UPDATE relay_invites SET used_at')) {
+      return { bind: () => ({ run: async () => ({ meta: { changes: 0 } }) }) }
+    }
+    return prepare(sql)
+  }
+  const response = await handleRequest(req('/api/relay/v1/register', {
+    method: 'PUT', body: { id, secret, target, inviteCode: code },
+  }), env)
+  assert.equal(response.status, 403)
+  assert.equal((await response.json()).error, 'invite-invalid')
+  assert.equal((await env.DB.prepare('SELECT COUNT(*) AS n FROM relay_identities').first()).n, 0)
+})
+
 test('同 id + 同 secret 可以刷新 target，不需要新邀请', async () => {
   const env = makeEnv()
   const code = await createInvite(env)
@@ -741,7 +796,7 @@ test('共享固定地址：过期验证码可复用原申请重发，旧码失�
   const applicationId = (await first.json()).applicationId
   const oldCode = mails[0].text.match(/\b(\d{6})\b/)[1]
   await env.DB.prepare('UPDATE relay_invite_requests SET expires_at = ?, verify_attempts = 4, verified_at = ? WHERE request_id = ?')
-    .bind(Date.now() - 1, Date.now(), applicationId).run()
+    .bind(Date.now() - 1, Date.now() - 5 * 60 * 1000 - 1, applicationId).run()
 
   const resent = await handleRequest(req('/api/relay/v1/invite-request', {
     method: 'POST', body: { email: 'expired@example.com' }, ip: '198.51.100.15',
@@ -764,6 +819,54 @@ test('共享固定地址：过期验证码可复用原申请重发，旧码失�
     method: 'POST', body: { applicationId, code: newCode },
   }), env)
   assert.equal(newResult.status, 200, JSON.stringify(await newResult.clone().json()))
+})
+
+test('共享固定地址：pending 验证占位超过 5 分钟后可重发恢复', async () => {
+  const env = makeEnv()
+  const mails = []
+  env.MAIL_SEND = async (message) => { mails.push(message); return { ok: true } }
+  const first = await handleRequest(req('/api/relay/v1/invite-request', {
+    method: 'POST', body: { email: 'stale-pending@example.com' }, ip: '198.51.100.16',
+  }), env)
+  const applicationId = (await first.json()).applicationId
+  await env.DB.prepare('UPDATE relay_invite_requests SET verified_at = ? WHERE request_id = ?')
+    .bind(Date.now() - 5 * 60 * 1000 - 1, applicationId).run()
+
+  const recovered = await handleRequest(req('/api/relay/v1/invite-request', {
+    method: 'POST', body: { email: 'stale-pending@example.com' }, ip: '198.51.100.16',
+  }), env)
+  assert.equal(recovered.status, 200, JSON.stringify(await recovered.clone().json()))
+  assert.equal(mails.length, 2)
+  const row = await env.DB.prepare('SELECT verified_at FROM relay_invite_requests WHERE request_id = ?').bind(applicationId).first()
+  assert.equal(row.verified_at, null)
+  const code = mails[1].text.match(/\b(\d{6})\b/)[1]
+  const verified = await handleRequest(req('/api/relay/v1/invite-verify', {
+    method: 'POST', body: { applicationId, code },
+  }), env)
+  assert.equal(verified.status, 200, JSON.stringify(await verified.clone().json()))
+})
+
+test('共享固定地址：5 分钟内的验证占位不被再次申请打断', async () => {
+  const env = makeEnv()
+  const mails = []
+  env.MAIL_SEND = async (message) => { mails.push(message); return { ok: true } }
+  const first = await handleRequest(req('/api/relay/v1/invite-request', {
+    method: 'POST', body: { email: 'fresh-pending@example.com' }, ip: '198.51.100.17',
+  }), env)
+  const applicationId = (await first.json()).applicationId
+  const verifiedAt = Date.now()
+  await env.DB.prepare('UPDATE relay_invite_requests SET verified_at = ? WHERE request_id = ?')
+    .bind(verifiedAt, applicationId).run()
+  const before = await env.DB.prepare('SELECT verify_hash FROM relay_invite_requests WHERE request_id = ?').bind(applicationId).first()
+
+  const rejected = await handleRequest(req('/api/relay/v1/invite-request', {
+    method: 'POST', body: { email: 'fresh-pending@example.com' }, ip: '198.51.100.17',
+  }), env)
+  assert.equal(rejected.status, 409)
+  assert.equal(mails.length, 1)
+  const after = await env.DB.prepare('SELECT verify_hash, verified_at FROM relay_invite_requests WHERE request_id = ?').bind(applicationId).first()
+  assert.equal(after.verify_hash, before.verify_hash)
+  assert.equal(after.verified_at, verifiedAt)
 })
 
 test('共享固定地址：无 MAIL_SEND 且未配置 Turnstile 时失败关闭', async () => {
@@ -792,6 +895,21 @@ test('共享固定地址：同一 IP 30 天内最多 2 个邮箱', async () => {
   }), env)
   assert.equal(three.status, 409)
   assert.equal((await three.json()).error, 'ip-limit-reached')
+})
+
+test('共享固定地址：同一 IP 并发 3 个申请最多成功 2 个', async () => {
+  const env = makeEnv()
+  env.MAIL_SEND = async () => ({ ok: true })
+  const responses = await Promise.all(['one', 'two', 'three'].map((name) => handleRequest(
+    req('/api/relay/v1/invite-request', {
+      method: 'POST', body: { email: name + '@example.com' }, ip: '198.51.100.21',
+    }), env,
+  )))
+  assert.equal(responses.filter((response) => response.status === 200).length, 2)
+  const rejected = responses.find((response) => response.status !== 200)
+  assert.equal(rejected.status, 409)
+  assert.equal((await rejected.json()).error, 'ip-limit-reached')
+  assert.equal((await env.DB.prepare('SELECT COUNT(*) AS n FROM relay_invite_requests').first()).n, 2)
 })
 
 test('共享固定地址申请页可打开', async () => {
