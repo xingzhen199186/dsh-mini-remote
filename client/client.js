@@ -4674,13 +4674,13 @@ window.__ModuleLoader__.load({
             disabled: Boolean(busy),
             style: styles.btnDanger,
             onClick: aRelay.stop,
-          }, '停止共享固定地址') : null,
+          }, busy ? '停止中…' : '停止共享固定地址') : null,
           aRelay && (aRelay.id || aRelay.enabled || aRelay.hasInviteCode) ? h('button', {
             type: 'button',
             disabled: Boolean(busy),
             style: styles.btnDanger,
             onClick: aRelay.reset,
-          }, '清空本地共享身份') : null,
+          }, busy ? '清理中…' : '清空本地共享身份') : null,
         ),
         aRelay && aRelay.enabled ? h('div', { style: styles.warn }, '共享中转会看到明文流量；它不是端到端加密。别把地址或二维码发出去。') : null,
 
