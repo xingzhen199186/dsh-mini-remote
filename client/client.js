@@ -4113,6 +4113,12 @@ window.__ModuleLoader__.load({
           '用一次性激活码，或（在服务方开放自服务时）直接开通一条 Cloudflare 命名隧道，得到一个固定的 dsh-everywhere.com 地址。'
           + '和上面的快速隧道、共享固定地址、自建中继互不影响。'),
         codeInput,
+        !running ? h('a', {
+          href: 'https://control.dsh-everywhere.com/request',
+          target: '_blank',
+          rel: 'noopener noreferrer',
+          style: styles.link,
+        }, '没有激活码？去申请') : null,
         h('div', { style: { display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 12 } }, actions),
         h('div', { style: { marginTop: 10 } },
           h('div', { style: styles.muted }, statusText),
@@ -4694,6 +4700,12 @@ window.__ModuleLoader__.load({
             style: styles.input,
           }),
           aRelay.id ? h('div', { style: styles.muted }, '已有身份；要换邀请码请先清空本地共享身份') : null,
+          !aRelay.id ? h('a', {
+            href: 'https://relay.dsh-mini-remote.com/request',
+            target: '_blank',
+            rel: 'noopener noreferrer',
+            style: styles.link,
+          }, '没有邀请码？去申请') : null,
         ),
         h('div', { style: { marginTop: 8, display: 'flex', gap: 8, flexWrap: 'wrap' } },
           !aRelay || !aRelay.enabled ? h('button', {
