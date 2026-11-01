@@ -19,7 +19,7 @@
     "B_ZONE_ID": "f2cc2bd5058c743656e938494cdee309",
     // 自助申请页：Resend 发信地址和 Turnstile 站点 key；没有就留空。
     "B_MAIL_FROM": "dsh-mini-remote <no-reply@dsh-everywhere.com>",
-    "B_TURNSTILE_SITE_KEY": ""
+    "B_TURNSTILE_SITE_KEY": "0x4AAAAAAFupdzaetdJZQX1-"
   },
   "routes": [
     { "pattern": "control.dsh-everywhere.com", "custom_domain": true }

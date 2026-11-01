@@ -1084,7 +1084,7 @@ window.__ModuleLoader__.load({
                 return prev ? Object.assign({}, prev, { bRelay: payload.bRelay }) : prev;
               });
             }
-            if (payload && payload.ok && (action === 'start' || action === 'retry')) setBActivation('');
+            if (payload && payload.ok && (action === 'start' || action === 'retry' || action === 'purge')) setBActivation('');
             if (!payload || !payload.ok) {
               setBRelayError((payload && payload.error) || ('专属固定地址操作失败：HTTP ' + r.status));
             }
@@ -2508,6 +2508,7 @@ window.__ModuleLoader__.load({
           retry: function () { runBRelay('retry'); },
           reconnect: function () { runBRelay('reconnect'); },
           stop: function () { runBRelay('stop'); },
+          purge: function () { runBRelay('purge'); },
           copy: copy,
         }, {
           controlUrl: multiControl,
@@ -4045,6 +4046,16 @@ window.__ModuleLoader__.load({
           + '和上面的快速隧道、共享固定地址、自建中继互不影响。'),
         codeInput,
         h('div', { style: { display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 12 } }, actions),
+        (st.id || st.configured || st.enabled) && !claiming ? h('div', { style: { marginTop: 8 } },
+          h('button', {
+            type: 'button',
+            disabled: Boolean(busy),
+            style: styles.btnDanger,
+            onClick: function () {
+              if (window.confirm('会删除服务器上的旧 Tunnel、DNS 和租约，并清空本机身份。这个操作不可恢复。确定继续？')) relay.purge();
+            },
+          }, '彻底清除旧租约'),
+        ) : null,
         h('div', { style: { marginTop: 10 } },
           h('div', { style: styles.muted }, statusText),
           errorText ? h('div', { style: styles.error }, errorText) : null,
