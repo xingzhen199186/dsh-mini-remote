@@ -585,13 +585,16 @@ async function collectUsage(env) {
   const accountId = typeof env.RELAY_ACCOUNT_ID === 'string' && env.RELAY_ACCOUNT_ID
     ? env.RELAY_ACCOUNT_ID
     : 'c388ee35863086d5ffbcee0bb4b63e0b'
-  const day = new Date().toISOString().slice(0, 10)
+  const now = new Date()
+  const day = now.toISOString().slice(0, 10)
+  const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString().slice(0, 10)
+  // Workers Paid 的额度按月计算；面板和封顶判断都看月初至今，而不是当天。
   const query = `query {
     viewer {
       accounts(filter: {accountTag: "${accountId}"}) {
-        workersInvocationsAdaptive(limit: 1, filter: {date_geq: "${day}", date_leq: "${day}"}) { sum { requests errors } }
-        d1AnalyticsAdaptiveGroups(limit: 1, filter: {date_geq: "${day}", date_leq: "${day}"}) { sum { readQueries writeQueries rowsRead rowsWritten } }
-        kvOperationsAdaptiveGroups(limit: 1, filter: {date_geq: "${day}", date_leq: "${day}"}) { sum { requests objectBytes } }
+        workersInvocationsAdaptive(limit: 1, filter: {date_geq: "${monthStart}", date_leq: "${day}"}) { sum { requests errors } }
+        d1AnalyticsAdaptiveGroups(limit: 1, filter: {date_geq: "${monthStart}", date_leq: "${day}"}) { sum { readQueries writeQueries rowsRead rowsWritten } }
+        kvOperationsAdaptiveGroups(limit: 1, filter: {date_geq: "${monthStart}", date_leq: "${day}"}) { sum { requests objectBytes } }
       }
     }
   }`
@@ -612,6 +615,7 @@ async function collectUsage(env) {
   const account = payload.data?.viewer?.accounts?.[0] || {}
   return {
     day,
+    monthStart,
     collectedAt: Date.now(),
     workers: account.workersInvocationsAdaptive?.[0]?.sum || { requests: 0, errors: 0 },
     d1: account.d1AnalyticsAdaptiveGroups?.[0]?.sum || { readQueries: 0, writeQueries: 0, rowsRead: 0, rowsWritten: 0 },

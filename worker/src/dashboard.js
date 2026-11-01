@@ -164,8 +164,8 @@ function setChecks(config){$('registrationEnabled').checked=!!config.registratio
 function usageHtml(u){
   if(!u)return '<span class="muted">还没有用量快照。开启每日任务并配置 token 后，这里会出现。</span>';
   if(u.error)return '<div class="error">'+esc(u.error)+'</div>';
-  const rows=[['Workers 请求',u.workers?.requests,100000],['D1 读取行',u.d1?.rowsRead,5000000],['D1 写入行',u.d1?.rowsWritten,100000],['KV 请求',u.kv?.requests,100000]];
-  return '<div class="muted small">采集时间：'+esc(time(u.collectedAt))+' · 日期 '+esc(u.day)+'</div><div class="table-wrap"><table><thead><tr><th>项目</th><th>用量</th><th>Free 上限</th><th>占比</th></tr></thead><tbody>'+rows.map(([n,v,l])=>{const p=l?Number(v||0)/l*100:0;return '<tr><td>'+esc(n)+'</td><td>'+esc(v??0)+'</td><td>'+esc(l)+'</td><td>'+p.toFixed(1)+'%</td></tr>'}).join('')+'</tbody></table></div>';
+  const rows=[['Workers 请求',u.workers?.requests,10000000],['D1 读取行',u.d1?.rowsRead,25000000000],['D1 写入行',u.d1?.rowsWritten,50000000],['KV 请求',u.kv?.requests,10000000]];
+  return '<div class="muted small">采集时间：'+esc(time(u.collectedAt))+' · 日期 '+esc(u.day)+'</div><div class="table-wrap"><table><thead><tr><th>项目</th><th>用量</th><th>套餐上限（月）</th><th>占比</th></tr></thead><tbody>'+rows.map(([n,v,l])=>{const p=l?Number(v||0)/l*100:0;return '<tr><td>'+esc(n)+'</td><td>'+esc(v??0)+'</td><td>'+esc(l)+'</td><td>'+p.toFixed(1)+'%</td></tr>'}).join('')+'</tbody></table></div>';
 }
 function setBChecks(config){
   $('bRegistrationEnabled').checked=config?.registrationEnabled!==false;
@@ -222,10 +222,10 @@ function renderVisual(o,b,ops){
   $('vBRatio').textContent=bCounts.total?Math.round(bCounts.active/bCounts.total*100)+'%':'—';
   $('vCollected').textContent=snap?.collectedAt?time(snap.collectedAt):'还没有采集';
   $('vMeters').innerHTML=[
-    meter('共享 Workers 请求',usage?.workers?.requests,100000,'次/天'),
-    meter('共享 KV 请求',usage?.kv?.requests,100000,'次/天'),
-    meter('共享 D1 读取行',usage?.d1?.rowsRead,5000000,'行/天'),
-    meter('共享 D1 写入行',usage?.d1?.rowsWritten,100000,'行/天'),
+    meter('共享 Workers 请求',usage?.workers?.requests,10000000,'次/月'),
+    meter('共享 KV 请求',usage?.kv?.requests,10000000,'次/月'),
+    meter('共享 D1 读取行',usage?.d1?.rowsRead,25000000000,'行/月'),
+    meter('共享 D1 写入行',usage?.d1?.rowsWritten,50000000,'行/月'),
     meter('专属 Tunnel 数量',bCounts.total,1000,'条'),
   ].join('');
   $('vStates').innerHTML=[
