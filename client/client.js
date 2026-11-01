@@ -3981,7 +3981,7 @@ window.__ModuleLoader__.load({
      */
     function bRelayBlock(st, relay, busy, copied) {
       var running = st.state === 'running';
-      var claiming = st.state === 'claiming' || Boolean(st.busy);
+      var claiming = st.state === 'claiming' || Boolean(st.busy) || Boolean(busy);
       var hostname = typeof st.hostname === 'string' ? st.hostname : '';
       var url = typeof st.url === 'string' ? st.url : (hostname ? 'https://' + hostname : '');
       var errorText = relay.error || st.lastError || null;
@@ -4016,12 +4016,17 @@ window.__ModuleLoader__.load({
           style: styles.btnPrimary,
           onClick: relay.retry,
         }, '立即重试') : null;
-      var actions = running || claiming
+      var actions = running
         ? h('button', {
           type: 'button', disabled: Boolean(busy),
           style: styles.btnDanger,
           onClick: relay.stop,
         }, '停止专属固定地址')
+        : claiming
+        ? h('button', {
+          type: 'button', disabled: true,
+          style: styles.btnPrimary,
+        }, '连接中…')
         : h('div', { style: { display: 'flex', gap: 8, flexWrap: 'wrap' } },
           retryButton,
           !retryButton && st.reconnectable ? h('button', {
