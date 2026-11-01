@@ -93,6 +93,69 @@ test('自助申请：一个邮箱只能申请一次，验证后能拿到邀请�
   assert.equal(again.body.code, 'already_requested')
 })
 
+test('自助申请：验证后 15 分钟内可重取同一邀请码和地址，错码和超时不可取', async () => {
+  const { env, db } = createEnv()
+  const pending = await application(env, 'reveal@example.com')
+  const verified = await request(env, 'POST', VERIFY_PATH, { applicationId: pending.id, code: pending.code })
+  assert.equal(verified.status, 200)
+  const again = await request(env, 'POST', VERIFY_PATH, { applicationId: pending.id, code: pending.code })
+  assert.equal(again.status, 200, JSON.stringify(again.body))
+  assert.equal(again.body.code, verified.body.code)
+  assert.equal(again.body.hostname, verified.body.hostname)
+
+  const wrongCode = String((Number(pending.code) + 1) % 1_000_000).padStart(6, '0')
+  const wrong = await request(env, 'POST', VERIFY_PATH, { applicationId: pending.id, code: wrongCode })
+  assert.equal(wrong.status, 403)
+  assert.equal(wrong.body.code, 'invalid_code')
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM b_activation_codes').get().n, 1)
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM b_leases').get().n, 1)
+  const stored = db.prepare('SELECT reveal_ct FROM b_invite_requests WHERE request_id = ?').get(pending.id)
+  assert.ok(stored.reveal_ct)
+  assert.equal(stored.reveal_ct.includes(verified.body.code), false)
+
+  db.prepare('UPDATE b_invite_requests SET fulfilled_at = ? WHERE request_id = ?')
+    .run(Date.now() - 15 * 60 * 1000, pending.id)
+  const expired = await request(env, 'POST', VERIFY_PATH, { applicationId: pending.id, code: pending.code })
+  assert.equal(expired.status, 410)
+  assert.equal(expired.body.code, 'request_expired')
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM b_activation_codes').get().n, 1)
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM b_leases').get().n, 1)
+})
+
+test('自助申请：过期验证码可复用原申请重发，旧码失效', async () => {
+  const { env, db } = createEnv()
+  const mail = mailRecorder()
+  env.MAIL_SEND = mail.send
+  const first = await request(env, 'POST', REQUEST_PATH, { email: 'expired@example.com' }, { ip: '198.51.100.15' })
+  assert.equal(first.status, 200)
+  const applicationId = first.body.applicationId
+  const oldCode = codeFrom(mail.mails[0])
+  db.prepare('UPDATE b_invite_requests SET expires_at = ?, verify_attempts = 4 WHERE request_id = ?')
+    .run(Date.now() - 1, applicationId)
+
+  const resent = await request(env, 'POST', REQUEST_PATH, { email: 'expired@example.com' }, { ip: '198.51.100.15' })
+  assert.equal(resent.status, 200, JSON.stringify(resent.body))
+  assert.equal(resent.body.applicationId, applicationId)
+  assert.equal(mail.mails.length, 2)
+  const newCode = codeFrom(mail.mails[1])
+  assert.equal(db.prepare('SELECT verify_attempts FROM b_invite_requests WHERE request_id = ?').get(applicationId).verify_attempts, 0)
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM b_invite_requests').get().n, 1)
+
+  const oldResult = await request(env, 'POST', VERIFY_PATH, { applicationId, code: oldCode })
+  assert.equal(oldResult.status, 403)
+  assert.equal(oldResult.body.code, 'invalid_code')
+  const newResult = await request(env, 'POST', VERIFY_PATH, { applicationId, code: newCode })
+  assert.equal(newResult.status, 200, JSON.stringify(newResult.body))
+})
+
+test('自助申请：无 MAIL_SEND 且未配置 Turnstile 时失败关闭', async () => {
+  const { env, db } = createEnv()
+  const result = await request(env, 'POST', REQUEST_PATH, { email: 'turnstile@example.com' })
+  assert.equal(result.status, 503)
+  assert.equal(result.body.code, 'turnstile_not_configured')
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM b_invite_requests').get().n, 0)
+})
+
 test('自助申请：同一 IP 30 天内最多 2 个邮箱', async () => {
   const { env } = createEnv()
   env.MAIL_SEND = async () => ({ ok: true })
@@ -115,10 +178,17 @@ test('自助申请：一次性邮箱被拒绝', async () => {
 
 test('自助申请：邮件服务未配置时明确失败，不留下申请记录', async () => {
   const { env, db } = createEnv()
-  const result = await request(env, 'POST', REQUEST_PATH, { email: 'no-mail@example.com' }, { ip: '198.51.100.40' })
-  assert.equal(result.status, 503)
-  assert.equal(result.body.code, 'mail_not_configured')
-  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM b_invite_requests').get().n, 0)
+  env.TURNSTILE_SECRET = 'test-secret'
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async () => new Response(JSON.stringify({ success: true }), { headers: { 'content-type': 'application/json' } })
+  try {
+    const result = await request(env, 'POST', REQUEST_PATH, { email: 'no-mail@example.com', turnstileToken: 'test-token' }, { ip: '198.51.100.40' })
+    assert.equal(result.status, 503)
+    assert.equal(result.body.code, 'mail_not_configured')
+    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM b_invite_requests').get().n, 0)
+  } finally {
+    globalThis.fetch = originalFetch
+  }
 })
 
 test('自助申请页和申请管理接口', async () => {
@@ -130,6 +200,8 @@ test('自助申请页和申请管理接口', async () => {
   assert.match(html, /申请固定地址邀请码/)
   assert.match(html, /invite-request/)
   assert.match(html, /invite-verify/)
+  assert.match(html, /localStorage\.getItem\('bRelayApplicationId'\)/)
+  assert.match(html, /localStorage\.setItem\('bRelayApplicationId', requestId\)/)
 
   const first = await request(env, 'POST', REQUEST_PATH, { email: 'admin-list@example.com' }, { ip: '198.51.100.50' })
   assert.equal(first.status, 200)

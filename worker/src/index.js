@@ -24,6 +24,7 @@ const RATE_WINDOW_MS = 60_000
 const RATE_PER_IP = 30
 const RATE_PER_ID = 12
 const VERIFY_TTL_MS = 10 * 60 * 1000
+const REVEAL_TTL_MS = 15 * 60 * 1000
 const VERIFY_MAX_ATTEMPTS = 5
 const IP_REQUEST_LIMIT = 2
 const IP_REQUEST_WINDOW_MS = 30 * 24 * 60 * 60 * 1000
@@ -76,6 +77,13 @@ function base64url(bytes) {
   return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
 }
 
+function base64urlBytes(value) {
+  if (typeof value !== 'string' || !/^[A-Za-z0-9_-]+$/.test(value)) throw new Error('invalid reveal data')
+  const base64 = value.replace(/-/g, '+').replace(/_/g, '/')
+  const binary = atob(base64 + '='.repeat((4 - base64.length % 4) % 4))
+  return Uint8Array.from(binary, (character) => character.charCodeAt(0))
+}
+
 async function hmac(env, purpose, value) {
   if (typeof env.RELAY_PEPPER !== 'string' || !env.RELAY_PEPPER) throw new Error('relay pepper is not configured')
   const key = await crypto.subtle.importKey(
@@ -87,6 +95,28 @@ async function hmac(env, purpose, value) {
   )
   const signature = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(purpose + ':' + value))
   return [...new Uint8Array(signature)].map((b) => b.toString(16).padStart(2, '0')).join('')
+}
+
+async function revealKey(env, applicationId, code) {
+  const material = await hmac(env, 'reveal', applicationId + ':' + code)
+  const materialBytes = Uint8Array.from(material.match(/../g), (byte) => parseInt(byte, 16))
+  const digest = await crypto.subtle.digest('SHA-256', materialBytes)
+  return await crypto.subtle.importKey('raw', digest, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt'])
+}
+
+async function sealReveal(env, applicationId, code, inviteCode) {
+  const iv = crypto.getRandomValues(new Uint8Array(12))
+  const key = await revealKey(env, applicationId, code)
+  const encrypted = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, new TextEncoder().encode(inviteCode))
+  return { iv: base64url(iv), ct: base64url(new Uint8Array(encrypted)) }
+}
+
+async function openReveal(env, applicationId, code, iv, ciphertext) {
+  const key = await revealKey(env, applicationId, code)
+  const decrypted = await crypto.subtle.decrypt(
+    { name: 'AES-GCM', iv: base64urlBytes(iv) }, key, base64urlBytes(ciphertext),
+  )
+  return new TextDecoder().decode(decrypted)
 }
 
 function timingSafeEqual(a, b) {
@@ -170,6 +200,7 @@ async function handleRegister(request, env) {
   const id = typeof body.id === 'string' ? body.id : ''
   const secret = typeof body.secret === 'string' ? body.secret : ''
   const target = typeof body.target === 'string' ? body.target : ''
+  const inviteCode = typeof body.inviteCode === 'string' ? body.inviteCode : ''
   if (!ID_RE.test(id) || !SECRET_RE.test(secret) || !isTargetAllowed(target)) return fail('invalid-params', 400)
 
   const ip = clientIp(request)
@@ -184,11 +215,11 @@ async function handleRegister(request, env) {
   if (existing) {
     if (existing.state === 'revoked') return fail('revoked', 403)
     if (!timingSafeEqual(existing.secret_hash, secretHash)) return fail('auth-failed', 403)
+    if (inviteCode) return fail('identity-exists', 409)
   } else {
     const config = await configOf(env)
     if (!config.registrationEnabled) return fail('registration-disabled', 403)
     if (config.inviteRequired) {
-      const inviteCode = typeof body.inviteCode === 'string' ? body.inviteCode : ''
       if (!inviteCode) return fail('invite-required', 403)
       let inviteHash
       try { inviteHash = await hmac(env, 'invite', inviteCode) } catch { return fail('storage-unavailable', 503) }
@@ -283,7 +314,7 @@ async function sendMail(env, { to, subject, text }) {
 
 async function verifyTurnstile(env, token, ip) {
   const secret = typeof env.RELAY_TURNSTILE_SECRET === 'string' ? env.RELAY_TURNSTILE_SECRET : ''
-  if (!secret) return true
+  if (!secret) return typeof env.MAIL_SEND === 'function' ? true : null
   if (typeof token !== 'string' || !token) return false
   try {
     const body = new URLSearchParams({ secret, response: token, remoteip: ip })
@@ -300,15 +331,16 @@ async function createRelayInvite(env, { code, days = 7, note = null, actor = 'ad
   const hash = await hmac(env, 'invite', value)
   const now = Date.now()
   const expiresAt = now + days * 86_400_000
+  const reveal = fulfillRequest ? await sealReveal(env, fulfillRequest.id, fulfillRequest.code, value) : null
   const statements = [
-    env.DB.prepare('INSERT INTO relay_invites (code_hash, code, created_at, expires_at, note) VALUES (?, ?, ?, ?, ?)')
-      .bind(hash, value, now, expiresAt, note),
+    env.DB.prepare('INSERT INTO relay_invites (code_hash, code, created_at, expires_at, note) VALUES (?, NULL, ?, ?, ?)')
+      .bind(hash, now, expiresAt, note),
   ]
   if (fulfillRequest) {
     statements.push(env.DB.prepare(
-      'UPDATE relay_invite_requests SET state = \'fulfilled\', invite_hash = ?, fulfilled_at = ? '
+      'UPDATE relay_invite_requests SET state = \'fulfilled\', invite_hash = ?, reveal_iv = ?, reveal_ct = ?, fulfilled_at = ? '
       + 'WHERE request_id = ? AND state = \'pending\' AND verified_at = ?',
-    ).bind(hash, now, fulfillRequest.id, fulfillRequest.verifiedAt))
+    ).bind(hash, reveal.iv, reveal.ct, now, fulfillRequest.id, fulfillRequest.verifiedAt))
   }
   statements.push(env.DB.prepare('INSERT INTO relay_audit (actor, action, target, reason, at) VALUES (?, ?, ?, ?, ?)')
     .bind(actor, 'invite.create', null, note, now))
@@ -323,7 +355,9 @@ async function handleInviteRequest(request, env) {
   const email = normalizeEmail(body.email)
   if (!email) return fail('invalid-email', 400)
   const ip = clientIp(request)
-  if (!(await verifyTurnstile(env, body.turnstileToken, ip))) return fail('turnstile-failed', 403)
+  const turnstile = await verifyTurnstile(env, body.turnstileToken, ip)
+  if (turnstile === null) return fail('turnstile-not-configured', 503)
+  if (!turnstile) return fail('turnstile-failed', 403)
   const emailHash = await hmac(env, 'email', email.normalized)
   const ipHash = await hmac(env, 'ip', ip)
   if (!(await spendRate(env, 'invite-request:ip:' + ipHash, 3))) return fail('rate-limited', 429)
@@ -334,7 +368,7 @@ async function handleInviteRequest(request, env) {
 
   const existing = await env.DB.prepare('SELECT * FROM relay_invite_requests WHERE email_hash = ?').bind(emailHash).first()
   if (existing) {
-    if (existing.state === 'pending' && Number(existing.expires_at) > now) {
+    if (existing.state === 'pending') {
       if (!(await spendRate(env, 'invite-resend:' + existing.request_id, 1))) return fail('rate-limited', 429)
       const code = randomCode()
       await env.DB.prepare('UPDATE relay_invite_requests SET verify_hash = ?, verify_attempts = 0, last_sent_at = ?, expires_at = ?, verified_at = NULL WHERE request_id = ?')
@@ -376,6 +410,19 @@ async function handleInviteVerify(request, env) {
   const code = typeof body.code === 'string' ? body.code.trim() : ''
   if (!/^[0-9a-f-]{36}$/i.test(applicationId) || !/^\d{6}$/.test(code)) return fail('invalid-params', 400)
   const row = await env.DB.prepare('SELECT * FROM relay_invite_requests WHERE request_id = ?').bind(applicationId).first()
+  if (row?.state === 'fulfilled') {
+    if (!row.fulfilled_at || Number(row.fulfilled_at) + REVEAL_TTL_MS <= Date.now()) return fail('request-expired', 410)
+    if (Number(row.verify_attempts) >= VERIFY_MAX_ATTEMPTS) return fail('too-many-attempts', 429)
+    let revealed
+    try {
+      revealed = await openReveal(env, applicationId, code, row.reveal_iv, row.reveal_ct)
+    } catch {
+      await env.DB.prepare('UPDATE relay_invite_requests SET verify_attempts = verify_attempts + 1 WHERE request_id = ?').bind(applicationId).run()
+      return fail('invalid-code', 403)
+    }
+    const invite = await env.DB.prepare('SELECT expires_at FROM relay_invites WHERE code_hash = ?').bind(row.invite_hash).first()
+    return json({ ok: true, code: revealed, expiresAt: invite?.expires_at })
+  }
   if (!row || row.state !== 'pending') return fail('request-not-found', 404)
   if (Number(row.expires_at) <= Date.now()) return fail('request-expired', 410)
   if (Number(row.verify_attempts) >= VERIFY_MAX_ATTEMPTS) return fail('too-many-attempts', 429)
@@ -400,7 +447,7 @@ async function handleInviteVerify(request, env) {
       days: 7,
       note: 'self-service:' + row.email_masked,
       actor: 'self-service',
-      fulfillRequest: { id: applicationId, verifiedAt },
+      fulfillRequest: { id: applicationId, verifiedAt, code },
     })
   } catch {
     await releaseReservation().catch(() => undefined)
@@ -708,7 +755,7 @@ async function handleAdmin(request, env, url) {
 
   if (request.method === 'GET' && path === '/admin/relay/v1/invites') {
     const rows = await env.DB.prepare(
-      'SELECT code, created_at, expires_at, note FROM relay_invites WHERE used_at IS NULL AND expires_at > ? ORDER BY created_at DESC LIMIT 50',
+      'SELECT NULL AS code, created_at, expires_at, note FROM relay_invites WHERE used_at IS NULL AND expires_at > ? ORDER BY created_at DESC LIMIT 50',
     ).bind(Date.now()).all()
     return json({ ok: true, invites: rows.results ?? [] })
   }

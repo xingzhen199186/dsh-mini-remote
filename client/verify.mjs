@@ -1070,6 +1070,27 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
     assert.equal(posted[0].body.mode, 'quick');
   });
 
+  await check('A 固定中继：已有身份时禁用邀请码，保存不再发送旧邀请码', async () => {
+    const runningTunnel = { enabled: true, up: true, starting: false, error: null };
+    await mount(withTunnel(runningTunnel,
+      { relay: { enabled: false, state: 'waiting-tunnel', publicUrl: null, error: null, hasInviteCode: false } }));
+    const draft = byType(tree6, 'input').find((n) => String(n.props.placeholder).includes('邀请码'));
+    draft.props.onChange({ target: { value: 'old-invite-code' } });
+    await tick();
+
+    await mount(withTunnel(runningTunnel,
+      { relay: { enabled: false, state: 'paused', publicUrl: null, error: null, hasInviteCode: true, id: 'abcdefghijklmnopqrstuvwxyz' } }));
+    const input = byType(tree6, 'input').find((n) => n.props.value === 'old-invite-code');
+    assert.ok(input);
+    assert.equal(input.props.disabled, true);
+    assert.match(textOf(tree6), /已有身份；要换邀请码请先清空本地共享身份/);
+    posted = [];
+    byType(tree6, 'button').find((n) => textOf(n) === '保存固定中继').props.onClick();
+    await tick();
+    assert.equal(posted.length, 1);
+    assert.equal(posted[0].body.relayInviteCode, '');
+  });
+
   await check('A 固定中继：停止和清空按钮会发对应 action', async () => {
     posted = [];
     await mount(withTunnel(

@@ -29,6 +29,7 @@ button:disabled{opacity:.5;cursor:default}
 .ok{color:#166534;margin-top:12px;white-space:pre-wrap}
 code{background:#f1f5f9;padding:2px 6px;border-radius:4px;word-break:break-all}
 .hidden{display:none}
+.link{margin-top:8px;background:transparent;color:#475569;padding:0;text-decoration:underline}
 </style>
 ${turnstile}
 </head>
@@ -47,13 +48,15 @@ ${turnstile}
     <label for="code">邮箱验证码</label>
     <input id="code" inputmode="numeric" autocomplete="one-time-code" placeholder="6 位数字">
     <button id="verify" type="button">验证并领取</button>
-    <div class="note">验证通过后会显示邀请码；它只出现一次。</div>
+    <button id="restart" type="button" class="link">重新申请</button>
+    <div class="note">验证通过后会显示邀请码；验证成功后 15 分钟内可用同一验证码重取。</div>
   </div>
   <div id="error" class="error"></div>
   <div id="result" class="ok"></div>
 </div>
 <script>
 var requestId = '';
+try { requestId = localStorage.getItem('bRelayApplicationId') || ''; } catch (_) {}
 var turnstileToken = '';
 function onTurnstile(token) { turnstileToken = token; }
 function showError(text) { document.getElementById('error').textContent = text || ''; }
@@ -70,6 +73,7 @@ document.getElementById('send').onclick = function () {
     btn.disabled = false;
     if (!r.body || !r.body.ok) { showError((r.body && r.body.message) || '发送失败，请稍后再试。'); return; }
     requestId = r.body.applicationId || '';
+    try { localStorage.setItem('bRelayApplicationId', requestId); } catch (_) {}
     document.getElementById('step1').classList.add('hidden');
     document.getElementById('step2').classList.remove('hidden');
     document.getElementById('result').textContent = '验证码已发送，去邮箱查看。';
@@ -87,6 +91,19 @@ document.getElementById('verify').onclick = function () {
     document.getElementById('result').textContent = '申请成功。邀请码：' + r.body.code + '\\n地址：' + r.body.hostname + '\\n请把邀请码粘贴到 DSH 的「专属固定地址」里。';
   }).catch(function () { btn.disabled = false; showError('网络错误，请稍后再试。'); });
 };
+document.getElementById('restart').onclick = function () {
+  try { localStorage.removeItem('bRelayApplicationId'); } catch (_) {}
+  requestId = '';
+  document.getElementById('step2').classList.add('hidden');
+  document.getElementById('step1').classList.remove('hidden');
+  document.getElementById('result').textContent = '';
+  showError('');
+};
+if (requestId) {
+  document.getElementById('step1').classList.add('hidden');
+  document.getElementById('step2').classList.remove('hidden');
+  document.getElementById('result').textContent = '已恢复上次申请。输入邮箱验证码即可验证或重取邀请码。';
+}
 </script>
 </body>
 </html>`

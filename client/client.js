@@ -2522,7 +2522,7 @@ window.__ModuleLoader__.load({
           invite: aRelayInvite,
           setInvite: setARelayInvite,
           save: function (enabled) {
-            toggleTunnel(true, { mode: 'quick', relayEnabled: enabled, relayInviteCode: aRelayInvite });
+            toggleTunnel(true, { mode: 'quick', relayEnabled: enabled, relayInviteCode: info && info.relay && info.relay.id ? '' : aRelayInvite });
           },
           stop: function () { runRelayAction('relay-stop'); },
           reset: function () {
@@ -4660,9 +4660,11 @@ window.__ModuleLoader__.load({
             type: 'text',
             value: aRelay.invite,
             placeholder: aRelay.hasInviteCode ? '邀请码已保存；要换再填一次' : '首次开通的邀请码',
+            disabled: Boolean(aRelay.id),
             onChange: function (e) { aRelay.setInvite(e.target.value); },
             style: styles.input,
           }),
+          aRelay.id ? h('div', { style: styles.muted }, '已有身份；要换邀请码请先清空本地共享身份') : null,
         ),
         h('div', { style: { marginTop: 8, display: 'flex', gap: 8, flexWrap: 'wrap' } },
           !aRelay || !aRelay.enabled ? h('button', {

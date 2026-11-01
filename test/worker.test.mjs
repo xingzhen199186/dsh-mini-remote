@@ -10,6 +10,8 @@ const MIGRATIONS = [
   readFileSync(new URL('../worker/migrations/0001_init.sql', import.meta.url), 'utf8'),
   readFileSync(new URL('../worker/migrations/0002_invite_code.sql', import.meta.url), 'utf8'),
   readFileSync(new URL('../worker/migrations/0003_invite_requests.sql', import.meta.url), 'utf8'),
+  readFileSync(new URL('../worker/migrations/0004_clear_invite_codes.sql', import.meta.url), 'utf8'),
+  readFileSync(new URL('../worker/migrations/0005_invite_reveal.sql', import.meta.url), 'utf8'),
 ]
 const ADMIN = 'test-admin-token'
 const PEPPER = 'test-pepper'
@@ -146,15 +148,17 @@ test('Cloudflare Access 邮箱可打开运维台和总览，非白名单仍拒�
   assert.equal(denied.status, 401)
 })
 
-test('未使用的邀请码可在运维台回看', async () => {
+test('邀请码只在创建响应出现，列表和数据库不保留明文', async () => {
   const env = makeEnv()
   const code = await createInvite(env)
+  assert.ok(code)
   const response = await handleRequest(req('/admin/relay/v1/invites', { token: ADMIN }), env)
   assert.equal(response.status, 200)
   const body = await response.json()
   assert.equal(body.invites.length, 1)
-  assert.equal(body.invites[0].code, code)
+  assert.equal(body.invites[0].code, null)
   assert.equal(body.invites[0].used_at, undefined)
+  assert.equal((await env.DB.prepare('SELECT code FROM relay_invites').first()).code, null)
 })
 
 test('关闭邀请码要求后，自服务注册无需邀请码', async () => {
@@ -393,6 +397,29 @@ test('同 id + 同 secret 可以刷新 target，不需要新邀请', async () =>
   assert.equal(response.status, 200)
   const stored = JSON.parse(env.RELAY_KV.dump().get('relay-target:' + id))
   assert.equal(stored.target, nextTarget)
+})
+
+test('已有身份带新邀请码返回 409，不消费邀请或改 target；不带码仍可刷新', async () => {
+  const env = makeEnv()
+  const firstCode = await createInvite(env)
+  await handleRequest(req('/api/relay/v1/register', {
+    method: 'PUT', body: { id, secret, target, inviteCode: firstCode },
+  }), env)
+  const secondCode = await createInvite(env)
+  const before = env.RELAY_KV.dump().get('relay-target:' + id)
+  const rejected = await handleRequest(req('/api/relay/v1/register', {
+    method: 'PUT', body: { id, secret, target: 'https://quick-two.trycloudflare.com', inviteCode: secondCode },
+  }), env)
+  assert.equal(rejected.status, 409)
+  assert.equal((await rejected.json()).error, 'identity-exists')
+  assert.equal(env.RELAY_KV.dump().get('relay-target:' + id), before)
+  assert.equal((await env.DB.prepare('SELECT COUNT(*) AS n FROM relay_invites WHERE used_at IS NULL').first()).n, 1)
+
+  const refreshed = await handleRequest(req('/api/relay/v1/register', {
+    method: 'PUT', body: { id, secret, target: 'https://quick-two.trycloudflare.com' },
+  }), env)
+  assert.equal(refreshed.status, 200)
+  assert.equal(JSON.parse(env.RELAY_KV.dump().get('relay-target:' + id)).target, 'https://quick-two.trycloudflare.com')
 })
 
 test('错误 secret 被拒绝，且不覆盖原 target', async () => {
@@ -668,6 +695,87 @@ test('共享固定地址：邮箱申请、验证、拿邀请码并注册', async
   assert.equal((await again.json()).error, 'already-requested')
 })
 
+test('共享固定地址：验证后 15 分钟内可重取同一邀请码，错码和超时不可取', async () => {
+  const env = makeEnv()
+  const pending = await createApplication(env, 'reveal@example.com')
+  const verified = await handleRequest(req('/api/relay/v1/invite-verify', {
+    method: 'POST', body: { applicationId: pending.id, code: pending.code },
+  }), env)
+  assert.equal(verified.status, 200)
+  const invite = await verified.json()
+  const again = await handleRequest(req('/api/relay/v1/invite-verify', {
+    method: 'POST', body: { applicationId: pending.id, code: pending.code },
+  }), env)
+  assert.equal(again.status, 200, JSON.stringify(await again.clone().json()))
+  assert.equal((await again.json()).code, invite.code)
+
+  const wrongCode = String((Number(pending.code) + 1) % 1_000_000).padStart(6, '0')
+  const wrong = await handleRequest(req('/api/relay/v1/invite-verify', {
+    method: 'POST', body: { applicationId: pending.id, code: wrongCode },
+  }), env)
+  assert.equal(wrong.status, 403)
+  assert.equal((await wrong.json()).error, 'invalid-code')
+  assert.equal((await env.DB.prepare('SELECT COUNT(*) AS n FROM relay_invites').first()).n, 1)
+  const stored = await env.DB.prepare('SELECT reveal_ct FROM relay_invite_requests WHERE request_id = ?').bind(pending.id).first()
+  assert.ok(stored.reveal_ct)
+  assert.equal(stored.reveal_ct.includes(invite.code), false)
+
+  await env.DB.prepare('UPDATE relay_invite_requests SET fulfilled_at = ? WHERE request_id = ?')
+    .bind(Date.now() - 15 * 60 * 1000, pending.id).run()
+  const expired = await handleRequest(req('/api/relay/v1/invite-verify', {
+    method: 'POST', body: { applicationId: pending.id, code: pending.code },
+  }), env)
+  assert.equal(expired.status, 410)
+  assert.equal((await expired.json()).error, 'request-expired')
+  assert.equal((await env.DB.prepare('SELECT COUNT(*) AS n FROM relay_invites').first()).n, 1)
+})
+
+test('共享固定地址：过期验证码可复用原申请重发，旧码失效', async () => {
+  const env = makeEnv()
+  const mails = []
+  env.MAIL_SEND = async (message) => { mails.push(message); return { ok: true } }
+  const first = await handleRequest(req('/api/relay/v1/invite-request', {
+    method: 'POST', body: { email: 'expired@example.com' }, ip: '198.51.100.15',
+  }), env)
+  assert.equal(first.status, 200)
+  const applicationId = (await first.json()).applicationId
+  const oldCode = mails[0].text.match(/\b(\d{6})\b/)[1]
+  await env.DB.prepare('UPDATE relay_invite_requests SET expires_at = ?, verify_attempts = 4, verified_at = ? WHERE request_id = ?')
+    .bind(Date.now() - 1, Date.now(), applicationId).run()
+
+  const resent = await handleRequest(req('/api/relay/v1/invite-request', {
+    method: 'POST', body: { email: 'expired@example.com' }, ip: '198.51.100.15',
+  }), env)
+  assert.equal(resent.status, 200, JSON.stringify(await resent.clone().json()))
+  assert.equal((await resent.json()).applicationId, applicationId)
+  assert.equal(mails.length, 2)
+  const newCode = mails[1].text.match(/\b(\d{6})\b/)[1]
+  const reset = await env.DB.prepare('SELECT verify_attempts, verified_at FROM relay_invite_requests WHERE request_id = ?').bind(applicationId).first()
+  assert.equal(reset.verify_attempts, 0)
+  assert.equal(reset.verified_at, null)
+  assert.equal((await env.DB.prepare('SELECT COUNT(*) AS n FROM relay_invite_requests').first()).n, 1)
+
+  const oldResult = await handleRequest(req('/api/relay/v1/invite-verify', {
+    method: 'POST', body: { applicationId, code: oldCode },
+  }), env)
+  assert.equal(oldResult.status, 403)
+  assert.equal((await oldResult.json()).error, 'invalid-code')
+  const newResult = await handleRequest(req('/api/relay/v1/invite-verify', {
+    method: 'POST', body: { applicationId, code: newCode },
+  }), env)
+  assert.equal(newResult.status, 200, JSON.stringify(await newResult.clone().json()))
+})
+
+test('共享固定地址：无 MAIL_SEND 且未配置 Turnstile 时失败关闭', async () => {
+  const env = makeEnv()
+  const response = await handleRequest(req('/api/relay/v1/invite-request', {
+    method: 'POST', body: { email: 'turnstile@example.com' },
+  }), env)
+  assert.equal(response.status, 503)
+  assert.equal((await response.json()).error, 'turnstile-not-configured')
+  assert.equal((await env.DB.prepare('SELECT COUNT(*) AS n FROM relay_invite_requests').first()).n, 0)
+})
+
 test('共享固定地址：同一 IP 30 天内最多 2 个邮箱', async () => {
   const env = makeEnv()
   env.MAIL_SEND = async () => ({ ok: true })
@@ -695,6 +803,8 @@ test('共享固定地址申请页可打开', async () => {
   assert.match(html, /申请共享固定地址邀请码/)
   assert.match(html, /invite-request/)
   assert.match(html, /cf-turnstile/)
+  assert.match(html, /localStorage\.getItem\('relayApplicationId'\)/)
+  assert.match(html, /localStorage\.setItem\('relayApplicationId', applicationId\)/)
 })
 
 test('共享固定地址：并发验证同一申请只创建一份邀请', async () => {
