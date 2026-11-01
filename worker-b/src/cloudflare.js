@@ -71,7 +71,7 @@ export function createCloudflareRelayApi(config) {
     },
     async deleteTunnel(tunnelId) {
       try {
-        return await cfCall(config, 'DELETE', account + '/cfd_tunnel/' + encodeURIComponent(tunnelId))
+        return await cfCall(config, 'DELETE', account + '/cfd_tunnel/' + encodeURIComponent(tunnelId) + '?cascade=true')
       } catch (error) {
         if (error instanceof CloudflareError && error.httpStatus === 404) return undefined
         throw error
