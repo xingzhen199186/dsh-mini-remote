@@ -4016,12 +4016,24 @@ window.__ModuleLoader__.load({
           style: styles.btnPrimary,
           onClick: relay.retry,
         }, '立即重试') : null;
-      var actions = running
+      var purgeButton = (st.id || st.configured || st.enabled)
         ? h('button', {
-          type: 'button', disabled: Boolean(busy),
+          type: 'button',
+          disabled: Boolean(busy),
           style: styles.btnDanger,
-          onClick: relay.stop,
-        }, '停止专属固定地址')
+          onClick: function () {
+            if (window.confirm('会删除服务器上的旧 Tunnel、DNS 和租约，并清空本机身份。这个操作不可恢复。确定继续？')) relay.purge();
+          },
+        }, '彻底清除旧租约') : null;
+      var actions = running
+        ? h('div', { style: { display: 'flex', gap: 8, flexWrap: 'wrap' } },
+          h('button', {
+            type: 'button', disabled: Boolean(busy),
+            style: styles.btnDanger,
+            onClick: relay.stop,
+          }, '停止专属固定地址'),
+          purgeButton,
+        )
         : claiming
         ? h('button', {
           type: 'button', disabled: true,
@@ -4039,6 +4051,7 @@ window.__ModuleLoader__.load({
             style: st.reconnectable ? styles.btn : styles.btnPrimary,
             onClick: relay.start,
           }, claiming ? '连接中…' : '开启专属固定地址') : null,
+          purgeButton,
         );
 
       return h('div', { key: 'b-relay', style: styles.block },
@@ -4051,16 +4064,6 @@ window.__ModuleLoader__.load({
           + '和上面的快速隧道、共享固定地址、自建中继互不影响。'),
         codeInput,
         h('div', { style: { display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 12 } }, actions),
-        (st.id || st.configured || st.enabled) && !claiming ? h('div', { style: { marginTop: 8 } },
-          h('button', {
-            type: 'button',
-            disabled: Boolean(busy),
-            style: styles.btnDanger,
-            onClick: function () {
-              if (window.confirm('会删除服务器上的旧 Tunnel、DNS 和租约，并清空本机身份。这个操作不可恢复。确定继续？')) relay.purge();
-            },
-          }, '彻底清除旧租约'),
-        ) : null,
         h('div', { style: { marginTop: 10 } },
           h('div', { style: styles.muted }, statusText),
           errorText ? h('div', { style: styles.error }, errorText) : null,
