@@ -148,6 +148,9 @@ async function configOf(env) {
       ? raw.inviteRequired !== false
       : env.RELAY_INVITE_REQUIRED !== '0',
     maxActive: Number.isInteger(raw?.maxActive) && raw.maxActive > 0 ? raw.maxActive : 200,
+    monthlyRequestLimit: raw?.monthlyRequestLimit === 0
+      ? 0
+      : (Number.isInteger(raw?.monthlyRequestLimit) && raw.monthlyRequestLimit > 0 ? raw.monthlyRequestLimit : 8_000_000),
   }
 }
 
@@ -684,6 +687,32 @@ function opsAnomalies({ usage, b, counts, now }) {
   return out
 }
 
+export async function enforceBudgetGuard(env, usage) {
+  const config = await configOf(env)
+  const limit = Number(config.monthlyRequestLimit || 0)
+  const requests = Number(usage?.workers?.requests || 0)
+  const state = {
+    checkedAt: Date.now(),
+    monthStart: usage?.monthStart ?? null,
+    requests,
+    limit,
+    tripped: false,
+    alreadyOff: !config.proxyEnabled,
+    error: usage?.error ?? null,
+  }
+  if (state.error || !limit || requests < limit) {
+    await env.RELAY_KV.put('relay-budget:last', JSON.stringify(state)).catch(() => undefined)
+    return state
+  }
+  if (config.proxyEnabled) {
+    await setConfig(env, { proxyEnabled: false, registrationEnabled: false })
+    await audit(env, 'budget-guard', 'budget.trip', null, `workers=${requests} limit=${limit}`)
+    state.tripped = true
+  }
+  await env.RELAY_KV.put('relay-budget:last', JSON.stringify(state)).catch(() => undefined)
+  return state
+}
+
 async function collectOpsSnapshot(env) {
   const now = Date.now()
   const config = await configOf(env)
@@ -797,6 +826,7 @@ async function handleAdmin(request, env, url) {
     return json({
       ok: true,
       config,
+      budget: await env.RELAY_KV.get('relay-budget:last', 'json').catch(() => null),
       counts: {
         active: byState.active ?? 0,
         revoked: byState.revoked ?? 0,
@@ -940,6 +970,10 @@ async function handleAdmin(request, env, url) {
       if (!Number.isInteger(body.maxActive) || body.maxActive < 1 || body.maxActive > 10000) return fail('invalid-params', 400)
       patch.maxActive = body.maxActive
     }
+    if (body.monthlyRequestLimit !== undefined) {
+      if (!Number.isInteger(body.monthlyRequestLimit) || body.monthlyRequestLimit < 0 || body.monthlyRequestLimit > 10_000_000) return fail('invalid-params', 400)
+      patch.monthlyRequestLimit = body.monthlyRequestLimit
+    }
     if (!Object.keys(patch).length) return fail('invalid-params', 400)
     const next = await setConfig(env, patch)
     await audit(env, auth.actor, 'config.update', null, JSON.stringify(patch))
@@ -1006,10 +1040,11 @@ export async function handleRequest(request, env) {
 
 export async function scheduled(event, env, ctx) {
   const config = await configOf(env)
-  if (!config.dailyReportEnabled) return
   ctx.waitUntil((async () => {
-    await refreshUsage(env)
-    await collectOpsSnapshot(env)
+    const usage = await refreshUsage(env)
+    // 硬预算保护独立于“每日报表”开关：即使报表关着，也必须检查。
+    await enforceBudgetGuard(env, usage)
+    if (config.dailyReportEnabled) await collectOpsSnapshot(env)
   })())
 }
 

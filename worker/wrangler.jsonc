@@ -29,7 +29,7 @@
     "RELAY_MAIL_FROM": "dsh-mini-remote <no-reply@dsh-everywhere.com>",
     "RELAY_TURNSTILE_SITE_KEY": "0x4AAAAAAFupdzaetdJZQX1-"
   },
-  "triggers": { "crons": ["10 0 * * *"] },
+  "triggers": { "crons": ["10 * * * *"] },
   "observability": { "enabled": true },
   "routes": [
     { "pattern": "relay.dsh-mini-remote.com", "custom_domain": true },

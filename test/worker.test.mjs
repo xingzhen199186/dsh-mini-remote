@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { DatabaseSync } from 'node:sqlite'
 
-import { handleRequest } from '../worker/src/index.js'
+import { handleRequest, enforceBudgetGuard } from '../worker/src/index.js'
 import { dashboardHtml } from '../worker/src/dashboard.js'
 
 const MIGRATIONS = [
@@ -352,6 +352,17 @@ test('每日用量开关可写可读', async () => {
     headers: { 'cf-access-authenticated-user-email': 'owner@example.com' },
   }), env)
   assert.equal((await overview.json()).config.dailyReportEnabled, true)
+})
+
+test('月度请求达到硬上限会自动关闭数据面和新注册', async () => {
+  const env = makeEnv()
+  await env.RELAY_KV.put('relay-config', JSON.stringify({ monthlyRequestLimit: 2 }))
+  const state = await enforceBudgetGuard(env, { monthStart: '2026-11-01', workers: { requests: 2 } })
+  assert.equal(state.tripped, true)
+  const config = await env.RELAY_KV.get('relay-config', 'json')
+  assert.equal(config.proxyEnabled, false)
+  assert.equal(config.registrationEnabled, false)
+  assert.equal((await env.DB.prepare('SELECT COUNT(*) AS n FROM relay_audit WHERE action = ?').bind('budget.trip').first()).n, 1)
 })
 
 test('没有邀请不能创建身份', async () => {

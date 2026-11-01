@@ -124,6 +124,8 @@ code{background:#f3f4f6;padding:2px 6px;border-radius:4px;word-break:break-all}
         <label class="switch"><input type="checkbox" id="proxyEnabled"> 数据面转发（关闭后所有固定地址返回离线页）</label>
         <label class="switch"><input type="checkbox" id="dailyReportEnabled"> 每天自动采集一次用量</label>
         <div class="row" style="margin-top:10px;align-items:center"><label for="maxActive">共享实例上限</label><input id="maxActive" type="number" min="1" max="10000" style="width:120px"><button class="btn" id="saveMaxActive">保存上限</button><span class="muted small">默认 200；达到上限后拒绝新身份，不再消耗邀请码。</span></div>
+        <div class="row" style="margin-top:10px;align-items:center"><label for="monthlyRequestLimit">月度请求硬上限</label><input id="monthlyRequestLimit" type="number" min="0" max="10000000" style="width:140px"><button class="btn" id="saveMonthlyLimit">保存硬上限</button><span class="muted small">默认 8000000；达到后自动关闭数据面和新注册；填 0 关闭保护。</span></div>
+        <div id="budgetStatus" class="muted small" style="margin-top:6px"></div>
         <div class="muted small">每日任务在 Worker Cron 中运行；需要配置 CF_ANALYTICS_TOKEN 才能查到 Cloudflare 用量。</div>
       </div>
       <div class="card"><h3>今日用量</h3><div class="row"><button class="btn" id="refreshUsage">立即采集</button><span class="muted small">每天自动采集可在上方开关。</span></div><div id="usage" class="muted" style="margin-top:10px">还没有用量快照。</div></div>
@@ -160,7 +162,7 @@ function showError(e){$('error').textContent=e;$('error').classList.remove('hidd
 function hideError(){$('error').classList.add('hidden')}
 async function api(path,init){const r=await fetch(path,{headers:{'content-type':'application/json'},...init});const b=await r.json().catch(()=>({}));if(!r.ok||b.ok===false)throw new Error(b.error||('HTTP '+r.status));return b}
 function page(p){state.page=p;document.querySelectorAll('.page').forEach((el)=>el.classList.toggle('active',el.id==='page-'+p));document.querySelectorAll('#nav button').forEach((b)=>b.classList.toggle('active',b.dataset.page===p));window.scrollTo({top:0,behavior:'smooth'})}
-function setChecks(config){$('registrationEnabled').checked=!!config.registrationEnabled;$('inviteRequired').checked=config.inviteRequired!==false;$('proxyEnabled').checked=!!config.proxyEnabled;$('dailyReportEnabled').checked=!!config.dailyReportEnabled;$('maxActive').value=config.maxActive??200}
+function setChecks(config){$('registrationEnabled').checked=!!config.registrationEnabled;$('inviteRequired').checked=config.inviteRequired!==false;$('proxyEnabled').checked=!!config.proxyEnabled;$('dailyReportEnabled').checked=!!config.dailyReportEnabled;$('maxActive').value=config.maxActive??200;$('monthlyRequestLimit').value=config.monthlyRequestLimit??8000000}
 function usageHtml(u){
   if(!u)return '<span class="muted">还没有用量快照。开启每日任务并配置 token 后，这里会出现。</span>';
   if(u.error)return '<div class="error">'+esc(u.error)+'</div>';
@@ -243,7 +245,7 @@ async function load(){
     const [o,ids,audit,invites,b,bops,bconfig,ops]=await Promise.all([
       api('/admin/relay/v1/overview'),api('/admin/relay/v1/identities?limit=50'),api('/admin/relay/v1/audit?limit=30'),api('/admin/relay/v1/invites'),api('/admin/relay/v1/b/leases'),api('/admin/relay/v1/b/ops'),api('/admin/relay/v1/b/config'),api('/admin/relay/v1/ops/snapshot'),
     ]);
-    setChecks(o.config||{});setBChecks(bconfig?.config||{});renderOverview(o,b);renderB(b);renderBOps(bops);renderVisual(o,b,ops);$('usage').innerHTML=usageHtml(o.usage);
+    setChecks(o.config||{});setBChecks(bconfig?.config||{});const bud=o.budget;if(bud){$('budgetStatus').textContent='上次检查：'+(bud.checkedAt?time(bud.checkedAt):'—')+' · 请求 '+Number(bud.requests||0).toLocaleString('zh-CN')+' / '+Number(bud.limit||0).toLocaleString('zh-CN')+' · '+(bud.tripped?'已触发关闭':(bud.error?'查询失败':'正常'))}else{$('budgetStatus').textContent='还没有额度检查记录；Cron 每小时检查一次。'}renderOverview(o,b);renderB(b);renderBOps(bops);renderVisual(o,b,ops);$('usage').innerHTML=usageHtml(o.usage);
     const rows=ids.identities||[];$('identityMeta').textContent='共 '+rows.length+' 条（最多显示 50 条）';
     $('identities').innerHTML=rows.map((x)=>'<tr><td><code>'+esc(x.id)+'</code></td><td>'+esc(x.state)+'</td><td>'+esc(time(x.last_seen_at))+'</td><td>'+esc(time(x.created_at))+'</td><td>'+(x.state==='active'?'<button class="btn danger" data-revoke="'+esc(x.id)+'">撤销</button>':'')+'</td></tr>').join('')||'<tr><td colspan="5" class="muted">没有实例。</td></tr>';
     $('audit').innerHTML=(audit.audit||[]).map((a)=>'<tr><td>'+esc(time(a.at))+'</td><td>'+esc(a.action)+'</td><td>'+esc(a.target||'—')+'</td><td>'+esc(a.reason||'—')+'</td><td>'+esc(a.actor||'—')+'</td></tr>').join('')||'<tr><td colspan="5" class="muted">没有审计记录。</td></tr>';
@@ -260,6 +262,7 @@ $('inviteRequired').addEventListener('change',(e)=>saveConfig('inviteRequired',e
 $('proxyEnabled').addEventListener('change',(e)=>saveConfig('proxyEnabled',e.target.checked));
 $('dailyReportEnabled').addEventListener('change',(e)=>saveConfig('dailyReportEnabled',e.target.checked));
 $('saveMaxActive').addEventListener('click',()=>{const n=Number($('maxActive').value);if(!Number.isInteger(n)||n<1||n>10000){showError('上限必须是 1 到 10000 的整数');return}saveConfig('maxActive',n)});
+$('saveMonthlyLimit').addEventListener('click',()=>{const n=Number($('monthlyRequestLimit').value);if(!Number.isInteger(n)||n<0||n>10000000){showError('硬上限必须是 0 到 10000000 的整数');return}saveConfig('monthlyRequestLimit',n)});
 $('newInvite').addEventListener('click',async()=>{try{const r=await api('/admin/relay/v1/invites',{method:'POST',body:JSON.stringify({expiresInDays:7})});$('inviteResult').classList.remove('hidden');$('inviteResult').innerHTML='新邀请码（只显示这一次）：<br><code>'+esc(r.code)+'</code>';await load()}catch(e){showError('创建邀请失败：'+e.message)}});
 $('newBInvite').addEventListener('click',async()=>{try{const r=await api('/admin/relay/v1/b/invites',{method:'POST',body:JSON.stringify({expiresInDays:7,note:'ops-console'})});$('bInviteResult').classList.remove('hidden');$('bInviteResult').innerHTML='新激活码（只显示这一次）：<br><code>'+esc(r.code)+'</code><br><span class="small">固定地址：<code>'+esc(r.hostname)+'</code></span>';await load()}catch(e){showError('创建激活码失败：'+e.message)}});
 document.addEventListener('click',async(e)=>{const copy=e.target?.dataset?.copy;if(copy){try{await navigator.clipboard.writeText(copy);e.target.textContent='已复制'}catch{}return}const id=e.target?.dataset?.revoke;if(!id)return;if(!confirm('确定撤销 '+id+'？撤销后固定地址立即失效。'))return;try{await api('/admin/relay/v1/revoke',{method:'POST',body:JSON.stringify({id,reason:'ops-console'})});await load()}catch(err){showError('撤销失败：'+err.message)}});
