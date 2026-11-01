@@ -260,7 +260,33 @@ async function verifyTurnstile(env, token, ip) {
   }
 }
 
-async function createInvite(env, { note = null, days = 7, actor = 'admin-token', requestId }) {
+async function retireExpiredInvites(env, { now, actor, requestId }) {
+  const eligible = 'l.state = \'invited\' AND l.tunnel_id IS NULL AND l.dns_record_id IS NULL '
+    + 'AND c.state = \'invited\' AND c.expires_at <= ?'
+  await env.DB.batch([
+    env.DB.prepare(
+      'INSERT INTO b_admin_audit (actor, action, lease_id, code_id, request_id, before_state, after_state, result, created_at) '
+      + 'SELECT ?, \'invite.expire\', l.lease_id, c.code_id, ?, \'invited\', \'retired\', \'succeeded\', ? '
+      + 'FROM b_leases l JOIN b_activation_codes c ON c.lease_id = l.lease_id WHERE ' + eligible,
+    ).bind(actor, requestId, now, now),
+    env.DB.prepare(
+      'UPDATE b_leases SET state = \'retired\', retired_at = ?, row_version = row_version + 1 '
+      + 'WHERE state = \'invited\' AND tunnel_id IS NULL AND dns_record_id IS NULL AND EXISTS ('
+      + 'SELECT 1 FROM b_activation_codes c WHERE c.lease_id = b_leases.lease_id '
+      + 'AND c.state = \'invited\' AND c.expires_at <= ?)',
+    ).bind(now, now),
+    env.DB.prepare(
+      'UPDATE b_activation_codes SET state = \'revoked\', revoked_at = ? '
+      + 'WHERE state = \'invited\' AND expires_at <= ? AND EXISTS ('
+      + 'SELECT 1 FROM b_leases l WHERE l.lease_id = b_activation_codes.lease_id '
+      + 'AND l.state = \'retired\' AND l.retired_at = ?)',
+    ).bind(now, now, now),
+  ])
+}
+
+async function createInvite(env, { note = null, days = 7, actor = 'admin-token', requestId, fulfillRequest = null }) {
+  const now = Date.now()
+  await retireExpiredInvites(env, { now, actor, requestId })
   const count = await env.DB.prepare(
     'SELECT COUNT(*) AS n FROM b_leases WHERE state IN (\'invited\', \'active\', \'claimed\', \'released\')',
   ).first()
@@ -268,17 +294,26 @@ async function createInvite(env, { note = null, days = 7, actor = 'admin-token',
   const id = randomId()
   const code = randomSecret()
   const codeId = crypto.randomUUID()
-  const now = Date.now()
   const expiresAt = now + days * DAY_MS
   const hostname = hostnameOf(env, id)
-  await env.DB.batch([
+  const statements = [
     env.DB.prepare('INSERT INTO b_leases (lease_id, hostname, state, tunnel_name, created_at) VALUES (?, ?, \'invited\', ?, ?)')
       .bind(id, hostname, tunnelNameOf(id), now),
     env.DB.prepare(
       'INSERT INTO b_activation_codes (code_id, code_hash, lease_id, state, note, created_at, expires_at) VALUES (?, ?, ?, \'invited\', ?, ?, ?)',
     ).bind(codeId, await hmac(env, 'activation', code), id, note, now, expiresAt),
     auditStatement(env, { actor, action: 'invite.create', leaseId: id, codeId, requestId, after: 'invited', result: 'succeeded' }),
-  ])
+  ]
+  if (fulfillRequest) {
+    statements.push(
+      env.DB.prepare(
+        'UPDATE b_invite_requests SET state = \'fulfilled\', lease_id = ?, code_id = ?, fulfilled_at = ? '
+        + 'WHERE request_id = ? AND state = \'verified\' AND verified_at = ?',
+      ).bind(id, codeId, now, fulfillRequest.id, fulfillRequest.verifiedAt),
+      auditStatement(env, { actor, action: 'invite.request.fulfilled', leaseId: id, codeId, requestId, after: 'fulfilled', result: 'succeeded' }),
+    )
+  }
+  await env.DB.batch(statements)
   return { ok: true, code, codeId, id, hostname, expiresAt }
 }
 
@@ -367,19 +402,32 @@ async function handleInviteVerify(request, env, requestId) {
     await env.DB.prepare('UPDATE b_invite_requests SET verify_attempts = verify_attempts + 1 WHERE request_id = ?').bind(id).run()
     return fail(requestId, 'invalid_code', 403)
   }
-  const created = await createInvite(env, {
-    note: 'self-service:' + row.email_masked,
-    days: 7,
-    actor: 'self-service',
-    requestId,
-  })
-  if (!created.ok) return fail(requestId, created.code, 503)
-  const now = Date.now()
-  await env.DB.batch([
-    env.DB.prepare('UPDATE b_invite_requests SET state = \'fulfilled\', lease_id = ?, code_id = ?, verified_at = ?, fulfilled_at = ? WHERE request_id = ?')
-      .bind(created.id, created.codeId, now, now, id),
-    auditStatement(env, { actor: 'self-service', action: 'invite.request.fulfilled', leaseId: created.id, codeId: created.codeId, requestId, after: 'fulfilled', result: 'succeeded' }),
-  ])
+  const verifiedAt = Date.now()
+  const reserved = await env.DB.prepare(
+    'UPDATE b_invite_requests SET state = \'verified\', verified_at = ? '
+    + 'WHERE request_id = ? AND state = \'pending\' AND verify_hash = ? AND expires_at > ? AND verify_attempts < ?',
+  ).bind(verifiedAt, id, expected, verifiedAt, VERIFY_MAX_ATTEMPTS).run()
+  if (Number(reserved?.meta?.changes || 0) !== 1) return fail(requestId, 'request_not_found', 404)
+  const releaseReservation = () => env.DB.prepare(
+    'UPDATE b_invite_requests SET state = \'pending\', verified_at = NULL WHERE request_id = ? AND state = \'verified\' AND verified_at = ?',
+  ).bind(id, verifiedAt).run()
+  let created
+  try {
+    created = await createInvite(env, {
+      note: 'self-service:' + row.email_masked,
+      days: 7,
+      actor: 'self-service',
+      requestId,
+      fulfillRequest: { id, verifiedAt },
+    })
+  } catch (error) {
+    await releaseReservation().catch(() => undefined)
+    throw error
+  }
+  if (!created.ok) {
+    await releaseReservation()
+    return fail(requestId, created.code, 503)
+  }
   // 邀请码直接回给刚通过邮箱验证的页面；不把明文邮箱落库，所以不再二次发信。
   return ok(requestId, { code: created.code, hostname: created.hostname, expiresAt: created.expiresAt })
 }
@@ -506,8 +554,10 @@ async function convergeClaim(env, api, lease, operation, requestId) {
 }
 
 async function selfServiceLeaseOf(env, claimRequestId) {
-  return await env.DB.prepare('SELECT * FROM b_leases WHERE claim_request_id = ?')
-    .bind(claimRequestId).first()
+  return await env.DB.prepare(
+    'SELECT * FROM b_leases WHERE claim_request_id = ? OR EXISTS ('
+    + 'SELECT 1 FROM b_operations WHERE lease_id = b_leases.lease_id AND operation_id = ? AND type = \'claim\') LIMIT 1',
+  ).bind(claimRequestId, claimRequestId).first()
 }
 
 /** 自服务 claim 的恢复路径：不消耗新名额，也不新建 Tunnel。 */
@@ -693,6 +743,8 @@ async function handleClaim(request, env, requestId) {
   if (invite.state === 'invited' && Number(invite.expires_at) <= Date.now()) return fail(requestId, 'activation_expired', 410)
   let lease = await leaseOf(env, invite.lease_id)
   if (!lease) return fail(requestId, 'storage_unavailable', 503, true, 5)
+  const bound = await selfServiceLeaseOf(env, claimRequestId)
+  if (bound && bound.lease_id !== lease.lease_id) return fail(requestId, 'claim_request_conflict', 409)
   const secretHash = await hmac(env, 'client', lease.lease_id + ':' + clientSecret)
 
   if (lease.state === 'invited') {
@@ -702,9 +754,9 @@ async function handleClaim(request, env, requestId) {
       env.DB.prepare('UPDATE b_activation_codes SET state = \'claimed\', claimed_at = ? WHERE code_id = ? AND state = \'invited\' AND expires_at > ?')
         .bind(now, invite.code_id, now),
       env.DB.prepare(
-        'UPDATE b_leases SET state = \'claimed\', client_secret_hash = ?, secret_version = 1, origin_port = ?, '
+        'UPDATE b_leases SET state = \'claimed\', client_secret_hash = ?, secret_version = 1, origin_port = ?, claim_request_id = ?, '
         + 'claimed_at = ?, last_seen_at = ?, row_version = row_version + 1 WHERE lease_id = ? AND state = \'invited\'',
-      ).bind(secretHash, originPort, now, now, lease.lease_id),
+      ).bind(secretHash, originPort, claimRequestId, now, now, lease.lease_id),
       env.DB.prepare(
         'INSERT INTO b_operations (operation_id, lease_id, type, request_fingerprint, state, current_step, retry_count, created_at, updated_at) '
         + 'SELECT ?, ?, \'claim\', ?, \'running\', \'tunnel\', 0, ?, ? '

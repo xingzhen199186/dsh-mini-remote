@@ -210,9 +210,12 @@ export function claimBody(code, extra = {}) {
   return { activationCode: code, clientSecret: CLIENT_SECRET, claimRequestId: CLAIM_ID, originPort: 3090, ...extra }
 }
 
-export async function activate(env) {
+export async function activate(env, extra = {}) {
   const invitation = await invite(env)
-  const claim = await request(env, 'PUT', '/api/b/v1/claim', claimBody(invitation.code))
+  const claim = await request(env, 'PUT', '/api/b/v1/claim', claimBody(invitation.code, {
+    claimRequestId: 'claim-request-' + invitation.id,
+    ...extra,
+  }))
   if (!claim.body.ok) throw new Error('claim failed: ' + JSON.stringify(claim.body))
   return { invitation, claim, id: invitation.id, hostname: invitation.hostname }
 }

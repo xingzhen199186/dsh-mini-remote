@@ -295,14 +295,24 @@ async function verifyTurnstile(env, token, ip) {
   }
 }
 
-async function createRelayInvite(env, { code, days = 7, note = null, actor = 'admin-token' }) {
+async function createRelayInvite(env, { code, days = 7, note = null, actor = 'admin-token', fulfillRequest = null }) {
   const value = typeof code === 'string' && code ? code : base64url(crypto.getRandomValues(new Uint8Array(24)))
   const hash = await hmac(env, 'invite', value)
   const now = Date.now()
   const expiresAt = now + days * 86_400_000
-  await env.DB.prepare('INSERT INTO relay_invites (code_hash, code, created_at, expires_at, note) VALUES (?, ?, ?, ?, ?)')
-    .bind(hash, value, now, expiresAt, note).run()
-  await audit(env, actor, 'invite.create', null, note)
+  const statements = [
+    env.DB.prepare('INSERT INTO relay_invites (code_hash, code, created_at, expires_at, note) VALUES (?, ?, ?, ?, ?)')
+      .bind(hash, value, now, expiresAt, note),
+  ]
+  if (fulfillRequest) {
+    statements.push(env.DB.prepare(
+      'UPDATE relay_invite_requests SET state = \'fulfilled\', invite_hash = ?, fulfilled_at = ? '
+      + 'WHERE request_id = ? AND state = \'pending\' AND verified_at = ?',
+    ).bind(hash, now, fulfillRequest.id, fulfillRequest.verifiedAt))
+  }
+  statements.push(env.DB.prepare('INSERT INTO relay_audit (actor, action, target, reason, at) VALUES (?, ?, ?, ?, ?)')
+    .bind(actor, 'invite.create', null, note, now))
+  await env.DB.batch(statements)
   return { code: value, hash, expiresAt }
 }
 
@@ -327,7 +337,7 @@ async function handleInviteRequest(request, env) {
     if (existing.state === 'pending' && Number(existing.expires_at) > now) {
       if (!(await spendRate(env, 'invite-resend:' + existing.request_id, 1))) return fail('rate-limited', 429)
       const code = randomCode()
-      await env.DB.prepare('UPDATE relay_invite_requests SET verify_hash = ?, verify_attempts = 0, last_sent_at = ?, expires_at = ? WHERE request_id = ?')
+      await env.DB.prepare('UPDATE relay_invite_requests SET verify_hash = ?, verify_attempts = 0, last_sent_at = ?, expires_at = ?, verified_at = NULL WHERE request_id = ?')
         .bind(await hmac(env, 'verify:' + existing.request_id, code), now, now + VERIFY_TTL_MS, existing.request_id).run()
       const mailed = await sendMail(env, { to: email.normalized, subject: '共享固定地址：邮箱验证码', text: '你的验证码是：' + code + '\n10 分钟内有效。' })
       if (!mailed.ok) return fail(mailed.error || 'mail-failed', 503)
@@ -374,14 +384,28 @@ async function handleInviteVerify(request, env) {
     await env.DB.prepare('UPDATE relay_invite_requests SET verify_attempts = verify_attempts + 1 WHERE request_id = ?').bind(applicationId).run()
     return fail('invalid-code', 403)
   }
-  const invite = await createRelayInvite(env, {
-    days: 7,
-    note: 'self-service:' + row.email_masked,
-    actor: 'self-service',
-  })
-  const now = Date.now()
-  await env.DB.prepare('UPDATE relay_invite_requests SET state = \'fulfilled\', invite_hash = ?, verified_at = ?, fulfilled_at = ? WHERE request_id = ?')
-    .bind(invite.hash, now, now, applicationId).run()
+  const verifiedAt = Date.now()
+  const reserved = await env.DB.prepare(
+    'UPDATE relay_invite_requests SET verified_at = ? '
+    + 'WHERE request_id = ? AND state = \'pending\' AND verified_at IS NULL '
+    + 'AND verify_hash = ? AND expires_at > ? AND verify_attempts < ?',
+  ).bind(verifiedAt, applicationId, expected, verifiedAt, VERIFY_MAX_ATTEMPTS).run()
+  if (Number(reserved?.meta?.changes || 0) !== 1) return fail('request-not-found', 404)
+  const releaseReservation = () => env.DB.prepare(
+    'UPDATE relay_invite_requests SET verified_at = NULL WHERE request_id = ? AND state = \'pending\' AND verified_at = ?',
+  ).bind(applicationId, verifiedAt).run()
+  let invite
+  try {
+    invite = await createRelayInvite(env, {
+      days: 7,
+      note: 'self-service:' + row.email_masked,
+      actor: 'self-service',
+      fulfillRequest: { id: applicationId, verifiedAt },
+    })
+  } catch {
+    await releaseReservation().catch(() => undefined)
+    return fail('storage-unavailable', 503)
+  }
   return json({ ok: true, code: invite.code, expiresAt: invite.expiresAt })
 }
 

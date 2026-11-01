@@ -65,6 +65,32 @@ test('same claim retry is idempotent and does not create another Tunnel', async 
   assert.equal(db.prepare('SELECT state FROM b_activation_codes').get().state, 'claimed')
 })
 
+test('已有 claimRequestId 时换第二枚邀请：预检拒绝且不消费邀请、不建资源', async () => {
+  const { env, db, cf } = createEnv()
+  const first = await invite(env)
+  const claimed = await claim(env, first.code)
+  assert.equal(claimed.status, 200)
+  assert.equal(db.prepare('SELECT claim_request_id FROM b_leases WHERE lease_id = ?').get(first.id).claim_request_id, CLAIM_ID)
+
+  const second = await invite(env)
+  cf.calls = []
+  const conflict = await claim(env, second.code)
+  assert.equal(conflict.status, 409)
+  assert.equal(conflict.body.code, 'claim_request_conflict')
+  assert.equal(db.prepare('SELECT state FROM b_activation_codes WHERE code_id = ?').get(second.codeId).state, 'invited')
+  assert.equal(db.prepare('SELECT state, claim_request_id FROM b_leases WHERE lease_id = ?').get(second.id).state, 'invited')
+  assert.equal(db.prepare('SELECT claim_request_id FROM b_leases WHERE lease_id = ?').get(second.id).claim_request_id, null)
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM b_leases').get().n, 2)
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM b_operations WHERE type = 'claim'").get().n, 1)
+  assert.equal(cf.createdTunnelCount, 1)
+  assert.equal(cf.calls.length, 0)
+
+  const resumed = await claim(env, first.code)
+  assert.equal(resumed.status, 200)
+  assert.equal(resumed.body.id, first.id)
+  assert.equal(cf.createdTunnelCount, 1)
+})
+
 test('same activation code cannot be rebound to a different clientSecret', async () => {
   const { env, cf } = createEnv()
   const invitation = await invite(env)

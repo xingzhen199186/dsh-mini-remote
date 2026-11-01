@@ -38,6 +38,18 @@ function makeD1() {
   }
   return {
     prepare: wrap,
+    async batch(statements) {
+      db.exec('BEGIN IMMEDIATE')
+      try {
+        const results = []
+        for (const statement of statements) results.push(await statement.run())
+        db.exec('COMMIT')
+        return results
+      } catch (error) {
+        db.exec('ROLLBACK')
+        throw error
+      }
+    },
     exec: (sql) => db.exec(sql),
     close: () => db.close(),
   }
@@ -90,6 +102,17 @@ async function createInvite(env) {
   }), env)
   assert.equal(response.status, 200)
   return (await response.json()).code
+}
+
+async function createApplication(env, email) {
+  const mails = []
+  env.MAIL_SEND = async (message) => { mails.push(message); return { ok: true } }
+  const response = await handleRequest(req('/api/relay/v1/invite-request', {
+    method: 'POST', body: { email }, ip: '198.51.100.60',
+  }), env)
+  assert.equal(response.status, 200)
+  const body = await response.json()
+  return { id: body.applicationId, code: mails[0].text.match(/\b(\d{6})\b/)[1] }
 }
 
 test('health 公开，不泄露配置', async () => {
@@ -672,4 +695,45 @@ test('共享固定地址申请页可打开', async () => {
   assert.match(html, /申请共享固定地址邀请码/)
   assert.match(html, /invite-request/)
   assert.match(html, /cf-turnstile/)
+})
+
+test('共享固定地址：并发验证同一申请只创建一份邀请', async () => {
+  const env = makeEnv()
+  const pending = await createApplication(env, 'concurrent@example.com')
+  const responses = await Promise.all([
+    handleRequest(req('/api/relay/v1/invite-verify', {
+      method: 'POST', body: { applicationId: pending.id, code: pending.code },
+    }), env),
+    handleRequest(req('/api/relay/v1/invite-verify', {
+      method: 'POST', body: { applicationId: pending.id, code: pending.code },
+    }), env),
+  ])
+  const results = await Promise.all(responses.map(async (response) => ({ status: response.status, body: await response.json() })))
+  assert.equal(results.filter((result) => result.status === 200).length, 1)
+  const rejected = results.find((result) => result.status !== 200)
+  assert.equal(rejected.status, 404)
+  assert.equal(rejected.body.error, 'request-not-found')
+  assert.equal((await env.DB.prepare('SELECT COUNT(*) AS n FROM relay_invites').first()).n, 1)
+  assert.equal((await env.DB.prepare('SELECT state FROM relay_invite_requests WHERE request_id = ?').bind(pending.id).first()).state, 'fulfilled')
+})
+
+test('共享固定地址：邀请创建失败时申请不标 fulfilled，也不留下邀请', async () => {
+  const env = makeEnv()
+  const pending = await createApplication(env, 'create-failure@example.com')
+  const prepare = env.DB.prepare
+  env.DB.prepare = (sql) => {
+    if (sql.startsWith('INSERT INTO relay_invites')) {
+      return { bind: () => ({ run: async () => { throw new Error('injected invite failure') } }) }
+    }
+    return prepare(sql)
+  }
+  const response = await handleRequest(req('/api/relay/v1/invite-verify', {
+    method: 'POST', body: { applicationId: pending.id, code: pending.code },
+  }), env)
+  assert.equal(response.status, 503)
+  assert.equal((await response.json()).error, 'storage-unavailable')
+  const row = await env.DB.prepare('SELECT state, verified_at FROM relay_invite_requests WHERE request_id = ?').bind(pending.id).first()
+  assert.equal(row.state, 'pending')
+  assert.equal(row.verified_at, null)
+  assert.equal((await env.DB.prepare('SELECT COUNT(*) AS n FROM relay_invites').first()).n, 0)
 })

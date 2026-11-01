@@ -22,6 +22,40 @@ function codeFrom(mail) {
   return match[1]
 }
 
+async function application(env, email = 'verify@example.com') {
+  const mail = mailRecorder()
+  env.MAIL_SEND = mail.send
+  const requested = await request(env, 'POST', REQUEST_PATH, { email }, { ip: '198.51.100.60' })
+  assert.equal(requested.status, 200)
+  return { id: requested.body.applicationId, code: codeFrom(mail.mails[0]) }
+}
+
+function makeLeaseId(index) {
+  const alphabet = 'abcdefghijklmnopqrstuvwxyz234567'
+  let value = index
+  let tail = ''
+  for (let position = 0; position < 6; position += 1) {
+    tail = alphabet[value % 32] + tail
+    value = Math.floor(value / 32)
+  }
+  return 'a'.repeat(20) + tail
+}
+
+function seedInvitedLeases(db, count, expiresAt) {
+  const lease = db.prepare(
+    'INSERT INTO b_leases (lease_id, hostname, state, tunnel_name, created_at) VALUES (?, ?, \'invited\', ?, ?)',
+  )
+  const code = db.prepare(
+    'INSERT INTO b_activation_codes (code_id, code_hash, lease_id, state, created_at, expires_at) VALUES (?, ?, ?, \'invited\', ?, ?)',
+  )
+  const now = Date.now()
+  for (let index = 0; index < count; index += 1) {
+    const id = makeLeaseId(index)
+    lease.run(id, `${id}.dsh-everywhere.com`, `dsh-b-relay-${id}`, now)
+    code.run(`code-${index}`, `hash-${index}`, id, now, expiresAt)
+  }
+}
+
 test('自助申请：一个邮箱只能申请一次，验证后能拿到邀请码并 claim', async () => {
   const { env, db } = createEnv()
   const mail = mailRecorder()
@@ -108,4 +142,62 @@ test('自助申请页和申请管理接口', async () => {
   assert.equal(removed.status, 200)
   assert.equal(removed.body.deleted, true)
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM b_invite_requests').get().n, 0)
+})
+
+test('邮箱验证并发提交：只占住一次 pending，创建一份邀请和一份租约', async () => {
+  const { env, db } = createEnv()
+  const pending = await application(env, 'concurrent@example.com')
+  const results = await Promise.all([
+    request(env, 'POST', VERIFY_PATH, { applicationId: pending.id, code: pending.code }),
+    request(env, 'POST', VERIFY_PATH, { applicationId: pending.id, code: pending.code }),
+  ])
+  assert.equal(results.filter((result) => result.status === 200).length, 1)
+  const rejected = results.find((result) => result.status !== 200)
+  assert.equal(rejected.status, 404)
+  assert.equal(rejected.body.code, 'request_not_found')
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM b_activation_codes').get().n, 1)
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM b_leases').get().n, 1)
+  assert.equal(db.prepare('SELECT state FROM b_invite_requests WHERE request_id = ?').get(pending.id).state, 'fulfilled')
+})
+
+test('邀请创建失败：申请回到 pending，不留下邀请或租约', async () => {
+  const { env, db } = createEnv()
+  const pending = await application(env, 'create-failure@example.com')
+  const prepare = env.DB.prepare.bind(env.DB)
+  env.DB.prepare = (sql) => {
+    if (sql.startsWith('INSERT INTO b_activation_codes')) {
+      return { bind: () => ({ run: async () => { throw new Error('injected invite failure') } }) }
+    }
+    return prepare(sql)
+  }
+  const result = await request(env, 'POST', VERIFY_PATH, { applicationId: pending.id, code: pending.code })
+  assert.equal(result.status, 503)
+  assert.equal(result.body.code, 'storage_unavailable')
+  assert.equal(db.prepare('SELECT state FROM b_invite_requests WHERE request_id = ?').get(pending.id).state, 'pending')
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM b_activation_codes').get().n, 0)
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM b_leases').get().n, 0)
+})
+
+test('900 条已过期未认领邀请会退休并留审计，不再挡住新邀请', async () => {
+  const { env, db, cf } = createEnv()
+  seedInvitedLeases(db, 900, Date.now() - 1000)
+  const created = await request(env, 'POST', '/admin/b/v1/invites', { note: 'after expiry cleanup' }, { admin: true })
+  assert.equal(created.status, 200, JSON.stringify(created.body))
+  assert.equal(created.body.ok, true)
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM b_leases WHERE state = 'retired'").get().n, 900)
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM b_leases WHERE state = 'invited'").get().n, 1)
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM b_activation_codes WHERE state = 'revoked'").get().n, 900)
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM b_admin_audit WHERE action = 'invite.expire'").get().n, 900)
+  assert.equal(cf.calls.length, 0)
+})
+
+test('900 条未过期 invited 租约仍计入容量', async () => {
+  const { env, db, cf } = createEnv()
+  seedInvitedLeases(db, 900, Date.now() + 86400000)
+  const created = await request(env, 'POST', '/admin/b/v1/invites', { note: 'must stay full' }, { admin: true })
+  assert.equal(created.status, 503)
+  assert.equal(created.body.code, 'self_service_capacity')
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM b_leases WHERE state = 'invited'").get().n, 900)
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM b_admin_audit WHERE action = 'invite.expire'").get().n, 0)
+  assert.equal(cf.calls.length, 0)
 })
