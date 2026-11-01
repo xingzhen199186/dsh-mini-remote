@@ -2359,6 +2359,8 @@
      */
     liveTool: null,
     running: false,
+    // 本地回显刚发出的指令后，下一次聊天渲染要贴底一次。
+    scrollSentMessage: false,
     subagentsRunning: false,
     sessions: [],
     // 排队中的指令（[{ id, text, placement }]）。跑着任务时接着发的那几条排在这儿，
@@ -4134,8 +4136,19 @@
     var settledKey = state.latest && state.latest.timestamp ? 'done:' + state.latest.timestamp : '';
     var newest = liveNow ? 'live' : settledKey;
     var isNew = liveNow ? newest !== pinnedAnswerKey : !!newest && newest !== seenSettledKey;
+    // 发送时展开 #work 会增加页面高度，让发送开头那次贴底失效。
+    // 本地回显后强制贴底一次；若回答已经到来，仍让下面的回答对齐规则优先。
+    var followSent = state.scrollSentMessage === true;
+    state.scrollSentMessage = false;
     pinnedAnswerKey = newest;
     if (!liveNow && settledKey) seenSettledKey = settledKey;
+    if (followSent && !isNew) {
+      // 刚发出的指令可能在上一轮还在流式时回显：这时 liveNow 仍是上一轮，
+      // 也要先把新指令露出来；只有“新回答已经开始”才让下面的回答对齐规则优先。
+      pinnedAnswerSpot = null;
+      mainEl.scrollTop = mainEl.scrollHeight;
+      return;
+    }
     if (newest && isNew) {
       var followsPinned = pinnedAnswerSpot !== null
         && Math.abs(mainEl.scrollTop - pinnedAnswerSpot) < 48;
@@ -6718,9 +6731,8 @@
     // （鲸鱼娘在跳、流式在写），别把正在翻历史的用户拽回来；这条管的是**用户自己按了发送**，
     // 那是主动动作，他想看自己刚发出去的那条、以及后面的回答，所以不管当时翻到哪儿都回底部。
     //
-    // 位置有讲究：必须放在 setRunning 之前。setRunning 会触发一次渲染，而渲染里的
-    // atBottom() 是在改内容**之前**问的——先滚到底，那次渲染才会认为「本来就在底部」
-    // 而继续跟着走；顺序反了，刚回到底部又会被那次渲染判成「用户翻上去了」而停在原地。
+    // 这里先立即回到底。setRunning 随后展开「正在执行」还会增加页面高度，
+    // 所以本地回显新气泡时由 scrollSentMessage 再贴底一次，不能只靠这一句。
     mainEl.scrollTop = mainEl.scrollHeight;
     inputEl.value = '';
     autoGrow();
@@ -6798,6 +6810,7 @@
               // 手机本地回显时轮还没开，先留空；服务端快照补上来时会带上真轮号。
               turn: currentTrajectoryTurn() }
           ]);
+          state.scrollSentMessage = true;
           render();
         }
       })

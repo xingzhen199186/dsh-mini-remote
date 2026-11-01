@@ -1773,9 +1773,8 @@ function buildSend({ running = false, serverSays = { ok: true }, rejects = false
     // send() 会无条件把页面拉回底部（见 lib/page.html 里那段注释），所以要给它一个 mainEl。
     mainEl,
     render: () => renders.push(state.mode),
-    // 记下 setRunning 被调用的**那一刻**滚动条在哪。用来钉住顺序：必须先滚到底再
-    // setRunning——setRunning 会触发渲染，而渲染里的 atBottom() 在改内容之前问，
-    // 顺序反了那次渲染会判成「用户翻上去了」，刚回到底部又停在原地。
+    // 记下 setRunning 被调用的**那一刻**滚动条在哪。发送开头先回到底，
+    // 执行区展开后的第二次贴底由下面 sendChatRunner 的完整回归覆盖。
     setRunning: (v) => { state.running = v; runnings.push(v); scrollAtSetRunning.push(mainEl.scrollTop) },
     toast: (m) => toasts.push(m),
     // 附件那几条函数在切片里，它们要用到这三个。
@@ -1915,11 +1914,10 @@ test('按发送时，不管翻到哪儿都立刻回到底部', () => {
   t.send()
   assert.equal(t.mainEl.scrollTop, 1000, '按了发送就该立刻回到底部，不管当时翻在哪儿')
 
-  // 顺序也要对：必须**先滚到底，再 setRunning**。setRunning 会触发一次渲染，而渲染里的
-  // atBottom() 是在改内容之前问的——如果那时滚动条还在上面，那次渲染会判成
-  // 「用户翻上去了」而停在原地，于是刚回到底部又不动了。
+  // 顺序也要对：发送动作先回到底，再 setRunning 展开执行区。
+  // 展开会让这次贴底失效，所以异步回显后的第二次贴底由 sendChatRunner 另外验证。
   assert.equal(t.scrollAtSetRunning[0], 1000,
-    'setRunning 触发渲染时滚动条得已经在底部了，否则那次渲染不会跟着走')
+    'setRunning 展开执行区前，发送动作已经先回到底部')
 })
 
 test('还在排队的那条，聊天里不显示成「已发出」', () => {
@@ -2834,6 +2832,104 @@ function chatSequenceRunner(layout) {
   mainEl.scrollTop = mainEl.scrollHeight
   return { state, mainEl, render }
 }
+
+/** 把真实 send() 和 renderChat() 放进同一份滚动状态里，覆盖异步回显的完整顺序。 */
+function sendChatRunner() {
+  const previous = { role: 'assistant', text: '上一轮长回答', timestamp: 1 }
+  const state = {
+    mode: 'chat', history: [{ role: 'user', text: '上一轮', timestamp: 0 }, previous],
+    latest: previous, live: '', running: false, uploads: [], queued: [], boundSessionId: 's1',
+  }
+  let geometry = { height: 3600, saidTops: [200], liveTop: 3400 }
+  const mainEl = {
+    classList: { remove() {} }, clientHeight: 600, scrollHeight: 3600, _scrollTop: 0,
+    get scrollTop() { return this._scrollTop },
+    set scrollTop(top) {
+      const max = Math.max(0, this.scrollHeight - this.clientHeight)
+      this._scrollTop = Math.max(0, Math.min(top, max))
+    },
+    getBoundingClientRect: () => ({ top: 0 }),
+  }
+  const node = (top) => ({ getBoundingClientRect: () => ({ top: top - mainEl.scrollTop }) })
+  function syncLayout() {
+    const started = state.history.some((m) => m.text === '刚发出的指令')
+    // #work 在 setRunning(true) 时展开，先于新用户气泡回显增加 180px。
+    const work = state.running ? 180 : 0
+    const live = state.live ? 600 : 0
+    geometry = { ...geometry, height: 3600 + (started ? 100 : 0) + work + live }
+    mainEl.scrollHeight = geometry.height
+    mainEl.scrollTop = mainEl.scrollTop
+  }
+  const replyEl = {
+    _html: '',
+    get innerHTML() { return this._html },
+    set innerHTML(value) { this._html = value; syncLayout() },
+    querySelector(sel) {
+      if (sel !== '.live' || !this._html.includes('class="live"')) return null
+      return node(geometry.liveTop)
+    },
+    querySelectorAll(sel) {
+      if (sel !== '.said') return []
+      const n = (this._html.match(/class="said"/g) || []).length
+      return Array.from({ length: n }, (_, i) => node(geometry.saidTops[i]))
+    },
+  }
+  const inputEl = { value: '刚发出的指令', placeholder: '', style: {}, scrollHeight: 40 }
+  const els = {}
+  const $ = (id) => (els[id] || (els[id] = {
+    hidden: false, innerHTML: '', disabled: false, value: '', files: null,
+    classList: { toggle() {} }, addEventListener() {}, click() {},
+  }))
+  const sandbox = {
+    state, replyEl, mainEl, inputEl, $,
+    timeLabel: () => '12:00', unlockAudio: () => {}, toast: () => {},
+    MAX_UPLOAD: 50 * 1024 * 1024, currentTrajectoryTurn: () => null,
+    api: () => Promise.resolve({ ok: true }),
+    setRunning(value) { state.running = value; syncLayout() },
+  }
+  const lb = html.indexOf('function liveBlock')
+  const build = new Function(...Object.keys(sandbox),
+    `${html.slice(start, end)}\n${html.slice(lb, html.indexOf('function render()'))}`
+    + `\n${html.slice(s2, e2)}\nfunction render() { renderChat(); }`
+    + '\nreturn { send, render: renderChat };')
+  const runner = build(...Object.values(sandbox))
+  syncLayout()
+  runner.render()
+  mainEl.scrollTop = mainEl.scrollHeight
+  return { ...runner, state, mainEl, inputEl }
+}
+
+test('上一轮还在流式时发送，新指令也要露出来', async () => {
+  const r = sendChatRunner()
+  r.state.live = '上一轮还在生成'
+  r.render()
+  r.send()
+  await Promise.resolve()
+  await Promise.resolve()
+  assert.ok(r.state.history.some((m) => m.text === '刚发出的指令'))
+  assert.equal(r.mainEl.scrollTop, r.mainEl.scrollHeight - r.mainEl.clientHeight,
+    '上一轮的 live 不能阻止新指令贴底')
+})
+
+test('发送时展开执行区后，异步画出的新指令仍贴底；随后流式与上翻规则不变', async () => {
+  const r = sendChatRunner()
+  r.send()
+  await Promise.resolve()
+  await Promise.resolve()
+
+  assert.ok(r.state.history.some((m) => m.text === '刚发出的指令'), '新指令已经回显')
+  assert.equal(r.mainEl.scrollTop, r.mainEl.scrollHeight - r.mainEl.clientHeight,
+    '执行区已经加高页面，也不能把新指令留在视口下面')
+
+  r.state.live = '新一轮正在生成'
+  r.render()
+  assert.equal(r.mainEl.scrollTop, 3388, '随后的新回答仍停在正文第一行')
+
+  r.mainEl.scrollTop = 200
+  r.state.live += '，继续生成'
+  r.render()
+  assert.equal(r.mainEl.scrollTop, 200, '用户随后手动上翻时不被拽回去')
+})
 
 test('发送后流式暂时清空：不把上一轮回答当成新回答跳回开头', () => {
   const previous = { role: 'assistant', text: '上一轮回答', timestamp: 1 }
