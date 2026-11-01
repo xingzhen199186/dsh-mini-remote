@@ -1346,7 +1346,6 @@ test('配对数据包含安全的 proxyCompat，且不自动改系统绕过列�
   assert.equal(payload.proxyCompat.tun, false)
   assert.equal(payload.proxyCompat.bypassApplied, false)
   assert.equal(payload.proxyCompat.bypassError, null)
-  assert.match(payload.proxyCompat.rulesText, /PROCESS-NAME,cloudflared\.exe,DIRECT/)
   const serialized = JSON.stringify(payload.proxyCompat)
   assert.ok(!serialized.includes('proxy-password') && !serialized.includes('env-password'))
   assert.ok(!('proxyServer' in payload.proxyCompat) && !('original' in payload.proxyCompat))

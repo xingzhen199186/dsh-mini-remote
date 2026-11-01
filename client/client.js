@@ -2625,7 +2625,7 @@ window.__ModuleLoader__.load({
           toggle(true, { mode: 'named', namedToken: named.token, publicUrl: named.publicUrl });
         },
         stop: function () { toggle(false, { mode: 'named' }); },
-      }, relayUi, info.proxyCompat, copied, copy)));
+      }, relayUi, info.proxyCompat)));
       external.push(collapsibleSub('manualUrl', '手动公网地址', groups.externalSubs.manualUrl, groups.toggleExternalSub, manualBlock(manual)));
       if (info.bRelay && bRelay) external.push(collapsibleSub('bRelay', '专属固定地址', groups.externalSubs.bRelay, groups.toggleExternalSub, bRelayBlock(info.bRelay, bRelay, busy, copied)));
       if (info.selfRelay && relay) {
@@ -4596,7 +4596,7 @@ window.__ModuleLoader__.load({
       return h('div', { key: 'self-relay-guide' }, out);
     }
 
-    function tunnelBlock(tunnel, busy, toggle, named, aRelay, proxyCompat, copied, copy) {
+    function tunnelBlock(tunnel, busy, toggle, named, aRelay, proxyCompat) {
       var namedActive = Boolean(tunnel.enabled && tunnel.mode === 'named');
       var quickEnabled = Boolean(tunnel.enabled && !namedActive);
       var working = Boolean(busy || tunnel.starting);
@@ -4639,9 +4639,9 @@ window.__ModuleLoader__.load({
       var proxyMessage = '';
       if (proxyCompat && proxyCompat.detected) {
         if (proxyCompat.tun) {
-          proxyMessage = 'TUN 模式无法由插件自动改规则；如果隧道连不上，复制下面的直连规则到代理软件，或改用专属固定地址。';
+          proxyMessage = 'TUN 模式无法由插件自动改规则；如果隧道连不上，需要在代理软件里让 cloudflared 直连，或改用专属固定地址。';
         } else if (proxyCompat.systemProxy) {
-          proxyMessage = '检测到系统代理；cloudflared 通常直连，不需要自动改绕过。若插件自身连不上，复制下面的规则。';
+          proxyMessage = '检测到系统代理；cloudflared 通常直连，不需要额外处理。若插件自身连不上，请检查代理软件是否强制透明代理或 DNS 劫持。';
         } else {
           proxyMessage = '检测到本机代理；如果隧道连不上，请复制下面的直连规则到代理软件。';
         }
@@ -4650,17 +4650,7 @@ window.__ModuleLoader__.load({
       return h('div', { key: 'tunnel', style: styles.block },
         h('div', { style: styles.entryTitle }, '公网访问'),
         h('div', { style: styles.muted }, '不想装 Tailscale 的话就打开这个：走 Cloudflare 的免费隧道，手机在外面用流量也能连进来。'),
-        proxyMessage ? h('div', { key: 'proxy-compat' },
-          h('div', { style: Object.assign({}, styles.muted, { marginTop: 10 }) }, '代理兼容：' + proxyMessage),
-          h('div', { style: { marginTop: 8 } },
-            h('button', {
-              type: 'button',
-              disabled: !proxyCompat.rulesText,
-              style: styles.btn,
-              onClick: function () { if (proxyCompat.rulesText) copy(proxyCompat.rulesText); },
-            }, proxyCompat.rulesText && copied === proxyCompat.rulesText ? '已复制' : '复制直连规则'),
-          ),
-        ) : null,
+        proxyMessage ? h('div', { key: 'proxy-compat', style: Object.assign({}, styles.muted, { marginTop: 10 }) }, '代理兼容：' + proxyMessage) : null,
         h('div', { style: Object.assign({}, styles.entryTitle, { marginTop: 14 }) }, '临时地址（快速隧道）'),
         h('label', { style: styles.toggleRow },
           h('input', {

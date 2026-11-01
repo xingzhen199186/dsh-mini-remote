@@ -1000,33 +1000,27 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
     assert.equal(byType(tree6, 'button').some((b) => textOf(b) === '复制直连规则'), false);
   });
 
-  await check('系统代理时显示代理兼容，并能复制直连规则', async () => {
-    const rules = 'PROCESS-NAME,cloudflared.exe,DIRECT\nDOMAIN-SUFFIX,trycloudflare.com,DIRECT';
+  await check('系统代理时显示代理兼容提示', async () => {
     await mount(withTunnel(
       { enabled: false, up: false, starting: false, error: null },
-      { proxyCompat: { detected: true, systemProxy: true, envProxy: false, tun: false, bypassApplied: false, rulesText: rules } },
+      { proxyCompat: { detected: true, systemProxy: true, envProxy: false, tun: false, bypassApplied: false } },
     ));
     const text = textOf(tree6);
     assert.match(text, /代理兼容/);
     assert.match(text, /cloudflared 通常直连/);
+    assert.doesNotMatch(text, /复制直连规则/);
     assert.doesNotMatch(text, /127\.0\.0\.1:7890|proxy-password/);
-    const written = [];
-    setGlobal('navigator', { clipboard: { writeText: async (value) => { written.push(value); } } });
-    byType(tree6, 'button').find((b) => textOf(b) === '复制直连规则').props.onClick();
-    await tick();
-    assert.deepEqual(written, [rules]);
-    assert.ok(byType(tree6, 'button').some((b) => textOf(b) === '已复制'));
   });
 
   await check('检测到 TUN 时诚实提示规则限制和专属固定地址替代路线', async () => {
     await mount(withTunnel(
       { enabled: true, up: false, starting: false, error: '连接超时' },
-      { proxyCompat: { detected: true, systemProxy: true, envProxy: true, tun: true, bypassApplied: false, rulesText: 'PROCESS-NAME,cloudflared.exe,DIRECT' } },
+      { proxyCompat: { detected: true, systemProxy: true, envProxy: true, tun: true, bypassApplied: false } },
     ));
     const text = textOf(tree6);
     assert.match(text, /TUN 模式无法由插件自动改规则/);
-    assert.match(text, /复制下面的直连规则到代理软件，或改用专属固定地址/);
-    assert.ok(byType(tree6, 'button').some((b) => textOf(b) === '复制直连规则'));
+    assert.match(text, /需要在代理软件里让 cloudflared 直连，或改用专属固定地址/);
+    assert.equal(byType(tree6, 'button').some((b) => textOf(b) === '复制直连规则'), false);
   });
 
   await check('公网开着且有地址时：开关选中，提示去看「公网」那条', async () => {

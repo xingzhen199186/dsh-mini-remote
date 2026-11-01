@@ -7,7 +7,6 @@ import {
   ensureSystemProxyBypass,
   restoreSystemProxyBypass,
   pickPhysicalIPv4,
-  proxyBypassRulesText,
 } from '../lib/proxy-compat.js'
 
 const KEY = String.raw`HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings`
@@ -150,10 +149,4 @@ test('pickPhysicalIPv4 排除虚拟网卡并优先常见私网地址', () => {
   assert.equal(pickPhysicalIPv4(interfaces), '192.168.31.2')
   assert.equal(pickPhysicalIPv4({ 'Wintun Userspace Tunnel': interfaces['Mihomo TUN'] }), null)
   assert.equal(pickPhysicalIPv4(() => interfaces), '192.168.31.2')
-})
-
-test('proxyBypassRulesText 可直接粘贴并包含进程和全部域名', () => {
-  const lines = proxyBypassRulesText().split('\n')
-  assert.equal(lines[0], 'PROCESS-NAME,cloudflared.exe,DIRECT')
-  assert.deepEqual(lines.slice(1), PROXY_BYPASS_DOMAINS.map((domain) => `DOMAIN-SUFFIX,${domain},DIRECT`))
 })
