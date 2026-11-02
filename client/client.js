@@ -2308,8 +2308,10 @@ window.__ModuleLoader__.load({
 
       var startAiSetup = function () {
         // 新会话只负责把提示词填进输入框，用户按发送即可；不替用户直接发消息。
-        if (uiWorkspaceFace && typeof uiWorkspaceFace.startSession === 'function') {
-          uiWorkspaceFace.startSession(undefined, { prompt: AI_SETUP_PROMPT, whenDraftExists: 'append' });
+        // 不在 startSession 的创建回调里塞 prompt：设置页不是会话面板，回调执行时
+        // 新会话的输入框可能还没挂好，DSH 会静默丢掉这份草稿。先开空白会话，等
+        // uiWorkspace.selection 真正切过去，再通过 conversation.input 填。
+        if (uiWorkspaceFace && typeof uiWorkspaceFace.startSession === 'function' && startAiSetupSession()) {
           return;
         }
         copy(AI_SETUP_PROMPT);
@@ -5650,7 +5652,75 @@ window.__ModuleLoader__.load({
     // 「点了没反应」的机制。所以退出那一下只能我们自己接。
     var layoutFace = null;        // 官方布局服务 ctx.layout；壳还没装配好时是 null
     var uiWorkspaceFace = null;   // 官方会话/工作区界面服务 ctx.uiWorkspace
+    var rootCtx = null;           // apply(ctx) 那一个根 ctx，给 AI 配置入口取 sessions/conversation
     var panelBeforeRemote = null; // 进远程窗口之前选中的面板；null = 会话视图（官方默认）
+
+    /** 当前主会话的 id；服务还没就绪时返回空串。 */
+    function currentSessionId() {
+      try {
+        var snapshot = uiWorkspaceFace && uiWorkspaceFace.selection && uiWorkspaceFace.selection.getSnapshot
+          ? uiWorkspaceFace.selection.getSnapshot()
+          : null;
+        return snapshot && typeof snapshot.sessionId === 'string' ? snapshot.sessionId : '';
+      } catch (err) {
+        return '';
+      }
+    }
+
+    /** 把 AI 配置提示词填进已经打开的主会话；成功返回 true。 */
+    function fillAiSetupPrompt(sessionId) {
+      if (!sessionId || currentSessionId() !== sessionId) return false;
+      try {
+        var sessions = rootCtx && typeof rootCtx.get === 'function' ? rootCtx.get('sessions') : null;
+        var conversation = rootCtx && typeof rootCtx.get === 'function' ? rootCtx.get('conversation') : null;
+        if (!sessions || !conversation || !conversation.input) return false;
+        var binding = typeof sessions.binding === 'function' ? sessions.binding(sessionId) : null;
+        if (!binding) return false;
+        var result = conversation.input.requestDraftInitialization(binding, {
+          prompt: AI_SETUP_PROMPT,
+          whenDraftExists: 'append',
+        });
+        return result === 'applied' || result === 'preserved';
+      } catch (err) {
+        return false;
+      }
+    }
+
+    /**
+     * 开一个空白会话，等主会话真正切过去再填提示词。
+     *
+     * 不能在 startSession 的创建回调里直接塞 prompt：设置页不是会话面板，
+     * 回调执行时输入框可能还没挂好，草稿会被静默丢掉。这里按 selection 确认
+     * 新会话已经打开，再重试几次；如果用户当前本来就是空白会话，同一个 id
+     * 也可以填。
+     */
+    function startAiSetupSession() {
+      if (!uiWorkspaceFace || typeof uiWorkspaceFace.startSession !== 'function') return false;
+      var before = currentSessionId();
+      var wasBlank = false;
+      try {
+        var sessions = rootCtx && typeof rootCtx.get === 'function' ? rootCtx.get('sessions') : null;
+        var list = sessions && sessions.list && sessions.list.getSnapshot ? sessions.list.getSnapshot() : null;
+        var summary = before && list && list.byId ? list.byId[before] : null;
+        wasBlank = Boolean(summary && summary.blank);
+      } catch (err) { wasBlank = false; }
+      try {
+        uiWorkspaceFace.startSession();
+      } catch (err) {
+        return false;
+      }
+      var tries = 0;
+      var attempt = function () {
+        var after = currentSessionId();
+        if (after && (after !== before || wasBlank)) {
+          if (fillAiSetupPrompt(after)) return;
+        }
+        tries += 1;
+        if (tries < 8) setTimeout(attempt, 150);
+      };
+      setTimeout(attempt, 80);
+      return true;
+    }
 
     // 我们那枚图标身上的记号。认「这一条是不是我们那一条」用 DOM 认，不认标题文字
     // ——标题是中文常量，换语言/改文案就失效了。
@@ -5742,6 +5812,7 @@ window.__ModuleLoader__.load({
     }
 
     function apply(ctx) {
+      rootCtx = ctx;
       // —— 「再点一下退出」的接线：拿官方布局服务的把手，并盯住「上一个面板」。
       // 布局服务（ctx.layout）由官方布局插件提供，不是我们依赖的槽位；照着官方插件
       // （dsh-client-ui-approval 等地）的写法用 ctx.inject 等它就绪，就绪前回调不跑、
