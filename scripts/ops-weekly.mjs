@@ -39,7 +39,10 @@ const b = body.b || {}
 const usage = a.usage || {}
 const ac = a.counts || {}
 const bc = b.counts || {}
-const pct = (value, limit) => limit ? (Number(value || 0) / limit * 100).toFixed(1) + '%' : '—'
+const pct = (value, limit) => limit ? (Number(value || 0) / limit * 100).toFixed(2) + '%' : '—'
+// Workers Paid $5：月度包含 10M 请求、10M KV 读取。
+const LIMIT = { workers: 10_000_000, kv: 10_000_000 }
+const num = (value) => Number(value || 0).toLocaleString('zh-CN')
 
 console.log('# 固定地址每周运维清单')
 console.log('')
@@ -50,8 +53,8 @@ console.log('')
 console.log('| 项目 | 当前 | 观察线 |')
 console.log('|---|---|---|')
 console.log('| 共享活跃实例 | ' + (ac.active ?? '—') + ' | 40 |')
-console.log('| 共享 Workers 请求 | ' + (usage.workers?.requests ?? 0) + '（' + pct(usage.workers?.requests, 100000) + '） | 60% |')
-console.log('| 共享 KV 请求 | ' + (usage.kv?.requests ?? 0) + '（' + pct(usage.kv?.requests, 100000) + '） | 60% |')
+console.log('| 共享 Workers 请求 | ' + num(usage.workers?.requests) + '（' + pct(usage.workers?.requests, LIMIT.workers) + '） | 60%（' + num(LIMIT.workers * 0.6) + '） |')
+console.log('| 共享 KV 请求 | ' + num(usage.kv?.requests) + '（' + pct(usage.kv?.requests, LIMIT.kv) + '） | 60%（' + num(LIMIT.kv * 0.6) + '） |')
 console.log('| 专属租约总数 | ' + (bc.total ?? '—') + ' | 700 |')
 console.log('')
 console.log('## 待处理')

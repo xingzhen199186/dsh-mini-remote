@@ -61,7 +61,10 @@ const b = snap.b || {}
 const usage = a.usage || {}
 const ac = a.counts || {}
 const bc = b.counts || {}
-const pct = (value, limit) => limit ? (Number(value || 0) / limit * 100).toFixed(1) + '%' : '—'
+const pct = (value, limit) => limit ? (Number(value || 0) / limit * 100).toFixed(2) + '%' : '—'
+// Workers Paid $5：月度包含 10M 请求、10M KV 读取、25B D1 读取行、50M D1 写入行。
+const LIMIT = { workers: 10_000_000, kv: 10_000_000, d1Read: 25_000_000_000, d1Write: 50_000_000 }
+const num = (value) => Number(value || 0).toLocaleString('zh-CN')
 
 function archiveText(text) {
   const date = new Intl.DateTimeFormat('en-CA', {
@@ -86,10 +89,10 @@ out('|---|---|')
 out('| 活跃实例 | ' + (ac.active ?? '—') + ' |')
 out('| 已撤销 | ' + (ac.revoked ?? '—') + ' |')
 out('| 未用邀请 | ' + (ac.unusedInvites ?? '—') + ' |')
-out('| Workers 请求 | ' + (usage.workers?.requests ?? 0) + ' / 100000（' + pct(usage.workers?.requests, 100000) + '） |')
-out('| KV 请求 | ' + (usage.kv?.requests ?? 0) + ' / 100000（' + pct(usage.kv?.requests, 100000) + '） |')
-out('| D1 读取行 | ' + (usage.d1?.rowsRead ?? 0) + ' / 5000000 |')
-out('| D1 写入行 | ' + (usage.d1?.rowsWritten ?? 0) + ' / 100000 |')
+out('| Workers 请求 | ' + num(usage.workers?.requests) + ' / ' + num(LIMIT.workers) + '（' + pct(usage.workers?.requests, LIMIT.workers) + '） |')
+out('| KV 请求 | ' + num(usage.kv?.requests) + ' / ' + num(LIMIT.kv) + '（' + pct(usage.kv?.requests, LIMIT.kv) + '） |')
+out('| D1 读取行 | ' + num(usage.d1?.rowsRead) + ' / ' + num(LIMIT.d1Read) + '（' + pct(usage.d1?.rowsRead, LIMIT.d1Read) + '） |')
+out('| D1 写入行 | ' + num(usage.d1?.rowsWritten) + ' / ' + num(LIMIT.d1Write) + '（' + pct(usage.d1?.rowsWritten, LIMIT.d1Write) + '） |')
 out('')
 out('## 专属固定地址')
 out('')
