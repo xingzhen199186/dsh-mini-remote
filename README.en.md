@@ -88,10 +88,10 @@ dsh plugin --profile web add C:\path\to\dsh-mini-remote
 ### Start and Confirm the Service
 
 1. Restart the DSH service: close the current `dsh web` window and start it again.
-2. Check the console for initialization output, the listening port, and the access token:
+2. Check the console for initialization output and the listening port:
 
    ```text
-   [dsh-mini-remote] 已启动：http://127.0.0.1:3090/mini?token=xxxxxxxxxxxx
+   [dsh-mini-remote] started: http://127.0.0.1:3090/mini
    ```
 
 3. Open the DSH desktop UI and go to **Settings** → **Remote Settings** to see the pairing QR codes and connection details.
@@ -109,7 +109,7 @@ dsh plugin --profile web add C:\path\to\dsh-mini-remote
 3. If you are not sure which route to use, click **Let AI guide me** at the top and follow the prompts.
 4. The phone page opens the session list, and the phone appears under **Computers & Devices** on the computer: the connection is working.
 
-> **The address is a credential.** The QR code and copied address contain an entry passphrase. Anyone who holds them can enroll a device and operate this computer. Do not send screenshots, project the page, or paste the address in public. After a device is revoked, scan again.
+> **A pairing link is an entry credential.** The QR code and copied link contain a one-time pairing grant valid for 5 minutes. After pairing, the long-lived credential stays in an HttpOnly cookie and never appears in the URL. An unused link can still enroll a device, so do not send screenshots, project the page, or paste it in public. After a device is revoked, scan again.
 
 ---
 
@@ -178,11 +178,13 @@ Pick one route that works before adding a fixed address. Use LAN when the phone 
 | **LAN** | Same Wi-Fi network | No extra dependency; plain HTTP; stops working when you leave the network | [01-LAN](docs/guide/01-内网.md) |
 | **Tailscale** | Remote use with a client installed | Both devices sign in to the same account; optional HTTPS depends on MagicDNS | [02-Tailscale](docs/guide/02-Tailscale.md) |
 | **Cloudflare public** | Temporary access, or a fixed address with your own domain | Temporary address changes after each restart; a fixed address needs a Cloudflare account and domain; traffic goes through Cloudflare | [03-Public Tunnel](docs/guide/03-公网隧道.md) |
-| **Shared fixed address** | A fixed URL without running a server | Requires a quick tunnel and a provider invite code; traffic goes through a shared relay and is not end-to-end encrypted | [04-Shared Fixed Address](docs/guide/04-共享固定地址.md) |
-| **Dedicated fixed address (B relay)** | A provider assigns a fixed domain or enables self-service | One-time activation code; the provider creates a named tunnel; stopping does not delete server resources | [05-Dedicated Fixed Address](docs/guide/05-专属固定地址.md) |
+| **Shared fixed address** | A fixed URL without running a server | Requires a quick tunnel and a provider invite code (valid for 30 minutes by default); traffic goes through a shared relay and is not end-to-end encrypted | [04-Shared Fixed Address](docs/guide/04-共享固定地址.md) |
+| **Dedicated fixed address (B relay)** | A provider assigns a fixed domain or enables self-service | One-time activation code (valid for 30 minutes by default); the provider creates a named tunnel; stopping does not delete server resources | [05-Dedicated Fixed Address](docs/guide/05-专属固定地址.md) |
 | **Self-hosted relay (single user)** | You have your own server and domain | Two domains and an frp token; fixed address; you maintain the server and certificate | [06-Self-hosted Relay](docs/guide/06-自建中继.md) |
 | **Self-hosted multi-user relay** | Several people each need access | An administrator deploys `relay-multi` and issues invite tickets; traffic goes only through that server | [07-Multi-user Relay](docs/guide/07-自建多用户中继.md) |
 | **Feishu** | Control through enterprise IM only | Configure a Feishu custom app; no inbound public port; currently text and approvals in direct messages | [13-Feishu](docs/guide/13-飞书通知.md) |
+
+Invite codes for the shared and dedicated fixed addresses are issued by the provider. If you do not have one, use the application entry the provider gives you; the plugin does not offer public registration.
 
 
 ---
@@ -194,7 +196,7 @@ Pick one route that works before adding a fixed address. Use LAN when the phone 
 - **A/B collaboration**: A uses `b_*` tools on B; B controls directories, writes, folder operations, and command permission locally. Re-pairing reuses the existing record via `machine-id`. See [11-A/B Collaboration](docs/guide/11-A-B端协作.md).
 - **B projects**: Register a real B directory as an A workspace without copying files; includes a B file panel and **New B Session**. See [12-B Projects](docs/guide/12-B项目.md).
 - **Bidirectional Feishu**: Text, question, and approval replies over the long connection. See [13-Feishu](docs/guide/13-飞书通知.md).
-- **Device management**: Phones and computers are registered separately; rename, revoke, or clean up records unused for 30 days. Revoked devices must scan again. See [10-Computers and Devices](docs/guide/10-电脑与设备.md).
+- **Device management**: Phones and computers are registered separately; rename or revoke them. The roster holds at most 5 devices, and a device idle for 30 days is removed automatically. Revoked devices must scan again. See [10-Computers and Devices](docs/guide/10-电脑与设备.md).
 
 ---
 
@@ -239,7 +241,7 @@ See [08-When It Will Not Connect](docs/guide/08-连不上怎么办.md) for the f
 
 ## Security Boundaries
 
-- **Addresses and devices**: the address contains an entry passphrase; revoked devices must scan again. Do not publish QR codes, passphrases, or addresses containing the passphrase.
+- **Addresses and devices**: the QR code and copied link contain a one-time pairing grant valid for 5 minutes. The long-lived credential stays in an HttpOnly cookie and never enters the URL. Revoked devices must scan again; do not publish QR codes, passphrases, or unused pairing links.
 - **Public and third-party routes**: Cloudflare, the shared fixed relay, and the dedicated B relay send traffic through a third party; a changing temporary hostname is not a security boundary. Self-hosted and multi-user relays also let the server operator see plaintext.
 - **Plugin permissions**: the plugin runs with the current user's privileges. Install only packages from trusted sources; an untrusted plugin can read files or leak credentials.
 - **Full interface**: **Advanced Settings** and Remote Window expose the complete DSH management plane, including model configuration, credentials, plugins, and session history. Enable them only for trusted devices.
@@ -256,8 +258,9 @@ npm test
 node client/verify.mjs
 ```
 
-- `npm test`: offline tests; DSH does not need to be running. Currently **1293 passed, 0 failed**.
-- `node client/verify.mjs`: verifies the client module, settings page, two-level collapsing, Remote Window, and B project panel. Currently **162 passed, 0 failed**.
+- `npm test`: offline tests; DSH does not need to be running.
+- `node client/verify.mjs`: verifies the client module, settings page, two-level collapsing, Remote Window, and B project panel.
+- Use the command output as the source of truth.
 - Run `npm pack --dry-run` before release to inspect the package contents.
 
 See [CHANGELOG.md](CHANGELOG.md) for detailed changes.

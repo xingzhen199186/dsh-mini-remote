@@ -12,18 +12,16 @@
 - **隧道自动恢复**：异常退出和公网探测失败按指数退避重试；连续失败达到预算后暂停，设置页给「立即重试」。
 - **错误分类**：token 错、公网地址/Public Hostname 不一致、本机服务没开等配置类问题不会盲目重启；本机 DNS 失败会用公共 DNS 复核，避免误判。
 - 设置页显示恢复阶段、重试次数和最近错误类型。
-- A 方案 Phase 0：quick 接入监督器，新增 `originHostHeader` 与 `RelayProvider` 纯状态机（未接 Worker）。
-- A 方案 Phase 1：新增 Worker 控制面、D1/KV 迁移、邀请/注册/注销/撤销、运营 CLI 与 11 项 Worker 测试；staging 已部署到 `relay.dsh-mini-remote.com`。
-- A 方案 Phase 2：Worker 数据面初版（Host 解析、路径/查询串、Host 重写、流式 body、WebSocket 分支、离线/撤销页）与 staging 通配路由；真实手机长连接验收待做。
-- A 方案 Phase 3：插件 RelayProvider 接 staging Worker，新增本机身份、Worker 客户端、固定中继配对条目与设置页开关；真机固定地址页面/API/SSE 已通过。
-- A 方案 Phase 4 起步：数据面全局停用开关（`proxyEnabled=false` 不转发），管理面仍可恢复。
-- A 中继：`workers_dev` 关闭，CLI 支持 Cloudflare Access service token，补 Access 配置清单。
-- A 中继：新增只读用量监控脚本 `worker/scripts/relay-usage.mjs`（Workers/D1/KV 每日 Free 用量）。
-- A 中继：新增 Cloudflare Access 保护的运维台 `/admin`，含实例、审计、邀请、运营开关和每日用量；Worker Cron 每天 08:10（北京时间）采集。
-- A 中继运维台：未使用邀请码可在页面回看和复制（新增 `code` 列迁移；旧码不可恢复）。
-- A 中继运维台：新增「必须邀请码 / 自服务注册」开关，默认仍要求邀请码。
-- A 中继：取消 15 分钟周期心跳，只在 quick 地址变化时登记；固定地址 KV TTL 改为 90 天。
 - 固定域名走 HTTPS 时，设备和口令 cookie 自动带 `Secure`；启动后立即做一次公网探测。
+
+- **配对入口收紧**：手机二维码改为 5 分钟、一次性的配对 grant，长期 token 不再进入 URL；配对成功后凭据放在 HttpOnly Cookie 中。
+- **设备名册**：最多保留 5 台，30 天没有活动的设备自动删除。
+- **邀请码有效期**：共享固定地址和专属固定地址的邀请码默认 30 分钟。
+
+### 修了的
+
+- 手机聊天页发送指令后，页面会贴底显示刚发出的那条，不再停在上一轮回答的底部。
+- 代理提示不再暗示插件会修改代理规则；TUN 模式只提示关闭 TUN 后再试。
 
 ## [0.2.6] - 2026-10-26
 

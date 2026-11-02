@@ -107,3 +107,9 @@ docs/promo-legacy.*
 docs/screen-dark.png
 docs/screen-light.png
 docs/screen-full-light.png
+
+# 自有服务端控制面、运维台和防滥用实现：只留本机，不发布到公开仓库。
+# 包含后台地址、管理 API、Cloudflare/D1 资源、Secrets 配置和限额实现。
+worker/
+worker-b/
+test/worker.test.mjs
