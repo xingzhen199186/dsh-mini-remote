@@ -34,7 +34,7 @@
 
 Minimal Remote is a plugin for [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/DeepSeek-Harness). It solves three problems:
 
-- **Phone control**: view sessions, send instructions, answer questions, and handle approvals in a phone browser without squeezing the full desktop interface onto a small screen.
+- **Phone control**: switch between Single frame, Chat, and Full modes in a phone browser to view sessions, send instructions, answer questions, or handle approvals, without squeezing the entire desktop interface onto a small screen.
 - **Remote Window**: open this computer's complete DSH interface inside another computer's DSH desktop.
 - **A/B cross-computer work**: A keeps the session and model, and uses `b_*` tools to read or write files and run commands on B. B decides locally which directories, writes, folder operations, and commands are allowed.
 
