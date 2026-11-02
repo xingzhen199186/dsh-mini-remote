@@ -6,7 +6,7 @@
   <img src="https://raw.githubusercontent.com/xingzhen199186/dsh-mini-remote/main/docs/promo.webp" alt="Minimal Remote: view instructions, conclusions, and execution details on your phone when you need them" width="720" />
 </p>
 
-**Bring DeepSeek Harness to your phone, and to another computer.**
+**Use DeepSeek Harness anywhere, and change the world.**
 
 [![npm](https://img.shields.io/npm/v/dsh-mini-remote)](https://www.npmjs.com/package/dsh-mini-remote)
 [![Node.js](https://img.shields.io/badge/node-%5E22.19.0%20%7C%7C%20%3E%3D24.0.0-brightgreen)](https://nodejs.org/)
