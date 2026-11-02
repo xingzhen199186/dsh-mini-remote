@@ -116,3 +116,6 @@ test/worker.test.mjs
 
 # 私人运维脚本：不进入公开 GitHub 仓库；同步到知识库 X 的运维目录。
 scripts/ops-*.mjs
+
+# 新会话交接文件，只放本机，不进公开仓库。
+HANDOFF.md
