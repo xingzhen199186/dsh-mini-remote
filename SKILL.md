@@ -39,20 +39,20 @@ description: 当用户要配置、修复或理解 dsh-mini-remote 时使用，�
 | 内网 | `docs/guide/01-内网.md` |
 | Tailscale | `docs/guide/02-Tailscale.md` |
 | 公网隧道 | `docs/guide/03-公网隧道.md` |
-| 手动公网地址、Tailscale Funnel、反向代理 | `docs/guide/17-手动公网地址.md` |
-| 共享固定地址 | `docs/guide/04-共享固定地址.md` |
-| 专属固定地址 | `docs/guide/05-专属固定地址.md` |
-| 自建中继 | `docs/guide/06-自建中继.md` |
-| 自建多用户中继 | `docs/guide/07-自建多用户中继.md` |
-| 连不上、代理、TUN 排障 | `docs/guide/08-连不上怎么办.md` |
-| 手机连接、二维码 grant、密码与页面模式 | `docs/guide/09-手机连接与密码.md` |
-| 电脑与设备、设备名单、其他电脑 | `docs/guide/10-电脑与设备.md` |
-| A/B 端协作、配对、权限 | `docs/guide/11-A-B端协作.md` |
-| B 项目、B 会话、B 文件 | `docs/guide/12-B项目.md` |
-| 飞书单聊、通知、机器人收发 | `docs/guide/13-飞书通知.md` |
-| 自检、进阶设置 | `docs/guide/14-自检与进阶设置.md` |
-| 远程窗口、嵌入另一台电脑的 DSH | `docs/guide/15-远程窗口.md` |
-| 配置参数、生效方式 | `docs/guide/16-参数与生效方式.md` |
+| 手动公网地址、Tailscale Funnel、反向代理 | `docs/guide/04-手动公网地址.md` |
+| 共享固定地址 | `docs/guide/05-共享固定地址.md` |
+| 专属固定地址 | `docs/guide/06-专属固定地址.md` |
+| 自建中继 | `docs/guide/07-自建中继.md` |
+| 自建多用户中继 | `docs/guide/08-自建多用户中继.md` |
+| 连不上、代理、TUN 排障 | `docs/guide/09-连不上怎么办.md` |
+| 手机连接、二维码 grant、密码与页面模式 | `docs/guide/10-手机连接与密码.md` |
+| 电脑与设备、设备名单、其他电脑 | `docs/guide/11-电脑与设备.md` |
+| A/B 端协作、配对、权限 | `docs/guide/12-A-B端协作.md` |
+| B 项目、B 会话、B 文件 | `docs/guide/13-B项目.md` |
+| 飞书单聊、通知、机器人收发 | `docs/guide/14-飞书通知.md` |
+| 自检、进阶设置 | `docs/guide/15-自检与进阶设置.md` |
+| 远程窗口、嵌入另一台电脑的 DSH | `docs/guide/16-远程窗口.md` |
+| 配置参数、生效方式 | `docs/guide/17-参数与生效方式.md` |
 
 如果用户问的是“整页怎么配”，不要一次读完全部文档；先按上面的板块判断，只读当前这一篇。
 
@@ -61,7 +61,7 @@ description: 当用户要配置、修复或理解 dsh-mini-remote 时使用，�
 - 一次只让用户做一个动作，做完再给下一步。
 - 每一步都说清「做完后应该看到什么」。
 - 需要用户去另一个页面操作时，给出页面路径和按钮名称。
-- 用户说「打不开」「连不上」时，先读 `docs/guide/08-连不上怎么办.md`，不要猜。
+- 用户说「打不开」「连不上」时，先读 `docs/guide/09-连不上怎么办.md`，不要猜。
 - 能用状态工具确认的，不要靠猜；工具不可用时，明确说「我看不到你现在的状态，请把设置页最上面那段发我」。
 
 ## 安全边界

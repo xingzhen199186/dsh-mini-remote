@@ -178,12 +178,12 @@ Pick one route that works before adding a fixed address. Use LAN when the phone 
 | **LAN** | Same Wi-Fi network | No extra dependency; plain HTTP; stops working when you leave the network | [01-LAN](docs/guide/01-内网.md) |
 | **Tailscale** | Remote use with a client installed | Both devices sign in to the same account; optional HTTPS depends on MagicDNS | [02-Tailscale](docs/guide/02-Tailscale.md) |
 | **Cloudflare public** | Temporary access, or a fixed address with your own domain | Temporary address changes after each restart; a fixed address needs a Cloudflare account and domain; traffic goes through Cloudflare | [03-Public Tunnel](docs/guide/03-公网隧道.md) |
-| **Manual public address** | You already run Tailscale Funnel, a reverse proxy, or another public entry | The plugin only displays the address and QR code; it does not create, probe, or repair the link. The entry itself must open `/mini`; Tailscale Funnel supports only ports 443, 8443, and 10000 | [17-Manual Public Address](docs/guide/17-手动公网地址.md) |
-| **Shared fixed address** | A fixed URL without running a server | Requires a quick tunnel and a provider invite code (valid for 30 minutes by default; see details); traffic goes through a shared relay and is not end-to-end encrypted | [04-Shared Fixed Address](docs/guide/04-共享固定地址.md) |
-| **Dedicated fixed address** | A provider assigns a fixed domain or enables self-service | One-time activation code (valid for 30 minutes by default; see details); the provider creates a named tunnel; stopping does not delete server resources | [05-Dedicated Fixed Address](docs/guide/05-专属固定地址.md) |
-| **Self-hosted relay (single user)** | You have your own server and domain | Requires your own public server and your own domain; two hostnames and an frp token; fixed address; you maintain the server and certificate | [06-Self-hosted Relay](docs/guide/06-自建中继.md) |
-| **Self-hosted multi-user relay** | Several people each need access, and you have a server and domain | Requires your own public server and your own domain; an administrator deploys `relay-multi` and issues invite tickets; traffic goes only through that server | [07-Multi-user Relay](docs/guide/07-自建多用户中继.md) |
-| **Feishu** | Control through enterprise IM only | Configure a Feishu custom app; no inbound public port; currently text and approvals in direct messages | [13-Feishu](docs/guide/13-飞书通知.md) |
+| **Manual public address** | You already run Tailscale Funnel, a reverse proxy, or another public entry | The plugin only displays the address and QR code; it does not create, probe, or repair the link. The entry itself must open `/mini`; Tailscale Funnel supports only ports 443, 8443, and 10000 | [04-Manual Public Address](docs/guide/04-手动公网地址.md) |
+| **Shared fixed address** | A fixed URL without running a server | Requires a quick tunnel and a provider invite code (valid for 30 minutes by default; see details); traffic goes through a shared relay and is not end-to-end encrypted | [05-Shared Fixed Address](docs/guide/05-共享固定地址.md) |
+| **Dedicated fixed address** | A provider assigns a fixed domain or enables self-service | One-time activation code (valid for 30 minutes by default; see details); the provider creates a named tunnel; stopping does not delete server resources | [06-Dedicated Fixed Address](docs/guide/06-专属固定地址.md) |
+| **Self-hosted relay (single user)** | You have your own server and domain | Requires your own public server and your own domain; two hostnames and an frp token; fixed address; you maintain the server and certificate | [07-Self-hosted Relay](docs/guide/07-自建中继.md) |
+| **Self-hosted multi-user relay** | Several people each need access, and you have a server and domain | Requires your own public server and your own domain; an administrator deploys `relay-multi` and issues invite tickets; traffic goes only through that server | [08-Multi-user Relay](docs/guide/08-自建多用户中继.md) |
+| **Feishu** | Control through enterprise IM only | Configure a Feishu custom app; no inbound public port; currently text and approvals in direct messages | [14-Feishu](docs/guide/14-飞书通知.md) |
 
 Invite codes for the shared and dedicated fixed addresses are issued by the provider. If you do not have one, use the application entry the provider gives you; the plugin does not offer public registration.
 
@@ -192,12 +192,12 @@ Invite codes for the shared and dedicated fixed addresses are issued by the prov
 
 ## Core Capabilities
 
-- **Phone page**: Single frame, Chat, and Full views; queueing, slash commands, question cards, approvals, and session management. See [09-Phone Connection and Passphrase](docs/guide/09-手机连接与密码.md).
-- **Remote Window**: Open this computer's complete DSH interface inside another computer's DSH desktop. See [15-Remote Window](docs/guide/15-远程窗口.md).
-- **A/B collaboration**: A uses `b_*` tools on B; B controls directories, writes, folder operations, and command permission locally. Re-pairing reuses the existing record via `machine-id`. See [11-A/B Collaboration](docs/guide/11-A-B端协作.md).
-- **B projects**: Register a real B directory as an A workspace without copying files; includes a B file panel and **New B Session**. See [12-B Projects](docs/guide/12-B项目.md).
-- **Bidirectional Feishu**: Text, question, and approval replies over the long connection. See [13-Feishu](docs/guide/13-飞书通知.md).
-- **Device management**: Phones and computers are registered separately; rename or revoke them. The roster holds at most 5 devices, and a device idle for 30 days is removed automatically. Revoked devices must scan again. See [10-Computers and Devices](docs/guide/10-电脑与设备.md).
+- **Phone page**: Single frame, Chat, and Full views; queueing, slash commands, question cards, approvals, and session management. See [10-Phone Connection and Passphrase](docs/guide/10-手机连接与密码.md).
+- **Remote Window**: Open this computer's complete DSH interface inside another computer's DSH desktop. See [16-Remote Window](docs/guide/16-远程窗口.md).
+- **A/B collaboration**: A uses `b_*` tools on B; B controls directories, writes, folder operations, and command permission locally. Re-pairing reuses the existing record via `machine-id`. See [12-A/B Collaboration](docs/guide/12-A-B端协作.md).
+- **B projects**: Register a real B directory as an A workspace without copying files; includes a B file panel and **New B Session**. See [13-B Projects](docs/guide/13-B项目.md).
+- **Bidirectional Feishu**: Text, question, and approval replies over the long connection. See [14-Feishu](docs/guide/14-飞书通知.md).
+- **Device management**: Phones and computers are registered separately; rename or revoke them. The roster holds at most 5 devices, and a device idle for 30 days is removed automatically. Revoked devices must scan again. See [11-Computers and Devices](docs/guide/11-电脑与设备.md).
 
 ---
 
@@ -214,7 +214,7 @@ Invite codes for the shared and dedicated fixed addresses are issued by the prov
 | **Notifications & Integrations** | Feishu, credentials, allowlists, setup guide |
 | **Diagnostics & Advanced** | Self-check, recent errors |
 
-For full settings details, see [14-Self-check and Advanced Settings](docs/guide/14-自检与进阶设置.md) and [16-Parameters and Timing](docs/guide/16-参数与生效方式.md).
+For full settings details, see [15-Self-check and Advanced Settings](docs/guide/15-自检与进阶设置.md) and [17-Parameters and Timing](docs/guide/17-参数与生效方式.md).
 
 ---
 
@@ -236,7 +236,7 @@ https://<machine>.<tailnet>.ts.net
 
 If `3090` is occupied, use the listening port shown under **Diagnostics & Advanced** → **Self-check**. To reconfigure, turn **Tailscale HTTPS** off and on again under **Connection & Fixed Addresses**.
 
-See [08-When It Will Not Connect](docs/guide/08-连不上怎么办.md) for the full symptom table and checks.
+See [09-When It Will Not Connect](docs/guide/09-连不上怎么办.md) for the full symptom table and checks.
 
 ---
 
