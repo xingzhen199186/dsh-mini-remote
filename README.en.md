@@ -178,7 +178,7 @@ Pick one route that works before adding a fixed address. Use LAN when the phone 
 | **LAN** | Same Wi-Fi network | No extra dependency; plain HTTP; stops working when you leave the network | [01-LAN](docs/guide/01-内网.md) |
 | **Tailscale** | Remote use with a client installed | Both devices sign in to the same account; optional HTTPS depends on MagicDNS | [02-Tailscale](docs/guide/02-Tailscale.md) |
 | **Cloudflare public** | Temporary access, or a fixed address with your own domain | Temporary address changes after each restart; a fixed address needs a Cloudflare account and domain; traffic goes through Cloudflare | [03-Public Tunnel](docs/guide/03-公网隧道.md) |
-| **Manual public address** | You already run Tailscale Funnel, a reverse proxy, or another public entry | The plugin only displays the address and QR code; it does not create, probe, or repair the link. The entry itself must open `/mini`; Tailscale Funnel supports only ports 443, 8443, and 10000 | [03-Public Tunnel](docs/guide/03-公网隧道.md#手动公网地址tailscale-funnel--反向代理) |
+| **Manual public address** | You already run Tailscale Funnel, a reverse proxy, or another public entry | The plugin only displays the address and QR code; it does not create, probe, or repair the link. The entry itself must open `/mini`; Tailscale Funnel supports only ports 443, 8443, and 10000 | [17-Manual Public Address](docs/guide/17-手动公网地址.md) |
 | **Shared fixed address** | A fixed URL without running a server | Requires a quick tunnel and a provider invite code (valid for 30 minutes by default; see details); traffic goes through a shared relay and is not end-to-end encrypted | [04-Shared Fixed Address](docs/guide/04-共享固定地址.md) |
 | **Dedicated fixed address** | A provider assigns a fixed domain or enables self-service | One-time activation code (valid for 30 minutes by default; see details); the provider creates a named tunnel; stopping does not delete server resources | [05-Dedicated Fixed Address](docs/guide/05-专属固定地址.md) |
 | **Self-hosted relay (single user)** | You have your own server and domain | Requires your own public server and your own domain; two hostnames and an frp token; fixed address; you maintain the server and certificate | [06-Self-hosted Relay](docs/guide/06-自建中继.md) |
@@ -270,7 +270,7 @@ See [CHANGELOG.md](CHANGELOG.md) for detailed changes.
 
 ## Documentation
 
-- **Full guide**: [docs/guide/](docs/guide/) (00–16). Connection, passphrases, devices, A/B, B projects, Feishu, self-check, Remote Window, and parameters are all here.
+- **Full guide**: [docs/guide/](docs/guide/) (00–17). Connection, passphrases, devices, A/B, B projects, Feishu, self-check, Remote Window, and parameters are all here.
 - **AI guide**: [SKILL.md](SKILL.md).
 - **Self-hosted relay server**: [relay-server/README.md](relay-server/README.md).
 - **Multi-user relay server**: [relay-multi/README.md](relay-multi/README.md).

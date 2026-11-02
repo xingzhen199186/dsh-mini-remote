@@ -19,6 +19,7 @@ description: 当用户要配置、修复或理解 dsh-mini-remote 时使用，�
 | 手机和电脑在同一个 Wi-Fi | 内网 | 两端在同一网络 |
 | 出门也要用，能装一个 App | Tailscale | 电脑和手机安装并登录 |
 | 出门也要用，不想装 App，临时用 | Cloudflare 快速隧道 | 首次需要下载组件 |
+| 已经在插件外配好公网入口 | 手动公网地址 | 自己维护 Tailscale Funnel 或反向代理 |
 | 要固定网址，使用共享入口 | 共享固定地址 | 先开快速隧道，并有邀请码 |
 | 服务方已单独分配固定域名 | 专属固定地址 | 有激活码 |
 | 有自己的服务器和域名 | 自建中继 | 已准备服务器和域名 |
@@ -38,6 +39,7 @@ description: 当用户要配置、修复或理解 dsh-mini-remote 时使用，�
 | 内网 | `docs/guide/01-内网.md` |
 | Tailscale | `docs/guide/02-Tailscale.md` |
 | 公网隧道 | `docs/guide/03-公网隧道.md` |
+| 手动公网地址、Tailscale Funnel、反向代理 | `docs/guide/17-手动公网地址.md` |
 | 共享固定地址 | `docs/guide/04-共享固定地址.md` |
 | 专属固定地址 | `docs/guide/05-专属固定地址.md` |
 | 自建中继 | `docs/guide/06-自建中继.md` |
