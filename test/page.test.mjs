@@ -7042,9 +7042,9 @@ test('轨迹详情：概览/载荷两页签，切换只改显隐', () => {
 /** 轨迹详情里的附件清单：从「只写名字」变成「点得开原件」（2026-11-05）。 */
 test('轨迹附件：清单行带 id，点得开原件；老记录没有 id 就如实置灰', () => {
   const src = pageScript()
-  const a = src.indexOf('function trajAttachHtml')
+  const a = src.indexOf('function trajAttachRowsHtml')
   const b = src.indexOf('function openTrajAssistant')
-  assert.ok(a > 0 && b > a, '找不到 trajAttachHtml，锚点变了先修测试')
+  assert.ok(a > 0 && b > a, '找不到 trajAttachRowsHtml，锚点变了先修测试')
   // eslint-disable-next-line no-new-func
   const fn = new Function('escapeHtml', `${src.slice(a, b)}\nreturn trajAttachHtml;`)(md.escapeHtml)
 
@@ -7068,4 +7068,32 @@ test('轨迹附件：清单行带 id，点得开原件；老记录没有 id 就�
   // 读取原件的那条接口只带 id，会话由服务端自己认。
   assert.ok(src.includes('/mini/api/attachment?sessionId='), '附件要走 /mini/api/attachment，不能借 /mini/file')
   assert.ok(src.includes('openImgView(attachmentUrl(id))'), '图片走全屏看图')
+})
+
+/** 轨迹列表的三样结构（2026-11-05，照桌面端）：请求边界行、轮次竖线、子工具缩进。 */
+test('轨迹：请求边界行、轮次竖线、子工具缩进', () => {
+  const src = pageScript()
+  const a = src.indexOf('function buildTrajItems')
+  const b = src.indexOf('function trajAssistantSummary')
+  assert.ok(a > 0 && b > a, '找不到 buildTrajItems，锚点变了先修测试')
+  // eslint-disable-next-line no-new-func
+  const build = new Function(`${src.slice(a, b)}\nreturn buildTrajItems;`)()
+  const items = build([
+    { id: 'c1', kind: 'tool', step: 1, name: 'run_code', summary: '跑一段程序' },
+    { id: 'sub:s1', kind: 'subtool', step: 1, parentCallId: 'c1', name: 'read', summary: 'a.txt' },
+  ])
+  assert.equal(items.length, 1, '子工具不占顶层行')
+  assert.equal(items[0].subtools.length, 1, '要挂到父工具下面')
+  assert.equal(items[0].subtools[0].id, 'sub:s1')
+
+  // 找不到父级时不许吞掉（老日志里父子关系可能缺）。
+  const orphan = build([{ id: 'sub:x', kind: 'subtool', step: 1, parentCallId: 'nope', name: 'read' }])
+  assert.equal(orphan.length, 1, '找不到父级就照普通工具行显示')
+
+  assert.ok(src.includes("'<div class=\"tj-req'"), '要有请求边界行')
+  assert.ok(src.includes('tj-in-turn'), '要挂轮次竖线')
+  assert.ok(src.includes('tj-sub'), '子工具要缩进')
+  assert.match(html, /\.tj-req::after[^}]*border-radius:\s*50%/, '请求边界是圆点')
+  assert.match(html, /\.traj-item\.tj-in-turn::before[^}]*width:\s*2px/, '轮次竖线是 2px')
+  assert.match(html, /\.traj-item\.tj-sub[^}]*padding-left:\s*46px/, '子工具缩进 20+26')
 })

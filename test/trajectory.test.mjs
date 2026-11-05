@@ -722,3 +722,60 @@ test('附件：不透明的 id 与整份引用都留着（手机点得开原件�
   assert.equal(att[1].id, 'sha256:def456')
   assert.equal(att[1].ref.bytes, 99)
 })
+
+test('附件：用户只传文件、一个字不写，也要留一条记录', () => {
+  const ref = { attachmentId: 'sha256:u1', bytes: 2048, name: '手机拍的.png' }
+  const groups = replayTrajectory([
+    ev('turn/start', { turn: 1 }),
+    ev('user/message', {
+      turn: 1, id: 'm1', source: { kind: 'user' },
+      content: [{ type: 'image', attachment: ref }],
+    }),
+  ])
+  const e = groups[0].entries[0]
+  assert.equal(e.kind, 'user', '以前这种消息整条被丢掉，现在要留一行')
+  assert.equal(e.output, '', '没有文字就是没有')
+  assert.match(e.summary, /手机拍的\.png/, '摘要用附件名，列表上才认得出')
+  assert.equal(e.attachments[0].id, 'sha256:u1')
+})
+
+test('附件：用户发了文字又带文件，两样都在', () => {
+  const ref = { attachmentId: 'sha256:u2', bytes: 10, name: 'a.txt' }
+  const groups = replayTrajectory([
+    ev('turn/start', { turn: 1 }),
+    ev('user/message', {
+      turn: 1, id: 'm2', source: { kind: 'user' },
+      content: [{ type: 'text', text: '你看这个' }, { type: 'file', attachment: ref }],
+    }),
+  ])
+  const e = groups[0].entries[0]
+  assert.equal(e.output, '你看这个')
+  assert.equal(e.summary, '你看这个')
+  assert.equal(e.attachments.length, 1)
+  assert.equal(e.attachments[0].kind, 'file')
+})
+
+test('子工具：PTC 派发记下父子与结果，别当顶层工具行', () => {
+  const groups = replayTrajectory([
+    ev('turn/start', { turn: 1 }),
+    ev('tool/call', { turn: 1, step: 1, callId: 'c1', name: 'run_code', arguments: '{}' }),
+    ev('tool/ptc-dispatch-start', {
+      turn: 1, step: 1, parentCallId: 'c1', subCallId: 's1', name: 'read', arguments: { path: 'a.txt' },
+    }),
+    ev('tool/ptc-dispatch', {
+      turn: 1, step: 1, parentCallId: 'c1', subCallId: 's1', name: 'read',
+      content: [{ type: 'text', text: '读到了甲' }], isError: false,
+    }),
+    ev('tool/result', {
+      turn: 1, step: 1,
+      message: { role: 'tool', toolCallId: 'c1', isError: false, content: [{ type: 'text', text: 'done' }] },
+    }),
+  ])
+  const es = groups[0].entries
+  const sub = es.find((e) => e.kind === 'subtool')
+  assert.ok(sub, 'run_code 派发的子工具要留一条')
+  assert.equal(sub.parentCallId, 'c1', '父子关系是手机缩进的唯一依据')
+  assert.equal(sub.state, 'ok', '结果回来要落定，别一直转')
+  assert.equal(sub.output, '读到了甲')
+  assert.equal(es.filter((e) => e.kind === 'tool').length, 1, '父工具仍是一条，不重复')
+})
