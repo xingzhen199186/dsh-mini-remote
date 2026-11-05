@@ -16,7 +16,7 @@ import { fileURLToPath } from 'node:url'
 import { createTurnTracker, stepSelfTalk } from '../lib/events.js'
 import { createStore } from '../lib/store.js'
 import { createMiniServer, miniControl } from '../lib/server.js'
-import { renderPage, readArt, readImage } from '../lib/page.js'
+import { renderPage, readArt, readImage, readText } from '../lib/page.js'
 import { buildId } from '../lib/build.js'
 
 const ev = (type, data) => ({ type, seq: 0, time: Date.now(), data })
@@ -486,6 +486,42 @@ test('正文里写相对路径的图，也要按「那段对话的工作目录�
   assert.equal(readImage(relName), null)
 })
 
+test('正文里点开的文件：只发文本类，穿越与二进制都拦住', () => {
+  // 相对路径按项目根/工作区找；内容是原文，名字是文件名。
+  const hit = readText('package.json')
+  assert.ok(hit && hit.text.includes('dsh-mini-remote'), '相对路径要读得到 package.json')
+  assert.equal(hit.name, 'package.json')
+
+  // 相对写法里的 `..` 一律拒绝——要看项目外的东西，写绝对路径。
+  assert.equal(readText('../outside.md'), null)
+  // 白名单之外的一律不发：密钥类、图片、可执行文件。
+  assert.equal(readText('.env'), null)
+  assert.equal(readText('lib/art/out-demo.webp'), null)
+  assert.equal(readText('bin/dsh-mini-remote.js.exe'), null)
+  assert.equal(readText(''), null)
+  assert.equal(readText(undefined), null)
+})
+
+test('正文里点开的文件：路由要鉴权，只发文本，穿越挡住', async (t) => {
+  const { server, base, token } = await startTestServer()
+  t.after(() => server.close())
+
+  const ok = await fetch(`${base}/mini/file?p=${encodeURIComponent('package.json')}&token=${token}`)
+  assert.equal(ok.status, 200, '项目里的文本文件要读得到')
+  const body = await ok.json()
+  assert.equal(body.ok, true)
+  assert.equal(body.name, 'package.json')
+  assert.ok(body.text.includes('dsh-mini-remote'), '内容是原文')
+
+  // 三道闸：没令牌、相对写法里的 `..`、白名单之外的类型。
+  const anon = await fetch(`${base}/mini/file?p=${encodeURIComponent('package.json')}`)
+  assert.equal(anon.status, 401)
+  const escape = await fetch(`${base}/mini/file?p=${encodeURIComponent('../outside.md')}&token=${token}`)
+  assert.equal(escape.status, 404)
+  const blocked = await fetch(`${base}/mini/file?p=${encodeURIComponent('.env')}&token=${token}`)
+  assert.equal(blocked.status, 404, '.env 这类不在白名单，不能借这条口子读走')
+})
+
 test('立绘也算进构建指纹（换了图，手机就该拿到新的）', () => {
   // build.js 如果漏了 art/，指纹会等于「只算 js/html」的那个。
   const hash = createHash('sha256')
@@ -513,6 +549,9 @@ async function startTestServer(overrides = {}) {
     config: { port: 0, defaultMode: 'minimal' },
     bindAddresses: ['127.0.0.1'],
     token,
+    consumePairGrant: overrides.consumePairGrant,
+    pairing: overrides.pairing,
+    devices: overrides.devices,
     // 这个桩要还原真实契约：服务只负责把指令转交给插件，
     // 写历史是插件 onInstruction 的职责（见 lib/index.js）。
     onInstruction: overrides.onInstruction ?? (async (text) => {
@@ -530,6 +569,175 @@ async function startTestServer(overrides = {}) {
   })
   return { store, server, token, seen, base: `http://127.0.0.1:${server.port}` }
 }
+
+test('待审批清单：要令牌才能看，没令牌 401，有令牌返回空清单', async (t) => {
+  const { server, base, token } = await startTestServer()
+  t.after(() => server.close())
+
+  const denied = await fetch(`${base}/mini/api/pending`)
+  assert.equal(denied.status, 401, '没有令牌不能看有什么在等')
+
+  const res = await fetch(`${base}/mini/api/pending?token=${token}`)
+  assert.equal(res.status, 200)
+  const body = await res.json()
+  assert.equal(body.ok, true)
+  assert.deepEqual(body.questions, [])
+  assert.deepEqual(body.approvals, [])
+  assert.ok(!JSON.stringify(body).includes('command'), '清单里不能出现命令正文')
+})
+test('子智能体轨迹：没接上时如实说没接上，不假装有数据', async (t) => {
+  const { server, base, token } = await startTestServer()
+  t.after(() => server.close())
+
+  const res = await fetch(`${base}/mini/api/subagent-trajectory?childId=child-1&token=${token}`)
+  assert.equal(res.status, 200)
+  const body = await res.json()
+  assert.equal(body.ok, false, '没有轨迹能力时要如实说没有')
+})
+test('安卓原生配对：不带令牌也能用 grant 换到设备凭据和干净地址池', async (t) => {
+  const grants = []
+  const registrations = []
+  const { server, base } = await startTestServer({
+    consumePairGrant: (grant, ip) => {
+      grants.push({ grant, ip })
+      return { token: 'short-lived-token', rateLimited: false }
+    },
+    devices: {
+      register: (input) => {
+        registrations.push(input)
+        return { id: 'dev-android', name: input.name, credential: 'dev-android.secret' }
+      },
+      verify: () => null,
+      touch: () => {},
+    },
+    pairing: async () => ({
+      status: 200,
+      body: {
+        token: 'panel-token-must-not-leak',
+        entries: [{
+          kind: 'lan',
+          label: '内网',
+          url: 'http://192.168.1.8:3090/mini/pair?grant=fresh-grant&token=url-token',
+          qr: 'data:image/png;base64,not-for-native',
+        }],
+      },
+    }),
+  })
+  t.after(() => server.close())
+
+  const res = await post(base, '/mini/api/native-pair', null, { grant: 'good-grant', name: '  客厅手机  ' })
+  assert.equal(res.status, 200)
+  const body = await res.json()
+  assert.deepEqual(body, {
+    deviceId: 'dev-android',
+    deviceSecret: 'secret',
+    addresses: [{ kind: 'lan', label: '内网', url: 'http://192.168.1.8:3090' }],
+    keyId: null,
+    keyFp: null,
+  })
+  assert.deepEqual(registrations, [{ name: '客厅手机', kind: 'android-app' }])
+  assert.equal(grants.length, 1)
+  assert.equal(grants[0].grant, 'good-grant')
+  assert.ok(grants[0].ip, '消费 grant 时要像网页配对一样带来源 IP')
+  assert.ok(!JSON.stringify(body).includes('fresh-grant'), '地址池不能带出新的配对 grant')
+  assert.ok(!JSON.stringify(body).includes('url-token'), '地址池不能带 token')
+  assert.ok(!JSON.stringify(body).includes('not-for-native'), '地址池不能带二维码')
+})
+
+test('安卓原生配对：坏 grant 回 403，而且不登记设备', async (t) => {
+  let registrations = 0
+  const { server, base } = await startTestServer({
+    consumePairGrant: () => ({ token: null, rateLimited: false }),
+    devices: {
+      register: () => { registrations += 1 },
+      verify: () => null,
+      touch: () => {},
+    },
+  })
+  t.after(() => server.close())
+
+  const res = await post(base, '/mini/api/native-pair', null, { grant: 'bad-grant' })
+  assert.equal(res.status, 403)
+  assert.match((await res.json()).error, /失效/)
+  assert.equal(registrations, 0)
+})
+
+test('安卓原生配对：grant 兑换限速回 429，而且不登记设备', async (t) => {
+  let registrations = 0
+  const { server, base } = await startTestServer({
+    consumePairGrant: () => ({ token: null, rateLimited: true }),
+    devices: {
+      register: () => { registrations += 1 },
+      verify: () => null,
+      touch: () => {},
+    },
+  })
+  t.after(() => server.close())
+
+  const res = await post(base, '/mini/api/native-pair', null, { grant: 'limited-grant' })
+  assert.equal(res.status, 429)
+  assert.match((await res.json()).error, /太多/)
+  assert.equal(registrations, 0)
+})
+
+test('安卓原生配对：坏请求 400；名册不可用 501，并且不消费 grant', async (t) => {
+  let consumed = 0
+  const { server, base } = await startTestServer({
+    consumePairGrant: () => { consumed += 1; return { token: 'should-not-be-used', rateLimited: false } },
+  })
+  t.after(() => server.close())
+
+  const malformed = await fetch(`${base}/mini/api/native-pair`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: '{not-json',
+  })
+  assert.equal(malformed.status, 400)
+  const missing = await post(base, '/mini/api/native-pair', null, {})
+  assert.equal(missing.status, 400)
+  const unavailable = await post(base, '/mini/api/native-pair', null, { grant: 'still-unused' })
+  assert.equal(unavailable.status, 501)
+  assert.match((await unavailable.json()).error, /名册不可用/)
+  assert.equal(consumed, 0, '请求不完整或名册不可用时，一次性 grant 必须留着')
+})
+
+test('安卓地址池：未鉴权 401；鉴权后只回根地址，未就绪时是空池', async (t) => {
+  let entries = null
+  let pairingCalls = 0
+  const { server, base, token } = await startTestServer({
+    pairing: async () => {
+      pairingCalls += 1
+      return {
+        status: entries ? 200 : 503,
+        body: entries ? { entries } : { ok: false, error: '手机服务还在启动' },
+      }
+    },
+  })
+  t.after(() => server.close())
+
+  const anonymous = await fetch(`${base}/mini/api/addresses`)
+  assert.equal(anonymous.status, 401)
+  assert.equal(pairingCalls, 0, '没通过鉴权时不该去组装配对信息')
+
+  const pending = await fetch(`${base}/mini/api/addresses?token=${token}`)
+  assert.equal(pending.status, 200)
+  assert.deepEqual(await pending.json(), { addresses: [] })
+
+  entries = [{
+    kind: 'tailscale',
+    label: 'Tailscale',
+    url: 'https://phone.example.ts.net/mini/pair?grant=another-grant',
+    qr: 'data:image/png;base64,secret-qr',
+  }]
+  const res = await fetch(`${base}/mini/api/addresses?token=${token}`)
+  assert.equal(res.status, 200)
+  const body = await res.json()
+  assert.deepEqual(body, {
+    addresses: [{ kind: 'tailscale', label: 'Tailscale', url: 'https://phone.example.ts.net' }],
+  })
+  assert.ok(!JSON.stringify(body).includes('qr'), '响应字段里没有 qr')
+  assert.ok(!JSON.stringify(body).includes('grant'), '响应地址里没有 grant/token 查询串')
+})
 
 test('配置的端口被占了，就自己往后挪一个，不让用户去配', async (t) => {
   // 撞上端口冲突时，一个非技术用户自己是没有办法的：设置界面里没有改端口的地方，

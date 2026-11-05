@@ -1,0 +1,257 @@
+package com.dsh.miniremote;
+
+import android.annotation.SuppressLint;
+import android.app.Activity;
+import android.content.Intent;
+import android.net.Uri;
+import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
+import android.webkit.CookieManager;
+import android.webkit.ValueCallback;
+import android.webkit.WebResourceRequest;
+import android.webkit.WebView;
+import android.webkit.WebViewClient;
+import android.widget.TextView;
+import android.widget.Toast;
+
+import java.io.IOException;
+import java.security.GeneralSecurityException;
+import java.util.Locale;
+
+/** 手机页 WebView 壳：恢复配对凭据、探测地址、按地址写设备 Cookie。 */
+public final class MainActivity extends Activity {
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
+
+    private PairingStore.Credentials credentials;
+    private AddressPool addressPool;
+    private WebView webView;
+    private String loadedBase;
+    private boolean probing;
+    private boolean destroyed;
+    private int loadGeneration;
+    /** 前台轮询待审批：把锁屏推送唤起后的通知画出来。 */
+    private PendingPoller poller;
+
+    @SuppressLint("SetJavaScriptEnabled")
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        PairingStore store = new PairingStore(this);
+        try {
+            credentials = store.load();
+        } catch (GeneralSecurityException | IOException e) {
+            showFatalMessage("本机配对凭据读取失败。请重新打开应用；若仍失败，请重新配对。");
+            return;
+        }
+        if (credentials == null) {
+            startActivity(new Intent(this, PairActivity.class));
+            finish();
+            return;
+        }
+
+        addressPool = new AddressPool(credentials.addresses);
+        webView = new WebView(this);
+        setContentView(webView);
+        webView.getSettings().setJavaScriptEnabled(true);
+        webView.getSettings().setDomStorageEnabled(true);
+        webView.setWebViewClient(new PairedHostClient());
+        CookieManager cookies = CookieManager.getInstance();
+        cookies.setAcceptCookie(true);
+        cookies.setAcceptThirdPartyCookies(webView, false);
+        probeAddresses();
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        // 回到前台时重新按地址池顺序探测；网络切换后的首次操作不会长期困在旧地址。
+        if (addressPool != null) {
+            probeAddresses();
+        }
+        if (poller != null && loadedBase != null) {
+            startPolling(loadedBase);
+        }
+        // 回前台：前台轮询接手，长连接让位——两条同时跑只会重复提醒。
+        MiniForegroundService.stop(this);
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        // 退到后台就停轮询；改由前台服务保持一条推送连接，否则锁屏后什么都收不到。
+        if (poller != null) {
+            poller.stop();
+        }
+        if (loadedBase != null && credentials != null) {
+            MiniForegroundService.start(this, loadedBase, credentials.deviceCredential());
+        }
+    }
+
+    private void probeAddresses() {
+        if (probing || destroyed || addressPool == null) {
+            return;
+        }
+        probing = true;
+        final String deviceCredential = credentials.deviceCredential();
+        Thread thread = new Thread(new Runnable() {
+            @Override
+            public void run() {
+                final AddressPool.ProbeResult result = addressPool.probe(new AddressPool.Prober() {
+                    @Override
+                    public boolean probe(String baseUrl) {
+                        try {
+                            Net.Response response = Net.get(
+                                    baseUrl + "/mini/api/version", deviceCredential);
+                            return response.isSuccess();
+                        } catch (IOException e) {
+                            return false;
+                        }
+                    }
+                });
+                mainHandler.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        if (destroyed) {
+                            return;
+                        }
+                        probing = false;
+                        if (result.alreadyProbing) {
+                            return;
+                        }
+                        if (result.current != null) {
+                            selectAddress(result.current.baseUrl);
+                        } else if (loadedBase == null) {
+                            showPageMessage("暂时连不上电脑",
+                                    "内网、Tailscale 和固定地址都探测失败。请检查电脑端服务与手机网络，再回到本应用重试。");
+                        } else {
+                            Toast.makeText(MainActivity.this,
+                                    "所有配对地址暂时都不可用，请稍后重试。", Toast.LENGTH_LONG).show();
+                        }
+                    }
+                });
+            }
+        }, "mini-address-probe");
+        thread.start();
+    }
+
+    /** 轮询只在前台跑；地址换一条就按新地址重开一轮。 */
+    private void startPolling(String baseUrl) {
+        if (poller == null) {
+            poller = new PendingPoller(this);
+        }
+        poller.stop();
+        poller.start(baseUrl, credentials.deviceCredential());
+    }
+
+    /** Cookie 按 base URL 的主机隔离，所以每次换地址都必须重新写一次。 */
+    private void selectAddress(final String baseUrl) {
+        if (baseUrl.equals(loadedBase)) {
+            return;
+        }
+        final int generation = ++loadGeneration;
+        final CookieManager cookies = CookieManager.getInstance();
+        StringBuilder cookie = new StringBuilder("dsh_mini_device=")
+                .append(credentials.deviceCredential())
+                .append("; Path=/mini; HttpOnly; SameSite=Lax");
+        if (baseUrl.toLowerCase(Locale.ROOT).startsWith("https:")) {
+            cookie.append("; Secure");
+        }
+        cookies.setCookie(baseUrl, cookie.toString(), new ValueCallback<Boolean>() {
+            @Override
+            public void onReceiveValue(Boolean accepted) {
+                // setCookie 完成后先 flush，再加载页面，避免首请求抢在 Cookie 落盘前发出。
+                mainHandler.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        if (destroyed || generation != loadGeneration) {
+                            return;
+                        }
+                        cookies.flush();
+                        loadedBase = baseUrl;
+                        webView.loadUrl(baseUrl + "/mini/");
+                        startPolling(baseUrl);
+                    }
+                });
+            }
+        });
+    }
+
+    private void showPageMessage(String title, String detail) {
+        if (webView == null) {
+            showFatalMessage(title + "。\n" + detail);
+            return;
+        }
+        String html = "<!doctype html><html><head><meta charset='utf-8'>"
+                + "<meta name='viewport' content='width=device-width,initial-scale=1'></head>"
+                + "<body style='font-family:sans-serif;padding:32px;line-height:1.7'>"
+                + "<h2>" + title + "</h2><p>" + detail + "</p></body></html>";
+        webView.loadDataWithBaseURL(null, html, "text/html", "UTF-8", null);
+    }
+
+    private void showFatalMessage(String message) {
+        TextView view = new TextView(this);
+        view.setText(message);
+        view.setTextSize(17);
+        int padding = Math.round(24 * getResources().getDisplayMetrics().density);
+        view.setPadding(padding, padding, padding, padding);
+        setContentView(view);
+    }
+
+    /** 只允许导航到配对地址池中的源，避免页面把设备 Cookie 带到陌生主机。 */
+    private boolean isPairedOrigin(Uri uri) {
+        String scheme = uri.getScheme();
+        String host = uri.getHost();
+        if (scheme == null || host == null
+                || !("http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme))) {
+            return false;
+        }
+        for (AddressPool.Entry entry : addressPool.getEntries()) {
+            Uri allowed = Uri.parse(entry.baseUrl);
+            if (scheme.equalsIgnoreCase(allowed.getScheme())
+                    && host.equalsIgnoreCase(allowed.getHost())
+                    && effectivePort(uri) == effectivePort(allowed)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static int effectivePort(Uri uri) {
+        if (uri.getPort() >= 0) {
+            return uri.getPort();
+        }
+        return "https".equalsIgnoreCase(uri.getScheme()) ? 443 : 80;
+    }
+
+    private final class PairedHostClient extends WebViewClient {
+        @Override
+        public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
+            if (isPairedOrigin(request.getUrl())) {
+                return false;
+            }
+            Toast.makeText(MainActivity.this, "已阻止打开配对范围之外的地址。", Toast.LENGTH_SHORT).show();
+            return true;
+        }
+    }
+
+    @Override
+    public void onBackPressed() {
+        if (webView != null && webView.canGoBack()) {
+            webView.goBack();
+        } else {
+            super.onBackPressed();
+        }
+    }
+
+    @Override
+    protected void onDestroy() {
+        destroyed = true;
+        loadGeneration++;
+        if (webView != null) {
+            webView.stopLoading();
+            webView.destroy();
+        }
+        super.onDestroy();
+    }
+}

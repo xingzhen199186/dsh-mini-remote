@@ -13,10 +13,12 @@
  * 设备 cookie 会自动跟着它的每一条请求走。少了尾斜杠照样白屏，所以那条还钉着。）
  */
 import { test } from 'node:test'
+import { pageSource } from './page-source.mjs'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 
-const html = readFileSync(new URL('../lib/page.html', import.meta.url), 'utf8')
+// 样式 2026-11-03 拆到 lib/page.css：拼回整份，样式相关的断言照旧。
+const html = pageSource()
 
 /** 把「进阶设置」那一段从页面里切出来单独跑，$ / api / toast 全给桩。 */
 function mirrorHarness({ apiImpl } = {}) {

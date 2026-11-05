@@ -9,10 +9,12 @@
  * 这里只读源码做静态检查，不开浏览器：page.html 是单文件模板，样式就是文本。
  */
 import { test } from 'node:test'
+import { pageSource } from './page-source.mjs'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 
-const html = readFileSync(new URL('../lib/page.html', import.meta.url), 'utf8')
+// 样式 2026-11-03 拆到 lib/page.css：拼回整份再按 <style> 切。
+const html = pageSource()
 const css = html.slice(html.indexOf('<style>'), html.indexOf('</style>'))
 
 test('设计令牌：圆角只有 2px 一档，强调色是暖金 #c9a55c', () => {
@@ -198,9 +200,12 @@ test('别处答掉了：只有飞书答的才说「已在飞书答过」，超�
 
 test('统一操作面板：不新造令牌、不放强调色、长文字省略（窄屏与深浅色一起管住）', () => {
   const from = css.indexOf('/* ---------- 统一操作面板')
-  const to = css.indexOf('/* ---------- token 输入')
+  // 终点到「正文里点开的文件」那段为止：文件抽屉后来插在这两块中间，
+  // 它是独立的整屏预览，不该受「面板只用 var(--r)」这条管。
+  const to = css.indexOf('/* ---------- 正文里点开的文件')
   assert.ok(from > 0 && to > from, '找不到统一面板那段样式，锚点变了先修测试')
   const block = css.slice(from, to)
+  assert.ok(!block.includes('#fileView'), '文件抽屉不该被算进统一面板的样式里')
 
   // 深浅色：新造的颜色令牌要在 [data-theme="light"] 里再写一份，漏一边就有元素在
   // 那个主题下隐身。这一块的做法是**一个都不造**，全用主屏已有的那几个。

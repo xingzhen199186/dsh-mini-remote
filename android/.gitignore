@@ -1,0 +1,24 @@
+# 构建产物
+build/
+.gradle/
+*.apk
+*.aab
+*.ap_
+*.dex
+
+# 本机配置：SDK 路径、签名口令，绝不进仓库
+local.properties
+keystore.properties
+
+# 签名文件：丢了就再也签不出同一个包，单独备份，不进 git
+*.jks
+*.keystore
+
+# Android Studio / IDEA
+.idea/
+*.iml
+captures/
+
+# 系统
+.DS_Store
+Thumbs.db

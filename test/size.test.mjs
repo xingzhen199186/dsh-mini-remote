@@ -35,13 +35,26 @@ import { fileURLToPath } from 'node:url'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
 
-test('手机页体量：不超过 8700 行、480 KB（超了就该重新想结构，不是继续往下堆）', () => {
-  const file = join(ROOT, 'lib/page.html')
-  // 这个仓库统一 LF（见 .gitattributes），所以按 `\n` 切就是真实行数。
-  const lines = readFileSync(file, 'utf8').split('\n').length
-  const kb = Math.round(statSync(file).size / 1024)
-  assert.ok(lines <= 8700, `lib/page.html 已经 ${lines} 行，越过守门线 8700 了`)
-  assert.ok(kb <= 480, `lib/page.html 已经 ${kb} KB，越过守门线 480 KB 了`)
+test('手机页体量：七份合计不超过 9960 行、540 KB，且任何一份不超过 3000 行', () => {
+  // 结构 page.html、样式 page.css、脚本五份 page-core/render/nav/ui/app.js（2026-11-05 从三份拆成五份）。
+  // 守的是**七份之和**——拆开是为了好改，不是为了把数字挪到别的文件里；
+  // 另外每一份单独不许超过 3000 行，防止又长回一个巨型文件。
+  // 9300→9400→9500→9600→9800→9900→9920→9960 是给「时长/输入轨道」和「用户/上下文/系统三类行」让的（2026-11-03）。
+  // 单份 3000 行那条线没动——结构问题由它兜，总量只是提醒。
+  const files = ['page.html', 'page.css', 'page-core.js', 'page-render.js', 'page-nav.js', 'page-ui.js', 'page-app.js']
+  let lines = 0
+  let bytes = 0
+  for (const f of files) {
+    const p = join(ROOT, 'lib', f)
+    const text = readFileSync(p, 'utf8')
+    const n = text.split('\n').length
+    lines += n
+    bytes += statSync(p).size
+    assert.ok(n <= 3000, `lib/${f} 已经 ${n} 行，单份越过 3000 了`)
+  }
+  const kb = Math.round(bytes / 1024)
+  assert.ok(lines <= 9960, `手机页合计已经 ${lines} 行，越过守门线 9960 了`)
+  assert.ok(bytes <= 540 * 1024, `手机页合计已经 ${kb} KB，越过守门线 540 KB 了`)
 })
 
 test('发布包体量：问 npm 要真实数字，不超过 25 MB（自建中继内置 frpc 后约 19 MB）', () => {

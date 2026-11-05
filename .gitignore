@@ -82,7 +82,8 @@ dsh-session-*.zip
 !lib/bin/README.md
 !lib/bin/frp-LICENSE
 
-# A staging Worker 的本地 secret（不进仓库）
+# 运维凭据（只读令牌、管理令牌、Access 服务令牌）已统一移出仓库：
+# I:\极简遥控器\运维\凭据。旧路径仍保留忽略，防止旧脚本误生成后被提交。
 worker/.staging-secrets.json
 
 # 内部设计与运维文档：只留在本机，不发布到公开仓库。

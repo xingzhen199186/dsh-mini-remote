@@ -8,10 +8,12 @@
  * 锚点一旦对不上就立刻失败，不会静悄悄地变成「零个测试通过」。
  */
 import { test } from 'node:test'
+import { pageSource, pageScript } from './page-source.mjs'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 
-const html = readFileSync(new URL('../lib/page.html', import.meta.url), 'utf8')
+// 样式 2026-11-03 拆到 lib/page.css：拼回整份，下面按选择器切 CSS 的用例照旧能用。
+const html = pageSource()
 
 const START = 'function escapeHtml'
 const END = '// 复制。navigator.clipboard'
@@ -26,7 +28,7 @@ const md = new Function(html.slice(start, end)
   // 所以这里补一个桩。测试关心的是「名字 → /mini/art/<名字>.webp」这个形状，
   // 不关心指纹的实际取值。若哪天 artUrl 被挪进切片，重复声明也是合法的。
   + '\nfunction artUrl(f) { return "/mini/art/" + f + ".webp?v=BUILD"; }'
-  + '\nreturn { escapeHtml, mdInline, mdToHtml, ICON_COPY, ICON_DONE };')()
+  + '\nreturn { escapeHtml, mdInline, mdToHtml, fileRenderHtml, ICON_COPY, ICON_DONE };')()
 
 /**
  * 把 renderMinimal 单独抠出来真跑一遍。
@@ -234,10 +236,44 @@ test('粗体、斜体、行内代码', () => {
   assert.match(md.mdToHtml('用 `npm test` 跑'), /<code>npm test<\/code>/)
 })
 
+test('正文里的文件路径变成可点（2026-11-03）', () => {
+  // 行内代码：白名单扩展名 + 没有命令符号，才当作文件。
+  const file = md.mdToHtml('改好了，看 `README.md` 这一节')
+  assert.match(file, /class="file-link"/)
+  assert.match(file, /data-file="README\.md"/)
+  assert.ok(file.includes('<code>README.md</code>'), '可点之后仍然保留等宽样式')
+
+  // 命令、通配符、没有扩展名的行内代码不动——它们不是文件。
+  assert.ok(!md.mdToHtml('跑 `npm test`').includes('file-link'))
+  assert.ok(!md.mdToHtml('看 `*.json`').includes('file-link'))
+
+  // Markdown 链接：http(s) 走外链，其它目标当文件。
+  assert.match(md.mdToHtml('[官网](https://example.com)'), /<a href="https:\/\/example\.com"/)
+  const linked = md.mdToHtml('[需求](docs/需求.md)')
+  assert.match(linked, /class="file-link"/)
+  assert.match(linked, /data-file="docs\/需求\.md"/)
+})
+
 test('行内代码里的星号不被当成粗体（占位符那套要真的生效）', () => {
   const out = md.mdToHtml('写 `**x**` 就是粗体')
   assert.match(out, /<code>\*\*x\*\*<\/code>/, `代码里的星号必须原样保留：${out}`)
   assert.ok(!out.includes('<strong>'), '代码里的星号不该生成 strong')
+})
+
+test('文件抽屉里 Markdown 走渲染、其它原样转义（2026-11-03）', () => {
+  const mdOut = md.fileRenderHtml('README.md', '# 标题\n\n**粗** 与 `code`')
+  assert.match(mdOut, /class="md file-md"/)
+  assert.match(mdOut, /<h1>标题<\/h1>/)
+  assert.match(mdOut, /<strong>粗<\/strong>/)
+
+  // 非 Markdown：等宽原文，HTML 一律转义，绝不当模板执行。
+  const txt = md.fileRenderHtml('a.txt', '<script>alert(1)</script>')
+  assert.match(txt, /<pre class="file-text">/)
+  assert.ok(!txt.includes('<script>'), '文件内容不能被当成 HTML')
+  assert.ok(txt.includes('&lt;script&gt;'))
+
+  // 空文件说人话，不装成一片空白。
+  assert.ok(md.fileRenderHtml('empty.txt', '').includes('这个文件是空的'))
 })
 
 test('围栏代码块：内容和语言都认，并且带复制按钮', () => {
@@ -2256,7 +2292,7 @@ function feedReply(payload, { mode = 'minimal', history = [], live = '', frames 
   const build = new Function(
     'state', 'EventSource', 'document', 'encodeURIComponent', '$',
     'setStatus', 'showGate', 'updateStatusUI', 'applySnapshot', 'render',
-    'setRunning', 'playDing', 'buzz', 'paintLive',
+    'setRunning', 'playDing', 'buzz', 'paintLive', 'schedulePaintLive',
     `${html.slice(ss, se)}\nreturn connect;`,
   )
   build(
@@ -2271,6 +2307,7 @@ function feedReply(payload, { mode = 'minimal', history = [], live = '', frames 
     })),
     () => {}, () => {}, () => {}, () => {}, () => {},
     (v) => { calls.push(v); state.running = v }, () => {}, () => {},
+    () => { paints += 1 },
     () => { paints += 1 },
   )()
   for (const frame of frames) source.fire('trajectory-live', frame)
@@ -4737,6 +4774,33 @@ test('完整模式：已结束的两步组默认收成一行，切开才见条�
   assert.equal(typeof h.replyEl.listeners.click, 'function', '点击走容器委托，不逐条绑')
 })
 
+test('完整模式：todo_write 展开是勾选清单，不是原始 JSON', () => {
+  const h = trajHarness()
+  const args = JSON.stringify({ todos: [
+    { content: '读代码', status: 'completed' },
+    { content: '改页面', status: 'in_progress' },
+    { content: '跑测试', status: 'pending' },
+  ] })
+  h.state.trajectory = [{
+    turn: 1, state: 'done', reason: 'completed',
+    entries: [trajTool('t1', {
+      name: 'todo_write', args, summary: '3 项 · 1 进行中', output: '已更新任务清单',
+    })],
+  }]
+  h.render()
+  const row = h.replyEl.innerHTML
+  assert.ok(row.includes('更新任务清单'), '折叠行用工具显示名')
+  assert.ok(row.includes('3 项 · 1 进行中'), '摘要行给计数，不是 JSON')
+
+  h.toggleTrajEntry('t1')
+  const open = h.replyEl.innerHTML
+  assert.ok(open.includes('class="traj-todo"'), '展开是清单')
+  assert.ok(open.includes('✓') && open.includes('▸') && open.includes('○'), '完成/进行中/待办各有记号')
+  assert.ok(open.includes('读代码') && open.includes('改页面') && open.includes('跑测试'), '每条内容都在')
+  assert.ok(!open.includes('"todos"'), '不再把原始 JSON 贴出来')
+  assert.ok(open.includes('已更新任务清单'), '工具输出照旧显示')
+})
+
 test('完整模式：turn/end 收官的组按服务端真实字典（done）叫「已完成」，不许误标进行中', () => {
   // 服务端收官走 turnStateOf：completed → 'done'（lib/trajectory.js:140），组状态字典里
   // 从来没有 'ok'——真机上组头全是 done，认不出就落到兜底「进行中」，跑完的轮全在转圈。
@@ -5126,6 +5190,27 @@ test('轨迹接线：旁白（say）走增量帧不掉种类——照旧是一�
     update: [],
   })
   assert.equal(w.state.trajectory[0].entries[0].kind, 'say', '旁白照旧是 say，不许被写成 tool')
+})
+
+test('轨迹接线：实时帧里的 user 保留类型，但不会出现在主页面窗口', () => {
+  const w = wiringHarness(() => new Promise(() => {}))
+  w.h.receiveTrajectoryFrame({
+    epoch: 'E1', seq: 1, sessionId: 's1', turn: 1,
+    add: [
+      { id: 'u1', turn: 1, step: 1, kind: 'user', summary: '只应出现在完整轨迹', output: '用户原话', state: 'ok' },
+      trajTool('t1', { name: 'read' }),
+    ],
+    update: [],
+  })
+  assert.equal(w.state.trajectory[0].entries[0].kind, 'user', '收帧不许把 user 改写成 tool')
+
+  const h = trajHarness()
+  h.state.trajectory = w.state.trajectory
+  h.render()
+  const out = h.replyEl.innerHTML
+  assert.ok(out.includes('data-traj-entry="t1"'), '同组的工具行仍在主页面窗口里')
+  assert.ok(!out.includes('data-traj-entry="u1"'), '用户条目由主页面白名单挡住')
+  assert.ok(!out.includes('只应出现在完整轨迹') && !out.includes('用户原话'), '用户摘要与正文都不进主页面')
 })
 
 test('轨迹接线：收帧按 id 增补改、seq 只进不退，跳一截不硬拼而是 GET 重拉', () => {
@@ -6870,4 +6955,30 @@ test('镜像横条：触摸设备也要能收起，但收起后必须留一条�
   assert.match(html, /barHasHover/, '要按设备能力分两套事件')
   assert.match(html, /addEventListener\('click', function \(\) \{\s*if \(\$\('mirrorView'\)\.classList\.contains\('bar-on'\)\)/,
     '触摸设备走"点一下切换"：已经开着就收起来，否则拉出来')
+})
+
+/**
+ * 页面脚本的收尾边界（2026-11-05 实机 bug 的回归测试）。
+ *
+ * 五份脚本拼回同一个 <script>，整页是一个大函数；`$`、`state`、`toast` 都只在大函数
+ * 内部可见。新代码要是写到最后一个 `})();` 之后，语法照样合法、其他测试也照样绿，
+ * 但运行时一进去就 ReferenceError——手机上的表现是「点了没反应」。
+ * 11 月 5 日的图片预览正是这么坏的：`openImgView` 落在门外，点了什么都不发生。
+ * 这条把「最后一道关门之后不许再有代码」钉死。
+ */
+test('页面脚本：最后一个 IIFE 关闭之后不能再有代码', () => {
+  const js = pageScript()
+  const close = js.lastIndexOf('})();')
+  assert.ok(close > 0, '找不到页面脚本的收尾 `})();`')
+  assert.equal(js.slice(close + 5).trim(), '',
+    '最后一个 `})();` 之后还有代码——它看不见闭包里的 $ / state，运行时会静默报错')
+})
+
+test('文件预览：整屏铺满，不再只露一截留出顶部空隙', () => {
+  // 2026-11-05 用户要求：文件预览要铺满全屏。原来是贴底 88vh 的抽屉，顶上一道缝。
+  const css = html.slice(html.indexOf('#fileView.open {'), html.indexOf('.file-text {'))
+  assert.match(css, /#fileView\.open \.sheet[^}]*height:\s*100%/, '抽屉要撑满整屏')
+  assert.match(css, /#fileView\.open \.sheet[^}]*max-height:\s*none/, '不能再被 88vh 截住')
+  assert.doesNotMatch(css, /max-height:\s*88vh/, '旧的一截高度必须消失')
+  assert.match(css, /#fileView\.open \.file-head[^}]*safe-area-inset-top/, '页眉要躲开刘海/状态栏')
 })

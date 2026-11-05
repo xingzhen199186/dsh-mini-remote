@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:accessibilityEventTypes="typeWindowStateChanged|typeWindowsChanged|typeWindowContentChanged|typeViewClicked|typeViewFocused|typeViewTextChanged|typeViewTextSelectionChanged|typeViewScrolled"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:accessibilityFlags="flagReportViewIds|flagRetrieveInteractiveWindows"
+    android:canPerformGestures="true"
+    android:canRetrieveWindowContent="true"
+    android:canTakeScreenshot="true"
+    android:description="@string/accessibility_service_description"
+    android:notificationTimeout="100">
+
+    <!--
+        事件职责（供 P3 的 onAccessibilityEvent 使用）：
+        - WindowStateChanged / WindowsChanged：识别前台窗口与窗口增删、层级变化。
+        - WindowContentChanged：更新可交互控件树与 stateToken。
+        - ViewClicked / ViewScrolled：观察点击和滑动后的界面变化。
+        - ViewFocused / ViewTextChanged / ViewTextSelectionChanged：确认输入焦点和文本结果。
+
+        不申请通知读取、短信或相册事件。不固定 packageNames，因为授权 App 集合由每次任务决定；
+        TODO(P3)：BridgeAccessibilityService 在执行动作前必须核对 RFC 8.4 的本地授权范围，
+        手势接 dispatchGesture，返回键接 performGlobalAction(GLOBAL_ACTION_BACK)，截图接 takeScreenshot。
+        minSdk 28 下需运行时判断 API 级别；API 34 才能使用 ERROR_TAKE_SCREENSHOT_SECURE_WINDOW
+        实现 RFC 8.2 的安全窗口硬拒保证，旧系统不得宣称具备该保证。
+    -->
+</accessibility-service>

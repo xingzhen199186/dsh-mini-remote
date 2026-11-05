@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!-- 未明确列出的目标一律禁止明文流量。 -->
+    <base-config cleartextTrafficPermitted="false" />
+
+    <!-- domain 按精确主机匹配；includeSubdomains 对 IP 网段没有通配作用。 -->
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">127.0.0.1</domain>
+        <!--
+            TODO(P1 自定义地址)：固定内网主机确需 HTTP 时，由构建配置负责人在此另建
+            domain-config 并填写确切主机名；Tailscale 与固定地址继续强制 HTTPS。
+            配对 POST /mini/api/native-pair 返回的 addresses 交给原生地址池校验，
+            运行时不能修改已经打包的本 XML。
+
+            平台限制：此 XML 不支持 CIDR，因而不能直接表达 10.0.0.0/8、
+            172.16.0.0/12、192.168.0.0/16。上述三个网段目前没有在系统层放行。
+            后续必须由地址池/WebView 负责人确定动态白名单方案：WebView 导航接
+            WebViewClient.shouldOverrideUrlLoading，原生请求接统一 HttpURLConnection 入口；
+            如决定改用 base-config=true 配合原生网段白名单，必须先评审“其他地址默认禁止”的安全边界。
+        -->
+    </domain-config>
+</network-security-config>

@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application>
+        <!--
+            TODO(P3)：由 Java 负责人实现 com.dsh.miniremote.BridgeAccessibilityService，
+            继承 android.accessibilityservice.AccessibilityService，并按 RFC 8.3 接入
+            phone_observe、phone_open、phone_tap、phone_input、phone_swipe、phone_back。
+            系统通过 BIND_ACCESSIBILITY_SERVICE 绑定；P3 进入条件满足前不启用实现。
+        -->
+        <service
+            android:name=".BridgeAccessibilityService"
+            android:description="@string/accessibility_service_description"
+            android:exported="true"
+            android:label="@string/accessibility_service_label"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/accessibility_service_config" />
+        </service>
+    </application>
+</manifest>

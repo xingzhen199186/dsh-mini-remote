@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">DSH 极简遥控器</string>
+    <string name="pair_activity_title">扫码配对</string>
+
+    <!-- 仅 bridge 清单引用以下两项；standard 不声明无障碍服务。 -->
+    <string name="accessibility_service_label">DSH 手机桥（实验）</string>
+    <string name="accessibility_service_description">仅在用户明确授权的任务期间，协助电脑观察并操作指定应用。</string>
+</resources>

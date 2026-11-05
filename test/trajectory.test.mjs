@@ -25,6 +25,7 @@ import {
   mergeTrajectory,
   replayTrajectory,
   turnStateOf,
+  finalizeTrajectory,
 } from '../lib/trajectory.js'
 import { createStore } from '../lib/store.js'
 
@@ -107,7 +108,7 @@ test('提取：一轮 2 步 1 次工具调用 → 3 条轨迹（2 条思考 + 1 
   assert.equal(g.entries[0].name, null, '思考没有工具名')
 })
 
-test('提取：旁白进轨迹（kind=say），用户那句话和收尾回答不进', () => {
+test('提取：旁白进轨迹（kind=say），用户那句话进轨迹，收尾回答不进', () => {
   // 用户 2026-10-04 裁决推翻旧口径「旁白不进轨迹」：完整模式把鲸鱼娘气泡藏了，
   // 旁白（对用户说的话）没处去，塞回执行轨迹——照 PC，它是过程里的一段正文。
   // 收尾那条回答照旧不进：回答区已经有它，进轨迹就是重复。
@@ -131,11 +132,11 @@ test('提取：旁白进轨迹（kind=say），用户那句话和收尾回答不
     ev('turn/end', { turn: 1, reason: { kind: 'completed' } }),
   ]
   const g = replayTrajectory(events)[0]
-  assert.deepEqual(g.entries.map((e) => e.kind), ['think', 'say', 'tool'],
+  assert.deepEqual(g.entries.map((e) => e.kind), ['user', 'think', 'say', 'tool'],
     '带工具调用那一步的正文 = 旁白，按发生顺序排在中间')
-  assert.equal(g.entries[1].output, '我先看一下这个文件', '旁白的正文原样进轨迹')
+  assert.equal(g.entries[2].output, '我先看一下这个文件', '旁白的正文原样进轨迹')
   assert.ok(!g.entries.some((e) => e.output === '改好了。'), '收尾回答不进轨迹——回答区已经有它')
-  assert.ok(!g.entries.some((e) => e.output === '帮我改一下'), '用户那句话不进轨迹')
+  assert.ok(g.entries.some((e) => e.kind === 'user' && e.output === '帮我改一下'), '用户那句话进轨迹（2026-11-03 对齐本体）')
 })
 
 test('提取：工具失败 → error，原因是事件里那个，取不到就是 null（不编）', () => {
@@ -165,14 +166,46 @@ test('提取：工具失败 → error，原因是事件里那个，取不到就�
 test('提取：时间戳用事件自己的 time，没有就是 null（不编「现在」）', () => {
   const events = turnWithTool()
   const groups = replayTrajectory(events)
-  assert.equal(groups[0].entries[1].timestamp, events.find((e) => e.type === 'tool/call').time)
-  assert.equal(groups[0].entries[0].timestamp, events.find((e) => e.type === 'assistant/message').time)
+  const byKind = (k) => groups[0].entries.find((e) => e.kind === k)
+  assert.equal(byKind('tool').timestamp, events.find((e) => e.type === 'tool/call').time)
+  assert.equal(byKind('think').timestamp, events.find((e) => e.type === 'assistant/message').time)
+  assert.equal(byKind('user').timestamp, events.find((e) => e.type === 'user/message').time)
 
   const noTime = replayTrajectory([
     { type: 'turn/start', data: { turn: 1 } },
     { type: 'tool/call', data: { turn: 1, step: 1, callId: 'c1', name: 'read', arguments: '{}' } },
   ])
   assert.equal(noTime[0].entries[0].timestamp, null)
+})
+
+test('时间：endedAt 只认工具结果，非工具条目不借下一条时间', () => {
+  const events = [
+    ev('turn/start', { turn: 1 }),
+    ev('user/message', { id: 'm1', source: { kind: 'user' }, content: text('看一眼') }),
+    ev('assistant/message', {
+      turn: 1,
+      step: 1,
+      message: { content: [{ type: 'reasoning', text: '先想' }] },
+    }),
+    ev('tool/call', { turn: 1, step: 1, callId: 'c1', name: 'read', arguments: '{}' }),
+    ev('tool/result', {
+      turn: 1,
+      step: 1,
+      message: { role: 'tool', toolCallId: 'c1', content: text('看完了') },
+    }),
+    ev('assistant/message', {
+      turn: 1,
+      step: 2,
+      message: { content: [{ type: 'reasoning', text: '再想' }] },
+    }),
+  ]
+  const group = replayTrajectory(events)[0]
+  assert.equal(group.entries[0].endedAt, null)
+  assert.equal(group.entries[1].endedAt, null)
+  assert.equal(group.entries[2].endedAt, events.find((e) => e.type === 'tool/result').time)
+  assert.equal(group.entries[3].endedAt, null)
+  assert.equal(group.startedAt, group.entries[0].timestamp, '组的开始时间保留')
+  assert.equal(group.endedAt, group.entries[3].timestamp, '组的结束时间保留')
 })
 
 test('提取：轮状态四种——正在跑 / 已停 / 失败 / 完成', () => {
@@ -251,7 +284,7 @@ test('截断：4000 字符这一档是钉死的，超了才截，措辞与桌面
 test('截断：只兜极端值，正常长度一个字都不砍', () => {
   // 实测 p50 的单轮轨迹才 9,250 字符，单条正文远在 4000 以下——截断不该碰到它们。
   const groups = replayTrajectory(turnWithTool({ output: '一段平常长度的工具输出' }))
-  const tool = groups[0].entries[1]
+  const tool = groups[0].entries.find((e) => e.kind === 'tool')
   assert.equal(tool.output, '一段平常长度的工具输出')
   assert.equal(tool.truncated, null)
 })
@@ -289,6 +322,21 @@ test('参数摘要：照抄 PC 的取值顺序（SUMMARY_KEYS）——说明优�
   assert.equal(argSummary('{"title":"小活","x":1}', 'mystery_tool'), '小活', '认不出的工具：第一个非空字符串（照 PC）')
   assert.equal(argSummary('{"limit":10,"force":true}', 'mystery_tool'), '{"limit":10,"force":true}',
     '一个字符串都没有：原样一行（照 PC，不自造「key: value」的拼法）')
+  assert.equal(argSummary(JSON.stringify({ todos: [
+    { content: '甲', status: 'completed' },
+    { content: '乙', status: 'in_progress' },
+    { content: '丙', status: 'pending' },
+  ] }), 'todo_write'), '3 项 · 1 进行中', '待办清单给计数摘要，不贴原始 JSON')
+  assert.equal(argSummary(JSON.stringify({ todos: [
+    { content: '甲', status: 'completed' },
+    { content: '乙', status: 'completed' },
+  ] }), 'todo_write'), '2 项全部完成')
+  assert.equal(argSummary(JSON.stringify({ todos: [
+    { content: '甲', status: 'completed' },
+    { content: '乙', status: 'pending' },
+  ] }), 'todo_write'), '2 项 · 1 已完成')
+  assert.equal(argSummary(JSON.stringify({ todos: [{ content: '甲', status: 'pending' }] }), 'todo_write'), '1 项')
+  assert.equal(argSummary('{"todos":[]}', 'todo_write'), '{"todos":[]}', '空清单回落原始 JSON，不假装有摘要')
   assert.equal(argSummary('{\n  "path": "a\\nb.txt"\n}', 'read'), 'a b.txt', '摘要是一行，不留换行')
   assert.equal(argSummary('{"broken":'), '{"broken":')
   assert.equal(argSummary('[]'), '[]', '不是对象的 JSON 就原样')
@@ -352,6 +400,7 @@ test('合并：同一个事件在实时和重放两条路上必须算成同一�
     }
   }
 
+  finalizeTrajectory(live)
   const replay = replayTrajectory(events)
   assert.deepEqual(live, replay, '实时那份和重放那份必须一模一样')
 
@@ -375,6 +424,21 @@ test('合并：事件没带 seq 时也要有稳定身份（否则老日志重放
   assert.equal(merged[0].entries.length, first[0].entries.length, '同一个事件不许算成两条')
 })
 
+test('合并：无 seq 时用户与上下文条目在同一轮内也不会撞号', () => {
+  const noSeq = (type, data) => ({ type, time: (clock += 1000), data })
+  const groups = replayTrajectory([
+    noSeq('turn/start', { turn: 1 }),
+    noSeq('user/message', { id: 'message-a', source: { kind: 'user' }, content: text('第一句') }),
+    noSeq('request/context', { model: 'model-a' }),
+    noSeq('user/message', { source: { kind: 'user' }, content: text('第二句') }),
+    noSeq('request/context', { id: 'context-a', model: 'model-b' }),
+    noSeq('request/context', { model: 'model-c' }),
+  ])
+  const ids = groups[0].entries.map((e) => e.id)
+  assert.deepEqual(ids, ['u:id:message-a', 'c:auto:1:1', 'u:auto:1:1', 'c:id:context-a', 'c:auto:1:2'])
+  assert.equal(new Set(ids).size, ids.length, '同一轮里每条用户与上下文条目的 id 都必须唯一')
+})
+
 test('合并：状态以内心里那份为准（它是亲眼看见的、更新的），条目按轮号排', () => {
   const replay = [
     { turn: 1, state: 'done', reason: 'completed', entries: [{ id: 'a', state: 'ok' }] },
@@ -389,6 +453,21 @@ test('合并：状态以内心里那份为准（它是亲眼看见的、更新�
   assert.equal(merged[1].state, 'done', '实时那份说这一轮跑完了')
   assert.deepEqual(merged[1].entries.map((e) => e.id), ['b'], 'b 只出现一次')
   assert.equal(merged[1].entries[0].state, 'ok')
+})
+
+test('合并：重放底稿还在跑时，实时补丁带回的结束与用量字段也要留下', () => {
+  const replay = [{ turn: 1, state: 'running', reason: null, entries: [{ id: 'a', state: 'running' }] }]
+  const live = [{
+    turn: 1,
+    state: 'running',
+    reason: null,
+    entries: [{ id: 'a', state: 'running', endedAt: 2000, ttft: 100, genMs: 900, tokens: 42 }],
+  }]
+  const entry = mergeTrajectory(live, replay)[0].entries[0]
+  assert.equal(entry.endedAt, 2000)
+  assert.equal(entry.ttft, 100)
+  assert.equal(entry.genMs, 900)
+  assert.equal(entry.tokens, 42)
 })
 
 test('合并：给出的是副本——往上贴补丁不能回头污染重放缓存', () => {
@@ -426,6 +505,31 @@ function tempStore() {
   return createStore({ file: join(mkdtempSync(join(tmpdir(), 'dsh-traj-')), 'state.json'), maxHistory: 50 })
 }
 
+test('完整轨迹：同会话并发只读一次，结果缓存只留一个会话', async () => {
+  const store = tempStore()
+  let calls = 0
+  let release
+  const gate = new Promise((resolve) => { release = resolve })
+  store.setFullTrajectorySource(async () => {
+    calls += 1
+    await gate
+    return { turns: [] }
+  })
+  const first = store.fullTrajectoryOf('s1')
+  const second = store.fullTrajectoryOf('s1')
+  release()
+  const [a, b] = await Promise.all([first, second])
+  assert.equal(calls, 1, '同一会话的在途请求必须合并')
+  assert.equal(a, b)
+
+  await store.fullTrajectoryOf('s1')
+  assert.equal(calls, 1, '已缓存的会话不再读')
+  await store.fullTrajectoryOf('s2')
+  assert.equal(calls, 2)
+  await store.fullTrajectoryOf('s1')
+  assert.equal(calls, 3, '切到另一个会话后，旧缓存已被替换')
+})
+
 test('缓冲：增量帧只带这一批的变化，seq 一次一格', () => {
   const store = tempStore()
   store.bind('s1')
@@ -441,14 +545,15 @@ test('缓冲：增量帧只带这一批的变化，seq 一次一格', () => {
 
   assert.deepEqual(frames.map((f) => [f.state, f.add.length, f.update.length]), [
     ['running', 0, 0],   // turn/start：新的一轮立起来
+    [null, 1, 0],        // 用户那句话
     [null, 1, 0],        // 思考
     [null, 1, 0],        // 工具步（正在跑）
     [null, 0, 1],        // 结果回来，只补那一笔
     ['done', 0, 0],      // 收尾
   ])
-  assert.deepEqual(frames.map((f) => f.seq), [1, 2, 3, 4, 5], '帧序号一格一格走，客户端靠它认出漏帧')
-  assert.equal(frames[3].update[0].state, 'ok')
-  assert.equal(frames[3].update[0].id, frames[2].add[0].id, '补丁认的就是那条工具步的 id')
+  assert.deepEqual(frames.map((f) => f.seq), [1, 2, 3, 4, 5, 6], '帧序号一格一格走，客户端靠它认出漏帧')
+  assert.equal(frames[4].update[0].state, 'ok')
+  assert.equal(frames[4].update[0].id, frames[3].add[0].id, '补丁认的就是那条工具步的 id')
   assert.equal(frames[0].turn, 1)
 })
 

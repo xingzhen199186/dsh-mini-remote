@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 使用系统自带主题，不依赖 Material Components 或 AndroidX。 -->
+    <style
+        name="Theme.MiniRemote"
+        parent="android:style/Theme.DeviceDefault.Light.NoActionBar" />
+</resources>

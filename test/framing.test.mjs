@@ -15,12 +15,14 @@
  * 这条会明确跳过并说明原因，不会假装通过。
  */
 import { test } from 'node:test'
+import { pageSource } from './page-source.mjs'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 
-const html = readFileSync(new URL('../lib/page.html', import.meta.url), 'utf8')
+// 样式 2026-11-03 拆到 lib/page.css：这里把两份拼回同一份字符串，规则照旧按选择器查。
+const html = pageSource()
 
 /** 抠出某条规则的花括号内容。选择器在模板里是唯一的，找不到就直接失败。 */
 function rule(selector) {
