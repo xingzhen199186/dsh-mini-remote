@@ -29,34 +29,54 @@ android/
 
 ## 现在是什么状态
 
-工程骨架已经能读：Gradle 配置、清单、8 个 Java 类、资源和两个构建变体都在。
-**还没编译过**——本机只有 JDK 和 adb，没有 Android SDK / Gradle。
-
-已经写好的部分：
+**2026-11-05 已能构建**：本机用命令行工具链（JDK 21 + Android SDK 34 + Gradle 8.9，没装 Android Studio）
+编出了两个变体——`standard` 与 `bridge`，各约 688 KB。**尚未在真机上跑过**，下面的“能力”一栏
+从“未编译”改成“已编译、待真机”。
 
 | 能力 | 状态 |
 |---|---|
-| WebView 壳、按地址写设备 Cookie、地址池探测与切换 | 代码就绪，未编译 |
-| 配对：粘贴链接 / 扫二维码（ZXing）→ 换设备凭据 | 代码就绪，未编译 |
-| 待审批通知：前台轮询 + 通知栏「批准 / 拒绝」 | 代码就绪，未编译 |
-| 锁屏也能收：退到后台时开一条前台服务保持推送连接 | 代码就绪，未编译（Android 15 起 dataSync 每天最多 6 小时） |
+| WebView 壳、按地址写设备 Cookie、地址池探测与切换 | 已编译，待真机 |
+| 配对：粘贴链接 / 扫二维码（ZXing）→ 换设备凭据 | 已编译，待真机 |
+| 待审批通知：前台轮询 + 通知栏「批准 / 拒绝」 | 已编译，待真机 |
+| 锁屏也能收：退到后台时开一条前台服务保持推送连接 | 已编译，待真机（Android 15 起 dataSync 每天最多 6 小时） |
 | 服务端两个接口（换凭据、地址池）与待办清单 | 已实现并测过 |
 | 无障碍（实验版） | 空壳，P3 才填 |
 
-## 第一次构建（需要装一次 Android Studio）
+## 构建（两条路，选一条）
+
+### 一、Android Studio（图形化，适合改界面）
 
 1. 装 Android Studio，安装向导里勾选 **Android SDK**（默认路径即可）。
 2. 打开本目录（`android/`）作为工程；第一次会下载 Gradle 和依赖，需要联网。
-3. 出来的两个变体：`standard`（普通版）、`bridge`（实验版）。
-4. 命令行出包：
+3. 构建或直接跑：两个变体是 `standard`（普通版）和 `bridge`（实验版）。
 
-```
-gradlew.bat assembleStandardDebug
-```
+### 二、命令行（不装 Android Studio，2026-11-05 实测）
 
-包在 `app/build/outputs/apk/standard/debug/`。
+1. 装 JDK 17+（本机是 21）。
+2. 下载 Android command-line tools，用 `sdkmanager` 装三样：
+   `platform-tools`、`platforms;android-34`、`build-tools;34.0.0`（首次会要求 `--licenses`）。
+3. 下载 Gradle 8.9（AGP 8.5.2 要求 8.7+），解开即可，不需要 wrapper。
+4. 在 `android/` 目录下执行：
 
-**已知风险**：以上代码一行都没在真实工具链里编译过，第一次构建大概率会有报错要修；这是预期内的，不是坏了。
+   ```bat
+   set ANDROID_HOME=D:\Android\Sdk
+   D:\Android\gradle-8.9\bin\gradle.bat assembleStandardDebug
+   ```
+
+5. 包在 `app/build/outputs/apk/standard/debug/app-standard-debug.apk`；
+   `assembleBridgeDebug` 出实验版，路径同理。
+
+两个与本机有关的备注：
+
+- 工作区在中文路径下，AGP 会拦一条“非 ASCII 路径”的警告；`gradle.properties` 里已经写了
+  `android.overridePathCheck=true`，实测能出包。换到纯英文路径时这一行可以删掉。
+- SDK 与 Gradle 装在哪都行，只要 `ANDROID_HOME` 指对、`gradle.bat` 找得到。
+
+## 明文 HTTP 的边界
+
+内网与 Tailscale 默认就是 `http`，所以 `network_security_config.xml` 放开了明文流量
+（系统这份配置不支持按网段放行）。边界由代码守：`Net` 只请求配对链接和地址池里的地址，
+WebView 只导航到 `isPairedOrigin()` 认可的源。用固定地址/自建中继那些 `https` 时不需要改配置。
 
 ## 为什么不放在插件仓库外面
 

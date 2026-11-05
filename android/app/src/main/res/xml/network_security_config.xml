@@ -1,22 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <network-security-config>
-    <!-- 未明确列出的目标一律禁止明文流量。 -->
-    <base-config cleartextTrafficPermitted="false" />
-
-    <!-- domain 按精确主机匹配；includeSubdomains 对 IP 网段没有通配作用。 -->
-    <domain-config cleartextTrafficPermitted="true">
-        <domain includeSubdomains="false">127.0.0.1</domain>
-        <!--
-            TODO(P1 自定义地址)：固定内网主机确需 HTTP 时，由构建配置负责人在此另建
-            domain-config 并填写确切主机名；Tailscale 与固定地址继续强制 HTTPS。
-            配对 POST /mini/api/native-pair 返回的 addresses 交给原生地址池校验，
-            运行时不能修改已经打包的本 XML。
-
-            平台限制：此 XML 不支持 CIDR，因而不能直接表达 10.0.0.0/8、
-            172.16.0.0/12、192.168.0.0/16。上述三个网段目前没有在系统层放行。
-            后续必须由地址池/WebView 负责人确定动态白名单方案：WebView 导航接
-            WebViewClient.shouldOverrideUrlLoading，原生请求接统一 HttpURLConnection 入口；
-            如决定改用 base-config=true 配合原生网段白名单，必须先评审“其他地址默认禁止”的安全边界。
-        -->
-    </domain-config>
+    <!--
+        允许明文 HTTP，但只与「配对地址池里的主机」通信（2026-11-05 决定）。
+        原因：内网与 Tailscale 默认就是 http，这是本产品最常见的一条路；而这份系统
+        XML 不支持 CIDR，没法只放行 10/172.16-31/192.168 三段。
+        安全边界改由代码守：
+          · Net 只请求配对链接给出的 baseUrl 和地址池里的地址；
+          · WebView 只导航到 MainActivity.isPairedOrigin() 认可的源；
+          · 配对成功后的设备凭据只随 X-Mini-Device / HttpOnly Cookie 走。
+        要收紧时换成 https 地址即可，这里不用改。
+    -->
+    <base-config cleartextTrafficPermitted="true" />
 </network-security-config>
