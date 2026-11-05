@@ -522,6 +522,50 @@ test('正文里点开的文件：路由要鉴权，只发文本，穿越挡住',
   assert.equal(blocked.status, 404, '.env 这类不在白名单，不能借这条口子读走')
 })
 
+test('轨迹附件原件：要令牌、只认当前会话、按 id 取字节', async (t) => {
+  const png = Buffer.from('89504e470d0a1a0a', 'hex')
+  const asked = []
+  const { store, server, base, token } = await startTestServer({
+    onAttachment: async (sessionId, id) => {
+      asked.push([sessionId, id])
+      if (id !== 'sha256:ok') return null
+      return { buf: png, type: 'image/png', name: '图 1.png' }
+    },
+  })
+  t.after(() => server.close())
+  store.bind('s1')
+
+  // 没令牌：401，而且根本不该问到插件。
+  const anon = await fetch(`${base}/mini/api/attachment?id=sha256:ok`)
+  assert.equal(anon.status, 401)
+  assert.equal(asked.length, 0, '没令牌的请求不许摸到附件服务')
+
+  // 有令牌：按当前绑定会话去问，字节原样返回。
+  const ok = await fetch(`${base}/mini/api/attachment?id=${encodeURIComponent('sha256:ok')}&token=${token}`)
+  assert.equal(ok.status, 200)
+  assert.equal(ok.headers.get('content-type'), 'image/png')
+  assert.match(ok.headers.get('content-disposition') || '', /filename\*=UTF-8''/)
+  assert.deepEqual(Buffer.from(await ok.arrayBuffer()), png)
+  assert.deepEqual(asked[0], ['s1', 'sha256:ok'], '会话由服务端自己认，不接受手机指定')
+
+  // 会话里找不到的 id：404，而不是去猜路径。
+  const missing = await fetch(`${base}/mini/api/attachment?id=nope&token=${token}`)
+  assert.equal(missing.status, 404)
+
+  // 缺 id：400。
+  const noId = await fetch(`${base}/mini/api/attachment?token=${token}`)
+  assert.equal(noId.status, 400)
+})
+
+test('轨迹附件原件：插件没接上附件服务时如实说 503', async (t) => {
+  const { store, server, base, token } = await startTestServer()
+  t.after(() => server.close())
+  store.bind('s1')
+  const res = await fetch(`${base}/mini/api/attachment?id=x&token=${token}`)
+  assert.equal(res.status, 503)
+  assert.match((await res.json()).error, /附件服务/)
+})
+
 test('立绘也算进构建指纹（换了图，手机就该拿到新的）', () => {
   // build.js 如果漏了 art/，指纹会等于「只算 js/html」的那个。
   const hash = createHash('sha256')
@@ -561,6 +605,8 @@ async function startTestServer(overrides = {}) {
     }),
     // 不给就是「这台电脑没有附件服务」——那也是一条要覆盖的路径。
     onUpload: overrides.onUpload,
+    // 轨迹详情里点附件原件（2026-11-05）：不给就是没接上附件服务。
+    onAttachment: overrides.onAttachment,
     tree: overrides.tree,
     browse: overrides.browse,
     // 正文里相对路径图的额外候选根（真实运行时是「当前已注册工作区的目录」）。

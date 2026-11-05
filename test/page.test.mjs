@@ -6982,3 +6982,90 @@ test('文件预览：整屏铺满，不再只露一截留出顶部空隙', () =>
   assert.doesNotMatch(css, /max-height:\s*88vh/, '旧的一截高度必须消失')
   assert.match(css, /#fileView\.open \.file-head[^}]*safe-area-inset-top/, '页眉要躲开刘海/状态栏')
 })
+
+/**
+ * 轨迹详情分两页签（2026-11-05 用户要求：抽屉里别再是一长条）。
+ *
+ * 这一条不跑整页，只把「塞正文」和「切页签」两个函数抠出来，配一对象替身跑一遍：
+ * 页签切换只改 hidden 与 aria-selected，不重画正文——两页的滚动位置各自留着。
+ */
+test('轨迹详情：概览/载荷两页签，切换只改显隐', () => {
+  assert.match(html, /id="tdTabs"/, '抽屉里要有页签条')
+  assert.match(html, /data-td-tab="overview"[^>]*>概览</, '第一个页签叫「概览」')
+  assert.match(html, /data-td-tab="payload"[^>]*>载荷</, '第二个页签叫「载荷」')
+
+  const src = pageScript()
+  const a = src.indexOf('function setTrajDetailBody')
+  const b = src.indexOf('/** 完整轨迹页的数据')
+  assert.ok(a > 0 && b > a, '找不到 setTrajDetailBody / paintTrajDetailTab，锚点变了先修测试')
+
+  function harness(tab) {
+    const panes = ['overview', 'payload'].map((name) => ({
+      name, hidden: false,
+      getAttribute(k) { return k === 'data-td-pane' ? name : null },
+    }))
+    const marked = {}
+    const btns = ['overview', 'payload'].map((name) => ({
+      name,
+      getAttribute(k) { return k === 'data-td-tab' ? name : null },
+      classList: { toggle(cls, on) { if (cls === 'active') marked[name] = on } },
+      setAttribute(k, v) { if (k === 'aria-selected') marked['sel-' + name] = v },
+    }))
+    const bodyEl = { innerHTML: '', querySelectorAll() { return panes } }
+    const tabsEl = { querySelectorAll() { return btns } }
+    // eslint-disable-next-line no-new-func
+    const build = new Function('$', 'trajDetailTab', 'trajDetailScroll',
+      `${src.slice(a, b)}
+       return { setTrajDetailBody, paintTrajDetailTab };`)
+    const h = build((id) => (id === 'tdBody' ? bodyEl : id === 'tdTabs' ? tabsEl : null), tab,
+      { overview: 0, payload: 0 })
+    return { h, panes, marked, bodyEl }
+  }
+
+  const first = harness('overview')
+  first.h.setTrajDetailBody('<p>概览内容</p>', '<p>载荷内容</p>', '<button>跳到对话</button>')
+  assert.ok(first.bodyEl.innerHTML.includes('data-td-pane="overview"'), '概览页要画出来')
+  assert.ok(first.bodyEl.innerHTML.includes('data-td-pane="payload"'), '载荷页也要一起画')
+  assert.ok(first.bodyEl.innerHTML.includes('跳到对话'), '跳转按钮两页都能看到')
+  assert.equal(first.panes[0].hidden, false, '默认看概览')
+  assert.equal(first.panes[1].hidden, true, '载荷先藏着')
+  assert.equal(first.marked.overview, true, '概览页签要选中')
+
+  const second = harness('payload')
+  second.h.setTrajDetailBody('<p>概览内容</p>', '<p>载荷内容</p>', '')
+  assert.equal(second.panes[0].hidden, true, '切到载荷后概览藏起来')
+  assert.equal(second.panes[1].hidden, false, '载荷露出来')
+  assert.equal(second.marked['sel-payload'], 'true', '载荷页签的 aria-selected 要跟上')
+  assert.equal(second.marked['sel-overview'], 'false', '概览页签要取消选中')
+})
+
+/** 轨迹详情里的附件清单：从「只写名字」变成「点得开原件」（2026-11-05）。 */
+test('轨迹附件：清单行带 id，点得开原件；老记录没有 id 就如实置灰', () => {
+  const src = pageScript()
+  const a = src.indexOf('function trajAttachHtml')
+  const b = src.indexOf('function openTrajAssistant')
+  assert.ok(a > 0 && b > a, '找不到 trajAttachHtml，锚点变了先修测试')
+  // eslint-disable-next-line no-new-func
+  const fn = new Function('escapeHtml', `${src.slice(a, b)}\nreturn trajAttachHtml;`)(md.escapeHtml)
+
+  const now = fn({
+    think: [],
+    says: [{ attachments: [{ kind: 'image', id: 'sha256:x', name: 'a.png', bytes: 2048 }] }],
+    calls: [],
+  })
+  assert.match(now, /data-tj-attach="sha256:x"/, '手机只认这个不透明 id')
+  assert.match(now, /data-attach-kind="image"/)
+  assert.match(now, /data-attach-name="a\.png"/)
+  assert.ok(!now.includes('disabled'), '有 id 的附件应当可点')
+
+  const old = fn({
+    think: [],
+    says: [{ attachments: [{ kind: 'file', name: 'b.txt', bytes: 10 }] }],
+    calls: [],
+  })
+  assert.match(old, /disabled/, '没有 id 的旧记录不许假装能点')
+
+  // 读取原件的那条接口只带 id，会话由服务端自己认。
+  assert.ok(src.includes('/mini/api/attachment?sessionId='), '附件要走 /mini/api/attachment，不能借 /mini/file')
+  assert.ok(src.includes('openImgView(attachmentUrl(id))'), '图片走全屏看图')
+})

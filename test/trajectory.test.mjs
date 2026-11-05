@@ -691,3 +691,34 @@ test('缓冲：轨迹不落盘（体积是回答正文的 90.7 倍，落盘那�
   assert.equal(disk.trajectoryBySession, undefined)
   assert.ok(!readFileSync(file, 'utf8').includes('轨迹里的那句话'), '轨迹一个字都不该进盘上那份')
 })
+
+test('附件：不透明的 id 与整份引用都留着（手机点得开原件）', () => {
+  const imgRef = {
+    attachmentId: 'sha256:abc123', mediaType: 'image/png',
+    bytes: 4321, width: 120, height: 80, name: '截图.png',
+  }
+  const fileRef = { attachmentId: 'sha256:def456', bytes: 99, name: 'notes.txt' }
+  const groups = replayTrajectory([
+    ev('turn/start', { turn: 1 }),
+    ev('assistant/message', {
+      turn: 1,
+      step: 1,
+      message: {
+        content: [
+          { type: 'reasoning', text: '看一眼这两份' },
+          { type: 'image', attachment: imgRef },
+          { type: 'file', attachment: fileRef },
+        ],
+      },
+    }),
+  ])
+  const att = groups[0].entries[0].attachments
+  assert.equal(att.length, 2, '图片与文件各留一条')
+  assert.equal(att[0].kind, 'image')
+  assert.equal(att[0].id, 'sha256:abc123', '手机只认这个不透明 id')
+  assert.equal(att[0].ref.attachmentId, 'sha256:abc123', '整份引用要留着，服务端读取时要核对尺寸')
+  assert.equal(att[0].name, '截图.png')
+  assert.equal(att[1].kind, 'file')
+  assert.equal(att[1].id, 'sha256:def456')
+  assert.equal(att[1].ref.bytes, 99)
+})

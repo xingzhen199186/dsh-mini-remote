@@ -1572,7 +1572,9 @@
   .traj-calls { margin-top: 8px; border-top: 1px solid var(--line); padding-top: 8px; }
   .traj-attach { margin-top: 8px; border-top: 1px solid var(--line); padding-top: 8px; }
   .traj-attach-title { color: var(--dim); font-size: 11px; margin-bottom: 4px; }
-  .traj-attach-row { display: flex; gap: 8px; align-items: baseline; padding: 4px 2px; font-size: 12px; }
+  .traj-attach-row { display: flex; width: 100%; gap: 8px; align-items: baseline; padding: 4px 2px; border: 0; background: none; color: inherit; font: inherit; font-size: 12px; text-align: left; cursor: pointer; }
+  .traj-attach-row:active { background: var(--panel-2); }
+  .traj-attach-row[disabled] { cursor: default; }
   .traj-attach-kind { flex: none; color: var(--muted); }
   .traj-attach-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .traj-attach-meta { flex: none; color: var(--dim); font-size: 11px; }
@@ -1614,6 +1616,11 @@
   .td-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--line); }
   .td-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg); font-size: 13px; }
   .td-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 10px 12px; font-size: 12px; -webkit-user-select: text; user-select: text; }
+  /* 详情分两页签（2026-11-05）：概览看「是什么、多久、牵涉谁」，载荷看原始文本与参数。 */
+  .td-tabs { flex: none; display: flex; gap: 6px; padding: 8px 12px 0; }
+  .td-tab { padding: 4px 10px; border: 1px solid var(--line); border-radius: var(--r); background: var(--panel-2); color: var(--muted); font: inherit; font-size: 12px; cursor: pointer; }
+  .td-tab[aria-selected="true"] { color: var(--fg); border-color: var(--ice); }
+  .td-pane[hidden] { display: none; }
   .traj-tools { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
   .traj-tools .tj-btn { flex: none; font-size: 12px; padding: 5px 10px; }
   .traj-tools .ops-filter { flex: 1 1 auto; min-width: 0; margin: 0; }
