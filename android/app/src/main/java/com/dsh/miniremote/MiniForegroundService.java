@@ -45,6 +45,9 @@ public final class MiniForegroundService extends Service {
     private android.net.wifi.WifiManager.WifiLock wifiLock;
     /** 上一次 state 帧里任务是不是在跑：用来抓「跑完了」这一刻。 */
     private boolean wasRunning;
+    /** 任务结束后收摊的定时器：常驻通知不该在没任务时一直挂着。 */
+    private Runnable idleStop;
+    private final android.os.Handler main = new android.os.Handler(android.os.Looper.getMainLooper());
 
     static void start(Context context, String baseUrl, String credential) {
         if (baseUrl == null || credential == null) {
@@ -94,6 +97,10 @@ public final class MiniForegroundService extends Service {
 
     @Override
     public void onDestroy() {
+        if (idleStop != null) {
+            main.removeCallbacks(idleStop);
+            idleStop = null;
+        }
         running = false;
         if (worker != null) {
             worker.interrupt();
@@ -214,6 +221,23 @@ public final class MiniForegroundService extends Service {
                 Notifier.showDone(this, firstLine(text));
             }
             wasRunning = running;
+            // 任务不在了就等半分钟收摊：给「跑完了」那条通知留一点时间被人看见，
+            // 然后连常驻通知一起撤掉。任务又跑起来就把收摊撤销。
+            if (running) {
+                if (idleStop != null) {
+                    main.removeCallbacks(idleStop);
+                    idleStop = null;
+                }
+            } else if (idleStop == null) {
+                idleStop = new Runnable() {
+                    @Override
+                    public void run() {
+                        idleStop = null;
+                        stopSelf();
+                    }
+                };
+                main.postDelayed(idleStop, 30_000L);
+            }
         } else if ("question".equals(event)) {
             String id = idOf(raw);
             if (id != null && shown.add(id)) {

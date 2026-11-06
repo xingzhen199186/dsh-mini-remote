@@ -16,8 +16,14 @@ public final class Notifier {
     static final String EXTRA_BASE_URL = "baseUrl";
 
     private static final String CHANNEL_ID = "mini_approvals";
-    /** 前台服务那条常驻通知：要显眼到系统不会杀，又不能吵人，所以单开一个低优先级渠道。 */
-    private static final String SERVICE_CHANNEL_ID = "mini_service";
+    /**
+     * 前台服务那条常驻通知。安卓规定它必须存在，没法隐藏；那就把它压到最低存在感：
+     * IMPORTANCE_MIN = 不占状态栏图标、不出横幅、不响，只折叠在通知栏的“其他通知”里
+     * （2026-11-06 用户要求：有连接也别挂着显眼的通知）。
+     */
+    private static final String SERVICE_CHANNEL_ID = "mini_service_v2";
+    /** 旧版渠道：用户可能已经手动调高过它的重要性，直接弃用。 */
+    private static final String LEGACY_SERVICE_CHANNEL_ID = "mini_service";
 
     private Notifier() {
     }
@@ -47,8 +53,10 @@ public final class Notifier {
                 .setContentText(text)
                 .setContentIntent(contentIntent)
                 .setOngoing(true)
+                .setOnlyAlertOnce(true)
+                .setShowWhen(false)
                 .setCategory(Notification.CATEGORY_SERVICE)
-                .setPriority(Notification.PRIORITY_LOW)
+                .setPriority(Notification.PRIORITY_MIN)
                 .build();
     }
 
@@ -140,11 +148,24 @@ public final class Notifier {
             return;
         }
         NotificationManager mgr = manager(context);
+        // 旧的 LOW 渠道先清掉：渠道的重要性一旦被用户改过就锁住，只能换一个新的。
+        try {
+            if (mgr.getNotificationChannel(LEGACY_SERVICE_CHANNEL_ID) != null) {
+                mgr.deleteNotificationChannel(LEGACY_SERVICE_CHANNEL_ID);
+            }
+        } catch (Exception ignored) {
+            // 删不掉也不影响用新渠道。
+        }
         if (mgr.getNotificationChannel(SERVICE_CHANNEL_ID) != null) {
             return;
         }
-        NotificationChannel channel = new NotificationChannel(SERVICE_CHANNEL_ID, "任务提醒", NotificationManager.IMPORTANCE_LOW);
-        channel.setDescription("任务进行期间保持连接，锁屏也能收到提醒。");
+        NotificationChannel channel = new NotificationChannel(
+                SERVICE_CHANNEL_ID, "后台任务连接", NotificationManager.IMPORTANCE_MIN);
+        channel.setDescription("有任务在跑时才保持连接，锁屏也能收到提醒；平时不通知。");
+        channel.setShowBadge(false);
+        channel.setSound(null, null);
+        channel.enableVibration(false);
+        channel.setLockscreenVisibility(Notification.VISIBILITY_SECRET);
         mgr.createNotificationChannel(channel);
     }
 

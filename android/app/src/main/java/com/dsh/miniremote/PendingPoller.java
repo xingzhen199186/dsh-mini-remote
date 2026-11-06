@@ -33,6 +33,8 @@ final class PendingPoller {
     private String baseUrl;
     private String credential;
     private boolean running;
+    /** 电脑那头当前有没有任务在跑：退到后台时用它决定要不要维持推送连接。 */
+    private boolean taskRunning;
 
     PendingPoller(Activity activity) {
         this.activity = activity;
@@ -51,6 +53,11 @@ final class PendingPoller {
     void stop() {
         running = false;
         handler.removeCallbacks(tick);
+    }
+
+    /** 最近一次查到的「有任务在跑」；没拿到过就是 false，宁可不多挂一条常驻通知。 */
+    boolean taskRunning() {
+        return taskRunning;
     }
 
     private final Runnable tick = new Runnable() {
@@ -89,6 +96,9 @@ final class PendingPoller {
         }
         try {
             JSONObject root = new JSONObject(body);
+            // 老服务端没有这个字段：那种情况下按「有任务」处理，保持原来的行为，
+            // 免得电脑那头还没更新时后台提醒整个消失。
+            taskRunning = root.has("running") ? root.optBoolean("running", false) : true;
             JSONArray approvals = root.optJSONArray("approvals");
             if (approvals == null) {
                 return;

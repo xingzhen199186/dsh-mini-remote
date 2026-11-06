@@ -222,11 +222,16 @@ public final class MainActivity extends Activity {
     protected void onPause() {
         super.onPause();
         // 退到后台就停轮询；改由前台服务保持一条推送连接，否则锁屏后什么都收不到。
+        final boolean taskRunning = poller != null && poller.taskRunning();
         if (poller != null) {
             poller.stop();
         }
-        if (loadedBase != null && credentials != null) {
+        // 只有确实有任务在跑才维持后台连接：空闲时挂一条「正在盯着任务」的常驻通知
+        // 属于无中生有（2026-11-06 用户反馈）。
+        if (taskRunning && loadedBase != null && credentials != null) {
             MiniForegroundService.start(this, loadedBase, credentials.deviceCredential());
+        } else {
+            MiniForegroundService.stop(this);
         }
     }
 
