@@ -247,6 +247,8 @@ public final class MainActivity extends Activity {
                 // 打字后图标落到下面一行，文字就不再需要给它们让位：
                 // 左边对齐鲸鱼、右边对齐发送键，两侧不留空档。
                 + "body.mini-typing #input{padding:6px 8px 6px 2px !important;}"
+                // 键盘起来时，底栏下面那点留白只剩原来的三分之一（26 → 9）。
+                + "body.mini-typing footer{padding-bottom:calc(env(safe-area-inset-bottom,0px) + 9px) !important;}"
                 + "#btnAttach{order:2 !important;}"
                 + "#btnSend{order:3 !important;margin-left:auto !important;}"
                 // 空白状态：两个图标浮在输入框两端、垂直居中。
