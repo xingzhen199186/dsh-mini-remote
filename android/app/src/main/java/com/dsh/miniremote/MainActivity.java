@@ -226,29 +226,41 @@ public final class MainActivity extends Activity {
             return;
         }
         String css = "footer{"
-                // 底栏改成两列：左边回形针，右边输入框；发送键叠在输入框里面。
-                + "display:grid !important;"
-                + "grid-template-columns:auto 1fr !important;"
-                + "grid-template-areas:'attach input' !important;"
-                + "align-items:end !important;"
-                + "column-gap:8px !important;"
+                // 底栏：输入框独占一行；两个图标默认叠在它两端，打字后落成下面一条工具栏。
+                + "position:relative !important;"
+                + "display:flex !important;flex-wrap:wrap !important;align-items:center !important;"
+                + "column-gap:8px !important;row-gap:8px !important;"
                 + "padding:10px 12px calc(env(safe-area-inset-bottom,0px) + 30px) !important;"
                 + "}"
-                + "#btnAttach{grid-area:attach !important;}"
-                // 右边留出让位的空白，文字不会钻到按钮底下。
-                + "#input{grid-area:input !important;padding-right:54px !important;}"
+                + "#input{"
+                + "order:1 !important;flex:1 1 100% !important;width:100% !important;"
+                + "box-sizing:border-box !important;min-height:46px !important;"
+                + "padding:11px 54px !important;"
+                + "}"
+                // 不是打字状态：两个图标叠在输入框里，垂直居中。
+                + "#btnAttach,#btnSend{"
+                + "position:absolute !important;"
+                + "bottom:calc(env(safe-area-inset-bottom,0px) + 36px) !important;"
+                + "margin:0 !important;padding:0 !important;z-index:2 !important;"
+                + "width:34px !important;height:34px !important;"
+                + "display:flex !important;align-items:center !important;justify-content:center !important;"
+                + "}"
+                + "#btnAttach{left:20px !important;}"
+                + "#btnAttach svg{width:22px !important;height:auto !important;}"
                 + "#btnSend{"
-                + "grid-area:input !important;"
-                + "justify-self:end !important;align-self:end !important;"
-                + "margin:0 7px 7px 0 !important;"
-                + "width:34px !important;height:34px !important;padding:0 !important;"
+                + "right:20px !important;"
                 + "border:none !important;border-radius:10px !important;"
                 + "background:var(--act) !important;color:var(--on-act) !important;"
-                + "font-size:0 !important;line-height:34px !important;text-align:center !important;"
-                + "z-index:2 !important;"
+                + "font-size:0 !important;line-height:1 !important;"
                 + "}"
-                // 方形里一个向上箭头；把原来的「发送」两个字藏起来（font-size:0）。
-                + "#btnSend::after{content:'\u2191';font-size:19px;line-height:1;}"
+                + "#btnSend::after{content:'\u2191';font-size:16px;line-height:1;display:block;}"
+                // 打字状态：图标回到文档流，变成输入框下方的一条工具栏。
+                + "body.mini-typing #btnAttach,body.mini-typing #btnSend{"
+                + "position:static !important;"
+                + "}"
+                + "body.mini-typing #btnAttach{order:2 !important;}"
+                + "body.mini-typing #btnSend{order:3 !important;margin-left:auto !important;}"
+                + "body.mini-typing #input{padding:11px 12px !important;}"
                 + "main{padding-bottom:24px !important;}";
         String js = "(function(){"
                 + "if(document.getElementById('mini-app-only-style'))return;"
@@ -258,7 +270,29 @@ public final class MainActivity extends Activity {
                 + "(document.head||document.documentElement).appendChild(s);"
                 + "})();";
         webView.evaluateJavascript(js, null);
+        webView.evaluateJavascript(COMPOSER_STATE_JS, null);
     }
+
+    /**
+     * 输入区的状态开关：空白时两个图标嵌在输入框里，一旦聚焦或有字就切换成下方工具栏。
+     * 页面自己的发送逻辑不认这个类，它只影响外观（2026-11-06）。
+     */
+    private static final String COMPOSER_STATE_JS = "(function(){"
+            + "var el=document.getElementById('input');"
+            + "if(!el)return;"
+            + "function sync(){"
+            + "var typing=document.activeElement===el||el.value.trim().length>0;"
+            + "document.body.classList.toggle('mini-typing',typing);"
+            + "}"
+            + "if(!el.__miniComposer){"
+            + "el.__miniComposer=1;"
+            + "el.addEventListener('focus',sync);"
+            + "el.addEventListener('blur',function(){setTimeout(sync,80)});"
+            + "el.addEventListener('input',sync);"
+            + "setInterval(sync,500);"
+            + "}"
+            + "sync();"
+            + "})();";
 
     /** 把文件挂进网页那边的输入框；页面还没加载好就先存着，onPageFinished 再来一次。 */
     private void injectShare(final String json) {
