@@ -259,7 +259,7 @@ public final class MainActivity extends Activity {
                 + "body:not(.mini-typing) #btnSend{right:12px !important;}"
                 // 两个按钮统一尺寸，箭头居中。
                 + "#btnAttach,#btnSend{"
-                + "width:26px !important;height:26px !important;padding:0 !important;"
+                + "width:22px !important;height:22px !important;padding:0 !important;"
                 + "display:flex !important;align-items:center !important;justify-content:center !important;"
                 + "border-radius:10px !important;"
                 + "}"
@@ -267,7 +267,7 @@ public final class MainActivity extends Activity {
                 + "#btnAttach svg{width:22px !important;height:auto !important;}"
                 + "#btnSend{"
                 + "margin-left:auto !important;"
-                + "border:none !important;border-radius:7px !important;"
+                + "border:none !important;border-radius:6px !important;"
                 + "background:var(--act) !important;color:var(--on-act) !important;"
                 + "font-size:0 !important;line-height:1 !important;"
                 + "}"
