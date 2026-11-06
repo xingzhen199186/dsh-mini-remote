@@ -39,6 +39,9 @@ public final class MainActivity extends Activity {
     private int loadGeneration;
     /** 系统分享进来的内容，等地址就绪后发出去（2026-11-06）。 */
     private ShareSender.Payload pendingShare;
+    /** 页面加载完了没有：分享要等页面能接收才注入。 */
+    private boolean pageReady;
+    private String pendingShareJson;
     /** 前台轮询待审批：把锁屏推送唤起后的通知画出来。 */
     private PendingPoller poller;
 
@@ -123,14 +126,38 @@ public final class MainActivity extends Activity {
             @Override
             public void run() {
                 try {
-                    String message = ShareSender.submit(MainActivity.this, base,
+                    org.json.JSONObject result = ShareSender.upload(MainActivity.this, base,
                             credentials.deviceCredential(), payload);
-                    ShareSender.toast(MainActivity.this, message);
+                    injectShare(result.toString());
                 } catch (Exception err) {
                     ShareSender.toast(MainActivity.this, "分享失败：" + err.getMessage());
                 }
             }
         }, "mini-share").start();
+    }
+
+    /** 把文件挂进网页那边的输入框；页面还没加载好就先存着，onPageFinished 再来一次。 */
+    private void injectShare(final String json) {
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                if (!pageReady || webView == null) {
+                    pendingShareJson = json;
+                    return;
+                }
+                webView.evaluateJavascript(
+                        "(typeof window.miniComposeShare === 'function')"
+                                + " ? window.miniComposeShare(" + json + ") : -1",
+                        new ValueCallback<String>() {
+                            @Override
+                            public void onReceiveValue(String value) {
+                                boolean ok = value != null && !"null".equals(value) && !"-1".equals(value);
+                                ShareSender.toast(MainActivity.this,
+                                        ok ? "已放入输入框" : "页面还没更新，请重启 DSH 后重试");
+                            }
+                        });
+            }
+        });
     }
 
     /**
@@ -275,6 +302,7 @@ public final class MainActivity extends Activity {
                         }
                         cookies.flush();
                         loadedBase = baseUrl;
+                        pageReady = false;
                         webView.loadUrl(baseUrl + "/mini/");
                         startPolling(baseUrl);
                         deliverPendingShare();
@@ -339,6 +367,16 @@ public final class MainActivity extends Activity {
             }
             Toast.makeText(MainActivity.this, "已阻止打开配对范围之外的地址。", Toast.LENGTH_SHORT).show();
             return true;
+        }
+
+        @Override
+        public void onPageFinished(WebView view, String url) {
+            pageReady = true;
+            if (pendingShareJson != null) {
+                String json = pendingShareJson;
+                pendingShareJson = null;
+                injectShare(json);
+            }
         }
     }
 

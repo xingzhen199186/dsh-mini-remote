@@ -6,7 +6,6 @@ import android.content.Intent;
 import android.database.Cursor;
 import android.net.Uri;
 import android.provider.OpenableColumns;
-import android.widget.Toast;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -17,10 +16,10 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * 系统分享：从别的应用把文字或图片发给 DSH（2026-11-06）。
+ * 系统分享：从别的应用把文字或图片交给 DSH（2026-11-06）。
  *
- * 走的是网页端同一组接口：先 POST /mini/api/upload 换一张「小票」，
- * 再 POST /mini/api/send 把小票和文字一起交上去。没有另一套协议。
+ * 只负责把文件传上去、把结果整理成一份「放进输入框」的载荷；**不发送**——
+ * 用户要求分享完停在输入框里，可以补一句话再按发送（2026-11-06 真机反馈）。
  */
 final class ShareSender {
     private static final int MAX_BYTES = 20 * 1024 * 1024;
@@ -76,11 +75,14 @@ final class ShareSender {
         return payload.isEmpty() ? null : payload;
     }
 
-    /** 必须在后台线程调用；返回给用户看的一句话。 */
-    static String submit(Context context, String baseUrl, String credential, Payload payload)
+    /**
+     * 把文件逐个传给电脑，返回 miniComposeShare 要的那份 JSON。
+     * 必须在后台线程调用；失败抛异常，由调用方提示。
+     */
+    static JSONObject upload(Context context, String baseUrl, String credential, Payload payload)
             throws Exception {
         ContentResolver resolver = context.getContentResolver();
-        JSONArray uploadIds = new JSONArray();
+        JSONArray uploads = new JSONArray();
         for (int i = 0; i < payload.streams.size(); i += 1) {
             Uri uri = payload.streams.get(i);
             String name = displayName(resolver, uri, "share-" + (i + 1));
@@ -96,17 +98,16 @@ final class ShareSender {
             if (id.isEmpty()) {
                 throw new Exception("电脑没有返回文件编号。");
             }
-            uploadIds.put(id);
+            JSONObject one = new JSONObject();
+            one.put("uploadId", id);
+            one.put("name", json.optString("name", name));
+            one.put("bytes", json.optLong("bytes", bytes.length));
+            uploads.put(one);
         }
-
-        JSONObject body = new JSONObject();
-        body.put("text", payload.text == null ? "" : payload.text);
-        body.put("uploadIds", uploadIds);
-        Net.Response sent = Net.postJson(baseUrl + "/mini/api/send", body.toString(), credential);
-        if (!sent.isSuccess()) {
-            throw new Exception(sent.chineseError());
-        }
-        return payload.hasStreams() ? "已发给 DSH" : "已发送";
+        JSONObject result = new JSONObject();
+        result.put("text", payload.text == null ? "" : payload.text);
+        result.put("uploads", uploads);
+        return result;
     }
 
     private static String displayName(ContentResolver resolver, Uri uri, String fallback) {
@@ -157,7 +158,7 @@ final class ShareSender {
         activity.runOnUiThread(new Runnable() {
             @Override
             public void run() {
-                Toast.makeText(activity, message, Toast.LENGTH_LONG).show();
+                android.widget.Toast.makeText(activity, message, android.widget.Toast.LENGTH_LONG).show();
             }
         });
     }
