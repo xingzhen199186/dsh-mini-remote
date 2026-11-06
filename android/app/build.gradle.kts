@@ -44,4 +44,7 @@ dependencies {
     // 扫码要一个解码库：相机预览 + 二维码识别自己做是几百行，还要对付各家 ROM 的相机差异。
     // 这是本项目唯一的第三方依赖，只用来读二维码；其余仍是 Java 标准库 + android.jar。
     implementation("com.journeyapps:zxing-android-embedded:4.3.0")
+    // 扫码库内部用 ContextCompat 申请相机权限，但它把 androidx.core 声明成了可选依赖——
+    // 不显式加，编译能过，一开扫码头就崩（2026-11-06 真机日志：ClassNotFoundException）。
+    implementation("androidx.core:core:1.13.1")
 }

@@ -53,6 +53,13 @@ public final class MainActivity extends Activity {
         addressPool = new AddressPool(credentials.addresses);
         webView = new WebView(this);
         setContentView(webView);
+        // 调试版才开远程调试（chrome://inspect / adb forward），发布版不留这个口子。
+        // 2026-11-06 加：页面连不上推送流时要能在电脑上看到 WebView 的控制台与网络。
+        boolean debuggable = (getApplicationInfo().flags
+                & android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0;
+        if (debuggable) {
+            WebView.setWebContentsDebuggingEnabled(true);
+        }
         webView.getSettings().setJavaScriptEnabled(true);
         webView.getSettings().setDomStorageEnabled(true);
         webView.setWebViewClient(new PairedHostClient());
