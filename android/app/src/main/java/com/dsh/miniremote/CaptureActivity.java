@@ -67,11 +67,16 @@ public class CaptureActivity extends Activity {
     @Override
     protected void onCreate(Bundle state) {
         super.onCreate(state);
-        buildUi();
         manager = (CameraManager) getSystemService(Context.CAMERA_SERVICE);
         thread = new HandlerThread("capture");
         thread.start();
         handler = new Handler(thread.getLooper());
+
+        // 取景尺寸必须在建 Surface 之前定好：建好之后再改尺寸会把画面拆掉重建，
+        // 会话就起不来了（2026-11-06 真机踩过）。
+        Size shown = resolvePreviewSize();
+        buildUi(shown);
+        preview.getHolder().setFixedSize(shown.getWidth(), shown.getHeight());
 
         preview.getHolder().addCallback(new SurfaceHolder.Callback() {
             @Override
@@ -96,14 +101,14 @@ public class CaptureActivity extends Activity {
         }
     }
 
-    private void buildUi() {
+    private void buildUi(Size shown) {
         FrameLayout root = new FrameLayout(this);
         root.setBackgroundColor(0xFF000000);
 
         preview = new SurfaceView(this);
         // 取景框按相机画面的比例摆，不能按屏幕比例硬拉——否则画面会被压扁/拉长。
         DisplayMetrics dm = getResources().getDisplayMetrics();
-        float aspect = previewAspect();
+        float aspect = (float) shown.getWidth() / shown.getHeight();
         int preWidth = dm.heightPixels;
         int preHeight = Math.round(preWidth / aspect);
         FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(preWidth, preHeight);
@@ -214,9 +219,6 @@ public class CaptureActivity extends Activity {
         }
         try {
             Size frame = pickFrameSize();
-            Size shown = pickPreviewSize();
-            preview.getHolder().setFixedSize(shown.getWidth(), shown.getHeight());
-            matchPreviewShape(shown);
             reader = ImageReader.newInstance(frame.getWidth(), frame.getHeight(),
                     ImageFormat.YUV_420_888, 2);
             reader.setOnImageAvailableListener(new ImageReader.OnImageAvailableListener() {
@@ -268,6 +270,32 @@ public class CaptureActivity extends Activity {
         }
     }
 
+    /** 找到后置相机，并挑一个适合取景的尺寸；拿不到就退回 1280×960。 */
+    private Size resolvePreviewSize() {
+        try {
+            if (cameraId == null) {
+                for (String id : manager.getCameraIdList()) {
+                    CameraCharacteristics info = manager.getCameraCharacteristics(id);
+                    Integer facing = info.get(CameraCharacteristics.LENS_FACING);
+                    if (facing != null && facing == CameraCharacteristics.LENS_FACING_BACK) {
+                        cameraId = id;
+                        Integer orientation = info.get(CameraCharacteristics.SENSOR_ORIENTATION);
+                        if (orientation != null) {
+                            sensorOrientation = orientation;
+                        }
+                        break;
+                    }
+                }
+            }
+            if (cameraId != null) {
+                return pickPreviewSize();
+            }
+        } catch (Exception ignored) {
+            // 拿不到相机信息就退回默认尺寸，界面照常搭起来。
+        }
+        return new Size(1280, 960);
+    }
+
     /** 取景用的尺寸：接近 4:3、面积适中，预览才不容易变形。 */
     private Size pickPreviewSize() throws Exception {
         CameraCharacteristics info = manager.getCameraCharacteristics(cameraId);
@@ -289,26 +317,6 @@ public class CaptureActivity extends Activity {
             }
         }
         return best;
-    }
-
-    /** 取景框尺寸定下来之后，再按它的实际比例摆一次（避免个别机型给的是 16:9）。 */
-    private void matchPreviewShape(Size shown) {
-        DisplayMetrics dm = getResources().getDisplayMetrics();
-        float aspect = (float) shown.getWidth() / shown.getHeight();
-        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
-                dm.heightPixels, Math.round(dm.heightPixels / aspect));
-        lp.gravity = Gravity.CENTER;
-        preview.setLayoutParams(lp);
-    }
-
-    /** 提前算一下画面比例（拿不到相机信息时退回 4:3）。 */
-    private float previewAspect() {
-        try {
-            Size size = pickPreviewSize();
-            return (float) size.getWidth() / size.getHeight();
-        } catch (Exception err) {
-            return 4f / 3f;
-        }
     }
 
     /** 取景框尺寸：在相机支持的原始帧尺寸里挑一个不超过 190 万像素的。 */
