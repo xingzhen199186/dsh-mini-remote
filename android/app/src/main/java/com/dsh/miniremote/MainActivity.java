@@ -226,41 +226,48 @@ public final class MainActivity extends Activity {
             return;
         }
         String css = "footer{"
-                // 底栏：输入框独占一行；两个图标默认叠在它两端，打字后落成下面一条工具栏。
+                // 底栏本身只负责留白；真正的「框」是下面那个包裹层。
+                + "padding:10px 12px calc(env(safe-area-inset-bottom,0px) + 30px) !important;"
+                + "display:block !important;"
+                + "}"
+                // 输入框 + 工具栏同属一个圆角框：图标在里、框只有一层边。
+                + "#miniComposer{"
                 + "position:relative !important;"
                 + "display:flex !important;flex-wrap:wrap !important;align-items:center !important;"
-                + "column-gap:8px !important;row-gap:8px !important;"
-                + "padding:10px 12px calc(env(safe-area-inset-bottom,0px) + 30px) !important;"
+                + "width:100% !important;box-sizing:border-box !important;"
+                + "border:1px solid var(--line) !important;border-radius:18px !important;"
+                + "background:var(--panel-2) !important;"
+                + "padding:6px 8px !important;min-height:46px !important;"
                 + "}"
                 + "#input{"
-                + "order:1 !important;flex:1 1 100% !important;width:100% !important;"
-                + "box-sizing:border-box !important;min-height:46px !important;"
-                + "padding:11px 54px !important;"
+                + "order:1 !important;flex:1 1 100% !important;"
+                + "border:none !important;background:transparent !important;box-shadow:none !important;"
+                + "padding:6px 42px !important;min-height:34px !important;"
                 + "}"
-                // 不是打字状态：两个图标叠在输入框里，垂直居中。
+                + "#btnAttach{order:2 !important;}"
+                + "#btnSend{order:3 !important;margin-left:auto !important;}"
+                // 空白状态：两个图标浮在输入框两端、垂直居中。
+                + "body:not(.mini-typing) #btnAttach,"
+                + "body:not(.mini-typing) #btnSend{"
+                + "position:absolute !important;top:50% !important;"
+                + "transform:translateY(-50%) !important;margin:0 !important;z-index:2 !important;"
+                + "}"
+                + "body:not(.mini-typing) #btnAttach{left:10px !important;}"
+                + "body:not(.mini-typing) #btnSend{right:10px !important;}"
+                // 两个按钮统一尺寸，箭头居中。
                 + "#btnAttach,#btnSend{"
-                + "position:absolute !important;"
-                + "bottom:calc(env(safe-area-inset-bottom,0px) + 36px) !important;"
-                + "margin:0 !important;padding:0 !important;z-index:2 !important;"
-                + "width:34px !important;height:34px !important;"
+                + "width:34px !important;height:34px !important;padding:0 !important;"
                 + "display:flex !important;align-items:center !important;justify-content:center !important;"
+                + "border-radius:10px !important;"
                 + "}"
-                + "#btnAttach{left:20px !important;}"
+                + "#btnAttach{background:transparent !important;border:none !important;margin:0 !important;}"
                 + "#btnAttach svg{width:22px !important;height:auto !important;}"
                 + "#btnSend{"
-                + "right:20px !important;"
-                + "border:none !important;border-radius:10px !important;"
-                + "background:var(--act) !important;color:var(--on-act) !important;"
+                + "margin-left:auto !important;"
+                + "border:none !important;background:var(--act) !important;color:var(--on-act) !important;"
                 + "font-size:0 !important;line-height:1 !important;"
                 + "}"
                 + "#btnSend::after{content:'\u2191';font-size:16px;line-height:1;display:block;}"
-                // 打字状态：图标回到文档流，变成输入框下方的一条工具栏。
-                + "body.mini-typing #btnAttach,body.mini-typing #btnSend{"
-                + "position:static !important;"
-                + "}"
-                + "body.mini-typing #btnAttach{order:2 !important;}"
-                + "body.mini-typing #btnSend{order:3 !important;margin-left:auto !important;}"
-                + "body.mini-typing #input{padding:11px 12px !important;}"
                 + "main{padding-bottom:24px !important;}";
         String js = "(function(){"
                 + "if(document.getElementById('mini-app-only-style'))return;"
@@ -269,9 +276,31 @@ public final class MainActivity extends Activity {
                 + "s.textContent=" + org.json.JSONObject.quote(css) + ";"
                 + "(document.head||document.documentElement).appendChild(s);"
                 + "})();";
+        webView.evaluateJavascript(COMPOSER_WRAP_JS, null);
         webView.evaluateJavascript(js, null);
         webView.evaluateJavascript(COMPOSER_STATE_JS, null);
     }
+
+    /**
+     * 把输入框和两个按钮装进同一个容器（2026-11-06）。
+     *
+     * 页面原本把它们当成三个并排的独立元素；要做出「一整个圆角框、图标在里面」的效果，
+     * 只能在外壳这边补一层容器。元素本身没换，页面绑的事件照旧。
+     */
+    private static final String COMPOSER_WRAP_JS = "(function(){"
+            + "var footer=document.querySelector('footer');"
+            + "if(!footer||document.getElementById('miniComposer'))return;"
+            + "var input=document.getElementById('input');"
+            + "var attach=document.getElementById('btnAttach');"
+            + "var send=document.getElementById('btnSend');"
+            + "if(!input||!attach||!send)return;"
+            + "var box=document.createElement('div');"
+            + "box.id='miniComposer';"
+            + "footer.appendChild(box);"
+            + "box.appendChild(attach);"
+            + "box.appendChild(input);"
+            + "box.appendChild(send);"
+            + "})();";
 
     /**
      * 输入区的状态开关：空白时两个图标嵌在输入框里，一旦聚焦或有字就切换成下方工具栏。
