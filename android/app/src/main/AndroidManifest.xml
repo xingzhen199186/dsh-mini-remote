@@ -67,6 +67,17 @@
             android:exported="false"
             android:foregroundServiceType="dataSync" />
 
+        <!-- 拍照那条：相机把照片写进缓存目录，再把 content:// 交回网页（2026-11-06）。 -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
         <!-- 无障碍服务只存在于 src/bridge，standard 不合并该声明。 -->
     </application>
 </manifest>

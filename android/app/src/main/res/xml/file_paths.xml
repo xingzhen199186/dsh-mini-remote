@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- 相机拍完先落在这里，再把 content:// 交回网页（2026-11-06）。 -->
+    <cache-path name="camera" path="camera/" />
+</paths>

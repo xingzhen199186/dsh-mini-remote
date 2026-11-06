@@ -10,15 +10,20 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.provider.MediaStore;
 import android.provider.Settings;
 import android.webkit.CookieManager;
 import android.webkit.ValueCallback;
+import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import androidx.core.content.FileProvider;
+
+import java.io.File;
 import java.io.IOException;
 import java.security.GeneralSecurityException;
 import java.util.Locale;
@@ -42,6 +47,9 @@ public final class MainActivity extends Activity {
     /** 页面加载完了没有：分享要等页面能接收才注入。 */
     private boolean pageReady;
     private String pendingShareJson;
+    /** 网页里 <input type="file"> 的回调与相机输出位置（2026-11-06）。 */
+    private ValueCallback<Uri[]> fileCallback;
+    private Uri cameraOutput;
     /** 前台轮询待审批：把锁屏推送唤起后的通知画出来。 */
     private PendingPoller poller;
 
@@ -75,6 +83,7 @@ public final class MainActivity extends Activity {
         webView.getSettings().setJavaScriptEnabled(true);
         webView.getSettings().setDomStorageEnabled(true);
         webView.setWebViewClient(new PairedHostClient());
+        webView.setWebChromeClient(new FileChooserClient());
         // Android 13 起通知要运行时授权；不申请的话，锁屏提醒和「批准/拒绝」按钮
         // 会被系统静默丢掉，前台服务等于白跑（2026-11-06 补）。
         if (android.os.Build.VERSION.SDK_INT >= 33
@@ -377,6 +386,94 @@ public final class MainActivity extends Activity {
                 pendingShareJson = null;
                 injectShare(json);
             }
+        }
+    }
+
+    private static final int REQUEST_FILE_CHOOSER = 0x4d55;
+
+    /**
+     * 页面里「选文件 / 拍照」点的是 <input type="file">；WebView 默认不处理，
+     * 宿主不接就一点反应都没有（2026-11-06 真机反馈）。这里接住并弹系统选择器，
+     * 拍照那条额外挂一个相机 Intent，照片直接写到 FileProvider 缓存里。
+     */
+    private final class FileChooserClient extends WebChromeClient {
+        @Override
+        public boolean onShowFileChooser(WebView view, ValueCallback<Uri[]> callback,
+                                         FileChooserParams params) {
+            if (fileCallback != null) {
+                fileCallback.onReceiveValue(null);
+            }
+            fileCallback = callback;
+            cameraOutput = null;
+            Intent content = new Intent(Intent.ACTION_GET_CONTENT);
+            content.addCategory(Intent.CATEGORY_OPENABLE);
+            String type = "*/*";
+            String[] accepts = params.getAcceptTypes();
+            if (accepts != null && accepts.length > 0 && accepts[0] != null && !accepts[0].isEmpty()) {
+                type = accepts[0];
+            }
+            content.setType(type);
+            if (params.getMode() == FileChooserParams.MODE_OPEN_MULTIPLE) {
+                content.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+            }
+            Intent chooser = Intent.createChooser(content, "选择文件");
+            if (params.isCaptureEnabled()) {
+                Uri target = cameraTarget();
+                if (target != null) {
+                    cameraOutput = target;
+                    Intent camera = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
+                    camera.putExtra(MediaStore.EXTRA_OUTPUT, target);
+                    camera.addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                            | Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                    chooser.putExtra(Intent.EXTRA_INITIAL_INTENTS, new Intent[] { camera });
+                }
+            }
+            try {
+                startActivityForResult(chooser, REQUEST_FILE_CHOOSER);
+            } catch (Exception err) {
+                fileCallback = null;
+                cameraOutput = null;
+                return false;
+            }
+            return true;
+        }
+    }
+
+    private Uri cameraTarget() {
+        try {
+            File dir = new File(getCacheDir(), "camera");
+            if (!dir.exists() && !dir.mkdirs()) {
+                return null;
+            }
+            File file = File.createTempFile("shot-", ".jpg", dir);
+            return FileProvider.getUriForFile(this, getPackageName() + ".fileprovider", file);
+        } catch (Exception err) {
+            return null;
+        }
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode != REQUEST_FILE_CHOOSER || fileCallback == null) {
+            return;
+        }
+        Uri[] result = WebChromeClient.FileChooserParams.parseResult(resultCode, data);
+        if ((result == null || result.length == 0) && cameraOutput != null
+                && sizeOf(cameraOutput) > 0) {
+            result = new Uri[] { cameraOutput };
+        }
+        fileCallback.onReceiveValue(result);
+        fileCallback = null;
+        cameraOutput = null;
+    }
+
+    private long sizeOf(Uri uri) {
+        try (android.content.res.AssetFileDescriptor fd =
+                     getContentResolver().openAssetFileDescriptor(uri, "r")) {
+            return fd == null ? -1 : fd.getLength();
+        } catch (Exception err) {
+            return -1;
         }
     }
 
