@@ -25,6 +25,9 @@ import java.util.Locale;
 
 /** 手机页 WebView 壳：恢复配对凭据、探测地址、按地址写设备 Cookie。 */
 public final class MainActivity extends Activity {
+    /** 点「后台连接被挂起」那条通知进来时带上：强制再弹一次引导。 */
+    static final String EXTRA_BACKGROUND_HINT = "backgroundHint";
+
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
 
     private PairingStore.Credentials credentials;
@@ -78,20 +81,35 @@ public final class MainActivity extends Activity {
         cookies.setAcceptCookie(true);
         cookies.setAcceptThirdPartyCookies(webView, false);
         probeAddresses();
-        explainBackgroundOnce();
+        if (getIntent().getBooleanExtra(EXTRA_BACKGROUND_HINT, false)) {
+            getIntent().removeExtra(EXTRA_BACKGROUND_HINT);
+            explainBackground(true);
+        } else {
+            explainBackground(false);
+        }
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        if (intent != null && intent.getBooleanExtra(EXTRA_BACKGROUND_HINT, false)) {
+            intent.removeExtra(EXTRA_BACKGROUND_HINT);
+            explainBackground(true);
+        }
     }
 
     /**
      * 锁屏提醒的前提：系统不能把本应用冻结在后台（2026-11-06 真机结论）。
      * 荣耀实测：不放行时前台服务还在、通知也在，但连接被挂起，审批收不到。
-     * 只解释一次，不反复弹；点「去设置」直接开系统的电池优化授权页。
+     * 首次进主界面提醒一次；后台连接反复失败时点通知进来，force=true 再提醒一次。
      */
-    private void explainBackgroundOnce() {
+    private void explainBackground(boolean force) {
         if (Build.VERSION.SDK_INT < 23) {
             return;
         }
         SharedPreferences prefs = getSharedPreferences("mini.prefs", MODE_PRIVATE);
-        if (prefs.getBoolean("backgroundHintShown", false)) {
+        if (!force && prefs.getBoolean("backgroundHintShown", false)) {
             return;
         }
         prefs.edit().putBoolean("backgroundHintShown", true).apply();

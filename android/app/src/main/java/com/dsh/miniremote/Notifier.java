@@ -70,6 +70,22 @@ public final class Notifier {
         manager(appContext).notify(notificationId(approvalId), builder.build());
     }
 
+    /**
+     * 后台连接反复失败：请用户回去检查电池设置（2026-11-06）。
+     * 点通知会打开主界面并强制弹出那段引导，不再受“只提醒一次”的限制。
+     */
+    static void showBackgroundHint(Context context) {
+        Context appContext = context.getApplicationContext();
+        Intent open = new Intent(appContext, MainActivity.class);
+        open.putExtra(MainActivity.EXTRA_BACKGROUND_HINT, true);
+        PendingIntent contentIntent = PendingIntent.getActivity(appContext, 0x52, open, pendingIntentFlags());
+        Notification.Builder builder = baseBuilder(appContext, "background-hint")
+                .setContentTitle("DSH 后台连接被系统挂起")
+                .setContentText("锁屏提醒可能收不到，点这里检查电池设置。")
+                .setContentIntent(contentIntent);
+        manager(appContext).notify(notificationId("background-hint"), builder.build());
+    }
+
     private static Notification.Builder baseBuilder(Context context, String approvalId) {
         createChannel(context);
         Intent open = new Intent(context, MainActivity.class);

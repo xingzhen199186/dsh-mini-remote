@@ -38,6 +38,8 @@ public final class MiniForegroundService extends Service {
     private String credential;
     /** 已经弹过通知的编号：同一条审批只提醒一次。 */
     private final Set<String> shown = new HashSet<>();
+    /** 后台连接反复失败时只提醒一次，避免每次重试都弹。 */
+    private boolean hinted;
 
     static void start(Context context, String baseUrl, String credential) {
         if (baseUrl == null || credential == null) {
@@ -103,6 +105,12 @@ public final class MiniForegroundService extends Service {
                 failures = 0;
             } catch (Exception err) {
                 failures += 1;
+                // 连续三次连不上：多半是系统把后台冻结了（2026-11-06 荣耀实测）。
+                // 只提醒一次，点通知回去检查电池设置。
+                if (failures == 3 && !hinted) {
+                    hinted = true;
+                    Notifier.showBackgroundHint(this);
+                }
             }
             if (!running || failures >= MAX_FAILURES) {
                 break;
