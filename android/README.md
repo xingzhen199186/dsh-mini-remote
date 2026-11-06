@@ -47,20 +47,28 @@ android/
 ### 一、Android Studio（图形化，适合改界面）
 
 1. 装 Android Studio，安装向导里勾选 **Android SDK**（默认路径即可）。
-2. 打开本目录（`android/`）作为工程；第一次会下载 Gradle 和依赖，需要联网。
+2. 打开本目录（`android/`）作为工程；wrapper 已经生成（Gradle 8.9），第一次会下载依赖。
 3. 构建或直接跑：两个变体是 `standard`（普通版）和 `bridge`（实验版）。
+
+用 Studio 时有两处要手动调一次（2026-11-06 实测，Rabbit 2 / 2026.2.2）：
+
+- **Gradle JDK 选 17 或 21**（Settings → Build Tools → Gradle → Gradle JDK）。
+  Studio 自带的 JBR 是 25，Gradle 8.9 跑不了，同步会报 “Unsupported class file major version”。
+  本机已经装了 Temurin 21，选它即可。
+- **别点 “Upgrade AGP / compileSdk” 的提示**：工程固定 `compileSdk = 34`、AGP 8.5.2，
+  跟 Studio 自带 SDK（android-37）不是一回事；升上去要连带改 Gradle 和依赖，不属于现在这一步。
 
 ### 二、命令行（不装 Android Studio，2026-11-05 实测）
 
 1. 装 JDK 17+（本机是 21）。
 2. 下载 Android command-line tools，用 `sdkmanager` 装三样：
    `platform-tools`、`platforms;android-34`、`build-tools;34.0.0`（首次会要求 `--licenses`）。
-3. 下载 Gradle 8.9（AGP 8.5.2 要求 8.7+），解开即可，不需要 wrapper。
+3. 工程自带 wrapper（`gradlew.bat`，Gradle 8.9），不需要另装 Gradle。
 4. 在 `android/` 目录下执行：
 
    ```bat
    set ANDROID_HOME=D:\Android\Sdk
-   D:\Android\gradle-8.9\bin\gradle.bat assembleStandardDebug
+   gradlew.bat assembleStandardDebug
    ```
 
 5. 包在 `app/build/outputs/apk/standard/debug/app-standard-debug.apk`；
