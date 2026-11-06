@@ -244,6 +244,9 @@ public final class MainActivity extends Activity {
                 + "border:none !important;background:transparent !important;box-shadow:none !important;"
                 + "padding:6px 42px !important;min-height:34px !important;"
                 + "}"
+                // 打字后图标落到下面一行，文字就不再需要给它们让位：
+                // 左边对齐鲸鱼、右边对齐发送键，两侧不留空档。
+                + "body.mini-typing #input{padding:6px 8px 6px 2px !important;}"
                 + "#btnAttach{order:2 !important;}"
                 + "#btnSend{order:3 !important;margin-left:auto !important;}"
                 // 空白状态：两个图标浮在输入框两端、垂直居中。
@@ -252,11 +255,11 @@ public final class MainActivity extends Activity {
                 + "position:absolute !important;top:50% !important;"
                 + "transform:translateY(-50%) !important;margin:0 !important;z-index:2 !important;"
                 + "}"
-                + "body:not(.mini-typing) #btnAttach{left:10px !important;}"
-                + "body:not(.mini-typing) #btnSend{right:10px !important;}"
+                + "body:not(.mini-typing) #btnAttach{left:12px !important;}"
+                + "body:not(.mini-typing) #btnSend{right:12px !important;}"
                 // 两个按钮统一尺寸，箭头居中。
                 + "#btnAttach,#btnSend{"
-                + "width:34px !important;height:34px !important;padding:0 !important;"
+                + "width:26px !important;height:26px !important;padding:0 !important;"
                 + "display:flex !important;align-items:center !important;justify-content:center !important;"
                 + "border-radius:10px !important;"
                 + "}"
@@ -264,10 +267,11 @@ public final class MainActivity extends Activity {
                 + "#btnAttach svg{width:22px !important;height:auto !important;}"
                 + "#btnSend{"
                 + "margin-left:auto !important;"
-                + "border:none !important;background:var(--act) !important;color:var(--on-act) !important;"
+                + "border:none !important;border-radius:7px !important;"
+                + "background:var(--act) !important;color:var(--on-act) !important;"
                 + "font-size:0 !important;line-height:1 !important;"
                 + "}"
-                + "#btnSend::after{content:'\u2191';font-size:16px;line-height:1;display:block;}"
+                + "#btnSend::after{content:'\u2191';font-size:13px;line-height:1;display:block;}"
                 + "main{padding-bottom:24px !important;}";
         String js = "(function(){"
                 + "if(document.getElementById('mini-app-only-style'))return;"
