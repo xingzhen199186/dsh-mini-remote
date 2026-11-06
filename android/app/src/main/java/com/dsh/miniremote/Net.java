@@ -65,6 +65,40 @@ public final class Net {
         return request("POST", url, json, deviceCredential);
     }
 
+    /** 原始字节上传：系统分享的图片/文件走这条，服务端按流落盘。 */
+    public static Response postBytes(String url, byte[] bytes, String deviceCredential) throws IOException {
+        HttpURLConnection connection = (HttpURLConnection) new URL(url).openConnection();
+        try {
+            connection.setRequestMethod("POST");
+            connection.setConnectTimeout(CONNECT_TIMEOUT_MS);
+            connection.setReadTimeout(READ_TIMEOUT_MS);
+            connection.setUseCaches(false);
+            connection.setInstanceFollowRedirects(false);
+            connection.setRequestProperty("Content-Type", "application/octet-stream");
+            if (deviceCredential != null && !deviceCredential.isEmpty()) {
+                connection.setRequestProperty("X-Mini-Device", deviceCredential);
+            }
+            connection.setFixedLengthStreamingMode(bytes.length);
+            connection.setDoOutput(true);
+            OutputStream output = connection.getOutputStream();
+            try {
+                output.write(bytes);
+            } finally {
+                output.close();
+            }
+            int status = connection.getResponseCode();
+            InputStream input = status >= 400 ? connection.getErrorStream() : connection.getInputStream();
+            String body = input == null ? "" : readUtf8(input);
+            return new Response(status, body);
+        } catch (SocketTimeoutException e) {
+            throw new IOException("连接服务器超时，请检查网络后重试。", e);
+        } catch (MalformedURLException e) {
+            throw new IOException("服务器地址格式不正确。", e);
+        } finally {
+            connection.disconnect();
+        }
+    }
+
     /**
      * 服务器推送（SSE）用的长连接。
      *

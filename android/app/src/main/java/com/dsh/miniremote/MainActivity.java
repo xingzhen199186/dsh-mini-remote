@@ -37,6 +37,8 @@ public final class MainActivity extends Activity {
     private boolean probing;
     private boolean destroyed;
     private int loadGeneration;
+    /** 系统分享进来的内容，等地址就绪后发出去（2026-11-06）。 */
+    private ShareSender.Payload pendingShare;
     /** 前台轮询待审批：把锁屏推送唤起后的通知画出来。 */
     private PendingPoller poller;
 
@@ -87,6 +89,11 @@ public final class MainActivity extends Activity {
         } else {
             explainBackground(false);
         }
+        // 系统分享进来的内容：等地址探测完（selectAddress）再发，这里先收下。
+        pendingShare = ShareSender.parse(getIntent());
+        if (pendingShare != null) {
+            deliverPendingShare();
+        }
     }
 
     @Override
@@ -97,6 +104,33 @@ public final class MainActivity extends Activity {
             intent.removeExtra(EXTRA_BACKGROUND_HINT);
             explainBackground(true);
         }
+        ShareSender.Payload shared = ShareSender.parse(intent);
+        if (shared != null) {
+            pendingShare = shared;
+            deliverPendingShare();
+        }
+    }
+
+    /** 分享内容要等拿到地址、写好 Cookie 之后再发；早到的就等 selectAddress 来叫。 */
+    private void deliverPendingShare() {
+        final ShareSender.Payload payload = pendingShare;
+        if (payload == null || loadedBase == null || credentials == null) {
+            return;
+        }
+        pendingShare = null;
+        final String base = loadedBase;
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    String message = ShareSender.submit(MainActivity.this, base,
+                            credentials.deviceCredential(), payload);
+                    ShareSender.toast(MainActivity.this, message);
+                } catch (Exception err) {
+                    ShareSender.toast(MainActivity.this, "分享失败：" + err.getMessage());
+                }
+            }
+        }, "mini-share").start();
     }
 
     /**
@@ -243,6 +277,7 @@ public final class MainActivity extends Activity {
                         loadedBase = baseUrl;
                         webView.loadUrl(baseUrl + "/mini/");
                         startPolling(baseUrl);
+                        deliverPendingShare();
                     }
                 });
             }
