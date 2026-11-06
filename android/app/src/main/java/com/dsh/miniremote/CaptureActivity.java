@@ -101,9 +101,12 @@ public class CaptureActivity extends Activity {
         root.setBackgroundColor(0xFF000000);
 
         preview = new SurfaceView(this);
-        // 竖屏取景：把取景面转 90°，再用交换过的宽高铺满屏幕。
+        // 取景框按相机画面的比例摆，不能按屏幕比例硬拉——否则画面会被压扁/拉长。
         DisplayMetrics dm = getResources().getDisplayMetrics();
-        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(dm.heightPixels, dm.widthPixels);
+        float aspect = previewAspect();
+        int preWidth = dm.heightPixels;
+        int preHeight = Math.round(preWidth / aspect);
+        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(preWidth, preHeight);
         lp.gravity = Gravity.CENTER;
         preview.setLayoutParams(lp);
         preview.setRotation(270);
@@ -211,6 +214,9 @@ public class CaptureActivity extends Activity {
         }
         try {
             Size frame = pickFrameSize();
+            Size shown = pickPreviewSize();
+            preview.getHolder().setFixedSize(shown.getWidth(), shown.getHeight());
+            matchPreviewShape(shown);
             reader = ImageReader.newInstance(frame.getWidth(), frame.getHeight(),
                     ImageFormat.YUV_420_888, 2);
             reader.setOnImageAvailableListener(new ImageReader.OnImageAvailableListener() {
@@ -259,6 +265,49 @@ public class CaptureActivity extends Activity {
         } catch (Exception err) {
             Toast.makeText(this, "相机打不开：" + err.getMessage(), Toast.LENGTH_LONG).show();
             finish();
+        }
+    }
+
+    /** 取景用的尺寸：接近 4:3、面积适中，预览才不容易变形。 */
+    private Size pickPreviewSize() throws Exception {
+        CameraCharacteristics info = manager.getCameraCharacteristics(cameraId);
+        android.hardware.camera2.params.StreamConfigurationMap map =
+                info.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
+        Size[] sizes = map.getOutputSizes(ImageFormat.YUV_420_888);
+        Size best = sizes[0];
+        double bestScore = Double.MAX_VALUE;
+        for (Size size : sizes) {
+            long area = (long) size.getWidth() * size.getHeight();
+            if (area < 640L * 480L || area > 2000L * 1000L) {
+                continue;
+            }
+            double aspect = (double) size.getWidth() / size.getHeight();
+            double score = Math.abs(aspect - 4.0 / 3.0);
+            if (score < bestScore) {
+                bestScore = score;
+                best = size;
+            }
+        }
+        return best;
+    }
+
+    /** 取景框尺寸定下来之后，再按它的实际比例摆一次（避免个别机型给的是 16:9）。 */
+    private void matchPreviewShape(Size shown) {
+        DisplayMetrics dm = getResources().getDisplayMetrics();
+        float aspect = (float) shown.getWidth() / shown.getHeight();
+        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
+                dm.heightPixels, Math.round(dm.heightPixels / aspect));
+        lp.gravity = Gravity.CENTER;
+        preview.setLayoutParams(lp);
+    }
+
+    /** 提前算一下画面比例（拿不到相机信息时退回 4:3）。 */
+    private float previewAspect() {
+        try {
+            Size size = pickPreviewSize();
+            return (float) size.getWidth() / size.getHeight();
+        } catch (Exception err) {
+            return 4f / 3f;
         }
     }
 
