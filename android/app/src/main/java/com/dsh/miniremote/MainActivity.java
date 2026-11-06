@@ -49,6 +49,7 @@ public final class MainActivity extends Activity {
     private String pendingShareJson;
     /** 网页里 <input type="file"> 的回调与相机输出位置（2026-11-06）。 */
     private ValueCallback<Uri[]> fileCallback;
+    private Uri cameraOutput;
     /** 前台轮询待审批：把锁屏推送唤起后的通知画出来。 */
     private PendingPoller poller;
 
@@ -406,7 +407,22 @@ public final class MainActivity extends Activity {
             }
             fileCallback = callback;
             if (params.isCaptureEnabled()) {
-                // 系统相机在荣耀上被禁（Permission Denial），改走应用内相机。
+                // 优先用系统相机：画质、变焦、HDR 都是手机原生的。
+                // 前提是我们已经拿到运行时相机授权——声明了 CAMERA 却没授权时，
+                // 安卓会直接拒绝这条 Intent（Permission Denial: revoked permission）。
+                if (checkSelfPermission(android.Manifest.permission.CAMERA)
+                        == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                    Intent camera = systemCaptureIntent();
+                    if (camera != null) {
+                        try {
+                            startActivityForResult(camera, REQUEST_FILE_CHOOSER);
+                            return true;
+                        } catch (Exception err) {
+                            cameraOutput = null;
+                        }
+                    }
+                }
+                // 没有授权或系统相机起不来，就用应用内相机兜底。
                 try {
                     startActivityForResult(new Intent(MainActivity.this, CaptureActivity.class),
                             REQUEST_FILE_CHOOSER);
@@ -436,6 +452,27 @@ public final class MainActivity extends Activity {
         }
     }
 
+    /** 系统相机：照片写到 FileProvider 缓存，拍完拿回来。 */
+    private Intent systemCaptureIntent() {
+        try {
+            File dir = new File(getCacheDir(), "camera");
+            if (!dir.exists() && !dir.mkdirs()) {
+                return null;
+            }
+            File file = File.createTempFile("shot-", ".jpg", dir);
+            Uri target = FileProvider.getUriForFile(this, getPackageName() + ".fileprovider", file);
+            Intent camera = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
+            camera.addCategory(Intent.CATEGORY_DEFAULT);
+            camera.putExtra(MediaStore.EXTRA_OUTPUT, target);
+            camera.addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                    | Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            cameraOutput = target;
+            return camera;
+        } catch (Exception err) {
+            return null;
+        }
+    }
+
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
@@ -443,12 +480,16 @@ public final class MainActivity extends Activity {
             return;
         }
         Uri[] result = WebChromeClient.FileChooserParams.parseResult(resultCode, data);
-        if ((result == null || result.length == 0) && resultCode == RESULT_OK
-                && data != null && data.getData() != null) {
-            result = new Uri[] { data.getData() };
+        if (result == null || result.length == 0) {
+            if (resultCode == RESULT_OK && data != null && data.getData() != null) {
+                result = new Uri[] { data.getData() };
+            } else if (resultCode == RESULT_OK && cameraOutput != null && sizeOf(cameraOutput) > 0) {
+                result = new Uri[] { cameraOutput };
+            }
         }
         fileCallback.onReceiveValue(result);
         fileCallback = null;
+        cameraOutput = null;
     }
 
     private long sizeOf(Uri uri) {
