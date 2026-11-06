@@ -12,6 +12,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.provider.MediaStore;
 import android.provider.Settings;
+import android.view.View;
 import android.webkit.CookieManager;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
@@ -143,6 +144,97 @@ public final class MainActivity extends Activity {
                 }
             }
         }, "mini-share").start();
+    }
+
+    /**
+     * 状态栏/导航栏跟页面底色对齐（2026-11-06）。
+     *
+     * 壳默认给的是系统主题色，和页面的浅蓝底摆在一起能看出一条分界。这里问一下页面
+     * 的 body 底色，把两条系统栏染成同一个颜色，界面就连成一整片了。
+     */
+    private void matchSystemBars() {
+        if (webView == null) {
+            return;
+        }
+        webView.evaluateJavascript(
+                "(function(){try{return getComputedStyle(document.body).backgroundColor||''}catch(e){return ''}})()",
+                new ValueCallback<String>() {
+                    @Override
+                    public void onReceiveValue(String value) {
+                        int color = parseCssColor(value);
+                        if (color == 0) {
+                            // 页面 body 常常是透明的（底色画在 html 或别处），这时候退回
+                            // 一个浅色，别把状态栏染成黑的。
+                            color = 0xFFF4F7FB;
+                        }
+                        getWindow().setStatusBarColor(color);
+                        getWindow().setNavigationBarColor(color);
+                        // 浅底配深色图标，否则时间/电量会看不见。
+                        View decor = getWindow().getDecorView();
+                        decor.setSystemUiVisibility(decor.getSystemUiVisibility()
+                                | View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR);
+                    }
+                });
+    }
+
+    /** 把页面里的 rgb(...) / #rrggbb 解析成颜色；认不出来返回 0。 */
+    private static int parseCssColor(String raw) {
+        if (raw == null) {
+            return 0;
+        }
+        String value = raw.replace("\"", "").trim();
+        try {
+            if (value.startsWith("#") && (value.length() == 7 || value.length() == 4)) {
+                if (value.length() == 4) {
+                    StringBuilder long_form = new StringBuilder("#");
+                    for (int i = 1; i < 4; i += 1) {
+                        long_form.append(value.charAt(i)).append(value.charAt(i));
+                    }
+                    value = long_form.toString();
+                }
+                return 0xFF000000 | Integer.parseInt(value.substring(1), 16);
+            }
+            if (value.startsWith("rgb")) {
+                String inside = value.substring(value.indexOf('(') + 1, value.indexOf(')'));
+                String[] parts = inside.split(",");
+                int r = Integer.parseInt(parts[0].trim());
+                int g = Integer.parseInt(parts[1].trim());
+                int b = Integer.parseInt(parts[2].trim());
+                if (parts.length >= 4) {
+                    // 全透明的底色不能拿来染系统栏，否则就是一片黑。
+                    double alpha = Double.parseDouble(parts[3].trim());
+                    if (alpha <= 0.01) {
+                        return 0;
+                    }
+                }
+                return 0xFF000000 | (r << 16) | (g << 8) | b;
+            }
+        } catch (Exception ignored) {
+            // 页面给了个怪颜色就当没拿到，保持系统默认。
+        }
+        return 0;
+    }
+
+    /**
+     * 只给安卓壳用的样式补丁（2026-11-06）。
+     *
+     * 页面本来是按浏览器/桌面端设计的，套进手机壳后底部输入框贴着屏幕下沿、太挤。
+     * 这里在页面加载完后注入一小段 CSS——只活在这个 WebView 里，网页端完全不受影响。
+     */
+    private void injectAppOnlyStyle() {
+        if (webView == null) {
+            return;
+        }
+        String css = "footer{padding-bottom:calc(env(safe-area-inset-bottom,0px) + 16px) !important;}"
+                + "main{padding-bottom:24px !important;}";
+        String js = "(function(){"
+                + "if(document.getElementById('mini-app-only-style'))return;"
+                + "var s=document.createElement('style');"
+                + "s.id='mini-app-only-style';"
+                + "s.textContent=" + org.json.JSONObject.quote(css) + ";"
+                + "(document.head||document.documentElement).appendChild(s);"
+                + "})();";
+        webView.evaluateJavascript(js, null);
     }
 
     /** 把文件挂进网页那边的输入框；页面还没加载好就先存着，onPageFinished 再来一次。 */
@@ -376,16 +468,24 @@ public final class MainActivity extends Activity {
     private final class PairedHostClient extends WebViewClient {
         @Override
         public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
-            if (isPairedOrigin(request.getUrl())) {
+            Uri target = request.getUrl();
+            if (isPairedOrigin(target)) {
                 return false;
             }
-            Toast.makeText(MainActivity.this, "已阻止打开配对范围之外的地址。", Toast.LENGTH_SHORT).show();
+            // 外链交给系统浏览器：在壳里既打不开也没法后退，等于点了没反应。
+            try {
+                startActivity(new Intent(Intent.ACTION_VIEW, target));
+            } catch (Exception err) {
+                Toast.makeText(MainActivity.this, "这台手机打不开这个链接。", Toast.LENGTH_SHORT).show();
+            }
             return true;
         }
 
         @Override
         public void onPageFinished(WebView view, String url) {
             pageReady = true;
+            injectAppOnlyStyle();
+            matchSystemBars();
             if (pendingShareJson != null) {
                 String json = pendingShareJson;
                 pendingShareJson = null;
