@@ -227,7 +227,7 @@ public final class MainActivity extends Activity {
         }
         String css = "footer{"
                 // 底栏本身只负责留白；真正的「框」是下面那个包裹层。
-                + "padding:10px 12px calc(env(safe-area-inset-bottom,0px) + 30px) !important;"
+                + "padding:10px 12px calc(env(safe-area-inset-bottom,0px) + 26px) !important;"
                 + "display:block !important;"
                 + "}"
                 // 输入框 + 工具栏同属一个圆角框：图标在里、框只有一层边。
