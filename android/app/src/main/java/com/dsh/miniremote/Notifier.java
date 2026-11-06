@@ -86,6 +86,18 @@ public final class Notifier {
         manager(appContext).notify(notificationId("background-hint"), builder.build());
     }
 
+    /** 一次任务跑完了（只在前台服务里发，也就是应用在后台或锁屏时）。 */
+    static void showDone(Context context, String detail) {
+        Context appContext = context.getApplicationContext();
+        String text = detail == null ? "" : detail.trim();
+        Notification.Builder builder = baseBuilder(appContext, "done")
+                .setContentTitle("DSH 任务完成")
+                .setContentText(text.isEmpty() ? "可以回到电脑上看结果了。" : text)
+                .setStyle(new Notification.BigTextStyle()
+                        .bigText(text.isEmpty() ? "可以回到电脑上看结果了。" : text));
+        manager(appContext).notify(notificationId("done"), builder.build());
+    }
+
     private static Notification.Builder baseBuilder(Context context, String approvalId) {
         createChannel(context);
         Intent open = new Intent(context, MainActivity.class);

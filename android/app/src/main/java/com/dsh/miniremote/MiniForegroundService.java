@@ -40,6 +40,11 @@ public final class MiniForegroundService extends Service {
     private final Set<String> shown = new HashSet<>();
     /** 后台连接反复失败时只提醒一次，避免每次重试都弹。 */
     private boolean hinted;
+    /** 锁屏期间保住 CPU 和 Wi-Fi：否则 socket 还在，数据要等解锁才读（2026-11-06 实测）。 */
+    private android.os.PowerManager.WakeLock wakeLock;
+    private android.net.wifi.WifiManager.WifiLock wifiLock;
+    /** 上一次 state 帧里任务是不是在跑：用来抓「跑完了」这一刻。 */
+    private boolean wasRunning;
 
     static void start(Context context, String baseUrl, String credential) {
         if (baseUrl == null || credential == null) {
@@ -73,6 +78,7 @@ public final class MiniForegroundService extends Service {
             return START_NOT_STICKY;
         }
         startForeground(NOTIFICATION_ID, Notifier.serviceNotification(this, "正在盯着任务", "锁屏后也能收到审批提醒"));
+        acquireLocks();
         if (!running) {
             running = true;
             worker = new Thread(new Runnable() {
@@ -93,7 +99,41 @@ public final class MiniForegroundService extends Service {
             worker.interrupt();
             worker = null;
         }
+        releaseLocks();
         super.onDestroy();
+    }
+
+    /** 只在服务存活期间持有；应用回到前台就停服务，不会长期占着。 */
+    private void acquireLocks() {
+        if (wakeLock == null) {
+            android.os.PowerManager pm =
+                    (android.os.PowerManager) getSystemService(POWER_SERVICE);
+            wakeLock = pm.newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK, "dsh-mini:sse");
+            wakeLock.setReferenceCounted(false);
+        }
+        if (!wakeLock.isHeld()) {
+            wakeLock.acquire();
+        }
+        if (wifiLock == null) {
+            android.net.wifi.WifiManager wm =
+                    (android.net.wifi.WifiManager) getApplicationContext()
+                            .getSystemService(WIFI_SERVICE);
+            wifiLock = wm.createWifiLock(android.net.wifi.WifiManager.WIFI_MODE_FULL_HIGH_PERF,
+                    "dsh-mini:sse");
+            wifiLock.setReferenceCounted(false);
+        }
+        if (!wifiLock.isHeld()) {
+            wifiLock.acquire();
+        }
+    }
+
+    private void releaseLocks() {
+        if (wakeLock != null && wakeLock.isHeld()) {
+            wakeLock.release();
+        }
+        if (wifiLock != null && wifiLock.isHeld()) {
+            wifiLock.release();
+        }
     }
 
     /** 连接断了就等一会儿再连；连续失败太多次就收摊，不无限重试耗电。 */
@@ -105,6 +145,7 @@ public final class MiniForegroundService extends Service {
                 failures = 0;
             } catch (Exception err) {
                 failures += 1;
+                android.util.Log.w("MiniSSE", "stream failed (" + failures + "): " + err);
                 // 连续三次连不上：多半是系统把后台冻结了（2026-11-06 荣耀实测）。
                 // 只提醒一次，点通知回去检查电池设置。
                 if (failures == 3 && !hinted) {
@@ -131,6 +172,7 @@ public final class MiniForegroundService extends Service {
             throw new IllegalStateException("推送连接没建立起来");
         }
         BufferedReader reader = new BufferedReader(new InputStreamReader(response.stream, "UTF-8"));
+        android.util.Log.i("MiniSSE", "stream open: " + url);
         String event = null;
         StringBuilder data = new StringBuilder();
         String line;
@@ -153,17 +195,53 @@ public final class MiniForegroundService extends Service {
         if (event == null || raw.isEmpty()) {
             return;
         }
+        android.util.Log.i("MiniSSE", "event=" + event + " len=" + raw.length());
         if ("approval".equals(event)) {
             String id = idOf(raw);
+            android.util.Log.i("MiniSSE", "approval id=" + id);
             if (id != null && shown.add(id)) {
                 Notifier.showApproval(this, baseUrl, id);
             }
+        } else if ("state".equals(event)) {
+            JSONObject json = parse(raw);
+            if (json == null) {
+                return;
+            }
+            boolean running = json.optBoolean("running", false);
+            if (wasRunning && !running) {
+                JSONObject latest = json.optJSONObject("latest");
+                String text = latest == null ? "" : latest.optString("text", "");
+                Notifier.showDone(this, firstLine(text));
+            }
+            wasRunning = running;
         } else if ("question".equals(event)) {
             String id = idOf(raw);
             if (id != null && shown.add(id)) {
                 Notifier.showInfo(this, "DSH 有一道题等你回答", "打开应用作答。", id);
             }
         }
+    }
+
+    private static JSONObject parse(String raw) {
+        try {
+            return new JSONObject(raw);
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    /** 通知栏只放得下一行：取正文第一行，去掉引用符号，太长就截断。 */
+    private static String firstLine(String text) {
+        if (text == null) {
+            return "";
+        }
+        String line = text.trim();
+        int nl = line.indexOf('\n');
+        if (nl >= 0) {
+            line = line.substring(0, nl);
+        }
+        line = line.replaceFirst("^#+\\s*", "").replaceFirst("^[-*]\\s+", "").trim();
+        return line.length() > 90 ? line.substring(0, 90) + "…" : line;
     }
 
     private static String idOf(String raw) {
