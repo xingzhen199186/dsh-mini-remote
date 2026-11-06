@@ -225,7 +225,30 @@ public final class MainActivity extends Activity {
         if (webView == null) {
             return;
         }
-        String css = "footer{padding-bottom:calc(env(safe-area-inset-bottom,0px) + 16px) !important;}"
+        String css = "footer{"
+                // 底栏改成两列：左边回形针，右边输入框；发送键叠在输入框里面。
+                + "display:grid !important;"
+                + "grid-template-columns:auto 1fr !important;"
+                + "grid-template-areas:'attach input' !important;"
+                + "align-items:end !important;"
+                + "column-gap:8px !important;"
+                + "padding:10px 12px calc(env(safe-area-inset-bottom,0px) + 30px) !important;"
+                + "}"
+                + "#btnAttach{grid-area:attach !important;}"
+                // 右边留出让位的空白，文字不会钻到按钮底下。
+                + "#input{grid-area:input !important;padding-right:54px !important;}"
+                + "#btnSend{"
+                + "grid-area:input !important;"
+                + "justify-self:end !important;align-self:end !important;"
+                + "margin:0 7px 7px 0 !important;"
+                + "width:34px !important;height:34px !important;padding:0 !important;"
+                + "border:none !important;border-radius:10px !important;"
+                + "background:var(--act) !important;color:var(--on-act) !important;"
+                + "font-size:0 !important;line-height:34px !important;text-align:center !important;"
+                + "z-index:2 !important;"
+                + "}"
+                // 方形里一个向上箭头；把原来的「发送」两个字藏起来（font-size:0）。
+                + "#btnSend::after{content:'\u2191';font-size:19px;line-height:1;}"
                 + "main{padding-bottom:24px !important;}";
         String js = "(function(){"
                 + "if(document.getElementById('mini-app-only-style'))return;"
