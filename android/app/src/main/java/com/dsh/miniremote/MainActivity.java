@@ -2,11 +2,15 @@ package com.dsh.miniremote;
 
 import android.annotation.SuppressLint;
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.provider.Settings;
 import android.webkit.CookieManager;
 import android.webkit.ValueCallback;
 import android.webkit.WebResourceRequest;
@@ -74,6 +78,42 @@ public final class MainActivity extends Activity {
         cookies.setAcceptCookie(true);
         cookies.setAcceptThirdPartyCookies(webView, false);
         probeAddresses();
+        explainBackgroundOnce();
+    }
+
+    /**
+     * 锁屏提醒的前提：系统不能把本应用冻结在后台（2026-11-06 真机结论）。
+     * 荣耀实测：不放行时前台服务还在、通知也在，但连接被挂起，审批收不到。
+     * 只解释一次，不反复弹；点「去设置」直接开系统的电池优化授权页。
+     */
+    private void explainBackgroundOnce() {
+        if (Build.VERSION.SDK_INT < 23) {
+            return;
+        }
+        SharedPreferences prefs = getSharedPreferences("mini.prefs", MODE_PRIVATE);
+        if (prefs.getBoolean("backgroundHintShown", false)) {
+            return;
+        }
+        prefs.edit().putBoolean("backgroundHintShown", true).apply();
+        new AlertDialog.Builder(this)
+                .setTitle("锁屏提醒需要一项系统设置")
+                .setMessage("国产手机默认会冻结后台应用，锁屏后就收不到审批提醒。\n\n"
+                        + "请在系统的「电池 → 应用启动管理」里把「DSH 极简遥控器」改成"
+                        + "允许后台活动；点「去设置」会打开本应用的详情页。")
+                .setPositiveButton("去设置", (dialog, which) -> openBatterySettings())
+                .setNegativeButton("知道了", null)
+                .show();
+    }
+
+    private void openBatterySettings() {
+        // 2026-11-06 真机：荣耀不认 REQUEST_IGNORE_BATTERY_OPTIMIZATIONS（能解析但页面立刻关掉），
+        // 应用详情页则一定存在。所以直接开详情页，用户从那里进「电池 / 耗电管理」。
+        try {
+            startActivity(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                    Uri.parse("package:" + getPackageName())));
+        } catch (Exception ignored) {
+            // 连详情页都打不开就什么也不做，别让用户卡在一个空对话框上。
+        }
     }
 
     @Override
