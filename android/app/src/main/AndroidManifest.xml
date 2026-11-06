@@ -51,6 +51,13 @@
             android:name=".PairActivity"
             android:exported="false" />
 
+        <!-- 应用内相机：荣耀封了第三方调用系统相机，只能自己拍（2026-11-06）。 -->
+        <activity
+            android:name=".CaptureActivity"
+            android:exported="false"
+            android:screenOrientation="portrait"
+            android:configChanges="orientation|screenSize|keyboardHidden" />
+
         <!--
             exported=false 不妨碍本应用的显式 PendingIntent 拉起它。
             TODO(P1)：通知实现使用 new Intent(context, ApprovalReceiver.class) 显式指定接收器，

@@ -49,7 +49,6 @@ public final class MainActivity extends Activity {
     private String pendingShareJson;
     /** 网页里 <input type="file"> 的回调与相机输出位置（2026-11-06）。 */
     private ValueCallback<Uri[]> fileCallback;
-    private Uri cameraOutput;
     /** 前台轮询待审批：把锁屏推送唤起后的通知画出来。 */
     private PendingPoller poller;
 
@@ -393,8 +392,10 @@ public final class MainActivity extends Activity {
 
     /**
      * 页面里「选文件 / 拍照」点的是 <input type="file">；WebView 默认不处理，
-     * 宿主不接就一点反应都没有（2026-11-06 真机反馈）。这里接住并弹系统选择器，
-     * 拍照那条额外挂一个相机 Intent，照片直接写到 FileProvider 缓存里。
+     * 宿主不接就一点反应都没有（2026-11-06 真机反馈）。
+     *
+     * 两条路分开走：拍照进**应用内相机**（荣耀封了第三方调用系统相机，2026-11-06
+     * 真机确认 Permission Denial），选文件仍走系统文件管理器。
      */
     private final class FileChooserClient extends WebChromeClient {
         @Override
@@ -404,7 +405,16 @@ public final class MainActivity extends Activity {
                 fileCallback.onReceiveValue(null);
             }
             fileCallback = callback;
-            cameraOutput = null;
+            if (params.isCaptureEnabled()) {
+                // 系统相机在荣耀上被禁（Permission Denial），改走应用内相机。
+                try {
+                    startActivityForResult(new Intent(MainActivity.this, CaptureActivity.class),
+                            REQUEST_FILE_CHOOSER);
+                    return true;
+                } catch (Exception err) {
+                    android.util.Log.w("MiniCamera", "in-app capture failed", err);
+                }
+            }
             Intent content = new Intent(Intent.ACTION_GET_CONTENT);
             content.addCategory(Intent.CATEGORY_OPENABLE);
             String type = "*/*";
@@ -416,39 +426,13 @@ public final class MainActivity extends Activity {
             if (params.getMode() == FileChooserParams.MODE_OPEN_MULTIPLE) {
                 content.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
             }
-            Intent chooser = Intent.createChooser(content, "选择文件");
-            if (params.isCaptureEnabled()) {
-                Uri target = cameraTarget();
-                if (target != null) {
-                    cameraOutput = target;
-                    Intent camera = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
-                    camera.putExtra(MediaStore.EXTRA_OUTPUT, target);
-                    camera.addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-                            | Intent.FLAG_GRANT_READ_URI_PERMISSION);
-                    chooser.putExtra(Intent.EXTRA_INITIAL_INTENTS, new Intent[] { camera });
-                }
-            }
             try {
-                startActivityForResult(chooser, REQUEST_FILE_CHOOSER);
+                startActivityForResult(Intent.createChooser(content, "选择文件"), REQUEST_FILE_CHOOSER);
             } catch (Exception err) {
                 fileCallback = null;
-                cameraOutput = null;
                 return false;
             }
             return true;
-        }
-    }
-
-    private Uri cameraTarget() {
-        try {
-            File dir = new File(getCacheDir(), "camera");
-            if (!dir.exists() && !dir.mkdirs()) {
-                return null;
-            }
-            File file = File.createTempFile("shot-", ".jpg", dir);
-            return FileProvider.getUriForFile(this, getPackageName() + ".fileprovider", file);
-        } catch (Exception err) {
-            return null;
         }
     }
 
@@ -459,13 +443,12 @@ public final class MainActivity extends Activity {
             return;
         }
         Uri[] result = WebChromeClient.FileChooserParams.parseResult(resultCode, data);
-        if ((result == null || result.length == 0) && cameraOutput != null
-                && sizeOf(cameraOutput) > 0) {
-            result = new Uri[] { cameraOutput };
+        if ((result == null || result.length == 0) && resultCode == RESULT_OK
+                && data != null && data.getData() != null) {
+            result = new Uri[] { data.getData() };
         }
         fileCallback.onReceiveValue(result);
         fileCallback = null;
-        cameraOutput = null;
     }
 
     private long sizeOf(Uri uri) {
