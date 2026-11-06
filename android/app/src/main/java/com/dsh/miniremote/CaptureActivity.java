@@ -106,7 +106,7 @@ public class CaptureActivity extends Activity {
         FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(dm.heightPixels, dm.widthPixels);
         lp.gravity = Gravity.CENTER;
         preview.setLayoutParams(lp);
-        preview.setRotation(90);
+        preview.setRotation(270);
         root.addView(preview);
 
         LinearLayout bar = new LinearLayout(this);
