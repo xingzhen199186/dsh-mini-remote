@@ -286,6 +286,7 @@ public final class MainActivity extends Activity {
 
               // 外壳探完一条就调一次：这一条通就点亮，不通就点红。
               window.miniConnStatus = function(url, reachable){
+                if (!url) return;
                 var rows = body.querySelectorAll('.row[data-url]');
                 for (var i = 0; i < rows.length; i++) {
                   if (rows[i].getAttribute('data-url') !== url) continue;
@@ -821,7 +822,7 @@ public final class MainActivity extends Activity {
                 Thread thread = new Thread(new Runnable() {
                     @Override
                     public void run() {
-                        final boolean reachable = reachableQuick(entry.baseUrl);
+                        final boolean reachable = reachableQuick(entry.baseUrl, deviceCredential);
                         mainHandler.post(new Runnable() {
                             @Override
                             public void run() {
@@ -895,30 +896,33 @@ public final class MainActivity extends Activity {
     }
 
     /**
-     * 快速判断一条地址通不通：只连端口，不发请求（2026-11-07）。
+     * 判断一条地址是不是真的「我们自己那台电脑」（2026-11-07）。
      *
-     * 圆点要「能连上就亮」，用整轮 HTTP 探测的话每条最多等 13 秒，
-     * 八条并行下来界面要愣半天。连得上端口就足够说明这条路是通的。
+     * 早先只连端口，结果闹了个笑话：没装 Tailscale 的手机上，
+     * desktop-xxx.ts.net 被本机 VPN 客户端解析成了公网地址，端口有人应答，
+     * 圆点就绿了——那不是我们的服务。所以这里真的去问一次版本接口，
+     * 只有它按我们的约定回话，才算这条线通。
+     *
+     * 超时压得比正常请求短：圆点是「大致能用」的提示，不该让界面等十几秒。
      */
-    private static boolean reachableQuick(String baseUrl) {
-        java.net.Socket socket = new java.net.Socket();
+    private static boolean reachableQuick(String baseUrl, String deviceCredential) {
+        java.net.HttpURLConnection connection = null;
         try {
-            java.net.URI uri = java.net.URI.create(baseUrl);
-            String host = uri.getHost();
-            if (host == null) {
-                return false;
-            }
-            int port = uri.getPort() > 0 ? uri.getPort()
-                    : ("https".equalsIgnoreCase(uri.getScheme()) ? 443 : 80);
-            socket.connect(new java.net.InetSocketAddress(host, port), 2500);
-            return true;
+            java.net.URL url = new java.net.URL(baseUrl + "/mini/api/version");
+            connection = (java.net.HttpURLConnection) url.openConnection();
+            connection.setRequestMethod("GET");
+            connection.setConnectTimeout(2500);
+            connection.setReadTimeout(3500);
+            connection.setUseCaches(false);
+            connection.setInstanceFollowRedirects(false);
+            connection.setRequestProperty("X-Mini-Device", deviceCredential);
+            int status = connection.getResponseCode();
+            return status >= 200 && status < 300;
         } catch (Exception e) {
             return false;
         } finally {
-            try {
-                socket.close();
-            } catch (Exception ignored) {
-                // 关不掉也没关系，进程退出就回收了。
+            if (connection != null) {
+                connection.disconnect();
             }
         }
     }
