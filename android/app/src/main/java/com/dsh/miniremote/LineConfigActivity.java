@@ -198,6 +198,17 @@ public final class LineConfigActivity extends Activity {
 
         TextView scanHint = new TextView(this);
         scanHint.setText("扫电脑上的二维码：是地址就填进上面，是配对码就直接重新配对。");
+        // 两条 Cloudflare 固定地址最常见的坏法是「进程还在、连接死了」，
+        // 在电脑端把它关一次再打开就能恢复（2026-11-07 用户要求提醒）。
+        String slot = Connections.slotOf(lineType);
+        if ("public-relay".equals(slot) || "b-relay".equals(slot)) {
+            TextView relayHint = new TextView(this);
+            relayHint.setText("一直连不上的话：到电脑端设置里把这条地址关一次、再打开，通常就好了。");
+            relayHint.setTextSize(12);
+            relayHint.setTextColor(0xFF5A7290);
+            relayHint.setPadding(0, 0, 0, dp * 10);
+            card.addView(relayHint);
+        }
         scanHint.setTextSize(12);
         scanHint.setTextColor(0xFF5A7290);
         scanHint.setPadding(0, dp * 8, 0, dp * 12);

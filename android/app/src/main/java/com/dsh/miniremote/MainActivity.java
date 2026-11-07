@@ -284,18 +284,39 @@ public final class MainActivity extends Activity {
                 }
               }
 
-              // 外壳探完一条就调一次：这一条通就点亮，不通就点红。
+              // Cloudflare 那两条固定地址：连不上时最常见的原因是隧道进程还在、
+              // 但连接已经死了，关一次再打开就能救回来（2026-11-07 用户要求提醒）。
+              var FIXED_RELAYS = { 'public-relay': 1, 'b-relay': 1 };
+
               window.miniConnStatus = function(url, reachable){
                 if (!url) return;
                 var rows = body.querySelectorAll('.row[data-url]');
                 for (var i = 0; i < rows.length; i++) {
                   if (rows[i].getAttribute('data-url') !== url) continue;
-                  var dot = rows[i].querySelector('.mini-dot');
+                  var row = rows[i];
+                  var dot = row.querySelector('.mini-dot');
                   if (!dot) continue;
                   dot.classList.remove('ok', 'down');
                   dot.classList.add(reachable ? 'ok' : 'down');
+                  updateRetryHint(row, reachable);
                 }
               };
+
+              function updateRetryHint(row, reachable){
+                var existing = row.querySelector('.mini-retry-hint');
+                var fixed = FIXED_RELAYS[row.getAttribute('data-kind')];
+                if (reachable || !fixed) {
+                  if (existing) existing.remove();
+                  return;
+                }
+                if (existing) return;
+                var hint = row.querySelector('.hint');
+                if (!hint) return;
+                var tip = document.createElement('span');
+                tip.className = 'mini-retry-hint';
+                tip.textContent = '连不上？到电脑端把这条关一次、再打开试试。';
+                hint.appendChild(tip);
+              }
 
               window.miniConnRerender = render;
               render();
@@ -407,6 +428,10 @@ public final class MainActivity extends Activity {
                 + "}"
                 + "#miniConnBlock .mini-ico.danger{color:#c0453f !important;}"
                 + "#miniConnBlock .mini-ico:disabled{opacity:.45 !important;}"
+                + "#miniConnBlock .mini-retry-hint{"
+                + "display:block !important;margin-top:6px !important;"
+                + "font-size:12px !important;line-height:1.5 !important;color:#c0453f !important;"
+                + "}"
                 + "#miniConnBlock .mini-ico svg{"
                 + "width:18px !important;height:18px !important;stroke:currentColor !important;"
                 + "fill:none !important;stroke-width:1.8 !important;"
