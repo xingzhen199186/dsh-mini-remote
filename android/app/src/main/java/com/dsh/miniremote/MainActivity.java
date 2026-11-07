@@ -12,6 +12,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.provider.MediaStore;
 import android.provider.Settings;
+import android.util.Log;
 import android.view.View;
 import android.webkit.CookieManager;
 import android.webkit.JavascriptInterface;
@@ -115,31 +116,13 @@ public final class MainActivity extends Activity {
         // 代理就绪后再去探测，否则探测会走公网直接失败（2026-11-08）。
         final String preferredUrl = Connections.preferred(this);
         if (preferredUrl != null && isTailnetAddress(preferredUrl) && TailNet.hasAuthKey(this)) {
-            new Thread(new Runnable() {
+            // 不走自动探测：用户选的就是这条，直接用它。
+            ensureTailNetThen(new Runnable() {
                 @Override
                 public void run() {
-                    final String failure = TailNet.startBlocking(MainActivity.this);
-                    mainHandler.post(new Runnable() {
-                        @Override
-                        public void run() {
-                            if (destroyed) {
-                                return;
-                            }
-                            if (failure != null) {
-                                Toast.makeText(MainActivity.this,
-                                        "内置 Tailscale 没起来：" + failure, Toast.LENGTH_LONG).show();
-                            }
-                            // 不走自动探测：用户选的就是这条，直接用它。
-                            enableTailProxy(new Runnable() {
-                                @Override
-                                public void run() {
-                                    selectAddress(preferredUrl);
-                                }
-                            });
-                        }
-                    });
+                    selectAddress(preferredUrl);
                 }
-            }, "mini-tailnet").start();
+            });
         } else {
             probeAddresses();
         }
@@ -1059,6 +1042,7 @@ public final class MainActivity extends Activity {
             @Override
             public void run() {
                 tailProxyOn = true;
+                Log.i("MiniTailProxy", "代理已设到 " + TailNet.PROXY_HOST + ":" + TailNet.PROXY_PORT);
                 Runnable next = pendingAfterProxy;
                 pendingAfterProxy = null;
                 if (next != null) {
@@ -1066,6 +1050,47 @@ public final class MainActivity extends Activity {
                 }
             }
         });
+    }
+
+    /**
+     * 切到 tailnet 线路前，确认内置内核在跑（2026-11-08）。
+     *
+     * 内核是应用进程的子进程，进程被杀、或者用户之前切到别的线路，
+     * 它都可能已经没了；这时只设代理会让页面直接报「无法访问」。
+     */
+    private void ensureTailNetThen(final Runnable after) {
+        if (TailNet.isConnected()) {
+            enableTailProxy(after);
+            return;
+        }
+        if (!TailNet.hasAuthKey(this)) {
+            Toast.makeText(this, "这条线路要用内置 Tailscale，先在它的配置页填授权密钥。",
+                    Toast.LENGTH_LONG).show();
+            if (after != null) after.run();
+            return;
+        }
+        Toast.makeText(this, "正在启动内置 Tailscale……", Toast.LENGTH_SHORT).show();
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                final String failure = TailNet.startBlocking(MainActivity.this);
+                mainHandler.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        if (destroyed) {
+                            return;
+                        }
+                        if (failure != null) {
+                            Toast.makeText(MainActivity.this,
+                                    "内置 Tailscale 没起来：" + failure, Toast.LENGTH_LONG).show();
+                            if (after != null) after.run();
+                            return;
+                        }
+                        enableTailProxy(after);
+                    }
+                });
+            }
+        }, "mini-tailnet-ensure").start();
     }
 
     /** 离开 tailnet 地址时把代理撤掉，免得别的线路被它挡住。 */
@@ -1140,7 +1165,7 @@ public final class MainActivity extends Activity {
                         // tailnet 地址必须走内置内核的代理；其它地址要把代理撤掉，
                         // 否则一条不可达的隧道会把所有线路都拖死（2026-11-08）。
                         if (isTailnetAddress(baseUrl)) {
-                            enableTailProxy(load);
+                            ensureTailNetThen(load);
                         } else {
                             disableTailProxy(load);
                         }

@@ -99,6 +99,7 @@ final class TailNet {
             for (int i = 0; i < 40; i++) {
                 String state = backendState();
                 if ("Running".equals(state)) {
+                    Log.i(TAG, "已连上，用时约 " + (i * 500) + "ms");
                     return null;
                 }
                 if ("Stopped".equals(state)) {
@@ -106,6 +107,7 @@ final class TailNet {
                 }
                 Thread.sleep(500);
             }
+            Log.w(TAG, "等不到 Running，当前=" + backendState() + " 日志=" + lastCoreLog());
             return "还没连上（" + backendState() + "）：" + lastCoreLog();
         } catch (Throwable e) {
             Log.w(TAG, "启动失败", e);
