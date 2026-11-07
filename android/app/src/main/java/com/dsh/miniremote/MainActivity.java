@@ -163,84 +163,115 @@ public final class MainActivity extends Activity {
      * 底下能手动加地址、也能删。数据全部来自外壳（window.MiniConn），
      * 页面自己的设置项一个都没碰。
      */
-    private static final String CONN_SECTION_JS = "(function(){"
-            + "if(window.__miniConnUi)return;"
-            + "var bridge=window.MiniConn;"
-            + "if(!bridge)return;"
-            + "var host=document.querySelector('#settings .sheet-body');"
-            + "if(!host)return;"
-            + "window.__miniConnUi=1;"
-            + "var block=document.createElement('div');"
-            + "block.id='miniConnBlock';"
-            + "block.innerHTML="
-            + "'<div class=\"row\"><div><div class=\"label\">连接</div>"
-            + "<div class=\"hint\" id=\"miniConnSummary\">读取中…</div></div>"
-            + "<button class=\"btn\" id=\"miniConnToggle\" type=\"button\">展开</button></div>"
-            + "<div id=\"miniConnBody\" hidden></div>';"
-            + "host.insertBefore(block,host.firstChild);"
-            + "var body=block.querySelector('#miniConnBody');"
-            + "var summary=block.querySelector('#miniConnSummary');"
-            + "var toggle=block.querySelector('#miniConnToggle');"
-            + "function esc(v){return String(v==null?'':v).replace(/[&<>\\\"]/g,function(c){"
-            + "return {'&':'&amp;','<':'&lt;','>':'&gt;','\\\"':'&quot;'}[c];});}"
-            + "function row(label,hint,actions){"
-            + "return '<div class=\"row\"><div><div class=\"label\">'+esc(label)+'</div>"
-            + "<div class=\"hint\">'+hint+'</div></div>"
-            + "<div style=\"display:flex;gap:8px;flex:0 0 auto\">'+actions+'</div></div>';"
-            + "}"
-            + "toggle.addEventListener('click',function(){"
-            + "var open=!body.hidden;"
-            + "body.hidden=open;"
-            + "toggle.textContent=open?'展开':'收起';"
-            + "});"
-            + "function render(){"
-            + "var data={};"
-            + "try{data=JSON.parse(bridge.state()||'{}');}catch(e){data={};}"
-            + "var items=data.items||[];"
-            + "summary.textContent=items.length?(items.length+' 条线路'):'还没有可用的线路';"
-            + "var html='';"
-            + "items.forEach(function(it){"
-            + "var hint=esc(it.url)+(it.current?' · 使用中':'');"
-            + "var actions=it.current"
-            + "?'<button class=\"btn\" type=\"button\" disabled>当前</button>'"
-            + ":'<button class=\"btn\" type=\"button\" data-use=\"'+esc(it.url)+'\">切换</button>';"
-            + "if(it.type==='manual'){"
-            + "actions+='<button class=\"btn\" type=\"button\" data-del=\"'+esc(it.url)+'\">删除</button>';"
-            + "}"
-            + "html+=row(it.label,hint,actions);"
-            + "});"
-            + "html+='<div class=\"row\"><input id=\"miniConnInput\" type=\"url\" placeholder=\"http://192.168.1.5:3090\" "
-            + "style=\"flex:1 1 auto;min-width:0;padding:10px 12px;border:1px solid var(--line);"
-            + "border-radius:10px;background:var(--panel-2);color:var(--fg);font:inherit\"></div>';"
-            + "html+=row('添加地址','粘贴电脑给的地址就能加一条线路',"
-            + "'<button class=\"btn\" id=\"miniConnAdd\" type=\"button\">添加</button>');"
-            + "body.innerHTML=html;"
-            + "Array.prototype.forEach.call(body.querySelectorAll('[data-use]'),function(btn){"
-            + "btn.addEventListener('click',function(){"
-            + "btn.textContent='切换中…';"
-            + "bridge.use(btn.getAttribute('data-use'));"
-            + "});"
-            + "});"
-            + "Array.prototype.forEach.call(body.querySelectorAll('[data-del]'),function(btn){"
-            + "btn.addEventListener('click',function(){"
-            + "var url=btn.getAttribute('data-del');"
-            + "if(!confirm('删掉这条线路？\\n'+url))return;"
-            + "var result=String(bridge.remove(url));"
-            + "if(result.indexOf('err:')===0){alert(result.slice(4));return;}"
-            + "render();"
-            + "});"
-            + "});"
-            + "var add=body.querySelector('#miniConnAdd');"
-            + "add.addEventListener('click',function(){"
-            + "var input=body.querySelector('#miniConnInput');"
-            + "var result=String(bridge.add(input.value||''));"
-            + "if(result.indexOf('err:')===0){alert(result.slice(4));return;}"
-            + "input.value='';"
-            + "render();"
-            + "});"
-            + "}"
-            + "render();"
-            + "})();";
+    private static final String CONN_SECTION_JS = """
+            (function(){
+              if (window.__miniConnUi) return;
+              var bridge = window.MiniConn;
+              if (!bridge) return;
+              var host = document.querySelector('#settings .sheet-body');
+              if (!host) return;
+              window.__miniConnUi = 1;
+
+              var block = document.createElement('div');
+              block.id = 'miniConnBlock';
+              block.innerHTML =
+                '<div class="row"><div>'
+                + '<div class="label">连接</div>'
+                + '<div class="hint" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">'
+                + '<span id="miniConnStatus">—</span><span>·</span><span id="miniConnSummary"></span>'
+                + '</div></div>'
+                + '<div id="miniConnActions" style="display:flex;gap:8px;flex:0 0 auto"></div>'
+                + '</div>'
+                + '<div id="miniConnBody" hidden></div>';
+              host.insertBefore(block, host.firstChild);
+
+              var body = block.querySelector('#miniConnBody');
+              var summary = block.querySelector('#miniConnSummary');
+              var statusSlot = block.querySelector('#miniConnStatus');
+              var actions = block.querySelector('#miniConnActions');
+
+              var toggle = document.createElement('button');
+              toggle.className = 'btn';
+              toggle.type = 'button';
+              toggle.textContent = '展开';
+
+              // 页面本来那条「连接」（状态 + 重连）搬进来，旧行藏掉：设置里只留一处。
+              var reconnect = document.getElementById('btnReconnect');
+              var connHint = document.getElementById('connHint');
+              var oldRow = reconnect ? reconnect.closest('.row') : null;
+              if (connHint) statusSlot.replaceWith(connHint);
+              if (reconnect) actions.appendChild(reconnect);
+              actions.appendChild(toggle);
+              if (oldRow) oldRow.hidden = true;
+
+              toggle.addEventListener('click', function(){
+                var open = !body.hidden;
+                body.hidden = open;
+                toggle.textContent = open ? '展开' : '收起';
+              });
+
+              function esc(v){
+                return String(v == null ? '' : v).replace(/[&<>"]/g, function(c){
+                  return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];
+                });
+              }
+              function row(label, hint, buttons){
+                return '<div class="row"><div>'
+                  + '<div class="label">' + esc(label) + '</div>'
+                  + '<div class="hint">' + hint + '</div></div>'
+                  + '<div style="display:flex;gap:8px;flex:0 0 auto">' + buttons + '</div></div>';
+              }
+
+              function render(){
+                var data = {};
+                try { data = JSON.parse(bridge.state() || '{}'); } catch (e) { data = {}; }
+                var items = data.items || [];
+                summary.textContent = items.length ? (items.length + ' 条线路') : '还没有可用的线路';
+                var html = '';
+                items.forEach(function(it){
+                  var hint = esc(it.url) + (it.current ? ' · 使用中' : '');
+                  var buttons = it.current
+                    ? '<button class="btn" type="button" disabled>当前</button>'
+                    : '<button class="btn" type="button" data-use="' + esc(it.url) + '">切换</button>';
+                  if (it.type === 'manual') {
+                    buttons += '<button class="btn" type="button" data-del="' + esc(it.url) + '">删除</button>';
+                  }
+                  html += row(it.label, hint, buttons);
+                });
+                html += '<div class="row"><input id="miniConnInput" type="url" placeholder="http://192.168.1.5:3090" '
+                  + 'style="flex:1 1 auto;min-width:0;padding:10px 12px;border:1px solid var(--line);'
+                  + 'border-radius:10px;background:var(--panel-2);color:var(--fg);font:inherit"></div>';
+                html += row('添加地址', '粘贴电脑给的地址就能加一条线路',
+                  '<button class="btn" id="miniConnAdd" type="button">添加</button>');
+                body.innerHTML = html;
+
+                Array.prototype.forEach.call(body.querySelectorAll('[data-use]'), function(btn){
+                  btn.addEventListener('click', function(){
+                    btn.textContent = '切换中…';
+                    bridge.use(btn.getAttribute('data-use'));
+                  });
+                });
+                Array.prototype.forEach.call(body.querySelectorAll('[data-del]'), function(btn){
+                  btn.addEventListener('click', function(){
+                    var url = btn.getAttribute('data-del');
+                    if (!confirm('删掉这条线路？\\n' + url)) return;
+                    var result = String(bridge.remove(url));
+                    if (result.indexOf('err:') === 0) { alert(result.slice(4)); return; }
+                    render();
+                  });
+                });
+                var add = body.querySelector('#miniConnAdd');
+                add.addEventListener('click', function(){
+                  var input = body.querySelector('#miniConnInput');
+                  var result = String(bridge.add(input.value || ''));
+                  if (result.indexOf('err:') === 0) { alert(result.slice(4)); return; }
+                  input.value = '';
+                  render();
+                });
+              }
+              render();
+            })();
+            """;
 
     /**
      * 状态栏/导航栏跟页面底色对齐（2026-11-06）。
