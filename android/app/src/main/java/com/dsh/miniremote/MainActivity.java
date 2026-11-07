@@ -220,11 +220,18 @@ public final class MainActivity extends Activity {
                   return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];
                 });
               }
+              var ICON_SWITCH = '<svg viewBox="0 0 24 24"><path d="M4 12h13"/><path d="M12 6l6 6-6 6"/></svg>';
+              var ICON_DELETE = '<svg viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M9 7V5h6v2"/><path d="M7 7l1 12h8l1-12"/></svg>';
+              var ICON_CHECK = '<svg viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></svg>';
+
               function row(label, hint, buttons, url, current){
-                return '<div class="row" data-url="' + esc(url) + '" data-current="' + (current ? '1' : '') + '" style="cursor:pointer"><div>'
+                return '<div class="row" data-url="' + esc(url) + '" data-current="' + (current ? '1' : '') + '" style="cursor:pointer">'
+                  + '<div style="display:flex;gap:10px;align-items:flex-start;min-width:0">'
+                  + '<span class="mini-dot' + (current ? ' ok' : '') + '"></span>'
+                  + '<div style="min-width:0">'
                   + '<div class="label">' + esc(label) + '</div>'
-                  + '<div class="hint">' + hint + '</div></div>'
-                  + '<div style="display:flex;gap:8px;flex:0 0 auto">' + buttons + '</div></div>';
+                  + '<div class="hint">' + hint + '</div></div></div>'
+                  + '<div class="mini-acts">' + buttons + '</div></div>';
               }
 
               function render(){
@@ -236,21 +243,18 @@ public final class MainActivity extends Activity {
                 items.forEach(function(it){
                   var hint = esc(it.url) + (it.current ? ' · 使用中' : '');
                   var buttons = it.current
-                    ? '<button class="btn" type="button" disabled>当前</button>'
-                    : '<button class="btn" type="button" data-use="' + esc(it.url) + '">切换</button>';
-                  if (it.type === 'manual') {
-                    buttons += '<button class="btn" type="button" data-del="' + esc(it.url) + '">删除</button>';
-                  }
+                    ? '<button class="mini-ico" type="button" disabled title="正在用">' + ICON_CHECK + '</button>'
+                    : '<button class="mini-ico" type="button" data-use="' + esc(it.url) + '" title="切换到这条">' + ICON_SWITCH + '</button>';
                   html += row(it.label, hint, buttons, it.url, it.current);
                 });
                 html += '<div class="row" data-url="" style="cursor:pointer"><div>'
                   + '<div class="label">添加地址</div>'
-                  + '<div class="hint">粘贴电脑给的地址就能加一条线路</div></div>'
-                  + '<div style="display:flex;gap:8px;flex:0 0 auto">'
-                  + '<button class="btn" type="button">添加</button></div></div>';
+                  + '<div class="hint">粘贴电脑给的地址，或者扫码</div></div>'
+                  + '<div class="mini-acts"><button class="mini-ico" type="button" title="添加">'
+                  + '<svg viewBox="0 0 24 24"><path d="M12 5v14"/><path d="M5 12h14"/></svg></button></div></div>';
                 body.innerHTML = html;
 
-                // 整行点击进入配置页；按钮 stopPropagation 不冒泡。
+                // 整行点击进入配置页；图标按钮不冒泡。
                 Array.prototype.forEach.call(body.querySelectorAll('.row[data-url]'), function(rowEl){
                   rowEl.addEventListener('click', function(ev){
                     if (ev.target.closest('button')) return;
@@ -261,21 +265,24 @@ public final class MainActivity extends Activity {
                 Array.prototype.forEach.call(body.querySelectorAll('[data-use]'), function(btn){
                   btn.addEventListener('click', function(ev){
                     ev.stopPropagation();
-                    btn.textContent = '切换中…';
+                    btn.disabled = true;
                     bridge.use(btn.getAttribute('data-use'));
                   });
                 });
-                Array.prototype.forEach.call(body.querySelectorAll('[data-del]'), function(btn){
-                  btn.addEventListener('click', function(ev){
-                    ev.stopPropagation();
-                    var url = btn.getAttribute('data-del');
-                    if (!confirm('删掉这条线路？\\n' + url)) return;
-                    var result = String(bridge.remove(url));
-                    if (result.indexOf('err:') === 0) { alert(result.slice(4)); return; }
-                    render();
-                  });
-                });
+                // 探测：先把不知道的通通留灰，回来一条点亮一条。
+                if (typeof bridge.probe === 'function') {
+                  bridge.probe();
+                }
               }
+
+              // 外壳探完一条就调一次，把那一行的圆点点亮或点红。
+              window.miniConnStatus = function(url, reachable){
+                var el = document.querySelector('#miniConnBody .row[data-url="' + url + '"] .mini-dot');
+                if (!el) return;
+                el.classList.remove('ok', 'down');
+                el.classList.add(reachable ? 'ok' : 'down');
+              };
+
               window.miniConnRerender = render;
               render();
             })();
@@ -367,6 +374,30 @@ public final class MainActivity extends Activity {
                 + "}"
                 // 输入框 + 工具栏同属一个圆角框：图标在里、框只有一层边。
                 + "#miniConnBlock .btn{white-space:nowrap !important;}"
+                // 状态圆点：灰=没探到/不知道，绿=通，红=不通。
+                + "#miniConnBlock .mini-dot{"
+                + "width:9px !important;height:9px !important;border-radius:50% !important;"
+                + "background:#c6d4e6 !important;margin-top:8px !important;flex:0 0 auto !important;"
+                + "}"
+                + "#miniConnBlock .mini-dot.ok{background:#2fbf71 !important;"
+                + "box-shadow:0 0 0 3px rgba(47,191,113,.16) !important;}"
+                + "#miniConnBlock .mini-dot.down{background:#e05b57 !important;}"
+                // 右侧图标按钮
+                + "#miniConnBlock .mini-acts{"
+                + "display:flex !important;gap:4px !important;flex:0 0 auto !important;align-items:center !important;"
+                + "}"
+                + "#miniConnBlock .mini-ico{"
+                + "width:34px !important;height:34px !important;padding:0 !important;border:none !important;"
+                + "border-radius:10px !important;background:transparent !important;color:var(--muted) !important;"
+                + "display:flex !important;align-items:center !important;justify-content:center !important;"
+                + "}"
+                + "#miniConnBlock .mini-ico.danger{color:#c0453f !important;}"
+                + "#miniConnBlock .mini-ico:disabled{opacity:.45 !important;}"
+                + "#miniConnBlock .mini-ico svg{"
+                + "width:18px !important;height:18px !important;stroke:currentColor !important;"
+                + "fill:none !important;stroke-width:1.8 !important;"
+                + "stroke-linecap:round !important;stroke-linejoin:round !important;"
+                + "}"
                 + "#miniConnBlock .hint{overflow-wrap:anywhere !important;}"
                 + "#miniComposer{"
                 + "position:relative !important;"
@@ -735,6 +766,40 @@ public final class MainActivity extends Activity {
                 Connections.setPreferred(MainActivity.this, null);
             }
             return saveAddresses(next);
+        }
+
+        /**
+         * 逐条探一下通不通，结果回吐给页面点灯（2026-11-07）。
+         *
+         * 每条各开一个线程：八条线路串着探，慢的时候要等一两分钟，
+         * 圆点就一直是灰的；并行探最多等一个超时。
+         */
+        @JavascriptInterface
+        public String probe() {
+            final String deviceCredential = credentials.deviceCredential();
+            for (final AddressPool.Entry entry : credentials.addresses) {
+                Thread thread = new Thread(new Runnable() {
+                    @Override
+                    public void run() {
+                        final boolean reachable = probeOnce(entry.baseUrl, deviceCredential);
+                        mainHandler.post(new Runnable() {
+                            @Override
+                            public void run() {
+                                if (destroyed || webView == null) {
+                                    return;
+                                }
+                                webView.evaluateJavascript(
+                                        "window.miniConnStatus && window.miniConnStatus("
+                                                + org.json.JSONObject.quote(entry.baseUrl) + ","
+                                                + reachable + ")",
+                                        null);
+                            }
+                        });
+                    }
+                }, "mini-line-probe");
+                thread.start();
+            }
+            return "ok";
         }
 
         /** 打开某条线路的配置页；空字符串表示添加新地址。 */
