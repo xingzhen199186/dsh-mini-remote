@@ -39,6 +39,44 @@ final class Connections {
     }
 
     /**
+     * 把线路类型收成一个「槽位」标识（2026-11-07）。
+     *
+     * 清单是按槽位排的：内网、Tailscale、公网各一条，清空某条之后槽位还在，
+     * 只是变成「未配置」。所以要先把五花八门的 type 归到同一个槽位上。
+     */
+    static String slotOf(String type) {
+        String t = type == null ? "" : type.toLowerCase(Locale.ROOT);
+        if (t.contains("lan") || t.contains("internal") || t.contains("private")) {
+            return "lan";
+        }
+        if (t.contains("tailscale-https")) {
+            return "tailscale-https";
+        }
+        if (t.contains("tailscale")) {
+            return "tailscale";
+        }
+        if (t.contains("b-relay")) {
+            return "b-relay";
+        }
+        if (t.contains("multi-relay")) {
+            return "multi-relay";
+        }
+        if (t.contains("self-relay")) {
+            return "self-relay";
+        }
+        if (t.contains("public-relay")) {
+            return "public-relay";
+        }
+        if (t.contains("manual")) {
+            return "manual";
+        }
+        if (t.contains("public") || t.contains("tunnel")) {
+            return "public";
+        }
+        return "other";
+    }
+
+    /**
      * 手动添加一条地址时，按地址本身猜它属于哪条路（2026-11-07）。
      *
      * 以前一律标成 manual，结果手机上加一个内网地址也显示「手动地址」——

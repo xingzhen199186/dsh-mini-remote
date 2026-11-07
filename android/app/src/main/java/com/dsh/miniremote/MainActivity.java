@@ -156,6 +156,12 @@ public final class MainActivity extends Activity {
     }
 
 
+    /** 连接清单的固定槽位，顺序就是显示顺序。 */
+    private static final String[] SLOT_KINDS = {
+            "lan", "tailscale", "tailscale-https", "public-relay",
+            "public", "b-relay", "self-relay", "multi-relay",
+    };
+
     /** 从 LineConfigActivity 回来：刷新清单；如果改的是当前在用的地址，重新探测加载。 */
     private static final int REQUEST_LINE_CONFIG = 0x4d56;
 
@@ -224,8 +230,8 @@ public final class MainActivity extends Activity {
               var ICON_DELETE = '<svg viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M9 7V5h6v2"/><path d="M7 7l1 12h8l1-12"/></svg>';
               var ICON_CHECK = '<svg viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></svg>';
 
-              function row(label, hint, buttons, url, current){
-                return '<div class="row" data-url="' + esc(url) + '" data-current="' + (current ? '1' : '') + '" style="cursor:pointer">'
+              function row(label, hint, buttons, url, current, kind){
+                return '<div class="row" data-url="' + esc(url) + '" data-kind="' + esc(kind) + '" data-current="' + (current ? '1' : '') + '" style="cursor:pointer">'
                   + '<div style="display:flex;gap:10px;align-items:flex-start;min-width:0">'
                   + '<span class="mini-dot' + (current ? ' ok' : '') + '"></span>'
                   + '<div style="min-width:0">'
@@ -238,28 +244,32 @@ public final class MainActivity extends Activity {
                 var data = {};
                 try { data = JSON.parse(bridge.state() || '{}'); } catch (e) { data = {}; }
                 var items = data.items || [];
-                summary.textContent = items.length ? (items.length + ' 条线路') : '还没有可用的线路';
+                var configured = items.filter(function(it){ return it.configured; }).length;
+                summary.textContent = configured + ' / ' + items.length + ' 条已配置';
                 var html = '';
                 items.forEach(function(it){
-                  var hint = esc(it.url) + (it.current ? ' · 使用中' : '');
-                  var buttons = it.current
-                    ? '<button class="mini-ico" type="button" disabled title="正在用">' + ICON_CHECK + '</button>'
-                    : '<button class="mini-ico" type="button" data-use="' + esc(it.url) + '" title="切换到这条">' + ICON_SWITCH + '</button>';
-                  html += row(it.label, hint, buttons, it.url, it.current);
+                  var hint;
+                  var buttons;
+                  if (it.configured) {
+                    hint = esc(it.url) + (it.current ? ' · 使用中' : '');
+                    buttons = it.current
+                      ? '<button class="mini-ico" type="button" disabled title="正在用">' + ICON_CHECK + '</button>'
+                      : '<button class="mini-ico" type="button" data-use="' + esc(it.url) + '" title="切换到这条">' + ICON_SWITCH + '</button>';
+                  } else {
+                    hint = '未配置 · 点进来填地址或扫码';
+                    buttons = '<button class="mini-ico" type="button" title="配置">'
+                      + '<svg viewBox="0 0 24 24"><path d="M12 5v14"/><path d="M5 12h14"/></svg></button>';
+                  }
+                  html += row(it.label, hint, buttons, it.url, it.current, it.kind);
                 });
-                html += '<div class="row" data-url="" style="cursor:pointer"><div>'
-                  + '<div class="label">添加地址</div>'
-                  + '<div class="hint">粘贴电脑给的地址，或者扫码</div></div>'
-                  + '<div class="mini-acts"><button class="mini-ico" type="button" title="添加">'
-                  + '<svg viewBox="0 0 24 24"><path d="M12 5v14"/><path d="M5 12h14"/></svg></button></div></div>';
                 body.innerHTML = html;
 
-                // 整行点击进入配置页；图标按钮不冒泡。
-                Array.prototype.forEach.call(body.querySelectorAll('.row[data-url]'), function(rowEl){
+                Array.prototype.forEach.call(body.querySelectorAll('.row[data-kind]'), function(rowEl){
                   rowEl.addEventListener('click', function(ev){
-                    if (ev.target.closest('button')) return;
+                    if (ev.target.closest('button') && !ev.target.closest('button').disabled) return;
                     var url = rowEl.getAttribute('data-url');
-                    bridge.config(url || '', rowEl.getAttribute('data-current') === '1');
+                    bridge.config(url || '', rowEl.getAttribute('data-current') === '1',
+                            rowEl.getAttribute('data-kind') || '');
                   });
                 });
                 Array.prototype.forEach.call(body.querySelectorAll('[data-use]'), function(btn){
@@ -269,19 +279,10 @@ public final class MainActivity extends Activity {
                     bridge.use(btn.getAttribute('data-use'));
                   });
                 });
-                // 探测：先把不知道的通通留灰，回来一条点亮一条。
                 if (typeof bridge.probe === 'function') {
                   bridge.probe();
                 }
               }
-
-              // 外壳探完一条就调一次，把那一行的圆点点亮或点红。
-              window.miniConnStatus = function(url, reachable){
-                var el = document.querySelector('#miniConnBody .row[data-url="' + url + '"] .mini-dot');
-                if (!el) return;
-                el.classList.remove('ok', 'down');
-                el.classList.add(reachable ? 'ok' : 'down');
-              };
 
               window.miniConnRerender = render;
               render();
@@ -688,11 +689,38 @@ public final class MainActivity extends Activity {
             try {
                 root.put("current", loadedBase == null ? "" : loadedBase);
                 JSONArray items = new JSONArray();
-                for (AddressPool.Entry entry : credentials.addresses) {
+                // 先按固定槽位排（2026-11-07 用户要求）：清空的那条仍然占一个位置，
+                // 显示成「未配置」，随时能重新填。
+                java.util.Set<String> usedSlots = new java.util.HashSet<>();
+                for (String slot : SLOT_KINDS) {
+                    AddressPool.Entry found = null;
+                    for (AddressPool.Entry entry : credentials.addresses) {
+                        if (slot.equals(Connections.slotOf(entry.type))) {
+                            found = entry;
+                            break;
+                        }
+                    }
+                    usedSlots.add(slot);
                     JSONObject item = new JSONObject();
-                    item.put("url", entry.baseUrl);
+                    item.put("kind", slot);
+                    item.put("label", Connections.labelOf(slot));
+                    item.put("url", found == null ? "" : found.baseUrl);
+                    item.put("type", found == null ? slot : found.type);
+                    item.put("configured", found != null);
+                    item.put("current", found != null && found.baseUrl.equals(loadedBase));
+                    items.put(item);
+                }
+                // 槽位之外的（比如手动加的），原样附在后面。
+                for (AddressPool.Entry entry : credentials.addresses) {
+                    if (usedSlots.contains(Connections.slotOf(entry.type))) {
+                        continue;
+                    }
+                    JSONObject item = new JSONObject();
+                    item.put("kind", Connections.slotOf(entry.type));
                     item.put("label", Connections.labelOf(entry.type));
+                    item.put("url", entry.baseUrl);
                     item.put("type", entry.type);
+                    item.put("configured", true);
                     item.put("current", entry.baseUrl.equals(loadedBase));
                     items.put(item);
                 }
@@ -804,9 +832,10 @@ public final class MainActivity extends Activity {
 
         /** 打开某条线路的配置页；空字符串表示添加新地址。 */
         @JavascriptInterface
-        public String config(String url, boolean current) {
+        public String config(String url, boolean current, String kind) {
             final String target = url == null ? "" : url;
             final boolean isCurrent = current;
+            final String slot = kind == null ? "" : kind;
             mainHandler.post(new Runnable() {
                 @Override
                 public void run() {
@@ -818,6 +847,7 @@ public final class MainActivity extends Activity {
                         intent.putExtra(LineConfigActivity.EXTRA_URL, target);
                     }
                     intent.putExtra(LineConfigActivity.EXTRA_CURRENT, isCurrent);
+                    intent.putExtra(LineConfigActivity.EXTRA_KIND, slot);
                     startActivityForResult(intent, REQUEST_LINE_CONFIG);
                 }
             });

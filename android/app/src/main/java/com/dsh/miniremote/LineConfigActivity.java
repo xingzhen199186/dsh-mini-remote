@@ -41,6 +41,8 @@ public final class LineConfigActivity extends Activity {
     static final String EXTRA_URL = "url";
     /** 这一条是不是主页面正在用的那条：为真时标题后面挂一句「正在用」。 */
     static final String EXTRA_CURRENT = "current";
+    /** 槽位标识（lan / tailscale / b-relay …）：未配置的槽位进来时靠它知道自己在配哪条。 */
+    static final String EXTRA_KIND = "kind";
 
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
 
@@ -93,7 +95,8 @@ public final class LineConfigActivity extends Activity {
                 return;
             }
         } else {
-            lineType = "manual";
+            String kind = getIntent().getStringExtra(EXTRA_KIND);
+            lineType = kind == null || kind.isEmpty() ? "manual" : kind;
         }
 
         int dp = Math.round(getResources().getDisplayMetrics().density);
@@ -121,7 +124,8 @@ public final class LineConfigActivity extends Activity {
 
         boolean current = getIntent().getBooleanExtra(EXTRA_CURRENT, false);
         titleView = new TextView(this);
-        titleView.setText(adding ? "添加地址" : Connections.labelOf(lineType));
+        // 标题就是这条槽位的名字：未配置的槽位进来，也知道自己在配哪一条。
+        titleView.setText(Connections.labelOf(lineType));
         titleView.setTextSize(22);
         titleView.setTextColor(0xFF1B2C49);
         titleView.setPadding(0, 0, 0, dp * 4);
@@ -131,7 +135,7 @@ public final class LineConfigActivity extends Activity {
         currentView.setTextSize(13);
         currentView.setTextColor(0xFF5A7290);
         if (adding) {
-            currentView.setText("手动加一条线路：填电脑给的地址，或者扫二维码。");
+            currentView.setText("还没配置：填电脑给的地址，或者扫二维码。");
         } else if (current) {
             currentView.setText("当前地址：" + originalUrl + "（正在用）");
         } else {
@@ -165,7 +169,7 @@ public final class LineConfigActivity extends Activity {
         card.addView(addressInput);
 
         saveButton = new Button(this);
-        saveButton.setText(adding ? "添加" : "保存地址");
+        saveButton.setText("保存");
         saveButton.setAllCaps(false);
         saveButton.setTextColor(Color.WHITE);
         saveButton.setTextSize(15);
@@ -200,7 +204,7 @@ public final class LineConfigActivity extends Activity {
         card.addView(scanHint);
 
         deleteButton = new Button(this);
-        deleteButton.setText("删掉这条线路");
+        deleteButton.setText("清空这条线路");
         deleteButton.setAllCaps(false);
         deleteButton.setTextColor(0xFFC0453F);
         deleteButton.setTextSize(14);
@@ -212,7 +216,7 @@ public final class LineConfigActivity extends Activity {
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
         deleteParams.topMargin = dp * 10;
         card.addView(deleteButton, deleteParams);
-        // 正在用的那条不给删：删掉就没网了，要删先切换。
+        // 正在用的那条不给清空：清掉就没网了，先切换走。
         deleteButton.setVisibility(adding || current ? View.GONE : View.VISIBLE);
         deleteButton.setOnClickListener(new View.OnClickListener() {
             @Override
@@ -323,23 +327,23 @@ public final class LineConfigActivity extends Activity {
         }, "mini-line-save").start();
     }
 
-    /** 删掉这条线路：先问一句，再把凭据重写一遍。 */
+    /** 清空这条线路：地址去掉，槽位留着，随时可以重新配置。 */
     private void confirmDelete() {
         if (busy || adding || originalUrl == null) {
             return;
         }
         new AlertDialog.Builder(this)
-                .setTitle("删掉这条线路？")
-                .setMessage(originalUrl + "\n\n只从这台手机上去掉，电脑那边不受影响。")
+                .setTitle("清空这条线路？")
+                .setMessage(originalUrl + "\n\n清空后它回到「未配置」，你可以随时重新填地址或扫码；电脑那边不受影响。")
                 .setNegativeButton("取消", null)
-                .setPositiveButton("删掉", (dialog, which) -> removeLine())
+                .setPositiveButton("清空", (dialog, which) -> removeLine())
                 .show();
     }
 
     private void removeLine() {
         busy = true;
         deleteButton.setEnabled(false);
-        statusView.setText("正在删除……");
+        statusView.setText("正在清空……");
         new Thread(new Runnable() {
             @Override
             public void run() {
@@ -352,7 +356,7 @@ public final class LineConfigActivity extends Activity {
                 String message;
                 boolean ok = false;
                 if (nextAddresses.isEmpty()) {
-                    message = "至少要留一条线路，先加一条再删这条。";
+                    message = "至少要留一条线路，先配好别的一条再清空这条。";
                 } else {
                     try {
                         PairingStore.Credentials updated = new PairingStore.Credentials(
@@ -363,10 +367,10 @@ public final class LineConfigActivity extends Activity {
                         if (originalUrl.equals(Connections.preferred(LineConfigActivity.this))) {
                             Connections.setPreferred(LineConfigActivity.this, null);
                         }
-                        message = "已删除。";
+                        message = "已清空。";
                         ok = true;
                     } catch (GeneralSecurityException | IOException e) {
-                        message = "删除失败，请重试。";
+                        message = "清空失败，请重试。";
                     }
                 }
                 final String resultMessage = message;
