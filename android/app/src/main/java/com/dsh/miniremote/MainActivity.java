@@ -284,6 +284,18 @@ public final class MainActivity extends Activity {
                 }
               }
 
+              // 外壳探完一条就调一次：这一条通就点亮，不通就点红。
+              window.miniConnStatus = function(url, reachable){
+                var rows = body.querySelectorAll('.row[data-url]');
+                for (var i = 0; i < rows.length; i++) {
+                  if (rows[i].getAttribute('data-url') !== url) continue;
+                  var dot = rows[i].querySelector('.mini-dot');
+                  if (!dot) continue;
+                  dot.classList.remove('ok', 'down');
+                  dot.classList.add(reachable ? 'ok' : 'down');
+                }
+              };
+
               window.miniConnRerender = render;
               render();
             })();
@@ -809,7 +821,7 @@ public final class MainActivity extends Activity {
                 Thread thread = new Thread(new Runnable() {
                     @Override
                     public void run() {
-                        final boolean reachable = probeOnce(entry.baseUrl, deviceCredential);
+                        final boolean reachable = reachableQuick(entry.baseUrl);
                         mainHandler.post(new Runnable() {
                             @Override
                             public void run() {
@@ -880,6 +892,35 @@ public final class MainActivity extends Activity {
             }
         }
         return false;
+    }
+
+    /**
+     * 快速判断一条地址通不通：只连端口，不发请求（2026-11-07）。
+     *
+     * 圆点要「能连上就亮」，用整轮 HTTP 探测的话每条最多等 13 秒，
+     * 八条并行下来界面要愣半天。连得上端口就足够说明这条路是通的。
+     */
+    private static boolean reachableQuick(String baseUrl) {
+        java.net.Socket socket = new java.net.Socket();
+        try {
+            java.net.URI uri = java.net.URI.create(baseUrl);
+            String host = uri.getHost();
+            if (host == null) {
+                return false;
+            }
+            int port = uri.getPort() > 0 ? uri.getPort()
+                    : ("https".equalsIgnoreCase(uri.getScheme()) ? 443 : 80);
+            socket.connect(new java.net.InetSocketAddress(host, port), 2500);
+            return true;
+        } catch (Exception e) {
+            return false;
+        } finally {
+            try {
+                socket.close();
+            } catch (Exception ignored) {
+                // 关不掉也没关系，进程退出就回收了。
+            }
+        }
     }
 
     private boolean probeOnce(String baseUrl, String deviceCredential) {
