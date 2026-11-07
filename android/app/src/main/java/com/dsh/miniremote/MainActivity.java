@@ -14,6 +14,7 @@ import android.provider.MediaStore;
 import android.provider.Settings;
 import android.view.View;
 import android.webkit.CookieManager;
+import android.webkit.JavascriptInterface;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
@@ -27,7 +28,13 @@ import androidx.core.content.FileProvider;
 import java.io.File;
 import java.io.IOException;
 import java.security.GeneralSecurityException;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
+
+import org.json.JSONArray;
+import org.json.JSONException;
+import org.json.JSONObject;
 
 /** 手机页 WebView 壳：恢复配对凭据、探测地址、按地址写设备 Cookie。 */
 public final class MainActivity extends Activity {
@@ -83,6 +90,8 @@ public final class MainActivity extends Activity {
         }
         webView.getSettings().setJavaScriptEnabled(true);
         webView.getSettings().setDomStorageEnabled(true);
+        // 设置页「连接」那一块的数据源：线路清单、切换、增删（2026-11-07）。
+        webView.addJavascriptInterface(new ConnectionBridge(), "MiniConn");
         webView.setWebViewClient(new PairedHostClient());
         webView.setWebChromeClient(new FileChooserClient());
         // Android 13 起通知要运行时授权；不申请的话，锁屏提醒和「批准/拒绝」按钮
@@ -145,6 +154,93 @@ public final class MainActivity extends Activity {
             }
         }, "mini-share").start();
     }
+
+
+    /**
+     * 设置页里的「连接」区块，只有 App 里才有（2026-11-07）。
+     *
+     * 默认收起；展开后是一张线路清单：当前那条标「使用中」，其它可以一键切换，
+     * 底下能手动加地址、也能删。数据全部来自外壳（window.MiniConn），
+     * 页面自己的设置项一个都没碰。
+     */
+    private static final String CONN_SECTION_JS = "(function(){"
+            + "if(window.__miniConnUi)return;"
+            + "var bridge=window.MiniConn;"
+            + "if(!bridge)return;"
+            + "var host=document.querySelector('#settings .sheet-body');"
+            + "if(!host)return;"
+            + "window.__miniConnUi=1;"
+            + "var block=document.createElement('div');"
+            + "block.id='miniConnBlock';"
+            + "block.innerHTML="
+            + "'<div class=\"row\"><div><div class=\"label\">连接</div>"
+            + "<div class=\"hint\" id=\"miniConnSummary\">读取中…</div></div>"
+            + "<button class=\"btn\" id=\"miniConnToggle\" type=\"button\">展开</button></div>"
+            + "<div id=\"miniConnBody\" hidden></div>';"
+            + "host.insertBefore(block,host.firstChild);"
+            + "var body=block.querySelector('#miniConnBody');"
+            + "var summary=block.querySelector('#miniConnSummary');"
+            + "var toggle=block.querySelector('#miniConnToggle');"
+            + "function esc(v){return String(v==null?'':v).replace(/[&<>\\\"]/g,function(c){"
+            + "return {'&':'&amp;','<':'&lt;','>':'&gt;','\\\"':'&quot;'}[c];});}"
+            + "function row(label,hint,actions){"
+            + "return '<div class=\"row\"><div><div class=\"label\">'+esc(label)+'</div>"
+            + "<div class=\"hint\">'+hint+'</div></div>"
+            + "<div style=\"display:flex;gap:8px;flex:0 0 auto\">'+actions+'</div></div>';"
+            + "}"
+            + "toggle.addEventListener('click',function(){"
+            + "var open=!body.hidden;"
+            + "body.hidden=open;"
+            + "toggle.textContent=open?'展开':'收起';"
+            + "});"
+            + "function render(){"
+            + "var data={};"
+            + "try{data=JSON.parse(bridge.state()||'{}');}catch(e){data={};}"
+            + "var items=data.items||[];"
+            + "summary.textContent=items.length?(items.length+' 条线路'):'还没有可用的线路';"
+            + "var html='';"
+            + "items.forEach(function(it){"
+            + "var hint=esc(it.url)+(it.current?' · 使用中':'');"
+            + "var actions=it.current"
+            + "?'<button class=\"btn\" type=\"button\" disabled>当前</button>'"
+            + ":'<button class=\"btn\" type=\"button\" data-use=\"'+esc(it.url)+'\">切换</button>';"
+            + "if(it.type==='manual'){"
+            + "actions+='<button class=\"btn\" type=\"button\" data-del=\"'+esc(it.url)+'\">删除</button>';"
+            + "}"
+            + "html+=row(it.label,hint,actions);"
+            + "});"
+            + "html+='<div class=\"row\"><input id=\"miniConnInput\" type=\"url\" placeholder=\"http://192.168.1.5:3090\" "
+            + "style=\"flex:1 1 auto;min-width:0;padding:10px 12px;border:1px solid var(--line);"
+            + "border-radius:10px;background:var(--panel-2);color:var(--fg);font:inherit\"></div>';"
+            + "html+=row('添加地址','粘贴电脑给的地址就能加一条线路',"
+            + "'<button class=\"btn\" id=\"miniConnAdd\" type=\"button\">添加</button>');"
+            + "body.innerHTML=html;"
+            + "Array.prototype.forEach.call(body.querySelectorAll('[data-use]'),function(btn){"
+            + "btn.addEventListener('click',function(){"
+            + "btn.textContent='切换中…';"
+            + "bridge.use(btn.getAttribute('data-use'));"
+            + "});"
+            + "});"
+            + "Array.prototype.forEach.call(body.querySelectorAll('[data-del]'),function(btn){"
+            + "btn.addEventListener('click',function(){"
+            + "var url=btn.getAttribute('data-del');"
+            + "if(!confirm('删掉这条线路？\\n'+url))return;"
+            + "var result=String(bridge.remove(url));"
+            + "if(result.indexOf('err:')===0){alert(result.slice(4));return;}"
+            + "render();"
+            + "});"
+            + "});"
+            + "var add=body.querySelector('#miniConnAdd');"
+            + "add.addEventListener('click',function(){"
+            + "var input=body.querySelector('#miniConnInput');"
+            + "var result=String(bridge.add(input.value||''));"
+            + "if(result.indexOf('err:')===0){alert(result.slice(4));return;}"
+            + "input.value='';"
+            + "render();"
+            + "});"
+            + "}"
+            + "render();"
+            + "})();";
 
     /**
      * 状态栏/导航栏跟页面底色对齐（2026-11-06）。
@@ -231,6 +327,8 @@ public final class MainActivity extends Activity {
                 + "display:block !important;"
                 + "}"
                 // 输入框 + 工具栏同属一个圆角框：图标在里、框只有一层边。
+                + "#miniConnBlock .btn{white-space:nowrap !important;}"
+                + "#miniConnBlock .hint{overflow-wrap:anywhere !important;}"
                 + "#miniComposer{"
                 + "position:relative !important;"
                 + "display:flex !important;flex-wrap:wrap !important;align-items:center !important;"
@@ -288,6 +386,7 @@ public final class MainActivity extends Activity {
         webView.evaluateJavascript(COMPOSER_WRAP_JS, null);
         webView.evaluateJavascript(js, null);
         webView.evaluateJavascript(COMPOSER_STATE_JS, null);
+        webView.evaluateJavascript(CONN_SECTION_JS, null);
     }
 
     /**
@@ -341,12 +440,15 @@ public final class MainActivity extends Activity {
             + "sync();"
             + "})();";
 
+
     /**
-     * 状态栏/导航栏跟页面底色对齐（2026-11-06）。
+     * 设置页里的「连接」区块，只有 App 里才有（2026-11-07）。
      *
-     * 壳默认给的是系统主题色，和页面的浅蓝底摆在一起能看出一条分界。这里问一下页面
-     * 的 body 底色，把两条系统栏染成同一个颜色，界面就连成一整片了。
+     * 默认收起；展开后是一张线路清单：当前那条标「使用中」，其它可以一键切换，
+     * 底下能手动加地址、也能删。数据全部来自外壳（window.MiniConn），
+     * 页面自己的设置项一个都没碰。
      */
+    
 
     /** 把文件挂进网页那边的输入框；页面还没加载好就先存着，onPageFinished 再来一次。 */
     private void injectShare(final String json) {
@@ -444,9 +546,25 @@ public final class MainActivity extends Activity {
         }
         probing = true;
         final String deviceCredential = credentials.deviceCredential();
+        final String preferred = Connections.preferred(this);
         Thread thread = new Thread(new Runnable() {
             @Override
             public void run() {
+                // 用户在「连接」里指定过线路：先试它。不通再退回自动探测，
+                // 所以挑错了最多慢一次，不会连不上（2026-11-07）。
+                if (preferred != null && preferredInPool(preferred) && probeOnce(preferred, deviceCredential)) {
+                    mainHandler.post(new Runnable() {
+                        @Override
+                        public void run() {
+                            if (destroyed) {
+                                return;
+                            }
+                            probing = false;
+                            selectAddress(preferred);
+                        }
+                    });
+                    return;
+                }
                 final AddressPool.ProbeResult result = addressPool.probe(new AddressPool.Prober() {
                     @Override
                     public boolean probe(String baseUrl) {
@@ -483,6 +601,138 @@ public final class MainActivity extends Activity {
             }
         }, "mini-address-probe");
         thread.start();
+    }
+
+
+    /**
+     * 设置页「连接」的数据源（2026-11-07）。
+     *
+     * 页面在手机壳里运行时才会挂上这个接口，所以网页端拿不到它，也就不用担心
+     * 桌面浏览器里冒出一个只给 App 用的东西。方法都在 JS 线程被调用，
+     * 凡是碰界面、改凭据的都丢回主线程。
+     */
+    private final class ConnectionBridge {
+        @JavascriptInterface
+        public String state() {
+            JSONObject root = new JSONObject();
+            try {
+                root.put("current", loadedBase == null ? "" : loadedBase);
+                JSONArray items = new JSONArray();
+                for (AddressPool.Entry entry : credentials.addresses) {
+                    JSONObject item = new JSONObject();
+                    item.put("url", entry.baseUrl);
+                    item.put("label", Connections.labelOf(entry.type));
+                    item.put("type", entry.type);
+                    item.put("current", entry.baseUrl.equals(loadedBase));
+                    items.put(item);
+                }
+                root.put("items", items);
+            } catch (JSONException e) {
+                return "{}";
+            }
+            return root.toString();
+        }
+
+        @JavascriptInterface
+        public String use(String url) {
+            if (url == null || url.isEmpty()) {
+                return "err:地址为空";
+            }
+            final String target = url;
+            Connections.setPreferred(MainActivity.this, target);
+            mainHandler.post(new Runnable() {
+                @Override
+                public void run() {
+                    if (!destroyed) {
+                        selectAddress(target);
+                    }
+                }
+            });
+            return "ok";
+        }
+
+        @JavascriptInterface
+        public String add(String url) {
+            if (url == null || url.trim().isEmpty()) {
+                return "err:先把地址填上";
+            }
+            try {
+                AddressPool.Entry entry = new AddressPool.Entry(url.trim(), "manual");
+                for (AddressPool.Entry existing : credentials.addresses) {
+                    if (existing.baseUrl.equals(entry.baseUrl)) {
+                        return "err:这条线路已经在列表里了";
+                    }
+                }
+                List<AddressPool.Entry> next = new ArrayList<>(credentials.addresses);
+                next.add(entry);
+                return saveAddresses(next);
+            } catch (IllegalArgumentException e) {
+                String reason = e.getMessage();
+                return "err:" + (reason == null ? "地址格式不对" : reason);
+            }
+        }
+
+        @JavascriptInterface
+        public String remove(String url) {
+            if (url == null || url.isEmpty()) {
+                return "err:地址为空";
+            }
+            List<AddressPool.Entry> next = new ArrayList<>();
+            boolean removed = false;
+            for (AddressPool.Entry entry : credentials.addresses) {
+                if (entry.baseUrl.equals(url)) {
+                    removed = true;
+                    continue;
+                }
+                next.add(entry);
+            }
+            if (!removed) {
+                return "err:没找到这条线路";
+            }
+            if (next.isEmpty()) {
+                return "err:至少要留一条线路";
+            }
+            if (url.equals(Connections.preferred(MainActivity.this))) {
+                Connections.setPreferred(MainActivity.this, null);
+            }
+            return saveAddresses(next);
+        }
+
+        /** 增删之后把凭据与地址池一起换掉，重启后仍然是这一份。 */
+        private String saveAddresses(List<AddressPool.Entry> next) {
+            try {
+                PairingStore.Credentials updated = new PairingStore.Credentials(
+                        credentials.deviceId, credentials.deviceSecret, next,
+                        credentials.keyId, credentials.keyFp);
+                new PairingStore(MainActivity.this).save(updated);
+                credentials = updated;
+                if (!preferredInPool(String.valueOf(Connections.preferred(MainActivity.this)))) {
+                    Connections.setPreferred(MainActivity.this, null);
+                }
+                addressPool = new AddressPool(updated.addresses);
+                return "ok";
+            } catch (GeneralSecurityException | IOException e) {
+                return "err:保存失败，请重试";
+            }
+        }
+    }
+
+    private boolean preferredInPool(String url) {
+        for (AddressPool.Entry entry : credentials.addresses) {
+            if (entry.baseUrl.equals(url)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean probeOnce(String baseUrl, String deviceCredential) {
+        try {
+            Net.Response response = Net.get(baseUrl + "/mini/api/version", deviceCredential);
+            return response.isSuccess();
+        } catch (IOException e) {
+            return false;
+        }
     }
 
     /** 轮询只在前台跑；地址换一条就按新地址重开一轮。 */
