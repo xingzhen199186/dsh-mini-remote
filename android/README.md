@@ -91,3 +91,40 @@ WebView 只导航到 `isPairedOrigin()` 认可的源。用固定地址/自建中
 - 两边改动经常要一起看（WebView 加载的页面就在 `../lib/page.html`），同一个仓库里跳转最省事；
 - 插件的 npm 包有白名单（`package.json` 的 `files`），这个目录**不会被打进 npm 包**，用户装插件时不会多下载几百 KB 源码；
 - 分发靠 GitHub Release，源码在仓库里、APK 在 Release 里，互不干扰。
+
+## 内置 Tailscale（不用在手机上装 Tailscale）
+
+Tailscale 那条线路现在可以走「应用内自带」的节点：手机不装 Tailscale，由 App 里的
+Go 内核在进程内跑一个 Tailscale 节点，在本地开 `127.0.0.1:1055` 的代理（SOCKS5 与
+HTTP 共用），WebView 的请求经它进入隧道。
+
+入口在「连接 → Tailscale → 内置 Tailscale（不装 App 也能连）」：填电脑上 Tailscale
+后台生成的授权密钥，点「用内置连接这条线路」。密钥存在应用私有偏好里。
+
+### 两个产物不进版本库
+
+`app/libs/appctr.aar` 与 `app/src/main/jniLibs/arm64-v8a/libtailscale.so` 合起来近
+40MB，已经写进 `.gitignore`。要重新生成：
+
+```
+# 1. Go + NDK + gomobile
+go install golang.org/x/mobile/cmd/gomobile@latest
+go install golang.org/x/mobile/cmd/gobind@latest
+
+# 2. 取 TailSocks 的 Go 内核（BSD-3），打它自带的补丁（含安卓网络切换、TUN 里的 DNS）
+git clone --depth 1 https://github.com/bropines/tailsocks.git
+cd tailsocks/appctr && ./build.sh          # 产物在 appctr/tmp/appctr.aar
+
+# 3. 把 appctr/tmp/appctr.aar 放到 app/libs/，
+#    appctr/tailscale_src/tmp/libtailscale_arm64.so 放到 app/src/main/jniLibs/arm64-v8a/libtailscale.so
+```
+
+注意三件事，踩过：
+
+- 守护进程必须是**安装时解压出来的可执行文件**（`android:extractNativeLibs="true"`
+  + `useLegacyPackaging = true`）；放在应用数据目录里执行会被拒（安卓 10 起 noexec）。
+- 内核把 socket 所在目录当工作目录（`chdir`），目录得先建好，否则启动即崩。
+- 可执行文件不能叫 `tailscaled`：内核会在同目录建同名软链，名字撞上就成了自己指自己的死链。
+
+许可证：TailSocks 为 BSD-3-Clause，见 `third_party/tailsocks-LICENSE.txt`；它内部又用了
+Tailscale（同为 BSD-3-Clause）。

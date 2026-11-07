@@ -38,6 +38,15 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
+
+    packaging {
+        // 内置 Tailscale 的守护进程是一个可执行文件（jniLibs 里的 libtailscale.so），
+        // 必须让系统在安装时把它解压成磁盘上的可执行文件；安卓 10 起应用数据目录
+        // 是 noexec，放在那儿执行会被拒（2026-11-07 实测）。
+        jniLibs {
+            useLegacyPackaging = true
+        }
+    }
 }
 
 dependencies {
@@ -47,4 +56,8 @@ dependencies {
     // 扫码库内部用 ContextCompat 申请相机权限，但它把 androidx.core 声明成了可选依赖——
     // 不显式加，编译能过，一开扫码头就崩（2026-11-06 真机日志：ClassNotFoundException）。
     implementation("androidx.core:core:1.13.1")
+    // 内置 Tailscale：Go 内核（TailSocks appctr）编出来的 AAR；守护进程本体在 jniLibs。
+    implementation(files("libs/appctr.aar"))
+    // WebView 的代理只能通过 androidx.webkit 的 ProxyController 设置。
+    implementation("androidx.webkit:webkit:1.11.0")
 }

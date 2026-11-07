@@ -43,6 +43,8 @@ public final class LineConfigActivity extends Activity {
     static final String EXTRA_CURRENT = "current";
     /** 槽位标识（lan / tailscale / b-relay …）：未配置的槽位进来时靠它知道自己在配哪条。 */
     static final String EXTRA_KIND = "kind";
+    /** 回来时带上它：内置 Tailscale 已经连上，主界面可以设代理了。 */
+    static final String EXTRA_TAILNET_URL = "tailnetUrl";
 
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
 
@@ -61,6 +63,7 @@ public final class LineConfigActivity extends Activity {
     /** 删掉这条线路：只在「不是当前正在用的那条」时露出来（2026-11-07）。 */
     private Button deleteButton;
     private TextView statusView;
+    private EditText tailKeyInput;
     private boolean destroyed;
     private boolean busy;
 
@@ -195,6 +198,50 @@ public final class LineConfigActivity extends Activity {
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
         scanParams.topMargin = dp * 10;
         card.addView(scanButton, scanParams);
+
+        if ("tailscale".equals(Connections.slotOf(lineType))) {
+            TextView tailLabel = new TextView(this);
+            tailLabel.setText("内置 Tailscale（不装 App 也能连）");
+            tailLabel.setTextSize(13);
+            tailLabel.setTextColor(0xFF5A7290);
+            tailLabel.setPadding(0, dp * 14, 0, dp * 6);
+            card.addView(tailLabel);
+
+            tailKeyInput = new EditText(this);
+            tailKeyInput.setHint("tskey-auth-…（电脑上 Tailscale 后台生成）");
+            tailKeyInput.setHintTextColor(0xFF9AAEC6);
+            tailKeyInput.setTextColor(0xFF1B2C49);
+            tailKeyInput.setTextSize(14);
+            tailKeyInput.setInputType(InputType.TYPE_CLASS_TEXT);
+            tailKeyInput.setPadding(dp * 12, dp * 10, dp * 12, dp * 10);
+            GradientDrawable keyBg = new GradientDrawable();
+            keyBg.setColor(0xFFF2F8FF);
+            keyBg.setCornerRadius(dp * 10);
+            keyBg.setStroke(dp, 0xFFD3E2F3);
+            tailKeyInput.setBackground(keyBg);
+            tailKeyInput.setText(TailNet.authKey(this));
+            card.addView(tailKeyInput);
+
+            Button tailConnect = new Button(this);
+            tailConnect.setText("用内置连接这条线路");
+            tailConnect.setAllCaps(false);
+            tailConnect.setTextColor(0xFF3B6FC4);
+            tailConnect.setTextSize(14);
+            GradientDrawable tailBg = new GradientDrawable();
+            tailBg.setColor(0xFFEEF4FB);
+            tailBg.setCornerRadius(dp * 10);
+            tailConnect.setBackground(tailBg);
+            LinearLayout.LayoutParams tailParams = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+            tailParams.topMargin = dp * 10;
+            card.addView(tailConnect, tailParams);
+            tailConnect.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View view) {
+                    connectBuiltIn();
+                }
+            });
+        }
 
         TextView scanHint = new TextView(this);
         scanHint.setText("扫电脑上的二维码：是地址就填进上面，是配对码就直接重新配对。");
@@ -404,6 +451,60 @@ public final class LineConfigActivity extends Activity {
                 });
             }
         }, "mini-line-delete").start();
+    }
+
+    /**
+     * 用内置内核连这条 tailnet 线路（2026-11-08）。
+     *
+     * 启动要几秒到几十秒，所以放后台线程；成功后把 URL 带回主界面，
+     * 由它去设 WebView 代理并加载页面。
+     */
+    private void connectBuiltIn() {
+        if (busy) {
+            return;
+        }
+        String key = tailKeyInput == null ? "" : tailKeyInput.getText().toString().trim();
+        if (key.isEmpty()) {
+            statusView.setText("先把授权密钥填上。");
+            return;
+        }
+        if (originalUrl == null || originalUrl.isEmpty()) {
+            statusView.setText("这条线路还没有地址：先在上面填 tailnet 地址并保存。");
+            return;
+        }
+        TailNet.setAuthKey(this, key);
+        busy = true;
+        saveButton.setEnabled(false);
+        scanButton.setEnabled(false);
+        statusView.setText("正在启动内置 Tailscale……第一次要十几秒。");
+        final String targetUrl = originalUrl;
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                final String failure = TailNet.startBlocking(LineConfigActivity.this);
+                mainHandler.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        if (destroyed) {
+                            return;
+                        }
+                        busy = false;
+                        saveButton.setEnabled(true);
+                        scanButton.setEnabled(true);
+                        if (failure != null) {
+                            statusView.setText("没连上：" + failure);
+                            return;
+                        }
+                        // 记住它，下次启动直接走内置连接。
+                        Connections.setPreferred(LineConfigActivity.this, targetUrl);
+                        Intent result = new Intent();
+                        result.putExtra(EXTRA_TAILNET_URL, targetUrl);
+                        setResult(RESULT_OK, result);
+                        finish();
+                    }
+                });
+            }
+        }, "mini-tailnet-connect").start();
     }
 
     /** 调起相机扫码；扫到的东西先按配对链接试，不行再按普通地址试。 */

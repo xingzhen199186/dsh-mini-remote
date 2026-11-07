@@ -24,6 +24,9 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.core.content.FileProvider;
+import androidx.webkit.ProxyConfig;
+import androidx.webkit.ProxyController;
+import androidx.webkit.WebViewFeature;
 
 import java.io.File;
 import java.io.IOException;
@@ -60,6 +63,10 @@ public final class MainActivity extends Activity {
     private Uri cameraOutput;
     /** 前台轮询待审批：把锁屏推送唤起后的通知画出来。 */
     private PendingPoller poller;
+    /** 内置 Tailscale：WebView 的代理是否已经切到本地内核。 */
+    private boolean tailProxyOn;
+    /** 等代理生效后再执行的动作（换地址/加载页面）。 */
+    private Runnable pendingAfterProxy;
 
     @SuppressLint("SetJavaScriptEnabled")
     @Override
@@ -104,7 +111,32 @@ public final class MainActivity extends Activity {
         CookieManager cookies = CookieManager.getInstance();
         cookies.setAcceptCookie(true);
         cookies.setAcceptThirdPartyCookies(webView, false);
-        probeAddresses();
+        // 上次选中的是 tailnet 地址、并且存了授权密钥：先把内置内核拉起来，
+        // 代理就绪后再去探测，否则探测会走公网直接失败（2026-11-08）。
+        final String preferredUrl = Connections.preferred(this);
+        if (preferredUrl != null && isTailnetAddress(preferredUrl) && TailNet.hasAuthKey(this)) {
+            new Thread(new Runnable() {
+                @Override
+                public void run() {
+                    final String failure = TailNet.startBlocking(MainActivity.this);
+                    mainHandler.post(new Runnable() {
+                        @Override
+                        public void run() {
+                            if (destroyed) {
+                                return;
+                            }
+                            if (failure != null) {
+                                Toast.makeText(MainActivity.this,
+                                        "内置 Tailscale 没起来：" + failure, Toast.LENGTH_LONG).show();
+                            }
+                            enableTailProxy(MainActivity.this::probeAddresses);
+                        }
+                    });
+                }
+            }, "mini-tailnet").start();
+        } else {
+            probeAddresses();
+        }
         if (getIntent().getBooleanExtra(EXTRA_BACKGROUND_HINT, false)) {
             getIntent().removeExtra(EXTRA_BACKGROUND_HINT);
             explainBackground(true);
@@ -961,6 +993,79 @@ public final class MainActivity extends Activity {
         }
     }
 
+    /** 这条地址是不是 tailnet 里的（100.64.0.0/10）。 */
+    private static boolean isTailnetAddress(String baseUrl) {
+        try {
+            String host = java.net.URI.create(baseUrl).getHost();
+            if (host == null || !host.startsWith("100.")) {
+                return false;
+            }
+            String[] parts = host.split("\\.");
+            if (parts.length < 2) {
+                return false;
+            }
+            int second = Integer.parseInt(parts[1]);
+            return second >= 64 && second <= 127;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /**
+     * 把 WebView 的流量切到内置内核的本地代理（2026-11-08）。
+     *
+     * 只挂代理、不加直连兜底：这个模式下我们要的就是「全部走隧道」，
+     * 直连兜底会让本该走隧道的请求悄悄走公网，反而更难查。
+     */
+    private void enableTailProxy(final Runnable after) {
+        if (webView == null) {
+            if (after != null) after.run();
+            return;
+        }
+        if (tailProxyOn) {
+            if (after != null) after.run();
+            return;
+        }
+        if (!WebViewFeature.isFeatureSupported(WebViewFeature.PROXY_OVERRIDE)) {
+            Toast.makeText(this, "这个系统不支持给应用内网页设代理，内置 Tailscale 用不了。",
+                    Toast.LENGTH_LONG).show();
+            if (after != null) after.run();
+            return;
+        }
+        ProxyConfig config = new ProxyConfig.Builder()
+                .addProxyRule(TailNet.PROXY_HOST + ":" + TailNet.PROXY_PORT)
+                .build();
+        pendingAfterProxy = after;
+        ProxyController.getInstance().setProxyOverride(config, mainHandler::post, new Runnable() {
+            @Override
+            public void run() {
+                tailProxyOn = true;
+                Runnable next = pendingAfterProxy;
+                pendingAfterProxy = null;
+                if (next != null) {
+                    next.run();
+                }
+            }
+        });
+    }
+
+    /** 离开 tailnet 地址时把代理撤掉，免得别的线路被它挡住。 */
+    private void disableTailProxy(Runnable after) {
+        if (webView == null || !tailProxyOn) {
+            if (after != null) after.run();
+            return;
+        }
+        ProxyController.getInstance().clearProxyOverride(mainHandler::post, new Runnable() {
+            @Override
+            public void run() {
+                tailProxyOn = false;
+                if (after != null) {
+                    after.run();
+                }
+            }
+        });
+    }
+
     /** 轮询只在前台跑；地址换一条就按新地址重开一轮。 */
     private void startPolling(String baseUrl) {
         if (poller == null) {
@@ -994,11 +1099,26 @@ public final class MainActivity extends Activity {
                             return;
                         }
                         cookies.flush();
-                        loadedBase = baseUrl;
-                        pageReady = false;
-                        webView.loadUrl(baseUrl + "/mini/");
-                        startPolling(baseUrl);
-                        deliverPendingShare();
+                        final Runnable load = new Runnable() {
+                            @Override
+                            public void run() {
+                                if (destroyed || generation != loadGeneration) {
+                                    return;
+                                }
+                                loadedBase = baseUrl;
+                                pageReady = false;
+                                webView.loadUrl(baseUrl + "/mini/");
+                                startPolling(baseUrl);
+                                deliverPendingShare();
+                            }
+                        };
+                        // tailnet 地址必须走内置内核的代理；其它地址要把代理撤掉，
+                        // 否则一条不可达的隧道会把所有线路都拖死（2026-11-08）。
+                        if (isTailnetAddress(baseUrl)) {
+                            enableTailProxy(load);
+                        } else {
+                            disableTailProxy(load);
+                        }
                     }
                 });
             }
@@ -1169,6 +1289,18 @@ public final class MainActivity extends Activity {
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
         if (requestCode == REQUEST_LINE_CONFIG) {
+            if (resultCode == RESULT_OK && data != null
+                    && data.getStringExtra(LineConfigActivity.EXTRA_TAILNET_URL) != null) {
+                // 配置页已经把内置内核拉起来了：先设代理，再按这条地址加载。
+                final String tailUrl = data.getStringExtra(LineConfigActivity.EXTRA_TAILNET_URL);
+                enableTailProxy(new Runnable() {
+                    @Override
+                    public void run() {
+                        selectAddress(tailUrl);
+                    }
+                });
+                return;
+            }
             if (resultCode == RESULT_OK) {
                 // 配置页改完了：刷新清单；如果改的是当前在用的地址，重新探测加载。
                 try {
