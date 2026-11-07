@@ -389,7 +389,7 @@ public final class MainActivity extends Activity {
         new AlertDialog.Builder(this)
                 .setTitle("锁屏提醒需要一项系统设置")
                 .setMessage("国产手机默认会冻结后台应用，锁屏后就收不到审批提醒。\n\n"
-                        + "请在系统的「电池 → 应用启动管理」里把「DSH 极简遥控器」改成"
+                        + "请在系统的「电池 → 应用启动管理」里把「DSH Everywhere」改成"
                         + "允许后台活动；点「去设置」会打开本应用的详情页。")
                 .setPositiveButton("去设置", (dialog, which) -> openBatterySettings())
                 .setNegativeButton("知道了", null)
