@@ -1,6 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">DSH Everywhere</string>
+    <!-- 桌面图标下只能用短名字：系统启动器一行放不下全名，会给省成「DSH Everywh…」。 -->
+    <string name="app_name_launcher">Everywhere</string>
     <string name="pair_activity_title">扫码配对</string>
 
     <!-- 仅 bridge 清单引用以下两项；standard 不声明无障碍服务。 -->
