@@ -150,7 +150,8 @@ public final class PairActivity extends Activity {
         thread.start();
     }
 
-    private static final class PairLink {
+    /** 配对链接解析结果；LineConfigActivity 也用它判断扫到的是不是完整配对码。 */
+    static final class PairLink {
         final String baseUrl;
         final String grant;
 

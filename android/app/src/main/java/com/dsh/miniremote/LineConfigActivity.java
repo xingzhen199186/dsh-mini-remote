@@ -1,0 +1,420 @@
+package com.dsh.miniremote;
+
+import android.app.Activity;
+import android.content.Intent;
+import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
+import android.text.InputType;
+import android.view.View;
+import android.widget.Button;
+import android.widget.EditText;
+import android.graphics.Color;
+import android.graphics.drawable.GradientDrawable;
+import android.widget.LinearLayout;
+import android.widget.ScrollView;
+import android.widget.TextView;
+import android.widget.Toast;
+
+import com.google.zxing.integration.android.IntentIntegrator;
+import com.google.zxing.integration.android.IntentResult;
+
+import java.io.IOException;
+import java.security.GeneralSecurityException;
+import java.util.ArrayList;
+import java.util.List;
+
+/**
+ * 单条线路的配置页（2026-11-07）。
+ *
+ * 从 MainActivity 的「连接」区块点进来：能改地址、能扫码（二维码里可能是新地址，
+ * 也可能是一整条配对链接——前者只改这一行，后者按重新配对处理，整份凭据都换）。
+ * 已经配过的线路随时能改，不用先删。
+ *
+ * 两种进入方式：
+ * - 带 EXTRA_URL：配置已有那条线路；
+ * - 不带：添加一条新线路（手动地址）。
+ */
+public final class LineConfigActivity extends Activity {
+    /** 上一个页面传过来的：要配置的是哪一条线路；不传表示添加新线路。 */
+    static final String EXTRA_URL = "url";
+    /** 这一条是不是主页面正在用的那条：为真时标题后面挂一句「正在用」。 */
+    static final String EXTRA_CURRENT = "current";
+
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
+
+    private PairingStore store;
+    private PairingStore.Credentials credentials;
+    /** 正在配置的那条线路的原始地址；添加模式为 null。 */
+    private String originalUrl;
+    private String lineType;
+    private boolean adding;
+
+    private TextView titleView;
+    private TextView currentView;
+    private EditText addressInput;
+    private Button saveButton;
+    private Button scanButton;
+    private Button repairButton;
+    private TextView statusView;
+    private boolean destroyed;
+    private boolean busy;
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        store = new PairingStore(this);
+        try {
+            credentials = store.load();
+        } catch (GeneralSecurityException | IOException e) {
+            credentials = null;
+        }
+        if (credentials == null) {
+            Toast.makeText(this, "本机凭据读取失败，请返回重试。", Toast.LENGTH_SHORT).show();
+            finish();
+            return;
+        }
+        originalUrl = getIntent().getStringExtra(EXTRA_URL);
+        adding = originalUrl == null || originalUrl.isEmpty();
+        if (!adding) {
+            boolean found = false;
+            for (AddressPool.Entry entry : credentials.addresses) {
+                if (entry.baseUrl.equals(originalUrl)) {
+                    lineType = entry.type;
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                Toast.makeText(this, "这条线路已被删除，请返回重试。", Toast.LENGTH_SHORT).show();
+                finish();
+                return;
+            }
+        } else {
+            lineType = "manual";
+        }
+
+        int dp = Math.round(getResources().getDisplayMetrics().density);
+        int pad = dp * 18;
+        getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(0xFFEAF3FC));
+        // 状态栏跟页面同色，别在顶上留一条系统默认的米色。
+        getWindow().setStatusBarColor(0xFFEAF3FC);
+        getWindow().getDecorView().setSystemUiVisibility(android.view.View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR);
+
+        ScrollView scroll = new ScrollView(this);
+        LinearLayout page = new LinearLayout(this);
+        page.setOrientation(LinearLayout.VERTICAL);
+        page.setPadding(pad, pad, pad, pad);
+        scroll.addView(page, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setPadding(dp * 16, dp * 16, dp * 16, dp * 18);
+        GradientDrawable cardBg = new GradientDrawable();
+        cardBg.setColor(0xFFFFFFFF);
+        cardBg.setCornerRadius(dp * 16);
+        card.setBackground(cardBg);
+        page.addView(card);
+
+        boolean current = getIntent().getBooleanExtra(EXTRA_CURRENT, false);
+        titleView = new TextView(this);
+        titleView.setText(adding ? "添加地址" : Connections.labelOf(lineType));
+        titleView.setTextSize(22);
+        titleView.setTextColor(0xFF1B2C49);
+        titleView.setPadding(0, 0, 0, dp * 4);
+        card.addView(titleView);
+
+        currentView = new TextView(this);
+        currentView.setTextSize(13);
+        currentView.setTextColor(0xFF5A7290);
+        if (adding) {
+            currentView.setText("手动加一条线路：填电脑给的地址，或者扫二维码。");
+        } else if (current) {
+            currentView.setText("当前地址：" + originalUrl + "（正在用）");
+        } else {
+            currentView.setText("当前地址：" + originalUrl);
+        }
+        currentView.setPadding(0, 0, 0, dp * 14);
+        card.addView(currentView);
+
+        TextView addressLabel = new TextView(this);
+        addressLabel.setText(adding ? "地址" : "新地址");
+        addressLabel.setTextSize(13);
+        addressLabel.setTextColor(0xFF5A7290);
+        addressLabel.setPadding(0, 0, 0, dp * 6);
+        card.addView(addressLabel);
+
+        addressInput = new EditText(this);
+        addressInput.setHint("http://192.168.1.5:3090");
+        addressInput.setHintTextColor(0xFF9AAEC6);
+        addressInput.setTextColor(0xFF1B2C49);
+        addressInput.setTextSize(15);
+        addressInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
+        addressInput.setPadding(dp * 12, dp * 10, dp * 12, dp * 10);
+        GradientDrawable inputBg = new GradientDrawable();
+        inputBg.setColor(0xFFF2F8FF);
+        inputBg.setCornerRadius(dp * 10);
+        inputBg.setStroke(dp, 0xFFD3E2F3);
+        addressInput.setBackground(inputBg);
+        if (!adding) {
+            addressInput.setText(originalUrl);
+        }
+        card.addView(addressInput);
+
+        saveButton = new Button(this);
+        saveButton.setText(adding ? "添加" : "保存地址");
+        saveButton.setAllCaps(false);
+        saveButton.setTextColor(Color.WHITE);
+        saveButton.setTextSize(15);
+        GradientDrawable primaryBg = new GradientDrawable();
+        primaryBg.setColor(0xFF3B6FC4);
+        primaryBg.setCornerRadius(dp * 10);
+        saveButton.setBackground(primaryBg);
+        LinearLayout.LayoutParams saveParams = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        saveParams.topMargin = dp * 14;
+        card.addView(saveButton, saveParams);
+
+        scanButton = new Button(this);
+        scanButton.setText("拍摄扫码");
+        scanButton.setAllCaps(false);
+        scanButton.setTextColor(0xFF3B6FC4);
+        scanButton.setTextSize(15);
+        GradientDrawable ghostBg = new GradientDrawable();
+        ghostBg.setColor(0xFFEEF4FB);
+        ghostBg.setCornerRadius(dp * 10);
+        scanButton.setBackground(ghostBg);
+        LinearLayout.LayoutParams scanParams = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        scanParams.topMargin = dp * 10;
+        card.addView(scanButton, scanParams);
+
+        TextView scanHint = new TextView(this);
+        scanHint.setText("扫电脑上的二维码：是地址就填进上面；是配对码就重新配对。");
+        scanHint.setTextSize(12);
+        scanHint.setTextColor(0xFF5A7290);
+        scanHint.setPadding(0, dp * 8, 0, dp * 12);
+        card.addView(scanHint);
+
+        repairButton = new Button(this);
+        repairButton.setText("重新配对（扫电脑二维码）");
+        repairButton.setAllCaps(false);
+        repairButton.setTextColor(0xFF3B6FC4);
+        repairButton.setTextSize(14);
+        repairButton.setBackground(ghostBg);
+        card.addView(repairButton);
+
+        statusView = new TextView(this);
+        statusView.setTextSize(14);
+        statusView.setTextColor(0xFF5A7290);
+        statusView.setPadding(0, dp * 12, 0, 0);
+        card.addView(statusView);
+
+        setContentView(scroll);
+
+        saveButton.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                saveAddress();
+            }
+        });
+        scanButton.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                startScan();
+            }
+        });
+        repairButton.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                startScan();
+            }
+        });
+    }
+
+    /** 手动改地址：校验通过后覆盖原来那一条（或新增一条），保存回加密凭据。 */
+    private void saveAddress() {
+        if (busy) {
+            return;
+        }
+        final String next = addressInput.getText().toString().trim();
+        if (next.isEmpty()) {
+            statusView.setText("先把地址填上。");
+            return;
+        }
+        if (!adding && next.equals(originalUrl)) {
+            statusView.setText("地址没变，不用保存。");
+            return;
+        }
+        final AddressPool.Entry entry;
+        try {
+            entry = new AddressPool.Entry(next, adding ? Connections.inferType(next) : lineType);
+        } catch (IllegalArgumentException e) {
+            String reason = e.getMessage();
+            statusView.setText(reason == null ? "地址格式不对。" : reason);
+            return;
+        }
+        for (AddressPool.Entry existing : credentials.addresses) {
+            if (existing.baseUrl.equals(entry.baseUrl)
+                    && (adding || !existing.baseUrl.equals(originalUrl))) {
+                statusView.setText("这条线路已经在列表里了。");
+                return;
+            }
+        }
+        busy = true;
+        saveButton.setEnabled(false);
+        statusView.setText(adding ? "正在添加……" : "正在保存……");
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                List<AddressPool.Entry> nextAddresses = new ArrayList<>();
+                if (adding) {
+                    nextAddresses.addAll(credentials.addresses);
+                    nextAddresses.add(entry);
+                } else {
+                    for (AddressPool.Entry existing : credentials.addresses) {
+                        if (existing.baseUrl.equals(originalUrl)) {
+                            nextAddresses.add(entry);
+                        } else {
+                            nextAddresses.add(existing);
+                        }
+                    }
+                }
+                PairingStore.Credentials updated = new PairingStore.Credentials(
+                        credentials.deviceId, credentials.deviceSecret, nextAddresses,
+                        credentials.keyId, credentials.keyFp);
+                String message;
+                try {
+                    store.save(updated);
+                    credentials = updated;
+                    message = adding ? "已添加。" : "已保存。";
+                } catch (GeneralSecurityException | IOException e) {
+                    message = "保存失败，请重试。";
+                }
+                final String resultMessage = message;
+                mainHandler.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        if (destroyed) {
+                            return;
+                        }
+                        busy = false;
+                        saveButton.setEnabled(true);
+                        statusView.setText(resultMessage);
+                        if (resultMessage.startsWith("已")) {
+                            // 改完地址后回到主界面要重新探测；这里直接关掉，让 MainActivity onResume 走重连。
+                            setResult(RESULT_OK);
+                            finish();
+                        }
+                    }
+                });
+            }
+        }, "mini-line-save").start();
+    }
+
+    /** 调起相机扫码；扫到的东西先按配对链接试，不行再按普通地址试。 */
+    private void startScan() {
+        if (busy) {
+            return;
+        }
+        IntentIntegrator integrator = new IntentIntegrator(this);
+        integrator.setDesiredBarcodeFormats(IntentIntegrator.QR_CODE);
+        integrator.setPrompt("对准电脑上的二维码");
+        integrator.setBeepEnabled(false);
+        integrator.setOrientationLocked(false);
+        integrator.initiateScan();
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        IntentResult scan = IntentIntegrator.parseActivityResult(requestCode, resultCode, data);
+        if (scan == null || scan.getContents() == null) {
+            return;
+        }
+        String text = scan.getContents().trim();
+        // 先按配对链接解析：里面有 grant 就是完整配对码，走重新配对。
+        try {
+            PairActivity.PairLink pairLink = PairActivity.PairLink.parse(text);
+            rePair(pairLink);
+            return;
+        } catch (IllegalArgumentException ignored) {
+            // 不是配对链接，继续按普通地址处理。
+        }
+        // 普通地址：校验通过后填进输入框，让用户确认后再保存。
+        try {
+            new AddressPool.Entry(text, lineType);
+            addressInput.setText(text);
+            statusView.setText("已扫到地址，确认后点「保存地址」。");
+        } catch (IllegalArgumentException e) {
+            statusView.setText("扫到的内容不是地址也不是配对码：" + text);
+        }
+    }
+
+    /** 扫到完整配对码：向电脑换一份新凭据，整份覆盖。 */
+    private void rePair(final PairActivity.PairLink pairLink) {
+        if (busy) {
+            return;
+        }
+        busy = true;
+        saveButton.setEnabled(false);
+        scanButton.setEnabled(false);
+        repairButton.setEnabled(false);
+        statusView.setText("正在向电脑交换设备凭据……");
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                String message;
+                PairingStore.Credentials paired = null;
+                try {
+                    String request = "{\"grant\":" + PairingStore.jsonQuote(pairLink.grant)
+                            + ",\"kind\":\"android-app\"}";
+                    Net.Response response = Net.postJson(
+                            pairLink.baseUrl + "/mini/api/native-pair", request, null);
+                    if (response.status == 404 || response.status == 405 || response.status == 501) {
+                        message = "服务端还没升级，无法使用原生配对。请先升级电脑端 DSH。";
+                    } else if (!response.isSuccess()) {
+                        message = response.status == 410
+                                ? "配对链接已过期，请回电脑重新生成。" : response.chineseError();
+                    } else {
+                        paired = PairingStore.Credentials.fromJson(response.body);
+                        store.save(paired);
+                        message = "重新配对成功。";
+                    }
+                } catch (IOException e) {
+                    message = e.getMessage();
+                } catch (GeneralSecurityException e) {
+                    message = "无法把设备凭据安全保存到本机，请检查系统锁屏设置后重试。";
+                } catch (RuntimeException e) {
+                    message = "配对响应无法处理，请确认电脑端已经升级。";
+                }
+                final PairingStore.Credentials result = paired;
+                final String resultMessage = message == null ? "重新配对失败，请重试。" : message;
+                mainHandler.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        if (destroyed) {
+                            return;
+                        }
+                        busy = false;
+                        saveButton.setEnabled(true);
+                        scanButton.setEnabled(true);
+                        repairButton.setEnabled(true);
+                        statusView.setText(resultMessage);
+                        if (result != null) {
+                            setResult(RESULT_OK);
+                            finish();
+                        }
+                    }
+                });
+            }
+        }, "mini-line-repair").start();
+    }
+
+    @Override
+    protected void onDestroy() {
+        destroyed = true;
+        super.onDestroy();
+    }
+}

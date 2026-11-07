@@ -39,6 +39,53 @@ final class Connections {
     }
 
     /**
+     * 手动添加一条地址时，按地址本身猜它属于哪条路（2026-11-07）。
+     *
+     * 以前一律标成 manual，结果手机上加一个内网地址也显示「手动地址」——
+     * 名字不对，用户还得多想一层它到底是什么。猜不出来才退回 manual。
+     */
+    static String inferType(String baseUrl) {
+        if (baseUrl == null) {
+            return "manual";
+        }
+        String host;
+        try {
+            host = java.net.URI.create(baseUrl.trim()).getHost();
+        } catch (IllegalArgumentException e) {
+            return "manual";
+        }
+        if (host == null) {
+            return "manual";
+        }
+        host = host.toLowerCase(Locale.ROOT);
+        if (host.endsWith(".ts.net") || host.startsWith("100.")) {
+            return "tailscale";
+        }
+        if ("localhost".equals(host) || host.endsWith(".local") || host.startsWith("10.")
+                || host.startsWith("192.168.") || host.startsWith("169.254.")
+                || host.startsWith("fc") || host.startsWith("fd") || host.startsWith("fe80:")) {
+            return "lan";
+        }
+        if (host.startsWith("172.")) {
+            String[] parts = host.split("\\.");
+            if (parts.length > 1) {
+                try {
+                    int second = Integer.parseInt(parts[1]);
+                    if (second >= 16 && second <= 31) {
+                        return "lan";
+                    }
+                } catch (NumberFormatException ignored) {
+                    // 不是内网段，继续往下走。
+                }
+            }
+        }
+        if ("https".equalsIgnoreCase(java.net.URI.create(baseUrl.trim()).getScheme())) {
+            return "public";
+        }
+        return "manual";
+    }
+
+    /**
      * 把 type 翻译成列表里显示的名字。
      *
      * 判断顺序有意从窄到宽：「tailscale-https」必须排在「tailscale」前面，

@@ -156,12 +156,17 @@ public final class MainActivity extends Activity {
     }
 
 
+    /** 从 LineConfigActivity 回来：刷新清单；如果改的是当前在用的地址，重新探测加载。 */
+    private static final int REQUEST_LINE_CONFIG = 0x4d56;
+
     /**
      * 设置页里的「连接」区块，只有 App 里才有（2026-11-07）。
      *
      * 默认收起；展开后是一张线路清单：当前那条标「使用中」，其它可以一键切换，
      * 底下能手动加地址、也能删。数据全部来自外壳（window.MiniConn），
      * 页面自己的设置项一个都没碰。
+     *
+     * 整行可点进入配置页；行内按钮（切换/删除）不冒泡。
      */
     private static final String CONN_SECTION_JS = """
             (function(){
@@ -215,8 +220,8 @@ public final class MainActivity extends Activity {
                   return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];
                 });
               }
-              function row(label, hint, buttons){
-                return '<div class="row"><div>'
+              function row(label, hint, buttons, url, current){
+                return '<div class="row" data-url="' + esc(url) + '" data-current="' + (current ? '1' : '') + '" style="cursor:pointer"><div>'
                   + '<div class="label">' + esc(label) + '</div>'
                   + '<div class="hint">' + hint + '</div></div>'
                   + '<div style="display:flex;gap:8px;flex:0 0 auto">' + buttons + '</div></div>';
@@ -236,23 +241,33 @@ public final class MainActivity extends Activity {
                   if (it.type === 'manual') {
                     buttons += '<button class="btn" type="button" data-del="' + esc(it.url) + '">删除</button>';
                   }
-                  html += row(it.label, hint, buttons);
+                  html += row(it.label, hint, buttons, it.url, it.current);
                 });
-                html += '<div class="row"><input id="miniConnInput" type="url" placeholder="http://192.168.1.5:3090" '
-                  + 'style="flex:1 1 auto;min-width:0;padding:10px 12px;border:1px solid var(--line);'
-                  + 'border-radius:10px;background:var(--panel-2);color:var(--fg);font:inherit"></div>';
-                html += row('添加地址', '粘贴电脑给的地址就能加一条线路',
-                  '<button class="btn" id="miniConnAdd" type="button">添加</button>');
+                html += '<div class="row" data-url="" style="cursor:pointer"><div>'
+                  + '<div class="label">添加地址</div>'
+                  + '<div class="hint">粘贴电脑给的地址就能加一条线路</div></div>'
+                  + '<div style="display:flex;gap:8px;flex:0 0 auto">'
+                  + '<button class="btn" type="button">添加</button></div></div>';
                 body.innerHTML = html;
 
+                // 整行点击进入配置页；按钮 stopPropagation 不冒泡。
+                Array.prototype.forEach.call(body.querySelectorAll('.row[data-url]'), function(rowEl){
+                  rowEl.addEventListener('click', function(ev){
+                    if (ev.target.closest('button')) return;
+                    var url = rowEl.getAttribute('data-url');
+                    bridge.config(url || '', rowEl.getAttribute('data-current') === '1');
+                  });
+                });
                 Array.prototype.forEach.call(body.querySelectorAll('[data-use]'), function(btn){
-                  btn.addEventListener('click', function(){
+                  btn.addEventListener('click', function(ev){
+                    ev.stopPropagation();
                     btn.textContent = '切换中…';
                     bridge.use(btn.getAttribute('data-use'));
                   });
                 });
                 Array.prototype.forEach.call(body.querySelectorAll('[data-del]'), function(btn){
-                  btn.addEventListener('click', function(){
+                  btn.addEventListener('click', function(ev){
+                    ev.stopPropagation();
                     var url = btn.getAttribute('data-del');
                     if (!confirm('删掉这条线路？\\n' + url)) return;
                     var result = String(bridge.remove(url));
@@ -260,15 +275,8 @@ public final class MainActivity extends Activity {
                     render();
                   });
                 });
-                var add = body.querySelector('#miniConnAdd');
-                add.addEventListener('click', function(){
-                  var input = body.querySelector('#miniConnInput');
-                  var result = String(bridge.add(input.value || ''));
-                  if (result.indexOf('err:') === 0) { alert(result.slice(4)); return; }
-                  input.value = '';
-                  render();
-                });
               }
+              window.miniConnRerender = render;
               render();
             })();
             """;
@@ -729,6 +737,28 @@ public final class MainActivity extends Activity {
             return saveAddresses(next);
         }
 
+        /** 打开某条线路的配置页；空字符串表示添加新地址。 */
+        @JavascriptInterface
+        public String config(String url, boolean current) {
+            final String target = url == null ? "" : url;
+            final boolean isCurrent = current;
+            mainHandler.post(new Runnable() {
+                @Override
+                public void run() {
+                    if (destroyed) {
+                        return;
+                    }
+                    Intent intent = new Intent(MainActivity.this, LineConfigActivity.class);
+                    if (!target.isEmpty()) {
+                        intent.putExtra(LineConfigActivity.EXTRA_URL, target);
+                    }
+                    intent.putExtra(LineConfigActivity.EXTRA_CURRENT, isCurrent);
+                    startActivityForResult(intent, REQUEST_LINE_CONFIG);
+                }
+            });
+            return "ok";
+        }
+
         /** 增删之后把凭据与地址池一起换掉，重启后仍然是这一份。 */
         private String saveAddresses(List<AddressPool.Entry> next) {
             try {
@@ -973,6 +1003,26 @@ public final class MainActivity extends Activity {
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == REQUEST_LINE_CONFIG) {
+            if (resultCode == RESULT_OK) {
+                // 配置页改完了：刷新清单；如果改的是当前在用的地址，重新探测加载。
+                try {
+                    credentials = new PairingStore(this).load();
+                } catch (GeneralSecurityException | IOException e) {
+                    // 凭据读不出来就按原样继续，下次启动再处理。
+                }
+                if (credentials != null) {
+                    addressPool = new AddressPool(credentials.addresses);
+                }
+                if (webView != null) {
+                    webView.evaluateJavascript(
+                            "window.miniConnRerender && window.miniConnRerender()",
+                            null);
+                }
+                probeAddresses();
+            }
+            return;
+        }
         if (requestCode != REQUEST_FILE_CHOOSER || fileCallback == null) {
             return;
         }

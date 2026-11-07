@@ -54,6 +54,12 @@
             android:name=".PairActivity"
             android:exported="false" />
 
+        <!-- 单条线路的配置页：从「连接」区块点进来，能改地址、扫码、重新配对。 -->
+        <activity
+            android:name=".LineConfigActivity"
+            android:exported="false"
+            android:screenOrientation="portrait" />
+
         <!-- 应用内相机：荣耀封了第三方调用系统相机，只能自己拍（2026-11-06）。 -->
         <activity
             android:name=".CaptureActivity"
