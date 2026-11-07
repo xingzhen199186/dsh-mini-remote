@@ -129,7 +129,13 @@ public final class MainActivity extends Activity {
                                 Toast.makeText(MainActivity.this,
                                         "内置 Tailscale 没起来：" + failure, Toast.LENGTH_LONG).show();
                             }
-                            enableTailProxy(MainActivity.this::probeAddresses);
+                            // 不走自动探测：用户选的就是这条，直接用它。
+                            enableTailProxy(new Runnable() {
+                                @Override
+                                public void run() {
+                                    selectAddress(preferredUrl);
+                                }
+                            });
                         }
                     });
                 }
@@ -685,6 +691,19 @@ public final class MainActivity extends Activity {
         if (probing || destroyed || addressPool == null) {
             return;
         }
+        // 内置 Tailscale 已连上、并且用户选的就是 tailnet 线路：这就是他要的路，
+        // 不再去探测别的线路。否则内网地址会经隧道「同样可达」而被抢走首选，
+        // 代理也会因为切到非 tailnet 地址被撤掉（2026-11-08 实测踩到）。
+        final String chosen = Connections.preferred(this);
+        if (chosen != null && isTailnetAddress(chosen) && TailNet.isConnected()) {
+            enableTailProxy(new Runnable() {
+                @Override
+                public void run() {
+                    selectAddress(chosen);
+                }
+            });
+            return;
+        }
         probing = true;
         final String deviceCredential = credentials.deviceCredential();
         final String preferred = Connections.preferred(this);
@@ -1077,6 +1096,12 @@ public final class MainActivity extends Activity {
 
     /** Cookie 按 base URL 的主机隔离，所以每次换地址都必须重新写一次。 */
     private void selectAddress(final String baseUrl) {
+        // 同样的理由：内置线路在用的时候，别让探测结果把它顶掉。
+        final String chosen = Connections.preferred(this);
+        if (chosen != null && isTailnetAddress(chosen) && TailNet.isConnected()
+                && !chosen.equals(baseUrl)) {
+            return;
+        }
         if (baseUrl.equals(loadedBase)) {
             return;
         }

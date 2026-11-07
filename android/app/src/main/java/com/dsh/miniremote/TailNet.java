@@ -75,10 +75,12 @@ final class TailNet {
             options.setAuthKey(key);
 
             if (appctr.Appctr.isRunning() && "Running".equals(backendState())) {
+                Log.i(TAG, "内核已在运行，直接复用");
                 return null; // 已经在跑，直接复用。
             }
 
             appctr.Appctr.setExternalSocketPath("");
+            Log.i(TAG, "启动内核 exec=" + options.getExecPath());
             appctr.Appctr.start(options);
             startedOnce = true;
 
@@ -93,6 +95,7 @@ final class TailNet {
                 appctr.Appctr.login(key);
             }
 
+            Log.i(TAG, "已启动，等待连上；当前=" + backendState());
             for (int i = 0; i < 40; i++) {
                 String state = backendState();
                 if ("Running".equals(state)) {
