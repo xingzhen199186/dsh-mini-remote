@@ -316,21 +316,37 @@ public final class MainActivity extends Activity {
      * 页面自己的发送逻辑不认这个类，它只影响外观（2026-11-06）。
      */
     private static final String COMPOSER_STATE_JS = "(function(){"
+            + "if(window.__miniComposerBound)return;"
+            + "window.__miniComposerBound=1;"
             + "var el=document.getElementById('input');"
             + "if(!el)return;"
+            // 用「可视高度有没有被键盘吃掉」判断，而不是看焦点：
+            // 安卓收起键盘后光标还在输入框里，按焦点判断会一直停在键盘态。
+            + "var base=window.innerHeight;"
             + "function sync(){"
-            + "var typing=document.activeElement===el||el.value.trim().length>0;"
-            + "document.body.classList.toggle('mini-typing',typing);"
+            + "var h=window.innerHeight;"
+            + "if(h>base)base=h;"
+            + "var open=h<base-120;"
+            + "document.body.classList.toggle('mini-typing',open);"
             + "}"
-            + "if(!el.__miniComposer){"
-            + "el.__miniComposer=1;"
+            + "window.addEventListener('resize',sync);"
+            + "if(window.visualViewport){"
+            + "window.visualViewport.addEventListener('resize',sync);"
+            + "window.visualViewport.addEventListener('scroll',sync);"
+            + "}"
             + "el.addEventListener('focus',sync);"
-            + "el.addEventListener('blur',function(){setTimeout(sync,80)});"
+            + "el.addEventListener('blur',sync);"
             + "el.addEventListener('input',sync);"
-            + "setInterval(sync,500);"
-            + "}"
+            + "setInterval(sync,300);"
             + "sync();"
             + "})();";
+
+    /**
+     * 状态栏/导航栏跟页面底色对齐（2026-11-06）。
+     *
+     * 壳默认给的是系统主题色，和页面的浅蓝底摆在一起能看出一条分界。这里问一下页面
+     * 的 body 底色，把两条系统栏染成同一个颜色，界面就连成一整片了。
+     */
 
     /** 把文件挂进网页那边的输入框；页面还没加载好就先存着，onPageFinished 再来一次。 */
     private void injectShare(final String json) {
