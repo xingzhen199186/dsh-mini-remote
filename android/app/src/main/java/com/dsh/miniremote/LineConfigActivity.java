@@ -1,6 +1,7 @@
 package com.dsh.miniremote;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.Intent;
 import android.os.Bundle;
 import android.os.Handler;
@@ -55,7 +56,8 @@ public final class LineConfigActivity extends Activity {
     private EditText addressInput;
     private Button saveButton;
     private Button scanButton;
-    private Button repairButton;
+    /** 删掉这条线路：只在「不是当前正在用的那条」时露出来（2026-11-07）。 */
+    private Button deleteButton;
     private TextView statusView;
     private boolean destroyed;
     private boolean busy;
@@ -191,19 +193,33 @@ public final class LineConfigActivity extends Activity {
         card.addView(scanButton, scanParams);
 
         TextView scanHint = new TextView(this);
-        scanHint.setText("扫电脑上的二维码：是地址就填进上面；是配对码就重新配对。");
+        scanHint.setText("扫电脑上的二维码：是地址就填进上面，是配对码就直接重新配对。");
         scanHint.setTextSize(12);
         scanHint.setTextColor(0xFF5A7290);
         scanHint.setPadding(0, dp * 8, 0, dp * 12);
         card.addView(scanHint);
 
-        repairButton = new Button(this);
-        repairButton.setText("重新配对（扫电脑二维码）");
-        repairButton.setAllCaps(false);
-        repairButton.setTextColor(0xFF3B6FC4);
-        repairButton.setTextSize(14);
-        repairButton.setBackground(ghostBg);
-        card.addView(repairButton);
+        deleteButton = new Button(this);
+        deleteButton.setText("删掉这条线路");
+        deleteButton.setAllCaps(false);
+        deleteButton.setTextColor(0xFFC0453F);
+        deleteButton.setTextSize(14);
+        GradientDrawable dangerBg = new GradientDrawable();
+        dangerBg.setColor(0xFFFBEDEC);
+        dangerBg.setCornerRadius(dp * 10);
+        deleteButton.setBackground(dangerBg);
+        LinearLayout.LayoutParams deleteParams = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        deleteParams.topMargin = dp * 10;
+        card.addView(deleteButton, deleteParams);
+        // 正在用的那条不给删：删掉就没网了，要删先切换。
+        deleteButton.setVisibility(adding || current ? View.GONE : View.VISIBLE);
+        deleteButton.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                confirmDelete();
+            }
+        });
 
         statusView = new TextView(this);
         statusView.setTextSize(14);
@@ -220,12 +236,6 @@ public final class LineConfigActivity extends Activity {
             }
         });
         scanButton.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View view) {
-                startScan();
-            }
-        });
-        repairButton.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View view) {
                 startScan();
@@ -313,6 +323,74 @@ public final class LineConfigActivity extends Activity {
         }, "mini-line-save").start();
     }
 
+    /** 删掉这条线路：先问一句，再把凭据重写一遍。 */
+    private void confirmDelete() {
+        if (busy || adding || originalUrl == null) {
+            return;
+        }
+        new AlertDialog.Builder(this)
+                .setTitle("删掉这条线路？")
+                .setMessage(originalUrl + "\n\n只从这台手机上去掉，电脑那边不受影响。")
+                .setNegativeButton("取消", null)
+                .setPositiveButton("删掉", (dialog, which) -> removeLine())
+                .show();
+    }
+
+    private void removeLine() {
+        busy = true;
+        deleteButton.setEnabled(false);
+        statusView.setText("正在删除……");
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                List<AddressPool.Entry> nextAddresses = new ArrayList<>();
+                for (AddressPool.Entry entry : credentials.addresses) {
+                    if (!entry.baseUrl.equals(originalUrl)) {
+                        nextAddresses.add(entry);
+                    }
+                }
+                String message;
+                boolean ok = false;
+                if (nextAddresses.isEmpty()) {
+                    message = "至少要留一条线路，先加一条再删这条。";
+                } else {
+                    try {
+                        PairingStore.Credentials updated = new PairingStore.Credentials(
+                                credentials.deviceId, credentials.deviceSecret, nextAddresses,
+                                credentials.keyId, credentials.keyFp);
+                        store.save(updated);
+                        credentials = updated;
+                        if (originalUrl.equals(Connections.preferred(LineConfigActivity.this))) {
+                            Connections.setPreferred(LineConfigActivity.this, null);
+                        }
+                        message = "已删除。";
+                        ok = true;
+                    } catch (GeneralSecurityException | IOException e) {
+                        message = "删除失败，请重试。";
+                    }
+                }
+                final String resultMessage = message;
+                final boolean removed = ok;
+                mainHandler.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        if (destroyed) {
+                            return;
+                        }
+                        busy = false;
+                        statusView.setText(resultMessage);
+                        if (removed) {
+                            setResult(RESULT_OK);
+                            finish();
+                        } else {
+                            deleteButton.setEnabled(true);
+                        }
+                    }
+                });
+            }
+        }, "mini-line-delete").start();
+    }
+
     /** 调起相机扫码；扫到的东西先按配对链接试，不行再按普通地址试。 */
     private void startScan() {
         if (busy) {
@@ -360,7 +438,6 @@ public final class LineConfigActivity extends Activity {
         busy = true;
         saveButton.setEnabled(false);
         scanButton.setEnabled(false);
-        repairButton.setEnabled(false);
         statusView.setText("正在向电脑交换设备凭据……");
         new Thread(new Runnable() {
             @Override
@@ -400,7 +477,6 @@ public final class LineConfigActivity extends Activity {
                         busy = false;
                         saveButton.setEnabled(true);
                         scanButton.setEnabled(true);
-                        repairButton.setEnabled(true);
                         statusView.setText(resultMessage);
                         if (result != null) {
                             setResult(RESULT_OK);
