@@ -206,7 +206,10 @@ public final class LineConfigActivity extends Activity {
         scanParams.topMargin = dp * 10;
         card.addView(scanButton, scanParams);
 
-        if ("tailscale".equals(Connections.slotOf(lineType))) {
+        // 两条 Tailscale 线路共用同一个内置内核：一条是 100.x 地址，一条是加密的
+        // *.ts.net 名字。登录、账号、密钥都该在这两页都能看到（2026-11-08）。
+        String tailSlot = Connections.slotOf(lineType);
+        if ("tailscale".equals(tailSlot) || "tailscale-https".equals(tailSlot)) {
             TextView tailLabel = new TextView(this);
             tailLabel.setText("内置 Tailscale（不装 App 也能连）");
             tailLabel.setTextSize(13);
