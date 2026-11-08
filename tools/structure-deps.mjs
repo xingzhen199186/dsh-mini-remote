@@ -90,6 +90,24 @@ export const MARKERS = [
     guard: '按类名后缀匹配（前缀是构建哈希，写死必失效）；`overflow-x:hidden` 一起写着，收起态不会被撑出横向滚动',
   },
   {
+    id: 'drawer-mask',
+    group: '⑳ 窄屏抽屉要能点（官方把内容区排在了它上面）',
+    marker: '[class*="_drawerMask"]',
+    scope: 'page',
+    expect: 'present',
+    probe: '[class*="_drawerMask"]',
+    tokens: ['class:_drawerMask'],
+    codeText: '[class*="_sidebarCol"],[class*="_drawerMask"]{z-index:2000 !important}',
+    where: 'lib/mirror.js · ADAPT_CSS ⑳；命中测试的实证数字写在那条规则上面的注释里',
+    why: '抽屉的遮罩层。2026-11-08 真机上量到：抽屉打开后，内容区那一层被画在了抽屉**上面**，'
+      + '命中测试 `elementsFromPoint` 在导航项正中间返回的第一个元素是内容区（`_frame`），'
+      + '手指落下去就被它接走；而它的处理是「点外面收起抽屉」——于是导航一点就消失、页面不动。'
+      + '把侧栏和遮罩一起抬到 2000 之后，第一个元素变成导航项，真实点击能进「插件市场」。',
+    fail: '这一条不生效，手机上就点不动电脑端界面的任何导航项：一碰就收，等于那半张界面废了。',
+    harm: 'safe',
+    guard: '只在 `@media (max-width: 1023px)` 里生效——桌面宽度下抽屉不是浮层，抬层级只会盖住别的东西',
+  },
+  {
     id: 'region-area',
     group: '⑲ 中间那块不参与压缩（「工作区 / 历史会话」要整条排出来）',
     marker: '[class*="_regionArea"]',

@@ -1021,8 +1021,16 @@ test('镜像：侧栏那一列要能纵向滚（不然最底下的「设置」�
   assert.doesNotMatch(body, /\[data-pane="sidebar"\]/,
     '别再改回 `data-pane="sidebar"`：官方已去掉这个属性，改回去规则会静默失效')
   // 动侧栏那一列的规则**只许有一条**（多一条就是多改了别的东西，得有人解释）。
-  const sideRules = [...body.matchAll(/\[class\*="_sidebarCol"\][^{}]*\{[^}]*\}/g)].map((m) => m[0])
-  assert.equal(sideRules.length, 1, '动侧栏那一列的规则只许有一条')
+  // **改滚动的那条只许有一条**；层级那条是另一回事（它只管窄屏抽屉，见下一条断言），
+  // 所以这里按「有没有写 overflow」来数，而不是按选择器字符串数（2026-11-08）。
+  const sideRules = [...body.matchAll(/\[class\*="_sidebarCol"\][^{}]*\{[^}]*\}/g)]
+    .map((m) => m[0])
+    .filter((rule) => /overflow-y/.test(rule))
+  assert.equal(sideRules.length, 1, '动侧栏滚动的规则只许有一条')
+  // 抽屉的层级：官方把内容区排在了抽屉上面，手机上一摸就被内容区接走（点一下抽屉就收起）。
+  // 实证见 lib/mirror.js 里那条注释。
+  assert.match(body, /@media \(max-width: 1023px\)\{\[class\*="_sidebarCol"\],\[class\*="_drawerMask"\]\{z-index:2000 !important\}\}/,
+    '窄屏要把抽屉抬到内容区上面，否则导航点不动')
 
   // 同一次注入里，**设置面板那几轮的战果一个都不许掉**（这条改动和它们不相干，钉在一起防回退）。
   assert.match(body, /\[data-shortcut-modal="settings"\] \[class\*="_content"\]\{min-height:0 !important\}/,
