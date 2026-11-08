@@ -1949,6 +1949,37 @@ test('镜像：我们自己的地盘不转 WebSocket（`/mini/...` 不是上游�
 //      **最后这条最要紧**：真机跑一次成本很高，链路不通就白跑。
 
 /** 把查询串里的 `diag=1` 翻成 `handle` 的第三个参数（lib/server.js 就是这么做的）。 */
+async function frontWithAdapt(mirror) {
+  return listen((req, res) => {
+    const adapt = !/[?&]adapt=0(?:&|$)/.test(String(req.url ?? ''))
+    mirror.handle(req, res, { adapt })
+  })
+}
+
+/**
+ * `?adapt=0`：只关**我们自己那层样式**，用来在真机上比对官方已经覆盖了哪几条。
+ *
+ * 为什么这层要留：它挡的是**第三方插件**塞进来的手机适配（dsh-pocket / meow-smooth /
+ * remote-web-ui），官方再怎么适配也管不到别人。所以关适配不等于关这一层。
+ */
+test('镜像：?adapt=0 只关我们自己那层，挡第三方那层照旧', async (t) => {
+  const app = await fakeApp()
+  const mirror = createMirror({
+    upstream: `http://127.0.0.1:${app.port}`,
+    tokenUrl: () => `http://127.0.0.1:${app.port}/?token=LAUNCH-TOKEN`,
+  })
+  const f = await frontWithAdapt(mirror)
+  t.after(async () => { await f.close(); await app.close() })
+
+  const on = await (await fetch(`http://127.0.0.1:${f.port}/blocked`)).text()
+  assert.match(on, /mini-mirror-adapt/, '默认要带着我们的适配')
+
+  const off = await (await fetch(`http://127.0.0.1:${f.port}/blocked?adapt=0`)).text()
+  assert.ok(!off.includes('mini-mirror-adapt'), '带上 adapt=0 时不再注入我们的样式')
+  assert.match(off, /STYLE_OWNERS/, '挡第三方手机适配那一层要留着')
+  assert.match(off, /ownsHost/, '「你是主机」那个标记也不能跟着掉')
+})
+
 async function frontWithDiag(mirror) {
   return listen((req, res) => {
     const diag = /[?&]diag=1(?:&|$)/.test(String(req.url ?? ''))
