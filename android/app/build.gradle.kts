@@ -60,7 +60,4 @@ dependencies {
     implementation(files("libs/appctr.aar"))
     // WebView 的代理只能通过 androidx.webkit 的 ProxyController 设置。
     implementation("androidx.webkit:webkit:1.11.0")
-    // 登录 Tailscale 用 Chrome Custom Tabs：盖上来的标签页，仍是真浏览器，
-    // Google/微软账号登录不会被拒（WebView 会被拒）。2026-11-08。
-    implementation("androidx.browser:browser:1.8.0")
 }

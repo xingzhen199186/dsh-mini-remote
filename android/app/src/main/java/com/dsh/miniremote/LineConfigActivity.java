@@ -272,19 +272,6 @@ public final class LineConfigActivity extends Activity {
                 }
             });
 
-            TextView browserHint = new TextView(this);
-            browserHint.setText("登录页一直转圈？点这里用浏览器打开");
-            browserHint.setTextSize(12);
-            browserHint.setTextColor(0xFF3B6FC4);
-            browserHint.setPadding(0, dp * 10, 0, 0);
-            card.addView(browserHint);
-            browserHint.setOnClickListener(new View.OnClickListener() {
-                @Override
-                public void onClick(View view) {
-                    loginInBrowser();
-                }
-            });
-
             TextView tailOr = new TextView(this);
             tailOr.setText("已经有一枚授权密钥的话，也可以直接粘在下面（老办法，不用登录）");
             tailOr.setTextSize(12);
@@ -782,7 +769,7 @@ public final class LineConfigActivity extends Activity {
                             finishConnected(targetUrl);
                             return;
                         }
-                        openLoginPage(url);
+                        openDefaultBrowser(url);
                         // 链接也摆出来：手机上转圈时，把这条拿到电脑上打开一样能完成授权。
                         statusView.setText("登录完成后会自动连上。\n\n登录链接（也可以在电脑上打开）：\n" + url);
                         waitLoginInBackground(targetUrl);
@@ -792,99 +779,21 @@ public final class LineConfigActivity extends Activity {
         }, "mini-tailnet-login").start();
     }
 
-    /**
-     * 「转圈就用浏览器打开」：走同一套登录准备，只是这次交给完整浏览器（2026-11-08）。
-     *
-     * Google 的「确认是本人」那一步在轻量标签页里偶尔转圈不动，换完整浏览器往往就好；
-     * 也不用用户自己去复制链接。
-     */
-    private void loginInBrowser() {
-        String ready = TailNet.pendingLoginUrl();
-        if (!ready.isEmpty()) {
-            openInBrowser(ready);
-            return;
-        }
-        if (busy) {
-            return;
-        }
-        busy = true;
-        saveButton.setEnabled(false);
-        scanButton.setEnabled(false);
-        statusView.setText("正在准备登录……");
-        new Thread(new Runnable() {
-            @Override
-            public void run() {
-                final String failure = TailNet.beginLogin(LineConfigActivity.this);
-                mainHandler.post(new Runnable() {
-                    @Override
-                    public void run() {
-                        if (destroyed) {
-                            return;
-                        }
-                        if (failure != null) {
-                            busy = false;
-                            saveButton.setEnabled(true);
-                            scanButton.setEnabled(true);
-                            statusView.setText("登录没起来：" + failure);
-                            return;
-                        }
-                        String url = TailNet.pendingLoginUrl();
-                        if (url.isEmpty()) {
-                            statusView.setText("内核说已经登录过了，点上面的「用内置连接这条线路」即可。");
-                            busy = false;
-                            saveButton.setEnabled(true);
-                            scanButton.setEnabled(true);
-                            return;
-                        }
-                        openInBrowser(url);
-                        statusView.setText("已用浏览器打开。\n\n登录链接（也可以在电脑上打开）：\n" + url);
-                        waitLoginInBackground(originalUrl);
-                    }
-                });
-            }
-        }, "mini-tailnet-login-browser").start();
-    }
-
-    /**
-     * 交给浏览器，但让用户自己挑哪一个（2026-11-08）。
-     *
-     * 手机默认浏览器可能是 Edge、夸克之类，里头登的账号不一定是你的 Google 账号；
-     * 一旦默认浏览器不对，Google 会当成新设备重新验证。给个选择器，用户能用自己
-     * 平时登录的那个浏览器。
-     */
-    private void openInBrowser(String url) {
-        try {
-            Intent view = new Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url));
-            startActivity(Intent.createChooser(view, "用哪个浏览器登录？"));
-        } catch (Exception e) {
-            statusView.setText("打不开浏览器，把这条网址复制到浏览器里：\n" + url);
-        }
-    }
-
-    /**
-     * 把登录页交出去：优先 Chrome Custom Tabs（盖在 App 上的真浏览器标签页），
-     * 手机上没有支持的浏览器时退回普通浏览器（2026-11-08）。
-     */
-    private void openLoginPage(String url) {
-        android.net.Uri uri = android.net.Uri.parse(url);
-        try {
-            androidx.browser.customtabs.CustomTabsIntent.Builder builder =
-                    new androidx.browser.customtabs.CustomTabsIntent.Builder();
-            builder.setShowTitle(true);
-            androidx.browser.customtabs.CustomTabsIntent intent = builder.build();
-            intent.launchUrl(this, uri);
-            return;
-        } catch (Exception ignored) {
-            // 没装支持 Custom Tabs 的浏览器，退回普通浏览器。
-        }
-        try {
-            startActivity(new Intent(Intent.ACTION_VIEW, uri));
-        } catch (Exception e) {
-            statusView.setText("打不开浏览器，把这条网址复制到浏览器里：\n" + url);
-        }
-    }
-
     /** 等用户在浏览器里登录完成；成功就带着地址回主界面。 */
+    /**
+     * 交给手机默认浏览器（2026-11-08，用户定的）。
+     *
+     * 不在 App 里套一层浏览器：Google 会把内嵌的网页算作「新设备」，反而多一道验证；
+     * 系统浏览器里用户本来就登着账号，一次就过。别的 App 也是这么做的。
+     */
+    private void openDefaultBrowser(String url) {
+        try {
+            startActivity(new Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url)));
+        } catch (Exception e) {
+            statusView.setText("打不开浏览器，把这条网址复制到浏览器里：\n" + url);
+        }
+    }
+
     private void waitLoginInBackground(final String targetUrl) {
         new Thread(new Runnable() {
             @Override
