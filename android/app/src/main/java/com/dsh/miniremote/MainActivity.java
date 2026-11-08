@@ -514,7 +514,7 @@ public final class MainActivity extends Activity {
                 // 工具栏那一行：两个图标各往外让一点，框内两侧留出空白。
                 + "body.mini-typing #btnAttach{margin:0 0 0 8px !important;}"
                 + "body.mini-typing #btnSend{margin-right:8px !important;}"
-                + "#btnAttach svg{width:25px !important;height:auto !important;}"
+                + "#btnAttach svg{width:28px !important;height:auto !important;}"
                 + "#btnSend{"
                 + "margin-left:auto !important;"
                 + "border:none !important;border-radius:6px !important;"
@@ -524,7 +524,7 @@ public final class MainActivity extends Activity {
                 // 箭头自绘：字符「↑」又细又长，压不粗也缩不短；用 SVG 直接画
                 // 一根短杆加一个粗箭头，颜色跟着按钮文字色走（2026-11-08）。
                 + "#btnSend::after{content:none !important;}"
-                + "#btnSend svg{width:18px !important;height:18px !important;display:block !important;}"
+                + "#btnSend svg{width:20px !important;height:20px !important;display:block !important;}"
                 + "#btnSend svg path{stroke:currentColor !important;stroke-width:2.6 !important;"
                 + "stroke-linecap:round !important;stroke-linejoin:round !important;fill:none !important;}"
                 + "main{padding-bottom:24px !important;}";
