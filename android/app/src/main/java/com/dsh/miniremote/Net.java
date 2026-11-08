@@ -24,14 +24,23 @@ public final class Net {
         tailnetProxy = proxy;
     }
 
-    /** 这条地址是不是 tailnet 里的（100.64.0.0/10）。 */
+    /**
+     * 这条地址是不是只能从 tailnet 里到达：100.64.0.0/10 的地址，或者 MagicDNS 的
+     * *.ts.net 名字（它要靠内核解析成 100.x，手机自己不认这个名字）。
+     */
     public static boolean isTailnetAddress(String baseUrl) {
         if (baseUrl == null) {
             return false;
         }
         try {
             String host = java.net.URI.create(baseUrl).getHost();
-            if (host == null || !host.startsWith("100.")) {
+            if (host == null) {
+                return false;
+            }
+            if (host.endsWith(".ts.net")) {
+                return true;
+            }
+            if (!host.startsWith("100.")) {
                 return false;
             }
             String[] parts = host.split("\\.");
