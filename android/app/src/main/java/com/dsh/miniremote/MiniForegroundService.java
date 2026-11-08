@@ -238,7 +238,11 @@ public final class MiniForegroundService extends Service {
         JSONObject root = new JSONObject(response.body);
         boolean nowRunning = root.has("running") ? root.optBoolean("running", false) : true;
         if (previousRunning && !nowRunning) {
-            Notifier.showDone(this, "");
+            // 通知正文用最后一条回复的第一行，别只写一句「回去看」
+            //（2026-11-08 用户要求）。
+            String latest = root.optJSONObject("latest") == null
+                    ? "" : root.optJSONObject("latest").optString("text", "");
+            Notifier.showDone(this, latest);
         }
         previousRunning = nowRunning;
         // 任务不在了就等半分钟收摊：给「跑完了」那条通知留一点时间被人看见。

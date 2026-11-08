@@ -48,7 +48,7 @@ public final class Notifier {
         PendingIntent contentIntent = PendingIntent.getActivity(context, 0x51, open, pendingIntentFlags());
         Notification.Builder builder = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
                 ? new Notification.Builder(context, SERVICE_CHANNEL_ID) : new Notification.Builder(context);
-        return builder.setSmallIcon(android.R.drawable.stat_notify_sync)
+        return builder.setSmallIcon(R.drawable.ic_notify)
                 .setContentTitle(title)
                 .setContentText(text)
                 .setContentIntent(contentIntent)
@@ -113,7 +113,7 @@ public final class Notifier {
                 approvalId.hashCode(), open, pendingIntentFlags());
         Notification.Builder builder = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
                 ? new Notification.Builder(context, CHANNEL_ID) : new Notification.Builder(context);
-        return builder.setSmallIcon(android.R.drawable.ic_dialog_info)
+        return builder.setSmallIcon(R.drawable.ic_notify)
                 .setContentIntent(contentIntent)
                 .setAutoCancel(true)
                 .setCategory(Notification.CATEGORY_REMINDER)
