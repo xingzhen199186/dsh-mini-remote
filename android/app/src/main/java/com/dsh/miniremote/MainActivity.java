@@ -580,8 +580,15 @@ public final class MainActivity extends Activity {
             + "var pinned=true,lastTouch=0,programmatic=0;"
             + "function userActive(){return Date.now()-lastTouch<600;}"
             + "function atBottom(){return m.scrollHeight-m.scrollTop-(m.clientHeight||0)<60;}"
+            + "function streaming(){"
+            // 正文正在往上长的时候，滚动该由页面自己管：它会把这一轮回答的开头对齐、
+            // 撑满一屏后停住（web 版就是这么做的）。壳这边再贴底，等于跟它抢方向盘，
+            // 结果就是「一屏开头对不上正文开头」（2026-11-08 用户报的）。
+            + "return !!document.querySelector('#reply .live');"
+            + "}"
             + "function pin(){"
             + "if(!pinned)return;"
+            + "if(streaming())return;"
             + "programmatic=Date.now()+150;"
             + "m.scrollTop=m.scrollHeight;"
             + "}"
