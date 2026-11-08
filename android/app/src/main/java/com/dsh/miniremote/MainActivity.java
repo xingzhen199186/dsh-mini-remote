@@ -521,7 +521,12 @@ public final class MainActivity extends Activity {
                 + "background:var(--act) !important;color:var(--on-act) !important;"
                 + "font-size:0 !important;line-height:1 !important;"
                 + "}"
-                + "#btnSend::after{content:'\u2191';font-size:13px;line-height:1;display:block;}"
+                // 箭头自绘：字符「↑」又细又长，压不粗也缩不短；用 SVG 直接画
+                // 一根短杆加一个粗箭头，颜色跟着按钮文字色走（2026-11-08）。
+                + "#btnSend::after{content:none !important;}"
+                + "#btnSend svg{width:16px !important;height:16px !important;display:block !important;}"
+                + "#btnSend svg path{stroke:currentColor !important;stroke-width:3.2 !important;"
+                + "stroke-linecap:round !important;stroke-linejoin:round !important;fill:none !important;}"
                 + "main{padding-bottom:24px !important;}";
         String js = "(function(){"
                 + "if(document.getElementById('mini-app-only-style'))return;"
@@ -555,6 +560,17 @@ public final class MainActivity extends Activity {
             + "box.appendChild(attach);"
             + "box.appendChild(input);"
             + "box.appendChild(send);"
+            + "if(!send.querySelector('svg')){"
+            + "var ns='http://www.w3.org/2000/svg';"
+            + "var svg=document.createElementNS(ns,'svg');"
+            + "svg.setAttribute('viewBox','0 0 24 24');"
+            + "svg.setAttribute('aria-hidden','true');"
+            + "var path=document.createElementNS(ns,'path');"
+            // 短杆 + 粗箭头：杆从 y=17 到 y=9，头从 (7,13) 到 (12,8) 再到 (17,13)。
+            + "path.setAttribute('d','M12 17V9.5M7.6 13.2 12 8.8l4.4 4.4');"
+            + "svg.appendChild(path);"
+            + "send.appendChild(svg);"
+            + "}"
             + "})();";
 
     /**
