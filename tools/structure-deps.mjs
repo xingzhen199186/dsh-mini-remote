@@ -97,7 +97,7 @@ export const MARKERS = [
     expect: 'present',
     probe: '[class*="_drawerMask"]',
     tokens: ['class:_drawerMask'],
-    codeText: '[class*="_sidebarCol"],[class*="_drawerMask"]{z-index:2000 !important}',
+    codeText: '[class*="_sidebarCol"],[class*="_drawerMask"]{z-index:1000 !important}',
     where: 'lib/mirror.js · ADAPT_CSS ⑳；命中测试的实证数字写在那条规则上面的注释里',
     why: '抽屉的遮罩层。2026-11-08 真机上量到：抽屉打开后，内容区那一层被画在了抽屉**上面**，'
       + '命中测试 `elementsFromPoint` 在导航项正中间返回的第一个元素是内容区（`_frame`），'
