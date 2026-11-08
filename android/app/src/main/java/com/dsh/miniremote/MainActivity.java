@@ -108,6 +108,7 @@ public final class MainActivity extends Activity {
         webView.getSettings().setDomStorageEnabled(true);
         // 设置页「连接」那一块的数据源：线路清单、切换、增删（2026-11-07）。
         webView.addJavascriptInterface(new ConnectionBridge(), "MiniConn");
+        webView.addJavascriptInterface(new UiPrefsBridge(), "DshMiniUi");
         webView.setWebViewClient(new PairedHostClient());
         webView.setWebChromeClient(new FileChooserClient());
         // Android 13 起通知要运行时授权；不申请的话，锁屏提醒和「批准/拒绝」按钮
@@ -1393,6 +1394,107 @@ public final class MainActivity extends Activity {
         return "https".equalsIgnoreCase(uri.getScheme()) ? 443 : 80;
     }
 
+    /**
+     * 手机上的显示设置（显示模式、外观、字号、流式等）跟着这台手机走，不跟着线路走。
+     *
+     * 这些值页面本来存在 localStorage 里，而 localStorage 是按地址（源）隔离的：
+     * 换一条线路就等于换了个地址，设置全丢。所以在壳里存一份，页面一加载就写回去，
+     * 页面里改的也回写到这里。**只存在手机上**，不往电脑端写，所以桌面端不受影响。
+     */
+    private static final String[] UI_PREF_KEYS = {
+            "dshMiniMode", "dshMiniSound", "dshMiniStreaming",
+            "dshMiniTheme", "dshMiniFont", "dshMiniNotify",
+    };
+
+    private static boolean isUiPrefKey(String key) {
+        if (key == null) {
+            return false;
+        }
+        for (String allowed : UI_PREF_KEYS) {
+            if (allowed.equals(key)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private android.content.SharedPreferences uiPrefs() {
+        return getSharedPreferences("mini_ui_prefs", MODE_PRIVATE);
+    }
+
+    /** 页面能调的那一端：读一份全量、写单个键、删单个键。 */
+    private final class UiPrefsBridge {
+        @android.webkit.JavascriptInterface
+        public String all() {
+            org.json.JSONObject out = new org.json.JSONObject();
+            android.content.SharedPreferences prefs = uiPrefs();
+            for (String key : UI_PREF_KEYS) {
+                String value = prefs.getString(key, null);
+                if (value != null) {
+                    try {
+                        out.put(key, value);
+                    } catch (org.json.JSONException ignored) {
+                        // 键是固定常量，不会失败。
+                    }
+                }
+            }
+            return out.toString();
+        }
+
+        @android.webkit.JavascriptInterface
+        public void save(String key, String value) {
+            if (!isUiPrefKey(key) || value == null) {
+                return;
+            }
+            uiPrefs().edit().putString(key, value).apply();
+        }
+
+        @android.webkit.JavascriptInterface
+        public void remove(String key) {
+            if (isUiPrefKey(key)) {
+                uiPrefs().edit().remove(key).apply();
+            }
+        }
+    }
+
+    /**
+     * 把外壳存的那份设置灌进当前线路的 localStorage，并把页面的改动回写。
+     *
+     * 页面在启动时就把这些值读进内存了，所以写完要刷一次；用 sessionStorage 记一下
+     * 已经刷过，避免来回跳。
+     */
+    private void applyUiPrefs() {
+        if (webView == null) {
+            return;
+        }
+        String keys = "'dshMiniMode','dshMiniSound','dshMiniStreaming',"
+                + "'dshMiniTheme','dshMiniFont','dshMiniNotify'";
+        String js = "(function(){"
+                + "var b=window.DshMiniUi;if(!b)return;"
+                + "var K=[" + keys + "];"
+                + "var stored={};try{stored=JSON.parse(b.all()||'{}')||{};}catch(e){}"
+                + "var changed=false;"
+                + "for(var i=0;i<K.length;i++){var k=K[i],v=stored[k];"
+                + "if(v===undefined||v===null){"
+                // 外壳没有这个值：把页面当前的记下来，换线路时才有的继承。
+                + "var cur=localStorage.getItem(k);"
+                + "if(cur!==null){try{b.save(k,cur);}catch(e){}}"
+                + "continue;}"
+                + "if(localStorage.getItem(k)!==v){localStorage.setItem(k,v);changed=true;}}"
+                + "if(!window.__miniUiPatched){window.__miniUiPatched=1;"
+                + "var set=localStorage.setItem.bind(localStorage);"
+                + "localStorage.setItem=function(k,v){set(k,v);"
+                + "if(K.indexOf(k)>=0){try{b.save(k,String(v));}catch(e){}}};"
+                + "var rem=localStorage.removeItem.bind(localStorage);"
+                + "localStorage.removeItem=function(k){rem(k);"
+                + "if(K.indexOf(k)>=0){try{b.remove(k);}catch(e){}}};}"
+                + "if(changed&&sessionStorage.getItem('__miniUiApplied')!=='1'){"
+                + "sessionStorage.setItem('__miniUiApplied','1');location.reload();return;}"
+                + "sessionStorage.setItem('__miniUiApplied','1');"
+                + "})();";
+        webView.evaluateJavascript(js, null);
+    }
+
     private final class PairedHostClient extends WebViewClient {
         @Override
         public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
@@ -1413,6 +1515,7 @@ public final class MainActivity extends Activity {
         public void onPageFinished(WebView view, String url) {
             pageReady = true;
             injectAppOnlyStyle();
+            applyUiPrefs();
             matchSystemBars();
             if (pendingShareJson != null) {
                 String json = pendingShareJson;
