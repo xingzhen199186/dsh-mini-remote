@@ -1427,6 +1427,18 @@ public final class MainActivity extends Activity {
         super.onActivityResult(requestCode, resultCode, data);
         if (requestCode == REQUEST_LINE_CONFIG) {
             if (resultCode == RESULT_OK && data != null
+                    && data.getBooleanExtra(LineConfigActivity.EXTRA_TAILNET_SIGNED_OUT, false)) {
+                // 刚退出登录：撤掉代理、别的线路照旧探测，别把页面留在死隧道上。
+                cancelTailNetIdleStop();
+                disableTailProxy(new Runnable() {
+                    @Override
+                    public void run() {
+                        probeAddresses();
+                    }
+                });
+                return;
+            }
+            if (resultCode == RESULT_OK && data != null
                     && data.getStringExtra(LineConfigActivity.EXTRA_TAILNET_URL) != null) {
                 // 配置页已经把内置内核拉起来了：先设代理，再按这条地址加载。
                 final String tailUrl = data.getStringExtra(LineConfigActivity.EXTRA_TAILNET_URL);

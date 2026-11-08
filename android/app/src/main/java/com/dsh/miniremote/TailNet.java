@@ -217,6 +217,80 @@ final class TailNet {
         return cleaned.length() > 40 ? cleaned.substring(0, 40) : cleaned;
     }
 
+    /**
+     * 当前登录的账号信息（2026-11-08）。
+     *
+     * 直接问内核要状态，不猜也不缓存：用户可能在浏览器里换过账号。
+     * 返回一段 JSON 文本，读不到就是 null。
+     */
+    /**
+     * 当前登录的账号信息（2026-11-08）。
+     *
+     * 直接问内核要状态，不猜也不缓存：用户可能在浏览器里换过账号。
+     * 返回一段 JSON 文本，读不到就是 null。
+     */
+    /** 调试用：内核状态接口的原始返回。 */
+    static String rawStatus() {
+        try {
+            if (!appctr.Appctr.isRunning()) {
+                return "not running";
+            }
+            return String.valueOf(appctr.Appctr.doLocalAPIRequest("GET", "/localapi/v0/status", ""));
+        } catch (Throwable e) {
+            return "err " + e;
+        }
+    }
+
+    static String accountJson() {
+        try {
+            if (!appctr.Appctr.isRunning()) {
+                return null;
+            }
+            String raw = String.valueOf(appctr.Appctr.doLocalAPIRequest("GET", "/localapi/v0/status", ""));
+            if (raw == null || raw.startsWith("Error:")) {
+                return null;
+            }
+            org.json.JSONObject status = new org.json.JSONObject(raw);
+            org.json.JSONObject self = status.optJSONObject("Self");
+            if (self == null) {
+                return null;
+            }
+            // 账号资料在顶层 User 表里，键是 Self.UserID；老版本状态里才在 Self.UserProfile。
+            org.json.JSONObject profile = self.optJSONObject("UserProfile");
+            if (profile == null) {
+                org.json.JSONObject users = status.optJSONObject("User");
+                String userId = self.optString("UserID");
+                if (users != null && !userId.isEmpty()) {
+                    profile = users.optJSONObject(userId);
+                }
+            }
+            org.json.JSONObject out = new org.json.JSONObject();
+            out.put("displayName", profile == null ? "" : profile.optString("DisplayName"));
+            out.put("loginName", profile == null ? "" : profile.optString("LoginName"));
+            out.put("hostName", self.optString("HostName"));
+            org.json.JSONObject tailnet = status.optJSONObject("CurrentTailnet");
+            out.put("tailnet", tailnet == null ? "" : tailnet.optString("Name"));
+            return out.toString();
+        } catch (Throwable e) {
+            Log.w(TAG, "读账号信息失败", e);
+            return null;
+        }
+    }
+
+    /** 退出登录：让内核登出、清掉账号状态，并删掉本机记下的授权密钥。 */
+    static String signOut(Context context) {
+        try {
+            if (appctr.Appctr.isRunning()) {
+                appctr.Appctr.logout();
+            }
+        } catch (Throwable e) {
+            Log.w(TAG, "退出登录失败", e);
+            return "退出登录失败：" + e.getClass().getSimpleName();
+        }
+        setAuthKey(context, "");
+        return null;
+    }
+
     static String backendState() {
         try {
             return String.valueOf(appctr.Appctr.getBackendState());

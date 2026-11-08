@@ -2,6 +2,7 @@ package com.dsh.miniremote;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.content.DialogInterface;
 import android.content.Intent;
 import android.os.Bundle;
 import android.os.Handler;
@@ -45,6 +46,8 @@ public final class LineConfigActivity extends Activity {
     static final String EXTRA_KIND = "kind";
     /** 回来时带上它：内置 Tailscale 已经连上，主界面可以设代理了。 */
     static final String EXTRA_TAILNET_URL = "tailnetUrl";
+    /** 回来时带上它：刚退出登录，主界面该把代理撤掉。 */
+    static final String EXTRA_TAILNET_SIGNED_OUT = "tailnetSignedOut";
 
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
 
@@ -64,6 +67,10 @@ public final class LineConfigActivity extends Activity {
     private Button deleteButton;
     private TextView statusView;
     private EditText tailKeyInput;
+    private LinearLayout accountCard;
+    private TextView accountNameView;
+    private TextView accountDetailView;
+    private Button signOutButton;
     private boolean destroyed;
     private boolean busy;
 
@@ -226,6 +233,45 @@ public final class LineConfigActivity extends Activity {
                 }
             });
 
+            accountCard = new LinearLayout(this);
+            accountCard.setOrientation(LinearLayout.VERTICAL);
+            accountCard.setVisibility(View.GONE);
+            LinearLayout.LayoutParams accountParams = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+            accountParams.topMargin = dp * 12;
+            card.addView(accountCard, accountParams);
+
+            accountNameView = new TextView(this);
+            accountNameView.setTextSize(15);
+            accountNameView.setTextColor(0xFF1B2C49);
+            accountCard.addView(accountNameView);
+
+            accountDetailView = new TextView(this);
+            accountDetailView.setTextSize(12);
+            accountDetailView.setTextColor(0xFF5A7290);
+            accountDetailView.setPadding(0, dp * 6, 0, 0);
+            accountCard.addView(accountDetailView);
+
+            signOutButton = new Button(this);
+            signOutButton.setText("退出登录");
+            signOutButton.setAllCaps(false);
+            signOutButton.setTextColor(0xFFC0392B);
+            signOutButton.setTextSize(14);
+            GradientDrawable outBg = new GradientDrawable();
+            outBg.setColor(0xFFFDF1EF);
+            outBg.setCornerRadius(dp * 10);
+            signOutButton.setBackground(outBg);
+            LinearLayout.LayoutParams outParams = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+            outParams.topMargin = dp * 10;
+            accountCard.addView(signOutButton, outParams);
+            signOutButton.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View view) {
+                    confirmSignOut();
+                }
+            });
+
             TextView tailOr = new TextView(this);
             tailOr.setText("已经有一枚授权密钥的话，也可以直接粘在下面（老办法，不用登录）");
             tailOr.setTextSize(12);
@@ -329,6 +375,110 @@ public final class LineConfigActivity extends Activity {
                 startScan();
             }
         });
+        loadAccountIfSignedIn();
+    }
+
+    /**
+     * 已经登录过就把账号摆出来（2026-11-08，参照 TailSocks 的设置页）。
+     *
+     * 账号信息来自内核的状态接口，读一次就够；读不到就当没登录，别摆一个空卡片。
+     */
+    private void loadAccountIfSignedIn() {
+        if (accountCard == null) {
+            return;
+        }
+        if (!TailNet.isConnected()) {
+            accountCard.setVisibility(View.GONE);
+            return;
+        }
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                final String raw = TailNet.accountJson();
+                mainHandler.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        if (destroyed || raw == null) {
+                            return;
+                        }
+                        try {
+                            org.json.JSONObject info = new org.json.JSONObject(raw);
+                            String name = info.optString("displayName");
+                            if (name.isEmpty()) {
+                                name = info.optString("loginName");
+                            }
+                            accountNameView.setText(name.isEmpty() ? "已登录" : name);
+                            StringBuilder detail = new StringBuilder();
+                            String login = info.optString("loginName");
+                            if (!login.isEmpty()) {
+                                detail.append(login);
+                            }
+                            String tailnet = info.optString("tailnet");
+                            if (!tailnet.isEmpty()) {
+                                detail.append(detail.length() > 0 ? "\n" : "").append("所属网络 ").append(tailnet);
+                            }
+                            String host = info.optString("hostName");
+                            if (!host.isEmpty()) {
+                                detail.append(detail.length() > 0 ? "\n" : "").append("当前设备 ").append(host);
+                            }
+                            accountDetailView.setText(detail.toString());
+                            accountCard.setVisibility(View.VISIBLE);
+                        } catch (org.json.JSONException ignored) {
+                            // 解析不出来就当没读到。
+                        }
+                    }
+                });
+            }
+        }, "mini-tailnet-account").start();
+    }
+
+    /** 退出登录：确认一次，然后让内核登出、清掉本机密钥。 */
+    private void confirmSignOut() {
+        new AlertDialog.Builder(this)
+                .setTitle("退出登录？")
+                .setMessage("退出后这台手机需要重新登录才能用内置 Tailscale。别的线路不受影响。")
+                .setNegativeButton("取消", null)
+                .setPositiveButton("退出", new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface dialog, int which) {
+                        doSignOut();
+                    }
+                })
+                .show();
+    }
+
+    private void doSignOut() {
+        if (busy) {
+            return;
+        }
+        busy = true;
+        signOutButton.setEnabled(false);
+        statusView.setText("正在退出登录……");
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                final String failure = TailNet.signOut(LineConfigActivity.this);
+                mainHandler.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        busy = false;
+                        if (destroyed) {
+                            return;
+                        }
+                        if (failure != null) {
+                            signOutButton.setEnabled(true);
+                            statusView.setText(failure);
+                            return;
+                        }
+                        // 已经登出：把代理撤掉、回到普通线路，别让页面挂在一个死隧道上。
+                        Intent result = new Intent();
+                        result.putExtra(EXTRA_TAILNET_SIGNED_OUT, true);
+                        setResult(RESULT_OK, result);
+                        finish();
+                    }
+                });
+            }
+        }, "mini-tailnet-signout").start();
     }
 
     /** 手动改地址：校验通过后覆盖原来那一条（或新增一条），保存回加密凭据。 */
@@ -680,6 +830,8 @@ public final class LineConfigActivity extends Activity {
     /** 连上了：记住这条线路并带地址回主界面。 */
     private void finishConnected(String targetUrl) {
         busy = false;
+        // 登录成功后那枚一次性密钥就没用了，留着只会让下一次误以为要粘贴它。
+        TailNet.setAuthKey(this, "");
         Connections.setPreferred(LineConfigActivity.this, targetUrl);
         Intent result = new Intent();
         result.putExtra(EXTRA_TAILNET_URL, targetUrl);
