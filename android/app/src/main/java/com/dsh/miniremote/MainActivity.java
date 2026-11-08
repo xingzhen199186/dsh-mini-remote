@@ -1053,6 +1053,44 @@ public final class MainActivity extends Activity {
      * 内核是应用进程的子进程，进程被杀、或者用户之前切到别的线路，
      * 它都可能已经没了；这时只设代理会让页面直接报「无法访问」。
      */
+    /**
+     * 等隧道真的能走通再打开页面（2026-11-08）。
+     *
+     * 后端说「已连接」不等于第一包就通得过：刚连上时还要选路径（直连或中继），
+     * 这期间发出去的第一个请求会失败。启动即加载页面就会撞上它，页面停在一个
+     * 错误页上再也回不来。
+     */
+    private void whenTailnetReachable(final Runnable after) {
+        final String target = Connections.preferred(this);
+        if (target == null || target.isEmpty()) {
+            after.run();
+            return;
+        }
+        final String credential = credentials == null ? "" : credentials.deviceCredential();
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                for (int i = 0; i < 20; i++) {
+                    try {
+                        Net.Response response = Net.get(target + "/mini/api/version", credential);
+                        if (response.isSuccess() || response.status == 401 || response.status == 403) {
+                            break; // 通了（401/403 也说明服务端在答话）
+                        }
+                    } catch (IOException ignored) {
+                        // 再等一秒重试。
+                    }
+                    try {
+                        Thread.sleep(1000);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        break;
+                    }
+                }
+                mainHandler.post(after);
+            }
+        }, "mini-tailnet-ready").start();
+    }
+
     private void ensureTailNetThen(final Runnable after) {
         if (TailNet.isConnected()) {
             cancelTailNetIdleStop();
@@ -1087,7 +1125,12 @@ public final class MainActivity extends Activity {
                             probeAddresses();
                             return;
                         }
-                        enableTailProxy(after);
+                        enableTailProxy(new Runnable() {
+                            @Override
+                            public void run() {
+                                whenTailnetReachable(after);
+                            }
+                        });
                     }
                 });
             }

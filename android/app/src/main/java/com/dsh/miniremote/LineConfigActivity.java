@@ -619,17 +619,36 @@ public final class LineConfigActivity extends Activity {
                             finishConnected(targetUrl);
                             return;
                         }
-                        try {
-                            startActivity(new Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url)));
-                            statusView.setText("已打开浏览器：登录完成后会自动连上，别关掉这一页。");
-                        } catch (Exception e) {
-                            statusView.setText("打不开浏览器，把这条网址复制到浏览器里：\n" + url);
-                        }
+                        openLoginPage(url);
+                        statusView.setText("登录完成后会自动连上，回到这一页就行。");
                         waitLoginInBackground(targetUrl);
                     }
                 });
             }
         }, "mini-tailnet-login").start();
+    }
+
+    /**
+     * 把登录页交出去：优先 Chrome Custom Tabs（盖在 App 上的真浏览器标签页），
+     * 手机上没有支持的浏览器时退回普通浏览器（2026-11-08）。
+     */
+    private void openLoginPage(String url) {
+        android.net.Uri uri = android.net.Uri.parse(url);
+        try {
+            androidx.browser.customtabs.CustomTabsIntent.Builder builder =
+                    new androidx.browser.customtabs.CustomTabsIntent.Builder();
+            builder.setShowTitle(true);
+            androidx.browser.customtabs.CustomTabsIntent intent = builder.build();
+            intent.launchUrl(this, uri);
+            return;
+        } catch (Exception ignored) {
+            // 没装支持 Custom Tabs 的浏览器，退回普通浏览器。
+        }
+        try {
+            startActivity(new Intent(Intent.ACTION_VIEW, uri));
+        } catch (Exception e) {
+            statusView.setText("打不开浏览器，把这条网址复制到浏览器里：\n" + url);
+        }
     }
 
     /** 等用户在浏览器里登录完成；成功就带着地址回主界面。 */
