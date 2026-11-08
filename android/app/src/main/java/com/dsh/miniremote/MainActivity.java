@@ -618,8 +618,11 @@ public final class MainActivity extends Activity {
             + "function armWatch(){"
             + "stopWatch();"
             + "if(!window.MutationObserver)return;"
+            + "var armedAt=Date.now();"
             + "watchObs=new MutationObserver(function(){"
-            + "if(streaming()){stopWatch();return;}"
+            // 头一秒先别让位：刚发出时正文可能还没开始，页面那套「对齐回答开头」会拿
+            // **上一条回答**当目标，人就被带回去了。等过了这一秒，再交给页面。
+            + "if(streaming()&&Date.now()-armedAt>1200){stopWatch();return;}"
             + "if(window.requestAnimationFrame)requestAnimationFrame(pin);else setTimeout(pin,16);"
             + "});"
             + "watchObs.observe(m,{childList:true,subtree:true});"
