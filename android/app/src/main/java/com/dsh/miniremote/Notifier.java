@@ -49,6 +49,8 @@ public final class Notifier {
         Notification.Builder builder = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
                 ? new Notification.Builder(context, SERVICE_CHANNEL_ID) : new Notification.Builder(context);
         return builder.setSmallIcon(R.drawable.ic_notify)
+                .setLargeIcon(android.graphics.BitmapFactory.decodeResource(
+                        context.getResources(), R.mipmap.ic_launcher))
                 .setContentTitle(title)
                 .setContentText(text)
                 .setContentIntent(contentIntent)
@@ -114,6 +116,10 @@ public final class Notifier {
         Notification.Builder builder = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
                 ? new Notification.Builder(context, CHANNEL_ID) : new Notification.Builder(context);
         return builder.setSmallIcon(R.drawable.ic_notify)
+                // 小图标只能是单色剪影（系统会染色），所以在右侧再放一张彩色的应用图标，
+                // 用户一眼能认出是谁发的（2026-11-08 用户要求用 App 图标）。
+                .setLargeIcon(android.graphics.BitmapFactory.decodeResource(
+                        context.getResources(), R.mipmap.ic_launcher))
                 .setContentIntent(contentIntent)
                 .setAutoCancel(true)
                 .setCategory(Notification.CATEGORY_REMINDER)
