@@ -42,6 +42,8 @@ public final class MiniForegroundService extends Service {
     private boolean hinted;
     /** 锁屏期间保住 CPU 和 Wi-Fi：否则 socket 还在，数据要等解锁才读（2026-11-06 实测）。 */
     private android.os.PowerManager.WakeLock wakeLock;
+    /** 唤醒锁一次租多久：短租+续租，系统不会判成"长时间阻止休眠"。 */
+    private static final long WAKE_LOCK_MS = 10 * 60 * 1000L;
     private android.net.wifi.WifiManager.WifiLock wifiLock;
     /** 上一次 state 帧里任务是不是在跑：用来抓「跑完了」这一刻。 */
     private boolean wasRunning;
@@ -106,6 +108,7 @@ public final class MiniForegroundService extends Service {
             worker.interrupt();
             worker = null;
         }
+        main.removeCallbacks(renew);
         releaseLocks();
         super.onDestroy();
     }
@@ -119,8 +122,12 @@ public final class MiniForegroundService extends Service {
             wakeLock.setReferenceCounted(false);
         }
         if (!wakeLock.isHeld()) {
-            wakeLock.acquire();
+            // 一次只租十分钟：系统看到"长时间持有唤醒锁"会给用户弹红字
+            // 「阻止系统休眠，耗电过快」。任务还在跑就续租，任务结束就不再续
+            // （2026-11-08 用户看到的那条告警就是这么来的）。
+            wakeLock.acquire(WAKE_LOCK_MS);
         }
+        scheduleRenew();
         if (wifiLock == null) {
             android.net.wifi.WifiManager wm =
                     (android.net.wifi.WifiManager) getApplicationContext()
@@ -142,6 +149,28 @@ public final class MiniForegroundService extends Service {
             wifiLock.release();
         }
     }
+
+    /** 续租：锁到期前再租一次，直到服务被停。 */
+    private void scheduleRenew() {
+        main.removeCallbacks(renew);
+        if (!running) {
+            return;
+        }
+        main.postDelayed(renew, WAKE_LOCK_MS - 60_000L);
+    }
+
+    private final Runnable renew = new Runnable() {
+        @Override
+        public void run() {
+            if (!running) {
+                return;
+            }
+            if (wakeLock != null && !wakeLock.isHeld()) {
+                wakeLock.acquire(WAKE_LOCK_MS);
+            }
+            scheduleRenew();
+        }
+    };
 
     /** 连接断了就等一会儿再连；连续失败太多次就收摊，不无限重试耗电。 */
     private void listenLoop() {
