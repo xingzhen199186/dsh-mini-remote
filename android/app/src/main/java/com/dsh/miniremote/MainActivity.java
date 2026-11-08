@@ -514,6 +514,9 @@ public final class MainActivity extends Activity {
                 // 按钮本身撑到图标那么大：按钮被写死 22px 时，里面的鲸鱼再调大也会被
                 // 挤回去（2026-11-08 实测：设 25 算出来还是 22）。
                 + "#btnAttach{width:25px !important;height:25px !important;}"
+                // 发送键也一起放到 25：两个按钮同样大小，蓝色方块跟着放宽，
+                // 里面的箭头仍按它自己的尺寸居中（2026-11-08）。
+                + "#btnSend{width:25px !important;height:25px !important;}"
                 + "#btnAttach svg{flex:0 0 auto !important;}"
                 // 工具栏那一行：两个图标各往外让一点，框内两侧留出空白。
                 + "body.mini-typing #btnAttach{margin:0 0 0 2px !important;}"
