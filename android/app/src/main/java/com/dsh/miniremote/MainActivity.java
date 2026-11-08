@@ -525,7 +525,7 @@ public final class MainActivity extends Activity {
                 // 一根短杆加一个粗箭头，颜色跟着按钮文字色走（2026-11-08）。
                 + "#btnSend::after{content:none !important;}"
                 + "#btnSend svg{width:16px !important;height:16px !important;display:block !important;}"
-                + "#btnSend svg path{stroke:currentColor !important;stroke-width:3.2 !important;"
+                + "#btnSend svg path{stroke:currentColor !important;stroke-width:2.6 !important;"
                 + "stroke-linecap:round !important;stroke-linejoin:round !important;fill:none !important;}"
                 + "main{padding-bottom:24px !important;}";
         String js = "(function(){"
@@ -567,7 +567,7 @@ public final class MainActivity extends Activity {
             + "svg.setAttribute('aria-hidden','true');"
             + "var path=document.createElementNS(ns,'path');"
             // 短杆 + 粗箭头：杆从 y=17 到 y=9，头从 (7,13) 到 (12,8) 再到 (17,13)。
-            + "path.setAttribute('d','M12 17V9.5M7.6 13.2 12 8.8l4.4 4.4');"
+            + "path.setAttribute('d','M12 18.6V7.4M6.3 12.5 12 6.8l5.7 5.7');"
             + "svg.appendChild(path);"
             + "send.appendChild(svg);"
             + "}"
