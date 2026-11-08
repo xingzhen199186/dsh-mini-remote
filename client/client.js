@@ -3270,7 +3270,7 @@ window.__ModuleLoader__.load({
       return h('div', { key: 'tailnet', style: styles.block },
         h('div', { style: styles.entryTitle }, '内置 Tailscale（手机不用装 Tailscale）'),
         h('div', { style: styles.muted },
-          '手机不装 Tailscale 也能连回这台电脑：由 App 自带一个节点，密钥用一次就作废。'),
+          '手机不装 Tailscale 也能连回这台电脑：由 App 自带一个节点。扫一次码就长期有效，密钥本身用一次就作废。'),
         h('div', { style: styles.warn },
           '生成密钥要一个 Tailscale API 访问令牌：打开后台 Settings → Keys → API access tokens 创建，粘到下面。令牌只存在这台电脑的插件设置里。'),
         h('div', { style: styles.entryRow },
@@ -3296,7 +3296,7 @@ window.__ModuleLoader__.load({
                 ? h('img', { src: result.qr, alt: '内置 Tailscale 接入码', style: styles.qr })
                 : h('div', { style: styles.qrFallback }, '二维码没画出来，把下面的地址和密钥手动填进手机也行。'),
               h('div', { style: styles.urlCol },
-                h('div', { style: styles.muted }, '用手机 App 里「Tailscale → 拍摄扫码」扫这个码。生成后一小时有效。'),
+                h('div', { style: styles.muted }, '用手机 App 里「Tailscale → 拍摄扫码」扫这个码。码一小时内有效，扫一次以后就不用再扫。'),
                 h('input', {
                   readOnly: true,
                   value: result.address || '',
