@@ -567,49 +567,52 @@ public final class MainActivity extends Activity {
      * 这里补一个常驻观察：只要内容长高、视野变矮，就重新贴到底；用户一旦自己往上
      * 划过（不在底部了），就停手，不跟他抢。
      */
+    /**
+     * 只在「输入框那块改高度」时补一次贴底（2026-11-08）。
+     *
+     * 为什么范围这么窄：正文流式生成、结束落定，这些滚动都该由页面自己管
+     * （它会把回答第一行对齐、满一屏停住）。之前这里盯着整个聊天区的尺寸和内容变化，
+     * 结果正文一长就被拉回底部——满屏后继续往下滚就是这么来的。
+     *
+     * 外壳真正需要插手的只有一件事：输入框在两种形态间切换、键盘起落时，可视区高度变了，
+     * 页面那套逻辑管不到。所以这里只盯着 footer 的高度变化。
+     */
     private static final String STICKY_BOTTOM_JS = "(function(){"
             + "if(window.__miniSticky)return;"
             + "var m=document.getElementById('main');"
-            + "if(!m)return;"
+            + "var f=document.querySelector('footer');"
+            + "if(!m||!f)return;"
             + "window.__miniSticky=1;"
-            // 关键：**只认用户自己的手势**。
-            // 发送后输入框变矮、可视区变高，浏览器会先把 scrollTop 往上夹紧，并在这之前
-            // 就派发一次 scroll。若按「scrollTop 变小 = 用户往上看」来判断，就会误判成
-            // 用户离开了底部，从此不再跟随——这正是上一版失灵的原因。
-            // 行业里的做法（use-stick-to-bottom 一类）也是这么区分的：用真实手势标记意图。
             + "var pinned=true,lastTouch=0,programmatic=0;"
             + "function userActive(){return Date.now()-lastTouch<600;}"
             + "function atBottom(){return m.scrollHeight-m.scrollTop-(m.clientHeight||0)<60;}"
-            + "function streaming(){"
-            // 正文正在往上长的时候，滚动该由页面自己管：它会把这一轮回答的开头对齐、
-            // 撑满一屏后停住（web 版就是这么做的）。壳这边再贴底，等于跟它抢方向盘，
-            // 结果就是「一屏开头对不上正文开头」（2026-11-08 用户报的）。
-            + "return !!document.querySelector('#reply .live');"
-            + "}"
-            + "function pin(){"
-            + "if(!pinned)return;"
-            + "if(streaming())return;"
-            + "programmatic=Date.now()+150;"
-            + "m.scrollTop=m.scrollHeight;"
-            + "}"
-            + "function soon(){if(window.requestAnimationFrame)requestAnimationFrame(pin);else setTimeout(pin,16);}"
-            + "['touchstart','touchmove','pointerdown','wheel'].forEach(function(name){"
-            + "m.addEventListener(name,function(){lastTouch=Date.now();},{passive:true});"
+            + "['touchstart','touchmove','pointerdown','wheel'].forEach(function(n){"
+            + "m.addEventListener(n,function(){lastTouch=Date.now();},{passive:true});"
             + "});"
             + "m.addEventListener('scroll',function(){"
             + "if(Date.now()<programmatic)return;"
             + "if(!userActive())return;"
             + "pinned=atBottom();"
             + "},{passive:true});"
-            + "if(window.ResizeObserver){"
-            + "var ro=new ResizeObserver(function(){soon();});"
-            + "ro.observe(m);"
-            + "if(m.firstElementChild)ro.observe(m.firstElementChild);"
+            + "function pin(){"
+            + "if(!pinned)return;"
+            + "programmatic=Date.now()+150;"
+            + "m.scrollTop=m.scrollHeight;"
             + "}"
-            + "if(window.MutationObserver){"
-            + "new MutationObserver(soon).observe(m,{childList:true,subtree:true,characterData:true});"
+            + "function pinSoon(){"
+            + "if(window.requestAnimationFrame)requestAnimationFrame(pin);else setTimeout(pin,16);"
+            // 再补一次：输入框变小的那一帧，新消息可能还没进 DOM，只贴一次会停在旧的底部。
+            + "setTimeout(pin,260);"
             + "}"
-            + "pin();"
+            + "if(window.ResizeObserver){new ResizeObserver(pinSoon).observe(f);}"
+            // 发出后输入框被清空：这是「刚发了一条」最可靠的信号，补一次贴底。
+            + "var i=document.getElementById('input');"
+            + "if(i){var had=false;"
+            + "i.addEventListener('input',function(){"
+            + "var now=!!i.value;"
+            + "if(had&&!now){pinned=true;pinSoon();}"
+            + "had=now;"
+            + "});}"
             + "})();";
 
     private static final String COMPOSER_WRAP_JS = "(function(){"
