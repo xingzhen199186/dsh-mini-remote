@@ -543,6 +543,7 @@ public final class MainActivity extends Activity {
                 + "s.textContent=" + org.json.JSONObject.quote(css) + ";"
                 + "(document.head||document.documentElement).appendChild(s);"
                 + "})();";
+        webView.evaluateJavascript(STICKY_BOTTOM_JS, null);
         webView.evaluateJavascript(COMPOSER_WRAP_JS, null);
         webView.evaluateJavascript(js, null);
         webView.evaluateJavascript(COMPOSER_STATE_JS, null);
@@ -555,6 +556,40 @@ public final class MainActivity extends Activity {
      * 页面原本把它们当成三个并排的独立元素；要做出「一整个圆角框、图标在里面」的效果，
      * 只能在外壳这边补一层容器。元素本身没换，页面绑的事件照旧。
      */
+    /**
+     * 一直贴着底部走（2026-11-08 用户报「发送后跳到上面去」）。
+     *
+     * 网页版没问题、App 里有问题，差别在壳这边：输入框会在「图标嵌在框里」和
+     * 「图标落到下面一行」两种形态之间切换，两种形态高度差三十多像素；键盘一收，
+     * 聊天区跟着变高变矮。页面自己那套贴底逻辑只在它自己的动作里跑，管不到这种
+     * 由外壳引起的尺寸变化。
+     *
+     * 这里补一个常驻观察：只要内容长高、视野变矮，就重新贴到底；用户一旦自己往上
+     * 划过（不在底部了），就停手，不跟他抢。
+     */
+    private static final String STICKY_BOTTOM_JS = "(function(){"
+            + "if(window.__miniSticky)return;"
+            + "var m=document.getElementById('main');"
+            + "if(!m)return;"
+            + "window.__miniSticky=1;"
+            + "var stick=true;"
+            + "function atBottom(){"
+            + "return m.scrollHeight-m.scrollTop-(m.clientHeight||0)<60;"
+            + "}"
+            + "function pin(){if(stick)m.scrollTop=m.scrollHeight;}"
+            + "m.addEventListener('scroll',function(){stick=atBottom();},{passive:true});"
+            + "function watch(){"
+            + "if(window.ResizeObserver){new ResizeObserver(pin).observe(m);}"
+            + "if(window.MutationObserver){"
+            + "new MutationObserver(function(){"
+            + "if(window.requestAnimationFrame)requestAnimationFrame(pin);else setTimeout(pin,16);"
+            + "}).observe(m,{childList:true,subtree:true,characterData:true});"
+            + "}"
+            + "}"
+            + "watch();"
+            + "m.scrollTop=m.scrollHeight;"
+            + "})();";
+
     private static final String COMPOSER_WRAP_JS = "(function(){"
             + "var footer=document.querySelector('footer');"
             + "if(!footer||document.getElementById('miniComposer'))return;"
@@ -597,6 +632,9 @@ public final class MainActivity extends Activity {
             + "var h=window.innerHeight;"
             + "if(h>base)base=h;"
             + "var open=h<base-120;"
+            // 输入框在「嵌着图标」和「下方工具栏」两种形态下高度不一样（差三十多像素）。
+            // 发指令后键盘收起、形态切回，聊天区高度跟着变，人就会觉得页面往上跳了一下。
+            // 所以：切换前人在底部，切换后补两次贴底（2026-11-08 用户报的）。
             + "document.body.classList.toggle('mini-typing',open);"
             + "}"
             + "window.addEventListener('resize',sync);"
