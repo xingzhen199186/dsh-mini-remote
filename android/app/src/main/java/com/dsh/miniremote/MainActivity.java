@@ -68,6 +68,8 @@ public final class MainActivity extends Activity {
     private boolean tailProxyOn;
     /** 内置内核正在启动：这期间别让探测把线路换掉。 */
     private volatile boolean tailNetStarting;
+    /** 这一轮里内置线路确实起不来，允许退回别的线路（下次启动再试）。 */
+    private volatile boolean tailNetGivenUp;
     /** 离开内置线路后，多久没人用它就把内核停掉（省电）。 */
     private static final long TAILNET_IDLE_STOP_MS = 5 * 60 * 1000L;
     /** 等代理生效后再执行的动作（换地址/加载页面）。 */
@@ -119,7 +121,7 @@ public final class MainActivity extends Activity {
         // 上次选中的是 tailnet 地址、并且存了授权密钥：先把内置内核拉起来，
         // 代理就绪后再去探测，否则探测会走公网直接失败（2026-11-08）。
         final String preferredUrl = Connections.preferred(this);
-        if (preferredUrl != null && Net.isTailnetAddress(preferredUrl) && TailNet.hasAuthKey(this)) {
+        if (preferredUrl != null && Net.isTailnetAddress(preferredUrl) && TailNet.hasSession(this)) {
             // 不走自动探测：用户选的就是这条，直接用它。
             ensureTailNetThen(new Runnable() {
                 @Override
@@ -687,7 +689,7 @@ public final class MainActivity extends Activity {
         // 不再去探测别的线路。否则内网地址会经隧道「同样可达」而被抢走首选，
         // 代理也会因为切到非 tailnet 地址被撤掉（2026-11-08 实测踩到）。
         final String chosen = Connections.preferred(this);
-        if (chosen != null && Net.isTailnetAddress(chosen) && TailNet.isConnected()) {
+        if (chosen != null && Net.isTailnetAddress(chosen) && holdsTailnetLine()) {
             enableTailProxy(new Runnable() {
                 @Override
                 public void run() {
@@ -1091,13 +1093,18 @@ public final class MainActivity extends Activity {
         }, "mini-tailnet-ready").start();
     }
 
+    /** 现在是不是该由内置线路说了算：正在启动，或者已经连上，都算。 */
+    private boolean holdsTailnetLine() {
+        return !tailNetGivenUp && (tailNetStarting || TailNet.isConnected());
+    }
+
     private void ensureTailNetThen(final Runnable after) {
         if (TailNet.isConnected()) {
             cancelTailNetIdleStop();
             enableTailProxy(after);
             return;
         }
-        if (!TailNet.hasAuthKey(this)) {
+        if (!TailNet.hasSession(this)) {
             Toast.makeText(this, "这条线路要用内置 Tailscale，先在它的配置页填授权密钥。",
                     Toast.LENGTH_LONG).show();
             if (after != null) after.run();
@@ -1118,10 +1125,11 @@ public final class MainActivity extends Activity {
                             return;
                         }
                         if (failure != null) {
-                            // 内核起不来就别硬往 tailnet 地址上撞：退回自动探测，
-                            // 至少让用户还能用别的线路（2026-11-08）。
+                            // 内核起不来就别硬往 tailnet 地址上撞：这一轮放弃内置线路，
+                            // 退回自动探测，至少让用户还能用别的线路（2026-11-08）。
                             Toast.makeText(MainActivity.this,
                                     "内置 Tailscale 没起来：" + failure, Toast.LENGTH_LONG).show();
+                            tailNetGivenUp = true;
                             probeAddresses();
                             return;
                         }
@@ -1203,7 +1211,7 @@ public final class MainActivity extends Activity {
     private void selectAddress(final String baseUrl) {
         // 同样的理由：内置线路在用的时候，别让探测结果把它顶掉。
         final String chosen = Connections.preferred(this);
-        if (chosen != null && Net.isTailnetAddress(chosen) && TailNet.isConnected()
+        if (chosen != null && Net.isTailnetAddress(chosen) && holdsTailnetLine()
                 && !chosen.equals(baseUrl)) {
             return;
         }

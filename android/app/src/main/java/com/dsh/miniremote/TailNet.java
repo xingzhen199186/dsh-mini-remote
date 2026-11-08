@@ -43,6 +43,21 @@ final class TailNet {
     }
 
     /**
+     * 这台手机是否已经有了 Tailscale 身份（2026-11-08）。
+     *
+     * 账号登录这条路不留下密钥文件，只看密钥会把「已经登录」误判成「没登录」，
+     * 于是启动时不去拉内核、直接去探测别的线路。身份的真实凭据是内核状态目录里的
+     * tailscaled.state：登出时内核会把它删掉，所以它既是"有身份"也是"没登出"。
+     */
+    static boolean hasSession(Context context) {
+        if (hasAuthKey(context)) {
+            return true;
+        }
+        File state = new File(context.getFilesDir(), "state/tailscaled.state");
+        return state.exists() && state.length() > 0;
+    }
+
+    /**
      * 启动内核并等它连上（阻塞，必须在后台线程调用）。
      *
      * 返回 null 表示成功；否则是给用户看的一句话。
@@ -98,6 +113,8 @@ final class TailNet {
             if ("Running".equals(backendState())) {
                 return null; // 已经登录过，直接可用。
             }
+            // 交互式登录会按当时的偏好给节点起名；先写进去，才能叫 bvl-an00 而不是 localhost-0。
+            applyHostname();
             appctr.Appctr.loginInteractive();
             String url = "";
             for (int i = 0; i < 40; i++) {
@@ -131,6 +148,7 @@ final class TailNet {
         while (System.currentTimeMillis() < deadline) {
             if ("Running".equals(backendState())) {
                 pendingLoginUrl = "";
+                applyHostname();
                 return null;
             }
             try {
@@ -141,6 +159,21 @@ final class TailNet {
             }
         }
         return "还没等到登录完成（" + backendState() + "）。";
+    }
+
+    /**
+     * 把设备名改成手机型号（2026-11-08）。
+     *
+     * 交互式登录建出来的节点默认叫 localhost-0，用户在自己的设备列表里根本认不出
+     * 哪台是手机。登录完成后改一次名字，之后一直是这个名字。
+     */
+    private static void applyHostname() {
+        try {
+            String body = "{\"Hostname\":\"" + deviceName() + "\"}";
+            appctr.Appctr.doLocalAPIRequest("PATCH", "/localapi/v0/prefs", body);
+        } catch (Throwable e) {
+            Log.w(TAG, "改设备名失败", e);
+        }
     }
 
     private static String safeLoginUrl() {
@@ -155,7 +188,9 @@ final class TailNet {
     static String startBlocking(Context context) {
         Context app = context.getApplicationContext();
         String key = authKey(app);
-        if (key.isEmpty()) {
+        // 账号登录过的手机上，身份在内核状态里，不需要再拿密钥；只有既没登录过、
+        // 也没密钥时才真的没得启动（2026-11-08：这里曾把"登录成功"误判成"没登录"）。
+        if (key.isEmpty() && !hasSession(app)) {
             return "还没有登录 Tailscale 账号。";
         }
         try {
@@ -182,7 +217,8 @@ final class TailNet {
                 return "内核没有起来：" + lastCoreLog();
             }
 
-            if (!"Running".equals(backendState())) {
+            if (!"Running".equals(backendState()) && !key.isEmpty()) {
+                // 只有带密钥时才主动登录；账号登录过的设备会自己用状态里的身份连上。
                 appctr.Appctr.login(key);
             }
 
@@ -191,6 +227,7 @@ final class TailNet {
                 String state = backendState();
                 if ("Running".equals(state)) {
                     Log.i(TAG, "已连上，用时约 " + (i * 500) + "ms");
+                    applyHostname();
                     return null;
                 }
                 if ("Stopped".equals(state)) {
