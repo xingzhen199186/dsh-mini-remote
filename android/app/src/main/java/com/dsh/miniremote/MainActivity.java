@@ -66,6 +66,8 @@ public final class MainActivity extends Activity {
     private PendingPoller poller;
     /** 内置 Tailscale：WebView 的代理是否已经切到本地内核。 */
     private boolean tailProxyOn;
+    /** 内置内核正在启动：这期间别让探测把线路换掉。 */
+    private volatile boolean tailNetStarting;
     /** 等代理生效后再执行的动作（换地址/加载页面）。 */
     private Runnable pendingAfterProxy;
 
@@ -674,6 +676,11 @@ public final class MainActivity extends Activity {
         if (probing || destroyed || addressPool == null) {
             return;
         }
+        // 内核还在启动：这时的探测必然失败（代理还没挂上），
+        // 让它跑只会把线路换成别的、并在 tailnet 地址上留一个错误页（2026-11-08）。
+        if (tailNetStarting) {
+            return;
+        }
         // 内置 Tailscale 已连上、并且用户选的就是 tailnet 线路：这就是他要的路，
         // 不再去探测别的线路。否则内网地址会经隧道「同样可达」而被抢走首选，
         // 代理也会因为切到非 tailnet 地址被撤掉（2026-11-08 实测踩到）。
@@ -1056,6 +1063,7 @@ public final class MainActivity extends Activity {
             return;
         }
         Toast.makeText(this, "正在启动内置 Tailscale……", Toast.LENGTH_SHORT).show();
+        tailNetStarting = true;
         new Thread(new Runnable() {
             @Override
             public void run() {
@@ -1063,13 +1071,16 @@ public final class MainActivity extends Activity {
                 mainHandler.post(new Runnable() {
                     @Override
                     public void run() {
+                        tailNetStarting = false;
                         if (destroyed) {
                             return;
                         }
                         if (failure != null) {
+                            // 内核起不来就别硬往 tailnet 地址上撞：退回自动探测，
+                            // 至少让用户还能用别的线路（2026-11-08）。
                             Toast.makeText(MainActivity.this,
                                     "内置 Tailscale 没起来：" + failure, Toast.LENGTH_LONG).show();
-                            if (after != null) after.run();
+                            probeAddresses();
                             return;
                         }
                         enableTailProxy(after);

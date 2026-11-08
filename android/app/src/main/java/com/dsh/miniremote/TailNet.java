@@ -73,6 +73,11 @@ final class TailNet {
             options.setSocks5Server(PROXY_HOST + ":" + PROXY_PORT);
             options.setHttpProxy(PROXY_HOST + ":" + PROXY_PORT);
             options.setAuthKey(key);
+            // 设备列表里别显示成 localhost-0：用手机型号当名字，
+            // 用户一眼能认出哪台是自己的手机（2026-11-08）。
+            options.setHostname(deviceName());
+            options.setOsVersion(android.os.Build.VERSION.RELEASE);
+            options.setDeviceModel(android.os.Build.MODEL == null ? "android" : android.os.Build.MODEL);
 
             if (appctr.Appctr.isRunning() && "Running".equals(backendState())) {
                 Log.i(TAG, "内核已在运行，直接复用");
@@ -113,6 +118,17 @@ final class TailNet {
             Log.w(TAG, "启动失败", e);
             return "启动失败：" + e.getClass().getSimpleName();
         }
+    }
+
+    /** tailnet 里的设备名：只留字母数字和连字符，别的都换成 -。 */
+    private static String deviceName() {
+        String model = android.os.Build.MODEL == null ? "" : android.os.Build.MODEL;
+        String cleaned = model.toLowerCase(java.util.Locale.ROOT).replaceAll("[^a-z0-9]+", "-");
+        cleaned = cleaned.replaceAll("^-+", "").replaceAll("-+$", "");
+        if (cleaned.isEmpty()) {
+            return "dsh-mini-remote";
+        }
+        return cleaned.length() > 40 ? cleaned.substring(0, 40) : cleaned;
     }
 
     static String backendState() {
