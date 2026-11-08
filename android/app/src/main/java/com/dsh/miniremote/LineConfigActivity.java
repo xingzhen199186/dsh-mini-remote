@@ -845,9 +845,17 @@ public final class LineConfigActivity extends Activity {
         }, "mini-tailnet-login-browser").start();
     }
 
+    /**
+     * 交给浏览器，但让用户自己挑哪一个（2026-11-08）。
+     *
+     * 手机默认浏览器可能是 Edge、夸克之类，里头登的账号不一定是你的 Google 账号；
+     * 一旦默认浏览器不对，Google 会当成新设备重新验证。给个选择器，用户能用自己
+     * 平时登录的那个浏览器。
+     */
     private void openInBrowser(String url) {
         try {
-            startActivity(new Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url)));
+            Intent view = new Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url));
+            startActivity(Intent.createChooser(view, "用哪个浏览器登录？"));
         } catch (Exception e) {
             statusView.setText("打不开浏览器，把这条网址复制到浏览器里：\n" + url);
         }
