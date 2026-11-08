@@ -272,6 +272,19 @@ public final class LineConfigActivity extends Activity {
                 }
             });
 
+            TextView browserHint = new TextView(this);
+            browserHint.setText("登录页一直转圈？点这里用浏览器打开");
+            browserHint.setTextSize(12);
+            browserHint.setTextColor(0xFF3B6FC4);
+            browserHint.setPadding(0, dp * 10, 0, 0);
+            card.addView(browserHint);
+            browserHint.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View view) {
+                    loginInBrowser();
+                }
+            });
+
             TextView tailOr = new TextView(this);
             tailOr.setText("已经有一枚授权密钥的话，也可以直接粘在下面（老办法，不用登录）");
             tailOr.setTextSize(12);
@@ -776,6 +789,67 @@ public final class LineConfigActivity extends Activity {
                 });
             }
         }, "mini-tailnet-login").start();
+    }
+
+    /**
+     * 「转圈就用浏览器打开」：走同一套登录准备，只是这次交给完整浏览器（2026-11-08）。
+     *
+     * Google 的「确认是本人」那一步在轻量标签页里偶尔转圈不动，换完整浏览器往往就好；
+     * 也不用用户自己去复制链接。
+     */
+    private void loginInBrowser() {
+        String ready = TailNet.pendingLoginUrl();
+        if (!ready.isEmpty()) {
+            openInBrowser(ready);
+            return;
+        }
+        if (busy) {
+            return;
+        }
+        busy = true;
+        saveButton.setEnabled(false);
+        scanButton.setEnabled(false);
+        statusView.setText("正在准备登录……");
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                final String failure = TailNet.beginLogin(LineConfigActivity.this);
+                mainHandler.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        if (destroyed) {
+                            return;
+                        }
+                        if (failure != null) {
+                            busy = false;
+                            saveButton.setEnabled(true);
+                            scanButton.setEnabled(true);
+                            statusView.setText("登录没起来：" + failure);
+                            return;
+                        }
+                        String url = TailNet.pendingLoginUrl();
+                        if (url.isEmpty()) {
+                            statusView.setText("内核说已经登录过了，点上面的「用内置连接这条线路」即可。");
+                            busy = false;
+                            saveButton.setEnabled(true);
+                            scanButton.setEnabled(true);
+                            return;
+                        }
+                        openInBrowser(url);
+                        statusView.setText("已用浏览器打开：登录完成后会自动连上。");
+                        waitLoginInBackground(originalUrl);
+                    }
+                });
+            }
+        }, "mini-tailnet-login-browser").start();
+    }
+
+    private void openInBrowser(String url) {
+        try {
+            startActivity(new Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url)));
+        } catch (Exception e) {
+            statusView.setText("打不开浏览器，把这条网址复制到浏览器里：\n" + url);
+        }
     }
 
     /**
