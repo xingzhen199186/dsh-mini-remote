@@ -783,7 +783,8 @@ public final class LineConfigActivity extends Activity {
                             return;
                         }
                         openLoginPage(url);
-                        statusView.setText("登录完成后会自动连上，回到这一页就行。");
+                        // 链接也摆出来：手机上转圈时，把这条拿到电脑上打开一样能完成授权。
+                        statusView.setText("登录完成后会自动连上。\n\n登录链接（也可以在电脑上打开）：\n" + url);
                         waitLoginInBackground(targetUrl);
                     }
                 });
@@ -836,7 +837,7 @@ public final class LineConfigActivity extends Activity {
                             return;
                         }
                         openInBrowser(url);
-                        statusView.setText("已用浏览器打开：登录完成后会自动连上。");
+                        statusView.setText("已用浏览器打开。\n\n登录链接（也可以在电脑上打开）：\n" + url);
                         waitLoginInBackground(originalUrl);
                     }
                 });
