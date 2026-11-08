@@ -20,6 +20,11 @@ public final class Net {
     /** 内置 Tailscale 的本地代理；装了它才走隧道，没装就直连。 */
     private static volatile java.net.Proxy tailnetProxy;
 
+    /** 当前有没有挂内置隧道的代理（诊断用）。 */
+    static boolean hasTailnetProxy() {
+        return tailnetProxy != null;
+    }
+
     static void setTailnetProxy(java.net.Proxy proxy) {
         tailnetProxy = proxy;
     }
@@ -159,10 +164,15 @@ public final class Net {
      * 调用方（前台服务）在停止时关。
      */
     public static Response getStream(String url, String deviceCredential) throws IOException {
+        return getStream(url, deviceCredential, 0);
+    }
+
+    /** readTimeoutMs = 0 表示不设读超时（长期挂着等事件）。 */
+    static Response getStream(String url, String deviceCredential, int readTimeoutMs) throws IOException {
         HttpURLConnection connection = open(url);
         connection.setRequestMethod("GET");
         connection.setConnectTimeout(CONNECT_TIMEOUT_MS);
-        connection.setReadTimeout(0);
+        connection.setReadTimeout(readTimeoutMs);
         connection.setUseCaches(false);
         connection.setInstanceFollowRedirects(false);
         connection.setRequestProperty("Accept", "text/event-stream");

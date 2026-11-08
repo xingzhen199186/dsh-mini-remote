@@ -6,6 +6,7 @@ import android.content.Intent;
 import android.os.Build;
 import android.os.IBinder;
 
+import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.BufferedReader;
@@ -44,9 +45,13 @@ public final class MiniForegroundService extends Service {
     private android.os.PowerManager.WakeLock wakeLock;
     /** 唤醒锁一次租多久：短租+续租，系统不会判成"长时间阻止休眠"。 */
     private static final long WAKE_LOCK_MS = 10 * 60 * 1000L;
+    /** 后台查询间隔：十五秒，够及时，也不费电。 */
+    private static final long POLL_INTERVAL_MS = 15_000L;
     private android.net.wifi.WifiManager.WifiLock wifiLock;
     /** 上一次 state 帧里任务是不是在跑：用来抓「跑完了」这一刻。 */
     private boolean wasRunning;
+    /** 上一次查询时任务在不在跑：用来抓「刚刚跑完」那一刻。 */
+    private boolean previousRunning;
     /** 任务结束后收摊的定时器：常驻通知不该在没任务时一直挂着。 */
     private Runnable idleStop;
     private final android.os.Handler main = new android.os.Handler(android.os.Looper.getMainLooper());
@@ -179,27 +184,44 @@ public final class MiniForegroundService extends Service {
     };
 
     /** 连接断了就等一会儿再连；连续失败太多次就收摊，不无限重试耗电。 */
+    /** 临时诊断：后台连接为什么没建立起来，写文件里看。 */
+    private void trace(String message) {
+        try (java.io.FileWriter writer = new java.io.FileWriter(
+                new java.io.File(getFilesDir(), "sse.log"), true)) {
+            writer.write(new java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US)
+                    .format(new java.util.Date()) + " " + message + "\n");
+        } catch (Exception ignored) {
+            // 诊断日志写不进去不影响功能。
+        }
+    }
+
+    /**
+     * 后台就干一件事：隔一会儿问电脑「任务还在跑吗、有没有新审批」（2026-11-08）。
+     *
+     * 原来这里挂的是一条长连接推送。实测下来，长连接经我们内置的 Tailscale 隧道
+     * 会卡在等响应（普通请求却能通），于是锁屏后什么都收不到。查询是普通请求，
+     * 走的是同一条已经验证可用的路径；十五秒问一次，对电量的影响可以忽略。
+     */
     private void listenLoop() {
         int failures = 0;
+        trace("poll loop start base=" + baseUrl + " proxy=" + Net.hasTailnetProxy());
         while (running) {
             try {
-                readStream();
+                pollOnce();
                 failures = 0;
             } catch (Exception err) {
                 failures += 1;
-                android.util.Log.w("MiniSSE", "stream failed (" + failures + "): " + err);
-                // 连续三次连不上：多半是系统把后台冻结了（2026-11-06 荣耀实测）。
-                // 只提醒一次，点通知回去检查电池设置。
+                trace("poll fail#" + failures + " " + err);
                 if (failures == 3 && !hinted) {
                     hinted = true;
                     Notifier.showBackgroundHint(this);
                 }
             }
-            if (!running || failures >= MAX_FAILURES) {
+            if (!running) {
                 break;
             }
             try {
-                Thread.sleep(RETRY_DELAY_MS);
+                Thread.sleep(POLL_INTERVAL_MS);
             } catch (InterruptedException stop) {
                 break;
             }
@@ -207,9 +229,66 @@ public final class MiniForegroundService extends Service {
         stopSelf();
     }
 
+    /** 问一次电脑：任务在不在跑、有没有新的审批和提问。 */
+    private void pollOnce() throws Exception {
+        Net.Response response = Net.get(baseUrl + "/mini/api/pending", credential);
+        if (!response.isSuccess() || response.body == null || response.body.isEmpty()) {
+            throw new IllegalStateException("查询没拿到结果（" + response.status + "）");
+        }
+        JSONObject root = new JSONObject(response.body);
+        boolean nowRunning = root.has("running") ? root.optBoolean("running", false) : true;
+        if (previousRunning && !nowRunning) {
+            Notifier.showDone(this, "");
+        }
+        previousRunning = nowRunning;
+        // 任务不在了就等半分钟收摊：给「跑完了」那条通知留一点时间被人看见。
+        if (nowRunning) {
+            cancelIdleStop();
+        } else if (idleStop == null) {
+            idleStop = new Runnable() {
+                @Override
+                public void run() {
+                    idleStop = null;
+                    stopSelf();
+                }
+            };
+            main.postDelayed(idleStop, 30_000L);
+        }
+        JSONArray approvals = root.optJSONArray("approvals");
+        if (approvals != null) {
+            for (int i = 0; i < approvals.length(); i += 1) {
+                JSONObject item = approvals.optJSONObject(i);
+                String id = item == null ? null : item.optString("id", "");
+                if (id != null && !id.isEmpty() && shown.add(id)) {
+                    Notifier.showApproval(this, baseUrl, id);
+                }
+            }
+        }
+        JSONArray questions = root.optJSONArray("questions");
+        if (questions != null) {
+            for (int i = 0; i < questions.length(); i += 1) {
+                JSONObject item = questions.optJSONObject(i);
+                String id = item == null ? null : item.optString("id", "");
+                if (id != null && !id.isEmpty() && shown.add(id)) {
+                    Notifier.showInfo(this, "DSH 有一道题等你回答", "打开应用作答。", id);
+                }
+            }
+        }
+    }
+
+    private void cancelIdleStop() {
+        if (idleStop != null) {
+            main.removeCallbacks(idleStop);
+            idleStop = null;
+        }
+    }
+
     private void readStream() throws Exception {
         String url = baseUrl + "/mini/api/stream";
-        Net.Response response = Net.getStream(url, credential);
+        trace("stream: 开始请求 " + url);
+        long t0 = System.currentTimeMillis();
+        Net.Response response = Net.getStream(url, credential, 15000);
+        trace("stream: 头部到手 " + (System.currentTimeMillis() - t0) + "ms status=" + response.status);
         if (!response.isSuccess() || response.stream == null) {
             throw new IllegalStateException("推送连接没建立起来");
         }
