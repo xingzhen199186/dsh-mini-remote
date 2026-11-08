@@ -488,7 +488,10 @@ public final class MainActivity extends Activity {
                 + "}"
                 // 打字后图标落到下面一行，文字就不再需要给它们让位：
                 // 左边对齐鲸鱼、右边对齐发送键，两侧不留空档。
-                + "body.mini-typing #input{padding:6px 8px 6px 2px !important;}"
+                // 文字和下面那排图标之间留一点呼吸：padding-bottom 撑出来的是输入框
+                // 自己的底边，背景透明，所以露出来的是外框那一层色，不会出现色差
+                //（2026-11-08 用户要求）。
+                + "body.mini-typing #input{padding:6px 8px 14px 2px !important;}"
                 // 键盘起来时，底栏下面那点留白只剩原来的三分之一（26 → 9）。
                 + "body.mini-typing footer{padding-bottom:calc(env(safe-area-inset-bottom,0px) + 9px) !important;}"
                 + "#btnAttach{order:2 !important;}"
