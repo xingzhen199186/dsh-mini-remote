@@ -207,8 +207,34 @@ public final class LineConfigActivity extends Activity {
             tailLabel.setPadding(0, dp * 14, 0, dp * 6);
             card.addView(tailLabel);
 
+            Button tailLogin = new Button(this);
+            tailLogin.setText("登录 Tailscale 账号");
+            tailLogin.setAllCaps(false);
+            tailLogin.setTextColor(0xFFFFFFFF);
+            tailLogin.setTextSize(15);
+            GradientDrawable loginBg = new GradientDrawable();
+            loginBg.setColor(0xFF3B6FC4);
+            loginBg.setCornerRadius(dp * 10);
+            tailLogin.setBackground(loginBg);
+            LinearLayout.LayoutParams loginParams = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+            card.addView(tailLogin, loginParams);
+            tailLogin.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View view) {
+                    loginTailnet();
+                }
+            });
+
+            TextView tailOr = new TextView(this);
+            tailOr.setText("已经有一枚授权密钥的话，也可以直接粘在下面（老办法，不用登录）");
+            tailOr.setTextSize(12);
+            tailOr.setTextColor(0xFF8AA0BA);
+            tailOr.setPadding(0, dp * 10, 0, dp * 4);
+            card.addView(tailOr);
+
             tailKeyInput = new EditText(this);
-            tailKeyInput.setHint("tskey-auth-…（电脑上 Tailscale 后台生成）");
+            tailKeyInput.setHint("tskey-auth-…（可选）");
             tailKeyInput.setHintTextColor(0xFF9AAEC6);
             tailKeyInput.setTextColor(0xFF1B2C49);
             tailKeyInput.setTextSize(14);
@@ -548,6 +574,98 @@ public final class LineConfigActivity extends Activity {
         } catch (IllegalArgumentException e) {
             statusView.setText("扫到的内容不是地址也不是配对码：" + text);
         }
+    }
+
+    /**
+     * 「登录 Tailscale 账号」：拉起内核发起一次交互式登录，把授权网址交给系统浏览器，
+     * 用户登录完内核自己就连上了（2026-11-08）。
+     *
+     * 之所以跳浏览器而不是内嵌网页：Tailscale 常用 Google/微软账号登录，这类登录
+     * 明令禁止在 App 内嵌的网页里完成，内嵌会直接被拒。
+     */
+    private void loginTailnet() {
+        if (busy) {
+            return;
+        }
+        if (originalUrl == null || originalUrl.isEmpty()) {
+            statusView.setText("这条线路还没有地址：先在上面填 tailnet 地址并保存。");
+            return;
+        }
+        busy = true;
+        saveButton.setEnabled(false);
+        scanButton.setEnabled(false);
+        statusView.setText("正在准备登录……");
+        final String targetUrl = originalUrl;
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                final String failure = TailNet.beginLogin(LineConfigActivity.this);
+                mainHandler.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        if (destroyed) {
+                            return;
+                        }
+                        if (failure != null) {
+                            busy = false;
+                            saveButton.setEnabled(true);
+                            scanButton.setEnabled(true);
+                            statusView.setText("登录没起来：" + failure);
+                            return;
+                        }
+                        String url = TailNet.pendingLoginUrl();
+                        if (url.isEmpty()) {
+                            // 内核说已经登录过了，不用再走网址。
+                            finishConnected(targetUrl);
+                            return;
+                        }
+                        try {
+                            startActivity(new Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url)));
+                            statusView.setText("已打开浏览器：登录完成后会自动连上，别关掉这一页。");
+                        } catch (Exception e) {
+                            statusView.setText("打不开浏览器，把这条网址复制到浏览器里：\n" + url);
+                        }
+                        waitLoginInBackground(targetUrl);
+                    }
+                });
+            }
+        }, "mini-tailnet-login").start();
+    }
+
+    /** 等用户在浏览器里登录完成；成功就带着地址回主界面。 */
+    private void waitLoginInBackground(final String targetUrl) {
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                final String failure = TailNet.waitLoggedIn(180000L);
+                mainHandler.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        if (destroyed) {
+                            return;
+                        }
+                        if (failure != null) {
+                            busy = false;
+                            saveButton.setEnabled(true);
+                            scanButton.setEnabled(true);
+                            statusView.setText("还没登录成功：" + failure + "。登录完再点一次也可以。");
+                            return;
+                        }
+                        finishConnected(targetUrl);
+                    }
+                });
+            }
+        }, "mini-tailnet-wait").start();
+    }
+
+    /** 连上了：记住这条线路并带地址回主界面。 */
+    private void finishConnected(String targetUrl) {
+        busy = false;
+        Connections.setPreferred(LineConfigActivity.this, targetUrl);
+        Intent result = new Intent();
+        result.putExtra(EXTRA_TAILNET_URL, targetUrl);
+        setResult(RESULT_OK, result);
+        finish();
     }
 
     /**
