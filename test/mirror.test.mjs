@@ -1029,8 +1029,10 @@ test('镜像：侧栏那一列要能纵向滚（不然最底下的「设置」�
   assert.equal(sideRules.length, 1, '动侧栏滚动的规则只许有一条')
   // 抽屉的层级：官方把内容区排在了抽屉上面，手机上一摸就被内容区接走（点一下抽屉就收起）。
   // 实证见 lib/mirror.js 里那条注释。
-  assert.match(body, /@media \(max-width: 1023px\)\{\[class\*="_sidebarCol"\],\[class\*="_drawerMask"\]\{z-index:2000 !important\}\}/,
+  assert.match(body, /\[class\*="_sidebarCol"\],\[class\*="_drawerMask"\]\{z-index:2000 !important\}/,
     '窄屏要把抽屉抬到内容区上面，否则导航点不动')
+  assert.match(body, /:has\(> \[class\*="_sidebarCol"\]\)\{grid-template-columns:6px minmax\(0,1fr\) 0 !important\}/,
+    '抽屉是浮层，不该真占一列：官方让出 324px 之后内容区只剩 37px，进去就是一条窄缝')
 
   // 同一次注入里，**设置面板那几轮的战果一个都不许掉**（这条改动和它们不相干，钉在一起防回退）。
   assert.match(body, /\[data-shortcut-modal="settings"\] \[class\*="_content"\]\{min-height:0 !important\}/,
