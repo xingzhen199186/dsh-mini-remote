@@ -502,8 +502,8 @@ public final class MainActivity extends Activity {
                 + "position:absolute !important;top:50% !important;"
                 + "transform:translateY(-50%) !important;margin:0 !important;z-index:2 !important;"
                 + "}"
-                + "body:not(.mini-typing) #btnAttach{left:18px !important;}"
-                + "body:not(.mini-typing) #btnSend{right:18px !important;}"
+                + "body:not(.mini-typing) #btnAttach{left:22px !important;}"
+                + "body:not(.mini-typing) #btnSend{right:22px !important;}"
                 // 两个按钮统一尺寸，箭头居中。
                 + "#btnAttach,#btnSend{"
                 + "width:22px !important;height:22px !important;padding:0 !important;"
@@ -512,8 +512,8 @@ public final class MainActivity extends Activity {
                 + "}"
                 + "#btnAttach{background:transparent !important;border:none !important;}"
                 // 工具栏那一行：两个图标各往外让一点，框内两侧留出空白。
-                + "body.mini-typing #btnAttach{margin:0 0 0 8px !important;}"
-                + "body.mini-typing #btnSend{margin-right:8px !important;}"
+                + "body.mini-typing #btnAttach{margin:0 0 0 14px !important;}"
+                + "body.mini-typing #btnSend{margin-right:14px !important;}"
                 + "#btnAttach svg{width:28px !important;height:auto !important;}"
                 + "#btnSend{"
                 + "margin-left:auto !important;"
