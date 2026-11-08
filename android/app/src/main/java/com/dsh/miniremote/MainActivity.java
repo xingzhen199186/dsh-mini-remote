@@ -115,7 +115,7 @@ public final class MainActivity extends Activity {
         // 上次选中的是 tailnet 地址、并且存了授权密钥：先把内置内核拉起来，
         // 代理就绪后再去探测，否则探测会走公网直接失败（2026-11-08）。
         final String preferredUrl = Connections.preferred(this);
-        if (preferredUrl != null && isTailnetAddress(preferredUrl) && TailNet.hasAuthKey(this)) {
+        if (preferredUrl != null && Net.isTailnetAddress(preferredUrl) && TailNet.hasAuthKey(this)) {
             // 不走自动探测：用户选的就是这条，直接用它。
             ensureTailNetThen(new Runnable() {
                 @Override
@@ -678,7 +678,7 @@ public final class MainActivity extends Activity {
         // 不再去探测别的线路。否则内网地址会经隧道「同样可达」而被抢走首选，
         // 代理也会因为切到非 tailnet 地址被撤掉（2026-11-08 实测踩到）。
         final String chosen = Connections.preferred(this);
-        if (chosen != null && isTailnetAddress(chosen) && TailNet.isConnected()) {
+        if (chosen != null && Net.isTailnetAddress(chosen) && TailNet.isConnected()) {
             enableTailProxy(new Runnable() {
                 @Override
                 public void run() {
@@ -967,11 +967,13 @@ public final class MainActivity extends Activity {
     private static boolean reachableQuick(String baseUrl, String deviceCredential) {
         java.net.HttpURLConnection connection = null;
         try {
-            java.net.URL url = new java.net.URL(baseUrl + "/mini/api/version");
-            connection = (java.net.HttpURLConnection) url.openConnection();
+            // 走 Net.open：tailnet 地址要过内置内核的代理，否则清单上的圆点
+            // 永远红着，明明页面已经能打开（2026-11-08 用户反馈）。
+            connection = Net.open(baseUrl + "/mini/api/version");
             connection.setRequestMethod("GET");
-            connection.setConnectTimeout(2500);
-            connection.setReadTimeout(3500);
+            boolean tailnet = Net.isTailnetAddress(baseUrl);
+            connection.setConnectTimeout(tailnet ? 6000 : 2500);
+            connection.setReadTimeout(tailnet ? 9000 : 3500);
             connection.setUseCaches(false);
             connection.setInstanceFollowRedirects(false);
             connection.setRequestProperty("X-Mini-Device", deviceCredential);
@@ -991,24 +993,6 @@ public final class MainActivity extends Activity {
             Net.Response response = Net.get(baseUrl + "/mini/api/version", deviceCredential);
             return response.isSuccess();
         } catch (IOException e) {
-            return false;
-        }
-    }
-
-    /** 这条地址是不是 tailnet 里的（100.64.0.0/10）。 */
-    private static boolean isTailnetAddress(String baseUrl) {
-        try {
-            String host = java.net.URI.create(baseUrl).getHost();
-            if (host == null || !host.startsWith("100.")) {
-                return false;
-            }
-            String[] parts = host.split("\\.");
-            if (parts.length < 2) {
-                return false;
-            }
-            int second = Integer.parseInt(parts[1]);
-            return second >= 64 && second <= 127;
-        } catch (Exception e) {
             return false;
         }
     }
@@ -1042,6 +1026,8 @@ public final class MainActivity extends Activity {
             @Override
             public void run() {
                 tailProxyOn = true;
+                Net.setTailnetProxy(new java.net.Proxy(java.net.Proxy.Type.HTTP,
+                        new java.net.InetSocketAddress(TailNet.PROXY_HOST, TailNet.PROXY_PORT)));
                 Log.i("MiniTailProxy", "代理已设到 " + TailNet.PROXY_HOST + ":" + TailNet.PROXY_PORT);
                 Runnable next = pendingAfterProxy;
                 pendingAfterProxy = null;
@@ -1103,6 +1089,7 @@ public final class MainActivity extends Activity {
             @Override
             public void run() {
                 tailProxyOn = false;
+                Net.setTailnetProxy(null);
                 if (after != null) {
                     after.run();
                 }
@@ -1123,7 +1110,7 @@ public final class MainActivity extends Activity {
     private void selectAddress(final String baseUrl) {
         // 同样的理由：内置线路在用的时候，别让探测结果把它顶掉。
         final String chosen = Connections.preferred(this);
-        if (chosen != null && isTailnetAddress(chosen) && TailNet.isConnected()
+        if (chosen != null && Net.isTailnetAddress(chosen) && TailNet.isConnected()
                 && !chosen.equals(baseUrl)) {
             return;
         }
@@ -1164,7 +1151,7 @@ public final class MainActivity extends Activity {
                         };
                         // tailnet 地址必须走内置内核的代理；其它地址要把代理撤掉，
                         // 否则一条不可达的隧道会把所有线路都拖死（2026-11-08）。
-                        if (isTailnetAddress(baseUrl)) {
+                        if (Net.isTailnetAddress(baseUrl)) {
                             ensureTailNetThen(load);
                         } else {
                             disableTailProxy(load);

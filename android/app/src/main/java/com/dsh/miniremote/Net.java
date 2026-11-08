@@ -17,6 +17,49 @@ public final class Net {
     private Net() {
     }
 
+    /** 内置 Tailscale 的本地代理；装了它才走隧道，没装就直连。 */
+    private static volatile java.net.Proxy tailnetProxy;
+
+    static void setTailnetProxy(java.net.Proxy proxy) {
+        tailnetProxy = proxy;
+    }
+
+    /** 这条地址是不是 tailnet 里的（100.64.0.0/10）。 */
+    public static boolean isTailnetAddress(String baseUrl) {
+        if (baseUrl == null) {
+            return false;
+        }
+        try {
+            String host = java.net.URI.create(baseUrl).getHost();
+            if (host == null || !host.startsWith("100.")) {
+                return false;
+            }
+            String[] parts = host.split("\\.");
+            if (parts.length < 2) {
+                return false;
+            }
+            int second = Integer.parseInt(parts[1]);
+            return second >= 64 && second <= 127;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /**
+     * tailnet 地址必须走本地代理，别的地址直连。
+     *
+     * 网页那边由 WebView 的代理接管；这里管的是应用自己的请求（线路探测、
+     * 长连接、分享上传）。少了这一步，tailnet 线路明明能用，清单上的圆点却是红的
+     * ——因为探测根本没走隧道（2026-11-08 用户反馈「Tailscale 线路连不上」）。
+     */
+    static HttpURLConnection open(String url) throws IOException {
+        java.net.Proxy proxy = tailnetProxy;
+        if (proxy != null && isTailnetAddress(url)) {
+            return (HttpURLConnection) new URL(url).openConnection(proxy);
+        }
+        return (HttpURLConnection) new URL(url).openConnection();
+    }
+
     public static final class Response {
         public final int status;
         public final String body;
@@ -67,7 +110,7 @@ public final class Net {
 
     /** 原始字节上传：系统分享的图片/文件走这条，服务端按流落盘。 */
     public static Response postBytes(String url, byte[] bytes, String deviceCredential) throws IOException {
-        HttpURLConnection connection = (HttpURLConnection) new URL(url).openConnection();
+        HttpURLConnection connection = open(url);
         try {
             connection.setRequestMethod("POST");
             connection.setConnectTimeout(CONNECT_TIMEOUT_MS);
@@ -107,7 +150,7 @@ public final class Net {
      * 调用方（前台服务）在停止时关。
      */
     public static Response getStream(String url, String deviceCredential) throws IOException {
-        HttpURLConnection connection = (HttpURLConnection) new URL(url).openConnection();
+        HttpURLConnection connection = open(url);
         connection.setRequestMethod("GET");
         connection.setConnectTimeout(CONNECT_TIMEOUT_MS);
         connection.setReadTimeout(0);
@@ -131,7 +174,7 @@ public final class Net {
             throws IOException {
         HttpURLConnection connection = null;
         try {
-            connection = (HttpURLConnection) new URL(url).openConnection();
+            connection = open(url);
             connection.setRequestMethod(method);
             connection.setConnectTimeout(CONNECT_TIMEOUT_MS);
             connection.setReadTimeout(READ_TIMEOUT_MS);
