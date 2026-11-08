@@ -605,12 +605,31 @@ public final class MainActivity extends Activity {
             + "setTimeout(pin,260);"
             + "}"
             + "if(window.ResizeObserver){new ResizeObserver(pinSoon).observe(f);}"
-            // 发出后输入框被清空：这是「刚发了一条」最可靠的信号，补一次贴底。
+            // 发出后输入框被清空：这是「刚发了一条」最可靠的信号。
+            // 但新气泡是**服务器回话之后**才插进 DOM 的（页面自己先回显、也可能晚一步），
+            // 只在那一刻贴一次常常贴早了——所以开一个三秒的小窗口，窗口里内容一变就再贴；
+            // 一旦正文开始流式长出来就停手，把滚动交回页面（2026-11-08 用户报的）。
+            + "function streaming(){return !!document.querySelector('#reply .live');}"
+            + "var watchTimer=null,watchObs=null;"
+            + "function stopWatch(){"
+            + "if(watchObs){watchObs.disconnect();watchObs=null;}"
+            + "if(watchTimer){clearTimeout(watchTimer);watchTimer=null;}"
+            + "}"
+            + "function armWatch(){"
+            + "stopWatch();"
+            + "if(!window.MutationObserver)return;"
+            + "watchObs=new MutationObserver(function(){"
+            + "if(streaming()){stopWatch();return;}"
+            + "if(window.requestAnimationFrame)requestAnimationFrame(pin);else setTimeout(pin,16);"
+            + "});"
+            + "watchObs.observe(m,{childList:true,subtree:true});"
+            + "watchTimer=setTimeout(stopWatch,3000);"
+            + "}"
             + "var i=document.getElementById('input');"
             + "if(i){var had=false;"
             + "i.addEventListener('input',function(){"
             + "var now=!!i.value;"
-            + "if(had&&!now){pinned=true;pinSoon();}"
+            + "if(had&&!now){pinned=true;pinSoon();armWatch();}"
             + "had=now;"
             + "});}"
             + "})();";
