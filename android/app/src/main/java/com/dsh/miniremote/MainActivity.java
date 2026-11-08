@@ -479,7 +479,7 @@ public final class MainActivity extends Activity {
                 + "width:100% !important;box-sizing:border-box !important;"
                 + "border:1px solid var(--line) !important;border-radius:18px !important;"
                 + "background:var(--panel-2) !important;"
-                + "padding:6px 8px !important;min-height:50px !important;"
+                + "padding:6px 8px !important;min-height:46px !important;"
                 + "}"
                 + "#input{"
                 + "order:1 !important;flex:1 1 100% !important;"
@@ -511,10 +511,14 @@ public final class MainActivity extends Activity {
                 + "border-radius:10px !important;"
                 + "}"
                 + "#btnAttach{background:transparent !important;border:none !important;}"
+                // 按钮本身撑到图标那么大：按钮被写死 22px 时，里面的鲸鱼再调大也会被
+                // 挤回去（2026-11-08 实测：设 25 算出来还是 22）。
+                + "#btnAttach{width:25px !important;height:25px !important;}"
+                + "#btnAttach svg{flex:0 0 auto !important;}"
                 // 工具栏那一行：两个图标各往外让一点，框内两侧留出空白。
-                + "body.mini-typing #btnAttach{margin:0 0 0 6px !important;}"
-                + "body.mini-typing #btnSend{margin-right:6px !important;}"
-                + "#btnAttach svg{width:35px !important;height:auto !important;}"
+                + "body.mini-typing #btnAttach{margin:0 0 0 2px !important;}"
+                + "body.mini-typing #btnSend{margin-right:2px !important;}"
+                + "#btnAttach svg{width:25px !important;height:auto !important;}"
                 + "#btnSend{"
                 + "margin-left:auto !important;"
                 + "border:none !important;border-radius:6px !important;"
