@@ -1233,7 +1233,8 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
     const inputs = byType(tree7, 'input');
     const urlInput = inputs.find((n) => n.props.value === 'https://dsh.example.com');
     assert.ok(urlInput, '公网地址要回填');
-    const tokenInput = inputs.find((n) => n.props.type === 'password');
+    const tokenInput = inputs.find((n) => n.props.type === 'password'
+      && /已经存过一份了/.test(String(n.props.placeholder)));
     assert.ok(tokenInput, 'token 要用密码框');
     assert.match(tokenInput.props.placeholder, /已经存过一份了，留空就不改动它/);
     assert.doesNotMatch(text, /已发布应用/, '配置指引默认收起');
@@ -1457,7 +1458,8 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
       errorCode: null,
     });
     await mount9(off);
-    const codeInput = byType(tree9, 'input').find((n) => n.props.type === 'password');
+    const codeInput = byType(tree9, 'input').find((n) => n.props.type === 'password'
+      && /激活码/.test(String(n.props.placeholder)));
     assert.ok(codeInput, '未开启时要有激活码密码框');
     const secret = 'z'.repeat(43);
     codeInput.props.onChange({ target: { value: secret } });
@@ -1668,7 +1670,8 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
       errorCode: null,
     });
     await mount10(off);
-    const ticketInput = byType(tree10, 'input').find((n) => n.props.type === 'password');
+    const ticketInput = byType(tree10, 'input').find((n) => n.props.type === 'password'
+      && /邀请票/.test(String(n.props.placeholder)));
     assert.ok(ticketInput, '默认要有邀请票输入框');
     assert.match(ticketInput.props.placeholder, /邀请票/);
     assert.ok(!byType(tree10, 'input').some((n) => n.props.type === 'url'), '默认不暴露控制台地址');
@@ -1697,8 +1700,10 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
     });
     assert.ok(byType(tree10, 'input').some((n) => String(n.props.value).includes(MULTI_HOST)),
       '开通成功后要显示固定地址');
-    const passwordAfter = byType(tree10, 'input').find((n) => n.props.type === 'password');
-    assert.equal(passwordAfter.props.value, '', '开通成功后管理员密码要清空');
+    const ticketAfter = byType(tree10, 'input').find((n) => n.props.type === 'password'
+      && /邀请票/.test(String(n.props.placeholder)) || /已有身份/.test(String(n.props.placeholder)));
+    assert.ok(ticketAfter, '开通后仍要有邀请票框');
+    assert.equal(ticketAfter.props.value, '', '开通成功后邀请票要清空');
     assert.doesNotMatch(textOf(tree10), /frpToken/i, '界面不显示 token');
     h10.unmount();
   });
@@ -1717,7 +1722,8 @@ setGlobal('fetch', () => new Promise((resolve) => { resolveFetch = resolve; }));
       errorCode: null,
     });
     await mount10(off);
-    const ticketInput = byType(tree10, 'input').find((n) => n.props.type === 'password');
+    const ticketInput = byType(tree10, 'input').find((n) => n.props.type === 'password'
+      && /邀请票/.test(String(n.props.placeholder)));
     ticketInput.props.onChange({ target: { value: 'relay1.test-ticket' } });
     await tick();
     const start = byType(tree10, 'button').find((b) => textOf(b) === '开通并连接');

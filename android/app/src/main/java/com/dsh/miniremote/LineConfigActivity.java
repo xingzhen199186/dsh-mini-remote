@@ -528,6 +528,10 @@ public final class LineConfigActivity extends Activity {
             return;
         }
         String text = scan.getContents().trim();
+        // 电脑端生成的「内置 Tailscale 接入码」：一条 JSON，带着地址和一次性密钥。
+        if (applyTailnetCode(text)) {
+            return;
+        }
         // 先按配对链接解析：里面有 grant 就是完整配对码，走重新配对。
         try {
             PairActivity.PairLink pairLink = PairActivity.PairLink.parse(text);
@@ -544,6 +548,47 @@ public final class LineConfigActivity extends Activity {
         } catch (IllegalArgumentException e) {
             statusView.setText("扫到的内容不是地址也不是配对码：" + text);
         }
+    }
+
+    /**
+     * 扫到电脑端生成的接入码：地址和密钥一起填好，直接连（2026-11-08）。
+     *
+     * 返回 true 表示这串内容确实是我们自己的接入码，已经处理完。
+     */
+    private boolean applyTailnetCode(String text) {
+        if (text == null || !text.trim().startsWith("{")) {
+            return false;
+        }
+        String addr;
+        String key;
+        try {
+            org.json.JSONObject json = new org.json.JSONObject(text);
+            if (!"tailnet".equals(json.optString("mini"))) {
+                return false;
+            }
+            addr = json.optString("addr").trim();
+            key = json.optString("key").trim();
+        } catch (org.json.JSONException e) {
+            return false;
+        }
+        if (addr.isEmpty() || key.isEmpty()) {
+            statusView.setText("这个接入码不完整，回电脑上重新生成一个。");
+            return true;
+        }
+        try {
+            new AddressPool.Entry(addr, lineType);
+        } catch (IllegalArgumentException e) {
+            statusView.setText("接入码里的地址不对：" + addr);
+            return true;
+        }
+        addressInput.setText(addr);
+        if (tailKeyInput != null) {
+            tailKeyInput.setText(key);
+        }
+        TailNet.setAuthKey(this, key);
+        statusView.setText("扫到了接入码，正在连接……");
+        connectBuiltIn();
+        return true;
     }
 
     /** 扫到完整配对码：向电脑换一份新凭据，整份覆盖。 */

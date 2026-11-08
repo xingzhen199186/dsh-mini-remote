@@ -696,6 +696,19 @@ window.__ModuleLoader__.load({
       var bManageState = useState(false);
       var bAllowManage = bManageState[0];
       var setBAllowManage = bManageState[1];
+      // 内置 Tailscale 接入码：令牌草稿、生成中、结果（二维码与地址）、错误。
+      var tailnetTokenState = useState('');
+      var tailnetToken = tailnetTokenState[0];
+      var setTailnetToken = tailnetTokenState[1];
+      var tailnetBusyState = useState(false);
+      var tailnetBusy = tailnetBusyState[0];
+      var setTailnetBusy = tailnetBusyState[1];
+      var tailnetResultState = useState(null);
+      var tailnetResult = tailnetResultState[0];
+      var setTailnetResult = tailnetResultState[1];
+      var tailnetErrState = useState(null);
+      var tailnetError = tailnetErrState[0];
+      var setTailnetError = tailnetErrState[1];
       // 自建中继：表单草稿、最近一次服务端状态、错误和“测试通过”提示。
       // token 永远不回显；草稿里留空表示沿用已保存的那一枚。
       var relayDraftState = useState(null);
@@ -1580,6 +1593,42 @@ window.__ModuleLoader__.load({
       var MIN_PASSWORD_LEN = 12;
 
       // 换一个自己设的密码。
+      /**
+       * 生成「内置 Tailscale」接入码（2026-11-08）。
+       *
+       * 令牌一并提交：用户刚粘上去就想立刻点，不该逼他先保存再生成。
+       * 拿不到二维码时把服务端那句话原样摆出来，别让按钮看起来像没反应。
+       */
+      var generateTailnetCode = function () {
+        var typed = String(tailnetToken || '').trim();
+        setTailnetBusy(true);
+        setTailnetError(null);
+        fetch('/mini-remote/tailnet-key', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ token: typed }),
+        })
+          .then(function (res) {
+            return res.json().then(
+              function (body) { return { status: res.status, body: body }; },
+              function () { return { status: res.status, body: null }; },
+            );
+          })
+          .then(function (r) {
+            setTailnetBusy(false);
+            if (r.status === 200 && r.body && r.body.ok) {
+              setTailnetResult(r.body);
+              setTailnetToken('');
+            } else {
+              setTailnetError((r.body && r.body.error) || '生成失败：服务端没有给出原因。');
+            }
+          })
+          .catch(function () {
+            setTailnetBusy(false);
+            setTailnetError('生成失败：连不上本机服务，稍后再试。');
+          });
+      };
+
       var savePassword = function () {
         var next = (draft || '').trim();
         if (next.length < MIN_PASSWORD_LEN) {
@@ -2567,11 +2616,18 @@ window.__ModuleLoader__.load({
           cancelReset: function () { setMultiResetAsk(false); },
           reset: function () { runMultiRelay('reset'); },
           copy: copy,
+        }, {
+          token: tailnetToken,
+          setToken: setTailnetToken,
+          busy: tailnetBusy,
+          result: tailnetResult,
+          error: tailnetError,
+          generate: generateTailnetCode,
         }),
       );
     }
 
-    function content(info, failure, copied, copy, busy, toggle, pwd, serve, feishu, dev, remote, agent, bAgent, bProject, rmt, self, groups, relay, named, manual, aRelay, bRelay, multiRelay) {
+    function content(info, failure, copied, copy, busy, toggle, pwd, serve, feishu, dev, remote, agent, bAgent, bProject, rmt, self, groups, relay, named, manual, aRelay, bRelay, multiRelay, tailnet) {
       if (failure) return h('div', { style: styles.error }, failure);
       if (!info) return h('div', { style: styles.loading }, '正在读取配对信息…');
 
@@ -2608,6 +2664,7 @@ window.__ModuleLoader__.load({
         }
         // 密码紧跟在那几条二维码后面：它是这些链接背后的钥匙，放在一起才讲得通。
         if (typeof info.token === 'string' && info.token) mobile.push(passwordBlock(info, copied, copy, pwd));
+        if (tailnet) mobile.push(tailnetBlock(tailnet));
       }
       // Tailscale 那一行：**没探到的时候也要出现**。原来它是直接不显示的，
       // 用户看到的不是「你没有 Tailscale」，而是「这里什么都没有」——他不知道
@@ -3202,6 +3259,57 @@ window.__ModuleLoader__.load({
      *
      * 按钮**只在有改动时才可点**，反馈靠它自己的禁用态（保存中…），不发「已保存」这种话。
      */
+    /**
+     * 「内置 Tailscale」这一块（2026-11-08）。
+     *
+     * 说明三件事：手机不用装 Tailscale、密钥由电脑代生成、令牌只存本机。
+     * 生成出来的二维码由服务端画好（data URL），这里只负责摆上去。
+     */
+    function tailnetBlock(tn) {
+      var result = tn.result;
+      return h('div', { key: 'tailnet', style: styles.block },
+        h('div', { style: styles.entryTitle }, '内置 Tailscale（手机不用装 Tailscale）'),
+        h('div', { style: styles.muted },
+          '手机不装 Tailscale 也能连回这台电脑：由 App 自带一个节点，密钥用一次就作废。'),
+        h('div', { style: styles.warn },
+          '生成密钥要一个 Tailscale API 访问令牌：打开后台 Settings → Keys → API access tokens 创建，粘到下面。令牌只存在这台电脑的插件设置里。'),
+        h('div', { style: styles.entryRow },
+          h('input', {
+            type: 'password',
+            value: tn.token,
+            placeholder: 'tskey-api-…',
+            spellCheck: false,
+            onChange: function (e) { tn.setToken(e.target.value); },
+            style: Object.assign({}, styles.monoInput, { flex: '1 1 240px', width: 'auto' }),
+          }),
+          h('button', {
+            type: 'button',
+            disabled: Boolean(tn.busy),
+            onClick: tn.generate,
+            style: styles.btnPrimary,
+          }, tn.busy ? '生成中…' : '生成接入码'),
+        ),
+        tn.error ? h('div', { style: styles.error }, tn.error) : null,
+        result
+          ? h('div', { style: styles.entryRow },
+              result.qr
+                ? h('img', { src: result.qr, alt: '内置 Tailscale 接入码', style: styles.qr })
+                : h('div', { style: styles.qrFallback }, '二维码没画出来，把下面的地址和密钥手动填进手机也行。'),
+              h('div', { style: styles.urlCol },
+                h('div', { style: styles.muted }, '用手机 App 里「Tailscale → 拍摄扫码」扫这个码。生成后一小时有效。'),
+                h('input', {
+                  readOnly: true,
+                  value: result.address || '',
+                  title: result.address || '',
+                  onFocus: function (e) { try { e.target.select(); } catch (err) { /* 忽略 */ } },
+                  style: Object.assign({}, styles.monoInput, { flex: '1 1 180px', width: 'auto', minWidth: 180 }),
+                }),
+              ),
+            )
+          : null,
+      );
+    }
+
     function feishuBlock(st, fs) {
       var d = fs.draft;
       if (!d) return null;

@@ -68,6 +68,8 @@ public final class MainActivity extends Activity {
     private boolean tailProxyOn;
     /** 内置内核正在启动：这期间别让探测把线路换掉。 */
     private volatile boolean tailNetStarting;
+    /** 离开内置线路后，多久没人用它就把内核停掉（省电）。 */
+    private static final long TAILNET_IDLE_STOP_MS = 5 * 60 * 1000L;
     /** 等代理生效后再执行的动作（换地址/加载页面）。 */
     private Runnable pendingAfterProxy;
 
@@ -1053,6 +1055,7 @@ public final class MainActivity extends Activity {
      */
     private void ensureTailNetThen(final Runnable after) {
         if (TailNet.isConnected()) {
+            cancelTailNetIdleStop();
             enableTailProxy(after);
             return;
         }
@@ -1063,6 +1066,7 @@ public final class MainActivity extends Activity {
             return;
         }
         Toast.makeText(this, "正在启动内置 Tailscale……", Toast.LENGTH_SHORT).show();
+        cancelTailNetIdleStop();
         tailNetStarting = true;
         new Thread(new Runnable() {
             @Override
@@ -1088,6 +1092,41 @@ public final class MainActivity extends Activity {
                 });
             }
         }, "mini-tailnet-ensure").start();
+    }
+
+    /**
+     * 离开内置线路后计时停内核（2026-11-08）。
+     *
+     * 内核是个常驻进程，一直跑着白耗电；但也不能切走就立刻停——用户常常是
+     * 来回切着比一比。所以留五分钟宽限，期间切回来就撤销。
+     */
+    private final Runnable tailNetIdleStop = new Runnable() {
+        @Override
+        public void run() {
+            if (destroyed || tailNetStarting) {
+                return;
+            }
+            String chosen = Connections.preferred(MainActivity.this);
+            if (chosen != null && Net.isTailnetAddress(chosen)) {
+                return; // 又切回 tailnet 了，别停。
+            }
+            new Thread(new Runnable() {
+                @Override
+                public void run() {
+                    Log.i("MiniTailNet", "空闲超时，停掉内置内核");
+                    TailNet.stop();
+                }
+            }, "mini-tailnet-idle-stop").start();
+        }
+    };
+
+    private void scheduleTailNetIdleStop() {
+        mainHandler.removeCallbacks(tailNetIdleStop);
+        mainHandler.postDelayed(tailNetIdleStop, TAILNET_IDLE_STOP_MS);
+    }
+
+    private void cancelTailNetIdleStop() {
+        mainHandler.removeCallbacks(tailNetIdleStop);
     }
 
     /** 离开 tailnet 地址时把代理撤掉，免得别的线路被它挡住。 */
@@ -1165,7 +1204,14 @@ public final class MainActivity extends Activity {
                         if (Net.isTailnetAddress(baseUrl)) {
                             ensureTailNetThen(load);
                         } else {
-                            disableTailProxy(load);
+                            cancelTailNetIdleStop();
+                            disableTailProxy(new Runnable() {
+                                @Override
+                                public void run() {
+                                    scheduleTailNetIdleStop();
+                                    load.run();
+                                }
+                            });
                         }
                     }
                 });
