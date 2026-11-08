@@ -66,6 +66,8 @@ public final class MainActivity extends Activity {
     private PendingPoller poller;
     /** 内置 Tailscale：WebView 的代理是否已经切到本地内核。 */
     private boolean tailProxyOn;
+    /** 界面现在是不是在前台（用于判断用户是否在看这一页）。 */
+    private boolean isResumed;
     /** 内置内核正在启动：这期间别让探测把线路换掉。 */
     private volatile boolean tailNetStarting;
     /** 这一轮里内置线路确实起不来，允许退回别的线路（下次启动再试）。 */
@@ -115,6 +117,12 @@ public final class MainActivity extends Activity {
                 != android.content.pm.PackageManager.PERMISSION_GRANTED) {
             requestPermissions(new String[] { "android.permission.POST_NOTIFICATIONS" }, 1);
         }
+        android.content.IntentFilter screenFilter =
+                new android.content.IntentFilter();
+        screenFilter.addAction(Intent.ACTION_SCREEN_ON);
+        screenFilter.addAction(Intent.ACTION_SCREEN_OFF);
+        registerReceiver(screenReceiver, screenFilter);
+
         CookieManager cookies = CookieManager.getInstance();
         cookies.setAcceptCookie(true);
         cookies.setAcceptThirdPartyCookies(webView, false);
@@ -648,6 +656,7 @@ public final class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        isResumed = true;
         // 回到前台时重新按地址池顺序探测；网络切换后的首次操作不会长期困在旧地址。
         if (addressPool != null) {
             probeAddresses();
@@ -662,6 +671,7 @@ public final class MainActivity extends Activity {
     @Override
     protected void onPause() {
         super.onPause();
+        isResumed = false;
         // 退到后台就停轮询；改由前台服务保持一条推送连接，否则锁屏后什么都收不到。
         final boolean taskRunning = poller != null && poller.taskRunning();
         if (poller != null) {
@@ -673,6 +683,46 @@ public final class MainActivity extends Activity {
             MiniForegroundService.start(this, loadedBase, credentials.deviceCredential());
         } else {
             MiniForegroundService.stop(this);
+        }
+    }
+
+    /**
+     * 用户此刻是否正看着这一页：应用在最前面、屏幕也亮着（2026-11-08）。
+     *
+     * 只按 onResume/onPause 判断不够——屏幕自动熄掉时 Activity 不会暂停，
+     * 那时人已经走了，却仍被当成"在看着"，于是什么提醒都不发。
+     */
+    private boolean userIsLooking() {
+        if (!isResumed) {
+            return false;
+        }
+        android.os.PowerManager pm = (android.os.PowerManager) getSystemService(POWER_SERVICE);
+        return pm == null || pm.isInteractive();
+    }
+
+    /** 屏幕亮起/熄灭：熄屏后要把后台连接顶上，亮屏且在前台就撤掉。 */
+    private final android.content.BroadcastReceiver screenReceiver =
+            new android.content.BroadcastReceiver() {
+                @Override
+                public void onReceive(android.content.Context context, Intent intent) {
+                    boolean on = Intent.ACTION_SCREEN_ON.equals(intent.getAction());
+                    if (!on) {
+                        startBackgroundServiceIfTaskRunning();
+                    } else if (isResumed) {
+                        MiniForegroundService.stop(MainActivity.this);
+                    }
+                }
+            };
+
+    private void startBackgroundServiceIfTaskRunning() {
+        boolean taskRunning = poller != null && poller.taskRunning();
+        if (taskRunning && loadedBase != null && credentials != null) {
+            try {
+                MiniForegroundService.start(this, loadedBase, credentials.deviceCredential());
+            } catch (RuntimeException e) {
+                // 安卓 14 起对「从后台拉起前台服务」管得严，被拒时不能让整个 App 崩掉：
+                // 退回到前台轮询那条路，通知会晚一点，但不会没有（2026-11-08）。
+            }
         }
     }
 
@@ -1201,7 +1251,7 @@ public final class MainActivity extends Activity {
     /** 轮询只在前台跑；地址换一条就按新地址重开一轮。 */
     private void startPolling(String baseUrl) {
         if (poller == null) {
-            poller = new PendingPoller(this);
+            poller = new PendingPoller(this, this::userIsLooking);
         }
         poller.stop();
         poller.start(baseUrl, credentials.deviceCredential());
@@ -1514,6 +1564,11 @@ public final class MainActivity extends Activity {
     @Override
     protected void onDestroy() {
         destroyed = true;
+        try {
+            unregisterReceiver(screenReceiver);
+        } catch (IllegalArgumentException ignored) {
+            // 没注册成功就注销不掉，忽略。
+        }
         loadGeneration++;
         if (webView != null) {
             webView.stopLoading();

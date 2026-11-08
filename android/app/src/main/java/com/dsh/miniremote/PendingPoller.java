@@ -26,6 +26,8 @@ final class PendingPoller {
     private static final long FIRST_DELAY_MS = 3_000L;
 
     private final Activity activity;
+    /** 用户此刻是不是正看着这一页（应用在最前面、屏幕也亮着）。 */
+    private final java.util.function.BooleanSupplier looking;
     private final Handler handler = new Handler(Looper.getMainLooper());
     /** 已经画过通知的编号：同一件事只提醒一次。 */
     private final Set<String> shown = new HashSet<>();
@@ -35,9 +37,12 @@ final class PendingPoller {
     private boolean running;
     /** 电脑那头当前有没有任务在跑：退到后台时用它决定要不要维持推送连接。 */
     private boolean taskRunning;
+    /** 上一次看到的状态：用来抓「刚刚跑完」那一刻（2026-11-08）。 */
+    private boolean wasTaskRunning;
 
-    PendingPoller(Activity activity) {
+    PendingPoller(Activity activity, java.util.function.BooleanSupplier looking) {
         this.activity = activity;
+        this.looking = looking;
     }
 
     void start(String baseUrl, String credential) {
@@ -99,6 +104,19 @@ final class PendingPoller {
             // 老服务端没有这个字段：那种情况下按「有任务」处理，保持原来的行为，
             // 免得电脑那头还没更新时后台提醒整个消失。
             taskRunning = root.has("running") ? root.optBoolean("running", false) : true;
+            // 刚刚跑完：用户不在看这一页才提醒（看着就不打扰了）。
+            if (wasTaskRunning && !taskRunning) {
+                final boolean userLooking = looking != null && looking.getAsBoolean();
+                if (!userLooking) {
+                    handler.post(new Runnable() {
+                        @Override
+                        public void run() {
+                            Notifier.showDone(activity, "");
+                        }
+                    });
+                }
+            }
+            wasTaskRunning = taskRunning;
             JSONArray approvals = root.optJSONArray("approvals");
             if (approvals == null) {
                 return;

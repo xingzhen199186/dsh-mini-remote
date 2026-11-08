@@ -82,7 +82,13 @@ public final class MiniForegroundService extends Service {
             stopSelf();
             return START_NOT_STICKY;
         }
-        startForeground(NOTIFICATION_ID, Notifier.serviceNotification(this, "正在盯着任务", "锁屏后也能收到审批提醒"));
+        try {
+            startForeground(NOTIFICATION_ID, Notifier.serviceNotification(this, "正在盯着任务", "锁屏后也能收到审批提醒"));
+        } catch (RuntimeException e) {
+            // 挂不上前台通知就别硬撑，否则系统五秒后会判我们超时并把进程杀掉。
+            stopSelf();
+            return START_NOT_STICKY;
+        }
         acquireLocks();
         if (!running) {
             running = true;
