@@ -108,6 +108,23 @@ public final class Notifier {
         manager(appContext).notify(notificationId("done"), builder.build());
     }
 
+    /**
+     * 电脑主动发来的一条通知（2026-11-09，`phone_notify`）。
+     *
+     * 和「任务完成」那条分开：标题要用**电脑给的那个**，不能一律写死成"DSH 任务完成"——
+     * 真机上第一次跑就露馅了：模型明明给了「该喝水了」，通知栏却写着"DSH 任务完成"。
+     */
+    static void showFromComputer(Context context, String title, String body) {
+        Context appContext = context.getApplicationContext();
+        String heading = title == null ? "" : title.trim();
+        String text = body == null ? "" : body.trim();
+        Notification.Builder builder = baseBuilder(appContext, "done")
+                .setContentTitle(heading.isEmpty() ? "来自电脑的消息" : heading)
+                .setContentText(text.isEmpty() ? heading : text)
+                .setStyle(new Notification.BigTextStyle().bigText(text.isEmpty() ? heading : text));
+        manager(appContext).notify(notificationId("done"), builder.build());
+    }
+
     private static Notification.Builder baseBuilder(Context context, String approvalId) {
         createChannel(context);
         Intent open = new Intent(context, MainActivity.class);

@@ -144,8 +144,8 @@ final class BridgePoller implements Runnable {
             if ("phone_notify".equals(tool)) {
                 String title = args == null ? "" : args.optString("title", "");
                 String body = args == null ? "" : args.optString("body", "");
-                if (context instanceof android.content.Context) {
-                    Notifier.showDone((android.content.Context) context, body.isEmpty() ? title : body);
+                if (context != null) {
+                    Notifier.showFromComputer(context, title, body);
                 }
                 report(id, true, "已显示通知");
             } else {
