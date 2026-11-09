@@ -148,21 +148,80 @@ final class BridgePoller implements Runnable {
                     Notifier.showFromComputer(context, title, body);
                 }
                 report(id, true, "已显示通知");
+            } else if ("phone_status".equals(tool)) {
+                try {
+                    report(id, true, statusJson());
+                } catch (Exception err) {
+                    report(id, false, "读不到手机状态：" + err.getMessage());
+                }
             } else {
                 report(id, false, "这个动作这台手机还不支持：" + tool);
             }
         }
     }
 
+    /**
+     * 手机状态（P2 第三步，2026-11-09）：电量、充电、网络、锁屏、是否前台。
+     *
+     * 只读，不在手机上留下任何痕迹——这是四个工具里最安全的一个。
+     * **不读**短信、通知、相册、剪贴板：要那些内容只能由用户自己分享过来。
+     */
+    private String statusJson() {
+        org.json.JSONObject out = new org.json.JSONObject();
+        try {
+            android.content.Context ctx = context;
+            android.os.BatteryManager battery = (android.os.BatteryManager)
+                    ctx.getSystemService(android.content.Context.BATTERY_SERVICE);
+            int level = battery == null ? -1
+                    : battery.getIntProperty(android.os.BatteryManager.BATTERY_PROPERTY_CAPACITY);
+            android.content.Intent intent = ctx.registerReceiver(null,
+                    new android.content.IntentFilter(android.content.Intent.ACTION_BATTERY_CHANGED));
+            int plugged = intent == null ? -1 : intent.getIntExtra(android.os.BatteryManager.EXTRA_PLUGGED, -1);
+            android.os.PowerManager power = (android.os.PowerManager)
+                    ctx.getSystemService(android.content.Context.POWER_SERVICE);
+            android.app.KeyguardManager keyguard = (android.app.KeyguardManager)
+                    ctx.getSystemService(android.content.Context.KEYGUARD_SERVICE);
+            android.net.ConnectivityManager conn = (android.net.ConnectivityManager)
+                    ctx.getSystemService(android.content.Context.CONNECTIVITY_SERVICE);
+            boolean wifi = false;
+            boolean mobile = false;
+            if (conn != null) {
+                android.net.Network active = conn.getActiveNetwork();
+                android.net.NetworkCapabilities caps = active == null ? null : conn.getNetworkCapabilities(active);
+                if (caps != null) {
+                    wifi = caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI);
+                    mobile = caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_CELLULAR);
+                }
+            }
+            out.put("battery", level);
+            out.put("charging", plugged > 0);
+            out.put("screenOn", power != null && power.isInteractive());
+            out.put("locked", keyguard != null && keyguard.isKeyguardLocked());
+            out.put("network", wifi ? "wifi" : mobile ? "mobile" : "none");
+        } catch (Exception err) {
+            try {
+                out.put("error", String.valueOf(err.getMessage()));
+            } catch (Exception ignored) {
+                // 连错误都写不进去就算了：上层会按"没有字段"处理。
+            }
+        }
+        return out.toString();
+    }
+
     /** 回报一次执行结果；回不上去就算了，电脑那边会按超时处理。 */
     private void report(String id, boolean ok, String message) {
+        reportRaw(id, ok, org.json.JSONObject.quote(message));
+    }
+
+    /** result 已经是 JSON 片段（对象或带引号的字符串）。 */
+    private void reportRaw(String id, boolean ok, String resultJson) {
         final String base = baseUrl;
         final String cred = credential;
         if (base == null || cred == null) return;
         new Thread(() -> {
             try {
                 String payload = "{\"id\":\"" + id + "\",\"ok\":" + ok
-                        + ",\"result\":\"" + message.replace("\"", "'") + "\"}";
+                        + ",\"result\":" + resultJson + "}";
                 Net.postJson(base + "/mini/api/bridge/result", payload, cred);
             } catch (Exception ignored) {
                 // 回报失败不重试：重试可能让同一件事执行两遍。
