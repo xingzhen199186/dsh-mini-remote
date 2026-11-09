@@ -281,6 +281,9 @@ public final class MainActivity extends Activity {
                 var data = {};
                 try { data = JSON.parse(bridge.state() || '{}'); } catch (e) { data = {}; }
                 var items = data.items || [];
+                var tn = data.tailnet || {};
+                tailnetSession = tn.session === true;
+                tailnetConnected = tn.connected === true;
                 var configured = items.filter(function(it){ return it.configured; }).length;
                 summary.textContent = configured + ' / ' + items.length + ' 条已配置';
                 var html = '';
@@ -336,6 +339,7 @@ public final class MainActivity extends Activity {
                   dot.classList.remove('ok', 'down');
                   dot.classList.add(reachable ? 'ok' : 'down');
                   updateRetryHint(row, reachable);
+                  updateTailnetHint(row, reachable);
                 }
               };
 
@@ -352,6 +356,32 @@ public final class MainActivity extends Activity {
                 var tip = document.createElement('span');
                 tip.className = 'mini-retry-hint';
                 tip.textContent = '连不上？到电脑端把这条关一次、再打开试试。';
+                hint.appendChild(tip);
+              }
+
+              // 内置 Tailscale 的状态，render 时从桥里取一次。
+              var tailnetSession = false;
+              var tailnetConnected = false;
+
+              /**
+               * Tailscale 那两条线是红的、而账号其实早就配好了 —— 这种情况下能不能连上
+               * 只取决于内置 Tailscale 有没有启动。用户看到的只是"它坏了"，所以在这里
+               * 明说一句该做什么（2026-11-09 用户要求）。
+               */
+              function updateTailnetHint(row, reachable){
+                var existing = row.querySelector('.mini-tailnet-hint');
+                var kind = row.getAttribute('data-kind');
+                var isTail = kind === 'tailscale' || kind === 'tailscale-https';
+                if (!(isTail && !reachable && tailnetSession && !tailnetConnected)) {
+                  if (existing) existing.remove();
+                  return;
+                }
+                if (existing) return;
+                var hint = row.querySelector('.hint');
+                if (!hint) return;
+                var tip = document.createElement('span');
+                tip.className = 'mini-tailnet-hint';
+                tip.textContent = '启动激活内置 Tailscale';
                 hint.appendChild(tip);
               }
 
@@ -453,6 +483,9 @@ public final class MainActivity extends Activity {
                 + "}"
                 + "#miniConnBlock .mini-dot.ok{background:#2fbf71 !important;"
                 + "box-shadow:0 0 0 3px rgba(47,191,113,.16) !important;}"
+                // 「启动激活内置 Tailscale」：不是故障说明，是下一步该做什么，所以用强调色。
+                + "#miniConnBlock .mini-tailnet-hint{display:block !important;margin-top:4px !important;"
+                + "color:#c2410c !important;font-weight:600 !important;}"
                 + "#miniConnBlock .mini-dot.down{background:#e05b57 !important;}"
                 // 右侧图标按钮
                 + "#miniConnBlock .mini-acts{"
@@ -1100,6 +1133,13 @@ public final class MainActivity extends Activity {
                     items.put(item);
                 }
                 root.put("items", items);
+                // 内置 Tailscale 的两件事，页面要用它们决定要不要提示「启动激活」：
+                //   session   —— 账号/身份已经就位（登录过，不是没登录）
+                //   connected —— 内核此刻在跑
+                JSONObject tailnet = new JSONObject();
+                tailnet.put("session", TailNet.hasSession(MainActivity.this));
+                tailnet.put("connected", TailNet.isConnected());
+                root.put("tailnet", tailnet);
             } catch (JSONException e) {
                 return "{}";
             }
