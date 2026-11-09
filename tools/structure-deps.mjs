@@ -97,7 +97,7 @@ export const MARKERS = [
     expect: 'present',
     probe: '[class*="_drawerMask"]',
     tokens: ['class:_drawerMask'],
-    codeText: '[class*="_sidebarCol"],[class*="_drawerMask"]{z-index:1000 !important}',
+    codeText: '[class*="_sidebarCol"],[class*="_drawerMask"]{z-index:2000 !important}',
     where: 'lib/mirror.js · ADAPT_CSS ⑳；命中测试的实证数字写在那条规则上面的注释里',
     why: '抽屉的遮罩层。2026-11-08 真机上量到：抽屉打开后，内容区那一层被画在了抽屉**上面**，'
       + '命中测试 `elementsFromPoint` 在导航项正中间返回的第一个元素是内容区（`_frame`），'
@@ -106,6 +106,23 @@ export const MARKERS = [
     fail: '这一条不生效，手机上就点不动电脑端界面的任何导航项：一碰就收，等于那半张界面废了。',
     harm: 'safe',
     guard: '只在 `@media (max-width: 1023px)` 里生效——桌面宽度下抽屉不是浮层，抬层级只会盖住别的东西',
+  },
+  {
+    id: 'account-menu',
+    group: '㉑ 账号菜单要浮在抽屉上面（不然点账号像没反应）',
+    marker: '[role="menu"]',
+    scope: 'page',
+    expect: 'present',
+    probe: '[role="menu"]',
+    tokens: ['role:menu'],
+    codeText: '[role="menu"]{z-index:3000 !important}',
+    where: 'lib/mirror.js · ADAPT_CSS ㉑；真机量到的两个数（抽屉 2000、菜单 1100）写在那条注释里',
+    why: '账号菜单。2026-11-09 真机量到：它是挂在 body 上的 fixed 浮层、层级 1100；'
+      + '而我们为了让抽屉能点，把抽屉抬到了 2000——于是菜单开在抽屉底下，'
+      + '用户看到的就是「点账号没反应」。把浮层抬到 3000 之后菜单正常显示（设置/意见反馈/退出登录）。',
+    fail: '这一条不在，账号菜单就被抽屉挡住、看不见——用户看到的只是「点了没反应」，设置面板也就没有入口。',
+    harm: 'safe',
+    guard: '只抬 `[role="menu"]` 这一层；**没有反过来压抽屉的层级**——压回去会退回「导航一点就消失」',
   },
   {
     id: 'region-area',
