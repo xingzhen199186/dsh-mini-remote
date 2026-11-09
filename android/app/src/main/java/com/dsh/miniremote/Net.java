@@ -135,6 +135,76 @@ public final class Net {
      * `total` 来自电脑端报的大小；每段都用 Range 要，服务端回 206。
      * 任何一段失败就**如实返回失败**，不留半截文件去装。
      */
+    /**
+     * 先整块传，卡住就自动改分段（2026-11-09 用户要求"先试老机制"）。
+     *
+     * 老机制（一个请求传完）在真机上曾整块卡死过，但那是另一种可能：也许只是慢。
+     * 所以这里给它一次机会——**但必须有止损**：15 秒内一个字节都没进来，就判定卡住，
+     * 立刻改用分段。这样"试老办法"不会变成"干等"。
+     *
+     * `onSwitch` 用来告诉界面"换了方式"，别让用户以为重头开始。
+     */
+    interface Switch {
+        void onSwitchToChunked();
+    }
+
+    static boolean downloadPreferWhole(String url, String credential, java.io.File out, long total,
+                                       Progress progress, Switch onSwitch) throws IOException {
+        try {
+            boolean ok = downloadWhole(url, credential, out, total, progress);
+            if (ok) {
+                return true;
+            }
+        } catch (IOException err) {
+            // 超时/断流都落在这里：当作"卡住"，继续走分段。
+        }
+        if (onSwitch != null) {
+            onSwitch.onSwitchToChunked();
+        }
+        return download(url, credential, out, total, progress);
+    }
+
+    /** 整块传：一个请求，从 0 到 total。15 秒没数据就算失败。 */
+    static boolean downloadWhole(String url, String deviceCredential, java.io.File out, long total,
+                                 Progress progress) throws IOException {
+        java.io.File parent = out.getParentFile();
+        if (parent != null && !parent.exists() && !parent.mkdirs()) {
+            return false;
+        }
+        HttpURLConnection connection = open(url);
+        connection.setRequestMethod("GET");
+        connection.setConnectTimeout(CONNECT_TIMEOUT_MS);
+        // 15 秒：整块传如果连数据都不来，就不必再等。
+        connection.setReadTimeout(15_000);
+        connection.setUseCaches(false);
+        connection.setInstanceFollowRedirects(false);
+        if (deviceCredential != null && !deviceCredential.isEmpty()) {
+            connection.setRequestProperty("X-Mini-Device", deviceCredential);
+        }
+        try {
+            int status = connection.getResponseCode();
+            if (status != 200) {
+                return false;
+            }
+            long written = 0;
+            try (java.io.InputStream in = connection.getInputStream();
+                 java.io.OutputStream os = new java.io.FileOutputStream(out, false)) {
+                byte[] buf = new byte[64 * 1024];
+                int n;
+                while ((n = in.read(buf)) > 0) {
+                    os.write(buf, 0, n);
+                    written += n;
+                    if (progress != null) {
+                        progress.onBytes(written);
+                    }
+                }
+            }
+            return written > 0 && (total <= 0 || written == total);
+        } finally {
+            connection.disconnect();
+        }
+    }
+
     static boolean download(String url, String deviceCredential, java.io.File out, long total, Progress progress) throws IOException {
         final long chunk = 2L * 1024 * 1024;
         java.io.File parent = out.getParentFile();

@@ -683,6 +683,7 @@ public final class MainActivity extends Activity {
             + "if(mine&&o.sha256&&mine===o.sha256){say('已经是最新版本。');btn.disabled=false;return;}"
             + "say('发现新版本，开始下载（'+(Math.round((o.size||0)/1048576))+' MB）…');"
             + "window.__miniUpdateProgress=function(p){say('正在下载 '+p+'%…');};"
+            + "window.__miniUpdateSwitch=function(){say('这条线路整块传不动，改成分段下载…');};"
             + "window.MiniUpdate.install(o.url, o.size||0);"
             + "setTimeout(function(){say('下载完成后会弹出安装界面。');btn.disabled=false;},1200);"
             + "})"
@@ -1733,7 +1734,7 @@ public final class MainActivity extends Activity {
                         java.io.File out = new java.io.File(dir, "app.apk");
                         final long total = expectedBytes;
                         // 服务器可能不认分段：那种情况下 total 未知，也照样能下完。
-                        boolean ok = Net.download(base + path, cred, out, total, written -> {
+                        boolean ok = Net.downloadPreferWhole(base + path, cred, out, total, written -> {
                             if (total <= 0) {
                                 return;
                             }
@@ -1744,7 +1745,8 @@ public final class MainActivity extends Activity {
                             lastPct = pct;
                             runOnUiThread(() -> webView.evaluateJavascript(
                                     "window.__miniUpdateProgress&&window.__miniUpdateProgress(" + pct + ")", null));
-                        });
+                        }, () -> runOnUiThread(() -> webView.evaluateJavascript(
+                                "window.__miniUpdateSwitch&&window.__miniUpdateSwitch()", null)));
                         if (!ok) {
                             toastOnUi("安装包下载失败，等下再试。");
                             return;
