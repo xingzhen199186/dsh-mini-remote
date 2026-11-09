@@ -459,11 +459,11 @@ public final class BridgeAccessibilityService extends AccessibilityService {
             return "{\"ok\":false,\"error\":\"这一屏不允许截图（安全窗口）\"}";
         }
         try {
-            int width = 720;
+            int width = 480;
             int height = Math.max(1, full.getHeight() * width / full.getWidth());
             Bitmap small = Bitmap.createScaledBitmap(full, width, height, true);
             java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
-            small.compress(Bitmap.CompressFormat.JPEG, 60, out);
+            small.compress(Bitmap.CompressFormat.JPEG, 50, out);
             String base64 = android.util.Base64.encodeToString(out.toByteArray(), android.util.Base64.NO_WRAP);
             org.json.JSONObject result = new org.json.JSONObject();
             result.put("ok", true);
