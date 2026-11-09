@@ -999,12 +999,22 @@ public final class MainActivity extends Activity {
         if (poller != null) {
             poller.stop();
         }
-        // 只有确实有任务在跑才维持后台连接：空闲时挂一条「正在盯着任务」的常驻通知
-        // 属于无中生有（2026-11-06 用户反馈）。
-        if (taskRunning && loadedBase != null && credentials != null) {
+        /* 退到后台时**一律接过后台盯着**（2026-11-09 用户要求）。
+         *
+         * 原来只在"页面已经知道有任务在跑"时才接过去。可真实的使用顺序偏偏相反：
+         * 发完一句话就锁屏——那一刻页面还没收到"开始跑"的状态，于是服务根本没启动，
+         * 任务跑完了也没有任何通知。这正是"通知从来不弹"的真正原因。
+         *
+         * 现在的分工：壳这边不判断，交给服务自己判断——它先盯着，**看到有任务在跑就继续盯，
+         * 一直没任务就几分钟后自己收摊**（它那条常驻通知是 MIN 级，不占状态栏）。
+         */
+        if (loadedBase != null && credentials != null) {
             MiniForegroundService.start(this, loadedBase, credentials.deviceCredential());
         } else {
             MiniForegroundService.stop(this);
+        }
+        if (taskRunning) {
+            // 页面此刻确实在跑：什么都不用额外做，服务接上了就会等到它结束。
         }
     }
 

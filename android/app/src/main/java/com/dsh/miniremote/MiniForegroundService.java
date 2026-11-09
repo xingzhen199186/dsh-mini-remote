@@ -256,7 +256,9 @@ public final class MiniForegroundService extends Service {
                     stopSelf();
                 }
             };
-            main.postDelayed(idleStop, 30_000L);
+            // 3 分钟：给"刚发完一句话、任务还没起来"留足时间。
+            // 太短会把刚发出去的那一轮漏掉，太长又白耗电和配额。
+            main.postDelayed(idleStop, 180_000L);
         }
         JSONArray approvals = root.optJSONArray("approvals");
         if (approvals != null) {
