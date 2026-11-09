@@ -125,6 +125,36 @@ public final class Notifier {
         manager(appContext).notify(notificationId("done"), builder.build());
     }
 
+    static final String ACTION_CLIPBOARD = "com.dsh.miniremote.action.CLIPBOARD";
+
+    /**
+     * 剪贴板确认（2026-11-09，`phone_set_clipboard`）。
+     *
+     * **每次都要用户点一下**：模型可能读到不可信内容，把转账地址或命令换掉，而用户
+     * 粘贴时未必细看。所以这里不做"连续几次就不问"的省事做法。
+     *
+     * 正文只放摘要，够判断就行；完整内容由复制动作真正写入。
+     */
+    static void showClipboardAsk(Context context, String callId, String text, String baseUrl, String credential) {
+        Context appContext = context.getApplicationContext();
+        String preview = text.length() > 160 ? text.substring(0, 160) + "…" : text;
+        Intent confirm = new Intent(appContext, ClipboardReceiver.class)
+                .setAction(ACTION_CLIPBOARD)
+                .putExtra("callId", callId)
+                .putExtra("text", text)
+                .putExtra("baseUrl", baseUrl)
+                .putExtra("credential", credential);
+        int flags = PendingIntent.FLAG_UPDATE_CURRENT
+                | (android.os.Build.VERSION.SDK_INT >= 23 ? PendingIntent.FLAG_IMMUTABLE : 0);
+        PendingIntent pending = PendingIntent.getBroadcast(appContext, callId.hashCode(), confirm, flags);
+        Notification.Builder builder = baseBuilder(appContext, "clip")
+                .setContentTitle("电脑想把一段文字放进剪贴板")
+                .setContentText(preview)
+                .setStyle(new Notification.BigTextStyle().bigText(preview))
+                .addAction(new Notification.Action.Builder(null, "复制到剪贴板", pending).build());
+        manager(appContext).notify(notificationId("clip"), builder.build());
+    }
+
     private static Notification.Builder baseBuilder(Context context, String approvalId) {
         createChannel(context);
         Intent open = new Intent(context, MainActivity.class);

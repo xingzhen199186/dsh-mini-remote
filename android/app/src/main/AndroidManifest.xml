@@ -100,6 +100,11 @@
                 android:resource="@xml/file_paths" />
         </provider>
 
+        <!-- 剪贴板确认按钮的落点：只有用户点了才写（2026-11-09）。 -->
+        <receiver
+            android:name=".ClipboardReceiver"
+            android:exported="false" />
+
         <!-- 无障碍服务只存在于 src/bridge，standard 不合并该声明。 -->
     </application>
 </manifest>

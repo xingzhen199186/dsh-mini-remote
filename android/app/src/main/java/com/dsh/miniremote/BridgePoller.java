@@ -148,6 +148,10 @@ final class BridgePoller implements Runnable {
                     Notifier.showFromComputer(context, title, body);
                 }
                 report(id, true, "已显示通知");
+            } else if ("phone_set_clipboard".equals(tool)) {
+                // **不直接写**：只弹一条带按钮的通知，用户点了才算数。
+                String text = args == null ? "" : args.optString("text", "");
+                Notifier.showClipboardAsk(context, id, text, baseUrl, credential);
             } else if ("phone_send_file".equals(tool)) {
                 try {
                     String name = args == null ? "文件.txt" : args.optString("name", "文件.txt");
@@ -250,6 +254,20 @@ final class BridgePoller implements Runnable {
             }
         }
         return out.toString();
+    }
+
+    /** 给接收器用的静态回报（它拿不到 poller 实例）。 */
+    static void reportStatic(String baseUrl, String credential, String id, boolean ok, String message) {
+        if (baseUrl == null || credential == null || id == null) return;
+        new Thread(() -> {
+            try {
+                String payload = "{\"id\":\"" + id + "\",\"ok\":" + ok
+                        + ",\"result\":" + org.json.JSONObject.quote(message) + "}";
+                Net.postJson(baseUrl + "/mini/api/bridge/result", payload, credential);
+            } catch (Exception ignored) {
+                // 回报失败不重试。
+            }
+        }, "mini-bridge-report").start();
     }
 
     /** 回报一次执行结果；回不上去就算了，电脑那边会按超时处理。 */
