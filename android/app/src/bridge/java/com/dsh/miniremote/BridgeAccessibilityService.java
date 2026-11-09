@@ -102,7 +102,7 @@ public final class BridgeAccessibilityService extends AccessibilityService {
         Bitmap bitmap = result[0];
         if (bitmap == null) {
             if (Build.VERSION.SDK_INT >= 34
-                    && failure[0] == TakeScreenshotCallback.ERROR_TAKE_SCREENSHOT_SECURE_WINDOW) {
+                    && failure[0] == AccessibilityService.ERROR_TAKE_SCREENSHOT_SECURE_WINDOW) {
                 return "错误：这一屏不允许截图（安全窗口）";
             }
             return "错误：截图失败（系统错误码 " + failure[0] + "）";

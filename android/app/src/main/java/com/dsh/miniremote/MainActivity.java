@@ -2024,9 +2024,6 @@ public final class MainActivity extends Activity {
 
         @android.webkit.JavascriptInterface
         public String shot() {
-            if (!confirmOnPhone("允许这次截图？", "网页请求截取当前屏幕。截图可能包含私人信息，只有在确认当前屏幕安全后才继续。")) {
-                return "错误：没有获得本机确认";
-            }
             Class<?> cls = serviceClass();
             if (cls == null) {
                 return "这个版本没有探针";
@@ -2041,9 +2038,6 @@ public final class MainActivity extends Activity {
 
         @android.webkit.JavascriptInterface
         public String observe() {
-            if (!confirmOnPhone("允许这次屏幕观察？", "网页请求读取当前屏幕的控件名称和位置。银行、支付、密码、短信和相册界面会被拒绝。")) {
-                return "{\"ok\":false,\"error\":\"没有获得本机确认\"}";
-            }
             Class<?> cls = serviceClass();
             if (cls == null) {
                 return "{\"ok\":false,\"error\":\"这个版本没有探针\"}";
@@ -2057,9 +2051,6 @@ public final class MainActivity extends Activity {
 
         @android.webkit.JavascriptInterface
         public String tap(float x, float y) {
-            if (!confirmOnPhone("允许这次点击？", "网页请求在当前屏幕上点一下。请确认当前应用和点击位置不会造成修改、发送或付款。")) {
-                return "错误：没有获得本机确认";
-            }
             Class<?> cls = serviceClass();
             if (cls == null) {
                 return "这个版本没有探针";
@@ -2109,7 +2100,7 @@ public final class MainActivity extends Activity {
             + "var hint=document.getElementById('miniProbeHint');"
             + "function say(t){hint.textContent=t;}"
             + "function sync(){try{var s=JSON.parse(probe.status()||'{}');"
-            + "say(s.running?'无障碍已开启，可以做下面两项':'无障碍未开启，先点「开无障碍」并找到 DSH Everywhere 打开');}catch(e){}}"
+            + "say(s.running?'无障碍已开启：电脑可以读到这台手机屏幕上的文字（银行、支付、密码、短信、相册界面会被拒绝）':'无障碍未开启，先点「开无障碍」并找到 DSH Everywhere 打开');}catch(e){}}"
             + "document.getElementById('miniProbeOpen').addEventListener('click',function(){probe.openSettings();setTimeout(sync,1500);});"
             + "document.getElementById('miniProbeShot').addEventListener('click',function(){say('正在截图…');setTimeout(function(){say(probe.shot());},60);});"
             + "document.getElementById('miniProbeTap').addEventListener('click',function(){"
