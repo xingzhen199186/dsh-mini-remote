@@ -120,3 +120,15 @@ test('手机桥：别的设备不能替它回话（结果绑定发起方）', as
   bridge.settle(DEVICE, id, { ok: true, result: '真结果' })
   assert.equal(await waiting, '真结果')
 })
+
+test('手机桥：超时的调用不会被手机在之后取走执行（延迟执行）', async () => {
+  const bridge = createBridge({ now: () => 0 })
+  bridge.hello(DEVICE, { protocol: 1 })
+  bridge.setArmed(DEVICE, true)
+
+  // 没人取的调用，等到超时
+  await assert.rejects(() => bridge.call(DEVICE, 'phone_send_file', { name: 'x' }, 120), /预期时间/)
+  // 之后手机才来取：**不该**再拿到这条早已没人等的动作
+  const taken = await bridge.poll(DEVICE, { waitMs: 0 })
+  assert.equal(taken.calls.length, 0, '过期的动作不能再发给手机')
+})
