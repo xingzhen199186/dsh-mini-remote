@@ -109,6 +109,7 @@ public final class MainActivity extends Activity {
         // 设置页「连接」那一块的数据源：线路清单、切换、增删（2026-11-07）。
         webView.addJavascriptInterface(new ConnectionBridge(), "MiniConn");
         webView.addJavascriptInterface(new UiPrefsBridge(), "DshMiniUi");
+        webView.addJavascriptInterface(new AppUpdateBridge(), "MiniUpdate");
         webView.setWebViewClient(new PairedHostClient());
         webView.setWebChromeClient(new FileChooserClient());
         // Android 13 起通知要运行时授权；不申请的话，锁屏提醒和「批准/拒绝」按钮
@@ -558,6 +559,7 @@ public final class MainActivity extends Activity {
         webView.evaluateJavascript(js, null);
         webView.evaluateJavascript(COMPOSER_STATE_JS, null);
         webView.evaluateJavascript(CONN_SECTION_JS, null);
+        webView.evaluateJavascript(UPDATE_UI_JS, null);
     }
 
     /**
@@ -645,6 +647,44 @@ public final class MainActivity extends Activity {
             + "if(had&&!now){pinned=true;pinSoon();armWatch();}"
             + "had=now;"
             + "});}"
+            + "})();";
+
+    /**
+     * 设置页里那一行「App 更新」（2026-11-09）。
+     *
+     * 放在 App 壳里，不改网页：网页版没有"安装包"这回事。
+     * 顺序要有讲究——**先比指纹，再决定下不下**，不能一点就下几十兆。
+     */
+    private static final String UPDATE_UI_JS = "(function(){"
+            + "if(window.__miniUpdateUi)return;"
+            + "var host=document.querySelector('#settings .sheet-body');"
+            + "if(!host)return;"
+            + "window.__miniUpdateUi=1;"
+            + "var block=document.createElement('div');"
+            + "block.id='miniUpdateBlock';"
+            + "block.innerHTML='<div class=\"row\"><div>"
+            + "<div class=\"label\">App 更新</div>"
+            + "<div class=\"hint\" id=\"miniUpdateHint\">检查这台手机上的版本是不是最新的</div>"
+            + "</div><div style=\"flex:0 0 auto\"><button class=\"btn\" id=\"miniUpdateBtn\">检查</button></div></div>';"
+            + "host.insertBefore(block,host.firstChild);"
+            + "var btn=document.getElementById('miniUpdateBtn');"
+            + "var hint=document.getElementById('miniUpdateHint');"
+            + "function say(t){hint.textContent=t;}"
+            + "btn.addEventListener('click',function(){"
+            + "if(!window.MiniUpdate){say('这个版本还不支持自动更新。');return;}"
+            + "btn.disabled=true;say('正在查询…');"
+            + "fetch('/mini/api/app-update',{credentials:'same-origin'})"
+            + ".then(function(r){return r.json();})"
+            + ".then(function(o){"
+            + "if(!o||!o.ok){say((o&&o.error)||'电脑端暂时没有可发的安装包。');btn.disabled=false;return;}"
+            + "var mine=window.MiniUpdate.selfHash?window.MiniUpdate.selfHash():'';"
+            + "if(mine&&o.sha256&&mine===o.sha256){say('已经是最新版本。');btn.disabled=false;return;}"
+            + "say('发现新版本，正在下载（'+(Math.round((o.size||0)/1048576))+' MB）…');"
+            + "window.MiniUpdate.install(o.url);"
+            + "setTimeout(function(){say('下载完成后会弹出安装界面。');btn.disabled=false;},1200);"
+            + "})"
+            + ".catch(function(){say('查询失败，检查一下连接。');btn.disabled=false;});"
+            + "});"
             + "})();";
 
     /**
@@ -1626,6 +1666,94 @@ public final class MainActivity extends Activity {
                 uiPrefs().edit().remove(key).apply();
             }
         }
+    }
+
+    /**
+     * App 内检查更新（2026-11-09 用户要求）。
+     *
+     * 流程：页面问电脑端要安装包的指纹 → 和**本机这一份**的指纹比 → 不一样就下载并
+     * 唤起系统安装器。全线走现有那条带凭据的连接，不需要数据线。
+     *
+     * 为什么比指纹而不是版本号：读 APK 里的版本号要解析二进制清单，代价大、还容易
+     * 随打包方式变化；内容不一样就说明包换了，对"要不要更新"已经足够。
+     */
+    private final class AppUpdateBridge {
+        /** 本机安装包的指纹（算一次就记住：几十兆，没必要每次摸）。 */
+        private String selfHash;
+
+        @android.webkit.JavascriptInterface
+        public String selfHash() {
+            if (selfHash != null) {
+                return selfHash;
+            }
+            try {
+                String path = getPackageManager()
+                        .getPackageInfo(getPackageName(), 0).applicationInfo.sourceDir;
+                java.security.MessageDigest md = java.security.MessageDigest.getInstance("SHA-256");
+                try (java.io.InputStream in = new java.io.FileInputStream(path)) {
+                    byte[] buf = new byte[64 * 1024];
+                    int n;
+                    while ((n = in.read(buf)) > 0) {
+                        md.update(buf, 0, n);
+                    }
+                }
+                StringBuilder sb = new StringBuilder();
+                for (byte b : md.digest()) {
+                    sb.append(String.format("%02x", b));
+                }
+                selfHash = sb.toString();
+                return selfHash;
+            } catch (Exception err) {
+                return "";
+            }
+        }
+
+        /** 下载并唤起安装器。参数是站内路径（如 `/mini/api/app.apk`）。 */
+        @android.webkit.JavascriptInterface
+        public void install(String path) {
+            final String base = loadedBase;
+            final String cred = credentials == null ? null : credentials.deviceCredential();
+            if (base == null || path == null || path.isEmpty()) {
+                return;
+            }
+            new Thread(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        java.io.File dir = new java.io.File(getCacheDir(), "update");
+                        java.io.File out = new java.io.File(dir, "app.apk");
+                        boolean ok = Net.download(base + path, cred, out);
+                        if (!ok) {
+                            toastOnUi("安装包下载失败，等下再试。");
+                            return;
+                        }
+                        launchInstaller(out);
+                    } catch (Exception err) {
+                        toastOnUi("安装包下载失败：" + err.getMessage());
+                    }
+                }
+            }, "mini-update").start();
+        }
+    }
+
+    /** 把下载好的包装上：交给系统安装器，我们只管把文件地址递过去。 */
+    private void launchInstaller(java.io.File apk) {
+        runOnUiThread(() -> {
+            try {
+                android.net.Uri uri = androidx.core.content.FileProvider.getUriForFile(
+                        this, getPackageName() + ".fileprovider", apk);
+                Intent intent = new Intent(Intent.ACTION_VIEW);
+                intent.setDataAndType(uri, "application/vnd.android.package-archive");
+                intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
+                startActivity(intent);
+            } catch (Exception err) {
+                Toast.makeText(this, "打不开安装器：" + err.getMessage(), Toast.LENGTH_LONG).show();
+            }
+        });
+    }
+
+    private void toastOnUi(String text) {
+        runOnUiThread(() -> Toast.makeText(this, text, Toast.LENGTH_SHORT).show());
     }
 
     /**

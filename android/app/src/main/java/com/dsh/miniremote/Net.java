@@ -114,6 +114,51 @@ public final class Net {
         }
     }
 
+    /**
+     * 把一份**二进制**（安装包）下载到文件里（2026-11-09）。
+     *
+     * `get()` 返回的是字符串——用来接 APK 会把字节弄坏。这里直接流式写盘。
+     * 返回是否成功；失败时文件删掉，别留一个半截的包让安装器去装。
+     */
+    static boolean download(String url, String deviceCredential, java.io.File out) throws IOException {
+        HttpURLConnection connection = open(url);
+        connection.setRequestMethod("GET");
+        connection.setConnectTimeout(CONNECT_TIMEOUT_MS);
+        // 安装包大，读超时给足（默认 8 秒对几十兆不够用）。
+        connection.setReadTimeout(120_000);
+        connection.setUseCaches(false);
+        connection.setInstanceFollowRedirects(false);
+        if (deviceCredential != null && !deviceCredential.isEmpty()) {
+            connection.setRequestProperty("X-Mini-Device", deviceCredential);
+        }
+        try {
+            int status = connection.getResponseCode();
+            if (status < 200 || status >= 300) {
+                return false;
+            }
+            java.io.File parent = out.getParentFile();
+            if (parent != null && !parent.exists() && !parent.mkdirs()) {
+                return false;
+            }
+            try (java.io.InputStream in = connection.getInputStream();
+                 java.io.OutputStream os = new java.io.FileOutputStream(out)) {
+                byte[] buf = new byte[64 * 1024];
+                int n;
+                while ((n = in.read(buf)) > 0) {
+                    os.write(buf, 0, n);
+                }
+            }
+            return true;
+        } catch (IOException err) {
+            if (out.exists() && !out.delete()) {
+                // 删不掉就算了：下次下载会覆盖它。
+            }
+            throw err;
+        } finally {
+            connection.disconnect();
+        }
+    }
+
     public static Response get(String url, String deviceCredential) throws IOException {
         return request("GET", url, null, deviceCredential);
     }

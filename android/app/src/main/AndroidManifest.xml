@@ -3,6 +3,8 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- App 内检查更新：下载完要能唤起系统安装器（2026-11-09）。 -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <!-- 扫配对二维码用；没有相机就不扫，手工粘贴仍然可用。 -->
     <uses-permission android:name="android.permission.CAMERA" />
     <!-- 任务期间保持一条推送连接：锁屏也能收到待审批（Android 14 起类型也要声明）。 -->
