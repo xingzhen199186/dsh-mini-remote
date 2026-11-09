@@ -132,3 +132,19 @@ test('手机桥：超时的调用不会被手机在之后取走执行（延迟�
   const taken = await bridge.poll(DEVICE, { waitMs: 0 })
   assert.equal(taken.calls.length, 0, '过期的动作不能再发给手机')
 })
+
+test('手机桥：hello 不能把待执行的调用顺手取走', async () => {
+  const bridge = createBridge({ now: () => 0 })
+  bridge.hello(DEVICE, { protocol: 1 })
+  bridge.setArmed(DEVICE, true)
+  const waiting = bridge.call(DEVICE, 'phone_status', {}, 500)
+
+  // 手机每次轮询都会先 hello 一次；这一步不该动队列
+  const greeted = bridge.hello(DEVICE, { protocol: 1 })
+  assert.deepEqual(greeted.calls ?? [], [], 'hello 的返回里不该有动作')
+
+  const taken = await bridge.poll(DEVICE, { waitMs: 0 })
+  assert.equal(taken.calls.length, 1, '动作必须留给真正的轮询')
+  bridge.settle(DEVICE, taken.calls[0].id, { ok: true, result: 'ok' })
+  assert.equal(await waiting, 'ok')
+})
