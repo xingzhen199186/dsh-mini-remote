@@ -415,6 +415,68 @@ public final class BridgeAccessibilityService extends AccessibilityService {
         return "{\"ok\":true,\"result\":\"" + result + "\"}";
     }
 
+    /**
+     * 截一张图，压小之后以 base64 交回电脑（2026-11-10）。
+     *
+     * 为什么要截图：微博这类 App 大量用自绘控件，"跳过"两个字只是个画上去的字符串——
+     * 既不在控件树里，也没法按序号点。只有看图才知道那东西长什么样、在哪。
+     *
+     * 压到宽 720 的 JPEG：一张原图动辄 3~5MB，走桥太笨；720 宽够看清界面布局，
+     * 也让回传的 JSON 保持在几十到一两百 KB。
+     */
+    static String shotBase64() {
+        BridgeAccessibilityService service = instance;
+        if (service == null) {
+            return "{\"ok\":false,\"error\":\"无障碍还没开启\"}";
+        }
+        if (Build.VERSION.SDK_INT < 30) {
+            return "{\"ok\":false,\"error\":\"系统版本太低（需要 Android 11 以上）\"}";
+        }
+        final java.util.concurrent.CountDownLatch latch = new java.util.concurrent.CountDownLatch(1);
+        final Bitmap[] holder = new Bitmap[1];
+        service.takeScreenshot(android.view.Display.DEFAULT_DISPLAY, service.getMainExecutor(),
+                new TakeScreenshotCallback() {
+                    @Override
+                    public void onSuccess(ScreenshotResult screenshot) {
+                        holder[0] = Bitmap.wrapHardwareBuffer(screenshot.getHardwareBuffer(), screenshot.getColorSpace());
+                        latch.countDown();
+                    }
+
+                    @Override
+                    public void onFailure(int errorCode) {
+                        latch.countDown();
+                    }
+                });
+        try {
+            if (!latch.await(3, java.util.concurrent.TimeUnit.SECONDS)) {
+                return "{\"ok\":false,\"error\":\"截图超时\"}";
+            }
+        } catch (InterruptedException err) {
+            return "{\"ok\":false,\"error\":\"截图被打断\"}";
+        }
+        Bitmap full = holder[0];
+        if (full == null) {
+            return "{\"ok\":false,\"error\":\"这一屏不允许截图（安全窗口）\"}";
+        }
+        try {
+            int width = 720;
+            int height = Math.max(1, full.getHeight() * width / full.getWidth());
+            Bitmap small = Bitmap.createScaledBitmap(full, width, height, true);
+            java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+            small.compress(Bitmap.CompressFormat.JPEG, 60, out);
+            String base64 = android.util.Base64.encodeToString(out.toByteArray(), android.util.Base64.NO_WRAP);
+            org.json.JSONObject result = new org.json.JSONObject();
+            result.put("ok", true);
+            result.put("width", width);
+            result.put("height", height);
+            result.put("jpeg", base64);
+            return result.toString();
+        } catch (Exception err) {
+            String message = String.valueOf(err.getMessage()).replace("\"", "'");
+            return "{\"ok\":false,\"error\":\"压图失败：" + message + "\"}";
+        }
+    }
+
     /** 返回键。**不提供**主页与最近任务：那样会脱离授权范围（RFC 8.3）。 */
     static String back() {
         if (instance == null) {

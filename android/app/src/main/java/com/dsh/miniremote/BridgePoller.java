@@ -193,6 +193,16 @@ final class BridgePoller {
                 } catch (Exception err) {
                     report(id, false, "通知显示失败：" + err.getMessage());
                 }
+            } else if ("phone_screenshot".equals(tool)) {
+                try {
+                    Class<?> cls = Class.forName("com.dsh.miniremote.BridgeAccessibilityService");
+                    String json = (String) cls.getDeclaredMethod("shotBase64").invoke(null);
+                    reportRaw(id, json.contains("\"ok\":true"), json);
+                } catch (ClassNotFoundException err) {
+                    report(id, false, "这个版本没有截图能力（需要实验版）");
+                } catch (Exception err) {
+                    report(id, false, "截图失败：" + err.getMessage());
+                }
             } else if ("phone_back".equals(tool) || "phone_swipe".equals(tool) || "phone_input".equals(tool)) {
                 try {
                     Class<?> cls = Class.forName("com.dsh.miniremote.BridgeAccessibilityService");
