@@ -1014,6 +1014,8 @@ public final class MainActivity extends Activity {
         }
         // 回前台：前台轮询接手，长连接让位——两条同时跑只会重复提醒。
         MiniForegroundService.stop(this);
+        // 桥的心跳也从服务手里收回界面这边（2026-11-09 加固）。
+        applyBridgeArm();
     }
 
     @Override
@@ -1035,9 +1037,14 @@ public final class MainActivity extends Activity {
          * 一直没任务就几分钟后自己收摊**（它那条常驻通知是 MIN 级，不占状态栏）。
          */
         if (loadedBase != null && credentials != null) {
-            MiniForegroundService.start(this, loadedBase, credentials.deviceCredential());
+            // 把桥的心跳一起交给服务：界面可能被系统回收，心跳不能跟着断。
+            MiniForegroundService.start(this, loadedBase, credentials.deviceCredential(), bridgeArmed());
         } else {
             MiniForegroundService.stop(this);
+        }
+        // 界面这边先停掉自己那条，免得同一台手机开两条心跳。
+        if (bridgeArmed()) {
+            bridgePoller.stop();
         }
         if (taskRunning) {
             // 页面此刻确实在跑：什么都不用额外做，服务接上了就会等到它结束。

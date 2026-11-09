@@ -16,6 +16,8 @@ final class BridgePoller implements Runnable {
     private volatile boolean online;
     /** 连续失败次数：用来区分"还在连"和"根本连不上"，界面要说得不一样。 */
     private volatile int failures;
+    /** 连续失败后的退避：别在断网时每 5 秒撞一次墙。 */
+    private long backoffMs = 5_000;
     /** 有没有见过"已武装"：没见过的第一拍说没武装，多半是武装请求还在路上，不算关。 */
     private volatile boolean sawArmed;
     /** 第一拍用短请求，别让用户干等一个长轮询周期。 */
@@ -94,6 +96,7 @@ final class BridgePoller implements Runnable {
                     handleCalls(root.optJSONArray("calls"));
                     boolean armed = root.optBoolean("armed", false);
                     failures = 0;
+                    backoffMs = 5_000;
                     online = armed;
                     notifyChange();
                     // 武装被关掉（比如在电脑侧关的）就停：没有授权就不该继续问。
@@ -107,7 +110,7 @@ final class BridgePoller implements Runnable {
                     failures++;
                     online = false;
                     notifyChange();
-                    sleepQuietly(5_000);
+                    sleepQuietly(nextBackoff());
                 }
             } catch (Exception err) {
                 if (!running) {
@@ -117,7 +120,7 @@ final class BridgePoller implements Runnable {
                 failures++;
                 online = false;
                 notifyChange();
-                sleepQuietly(5_000);
+                sleepQuietly(nextBackoff());
             }
         }
         online = false;
@@ -289,6 +292,13 @@ final class BridgePoller implements Runnable {
                 // 回报失败不重试：重试可能让同一件事执行两遍。
             }
         }, "mini-bridge-report").start();
+    }
+
+    /** 5s → 10 → 20 → 40 → 60 封顶。断网时不该每 5 秒撞一次。 */
+    private long nextBackoff() {
+        long wait = backoffMs;
+        backoffMs = Math.min(60_000, backoffMs * 2);
+        return wait;
     }
 
     private void sleepQuietly(long millis) {

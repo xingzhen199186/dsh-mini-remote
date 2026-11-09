@@ -28,6 +28,8 @@ import java.util.Set;
 public final class MiniForegroundService extends Service {
     static final String EXTRA_BASE_URL = "baseUrl";
     static final String EXTRA_CREDENTIAL = "credential";
+    /** 后台期间是否把手机桥的心跳接过来（2026-11-09 加固）。 */
+    static final String EXTRA_BRIDGE = "bridge";
 
     private static final int NOTIFICATION_ID = 0x4d524001;
     private static final long RETRY_DELAY_MS = 5_000L;
@@ -54,15 +56,28 @@ public final class MiniForegroundService extends Service {
     private boolean previousRunning;
     /** 任务结束后收摊的定时器：常驻通知不该在没任务时一直挂着。 */
     private Runnable idleStop;
+    /** 后台维持的手机桥心跳；不需要时保持 null。 */
+    private BridgePoller bridgePoller;
+    private boolean wantBridge;
     private final android.os.Handler main = new android.os.Handler(android.os.Looper.getMainLooper());
 
     static void start(Context context, String baseUrl, String credential) {
+        start(context, baseUrl, credential, false);
+    }
+
+    /**
+     * @param keepBridge 退到后台后是否**继续维持手机桥的心跳**。
+     *   以前桥的心跳只活在界面里：App 一退到后台、界面被系统回收，桥就悄悄断了，
+     *   电脑那边从此看不到这台手机（2026-11-09 加固的第一条）。
+     */
+    static void start(Context context, String baseUrl, String credential, boolean keepBridge) {
         if (baseUrl == null || credential == null) {
             return;
         }
         Intent intent = new Intent(context, MiniForegroundService.class);
         intent.putExtra(EXTRA_BASE_URL, baseUrl);
         intent.putExtra(EXTRA_CREDENTIAL, credential);
+        intent.putExtra(EXTRA_BRIDGE, keepBridge);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             context.startForegroundService(intent);
         } else {
@@ -95,6 +110,12 @@ public final class MiniForegroundService extends Service {
             return START_NOT_STICKY;
         }
         acquireLocks();
+        wantBridge = intent != null && intent.getBooleanExtra(EXTRA_BRIDGE, false);
+        if (wantBridge && bridgePoller == null) {
+            bridgePoller = new BridgePoller();
+            bridgePoller.attach(this);
+            bridgePoller.start(baseUrl, credential);
+        }
         if (!running) {
             running = true;
             worker = new Thread(new Runnable() {
@@ -115,6 +136,10 @@ public final class MiniForegroundService extends Service {
             idleStop = null;
         }
         running = false;
+        if (bridgePoller != null) {
+            bridgePoller.stop();
+            bridgePoller = null;
+        }
         if (worker != null) {
             worker.interrupt();
             worker = null;
