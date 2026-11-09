@@ -70,8 +70,13 @@ public final class BridgeAccessibilityService extends AccessibilityService {
         if (Build.VERSION.SDK_INT < 30) {
             return "错误：系统版本太低（需要 Android 11 以上）";
         }
+        String blocked = blockReason(service, service.getRootInActiveWindow());
+        if (blocked != null) return "错误：" + blocked;
+        // 检查与真正取图之间可能换屏：记下当时的前台包名，取完再核一次。
+        final String checkedPkg = currentPackage(service);
         final CountDownLatch latch = new CountDownLatch(1);
         final Bitmap[] result = new Bitmap[1];
+        final int[] failure = { -1 };
         service.takeScreenshot(android.view.Display.DEFAULT_DISPLAY,
                 service.getMainExecutor(),
                 new TakeScreenshotCallback() {
@@ -83,6 +88,7 @@ public final class BridgeAccessibilityService extends AccessibilityService {
 
                     @Override
                     public void onFailure(int errorCode) {
+                        failure[0] = errorCode;
                         latch.countDown();
                     }
                 });
@@ -95,7 +101,14 @@ public final class BridgeAccessibilityService extends AccessibilityService {
         }
         Bitmap bitmap = result[0];
         if (bitmap == null) {
-            return "错误：这一屏不允许截图（安全窗口）";
+            if (Build.VERSION.SDK_INT >= 34
+                    && failure[0] == TakeScreenshotCallback.ERROR_TAKE_SCREENSHOT_SECURE_WINDOW) {
+                return "错误：这一屏不允许截图（安全窗口）";
+            }
+            return "错误：截图失败（系统错误码 " + failure[0] + "）";
+        }
+        if (!checkedPkg.equals(currentPackage(service))) {
+            return "错误：检查之后屏幕换了，这张图作废";
         }
         try {
             if (!dir.exists() && !dir.mkdirs()) {
@@ -118,6 +131,8 @@ public final class BridgeAccessibilityService extends AccessibilityService {
      */
     private static String labelOf(android.view.accessibility.AccessibilityNodeInfo node) {
         try {
+            // 先判身份，再接触任何文字：输入框与密码框连内容描述也不读。
+            if (node.isEditable() || node.isPassword()) return "";
             CharSequence own = node.getText();
             if (own != null && own.length() > 0) {
                 return node.isEditable() ? "" : own.toString();
@@ -143,7 +158,9 @@ public final class BridgeAccessibilityService extends AccessibilityService {
         String[] keys = {
                 "bank", "pay", "wallet", "alipay", "tenpay", "unionpay",
                 "icbc", "ccb", "abc", "boc", "cmb", "spdb", "cib", "pingan", "citic", "psbc",
-                "secure", "password", "keyguard", "settings",
+                "hxb", "cgbchina", "secure", "password", "keyguard", "settings", "systemui",
+                "bitwarden", "keepass", "lastpass", "dashlane", "authenticator",
+                "mms", "messaging", "gallery", "photos",
         };
         for (String key : keys) {
             if (p.contains(key)) {
@@ -151,6 +168,61 @@ public final class BridgeAccessibilityService extends AccessibilityService {
             }
         }
         return false;
+    }
+
+    /** 多用途容器里的支付/密码页只能按界面词再挡一道；命中即整屏拒绝，不把原文外发。 */
+    private static boolean looksSensitiveText(CharSequence value) {
+        if (value == null) return false;
+        String s = value.toString().toLowerCase(java.util.Locale.ROOT);
+        String[] keys = {
+                "支付", "付款", "收款", "转账", "银行卡", "信用卡", "卡号", "钱包", "余额",
+                "密码", "验证码", "payment", "pay now", "password", "verification code", "one-time code",
+        };
+        for (String key : keys) {
+            if (s.contains(key)) return true;
+        }
+        return false;
+    }
+
+    /** 当前前台界面的包名；读不到就是空串（调用方按“不安全”处理）。 */
+    private static String currentPackage(BridgeAccessibilityService service) {
+        android.view.accessibility.AccessibilityNodeInfo root = service.getRootInActiveWindow();
+        return root == null || root.getPackageName() == null ? "" : root.getPackageName().toString();
+    }
+
+    /** 在本机预检整棵树；预检不完整也按不安全处理。输入框内容不参与扫描。 */
+    private static String protectedNodeReason(android.view.accessibility.AccessibilityNodeInfo root) {
+        java.util.ArrayList<android.view.accessibility.AccessibilityNodeInfo> queue = new java.util.ArrayList<>();
+        queue.add(root);
+        int visited = 0;
+        while (!queue.isEmpty() && visited < 400) {
+            android.view.accessibility.AccessibilityNodeInfo node = queue.remove(0);
+            visited++;
+            if (node == null) continue;
+            if (node.isPassword()) return "这一屏包含密码输入，按规则不读";
+            if (!node.isEditable() && (looksSensitiveText(node.getText())
+                    || looksSensitiveText(node.getContentDescription()))) {
+                return "这一屏包含支付、转账、密码或验证信息，按规则不读";
+            }
+            for (int i = 0; i < node.getChildCount(); i++) queue.add(node.getChild(i));
+        }
+        return queue.isEmpty() ? null : "这一屏内容过多，无法完整确认是否安全";
+    }
+
+    /** 观察、截图、点击共用的本地拒绝逻辑；任何不确定都 fail-closed。 */
+    private static String blockReason(BridgeAccessibilityService service,
+                                      android.view.accessibility.AccessibilityNodeInfo root) {
+        android.app.KeyguardManager keyguard = (android.app.KeyguardManager)
+                service.getSystemService(android.content.Context.KEYGUARD_SERVICE);
+        if (keyguard != null && keyguard.isKeyguardLocked()) {
+            return "锁屏期间按规则不读、不截图、不点击";
+        }
+        if (root == null) return "这一屏读不到，按规则不继续";
+        String pkg = root.getPackageName() == null ? "" : root.getPackageName().toString();
+        if (looksSensitive(pkg)) {
+            return "这一屏属于银行/支付/密码/短信/相册等受保护界面，按规则不读";
+        }
+        return protectedNodeReason(root);
     }
 
     /** 这个控件里面还有没有"可点的孩子"——有的话它就是容器，不该当成一个条目。 */
@@ -167,9 +239,10 @@ public final class BridgeAccessibilityService extends AccessibilityService {
         if (node == null || depth < 0 || out.length() > 120) {
             return;
         }
+        // 输入框和密码框的文本、描述、后代描述一律不读。
+        if (node.isEditable() || node.isPassword()) return;
         CharSequence text = node.getText();
-        // 输入框的内容不收集：宁可少信息，也不把用户填过的东西读出来。
-        if (text != null && text.length() > 0 && !node.isEditable()) {
+        if (text != null && text.length() > 0) {
             if (out.length() > 0) out.append(' ');
             out.append(text);
         }
@@ -200,19 +273,16 @@ public final class BridgeAccessibilityService extends AccessibilityService {
         }
         try {
             android.view.accessibility.AccessibilityNodeInfo root = service.getRootInActiveWindow();
-            if (root == null) {
-                return "{\"ok\":false,\"error\":\"这一屏读不到（可能锁屏或系统界面）\"}";
-            }
-            String pkg = root.getPackageName() == null ? "" : root.getPackageName().toString();
-            // **受保护的界面一律不读**（2026-11-09 自查补上）。
-            // 无障碍能读到控件树，而 FLAG_SECURE 只挡截图、**不挡读树**——所以银行、
-            // 支付、密码管理器、系统设置这类界面必须靠包名挡在外面，不能指望"读不到"。
-            if (looksSensitive(pkg)) {
+            String pkg = root == null || root.getPackageName() == null ? "" : root.getPackageName().toString();
+            // FLAG_SECURE 只挡截图，不挡无障碍读树；锁屏、敏感 App、密码框和容器内支付页
+            // 都必须在取出任何可返回内容之前先挡住。
+            String blockedReason = blockReason(service, root);
+            if (blockedReason != null) {
                 org.json.JSONObject blocked = new org.json.JSONObject();
                 blocked.put("ok", false);
                 blocked.put("blocked", true);
                 blocked.put("pkg", pkg);
-                blocked.put("error", "这一屏属于受保护界面（银行/支付/密码/系统设置），按规则不读");
+                blocked.put("error", blockedReason);
                 return blocked.toString();
             }
             org.json.JSONArray items = new org.json.JSONArray();
@@ -244,7 +314,8 @@ public final class BridgeAccessibilityService extends AccessibilityService {
                         continue;
                     }
                     item.put("t", label);
-                    item.put("d", node.getContentDescription() == null ? "" : node.getContentDescription().toString());
+                    item.put("d", editable || node.isPassword() || node.getContentDescription() == null
+                            ? "" : node.getContentDescription().toString());
                     android.graphics.Rect rect = new android.graphics.Rect();
                     node.getBoundsInScreen(rect);
                     item.put("b", rect.left + "," + rect.top + "," + rect.right + "," + rect.bottom);
@@ -276,6 +347,11 @@ public final class BridgeAccessibilityService extends AccessibilityService {
         if (service == null) {
             return "错误：无障碍还没开启";
         }
+        String blocked = blockReason(service, service.getRootInActiveWindow());
+        if (blocked != null) return "错误：" + blocked;
+        // 检查通过之后、真正派发手势之前再核一遍：这一小段里换了屏就不点。
+        String again = blockReason(service, service.getRootInActiveWindow());
+        if (again != null) return "错误：" + again;
         Path path = new Path();
         path.moveTo(x, y);
         GestureDescription gesture = new GestureDescription.Builder()

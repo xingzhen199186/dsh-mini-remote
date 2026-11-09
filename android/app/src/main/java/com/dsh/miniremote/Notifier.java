@@ -135,24 +135,31 @@ public final class Notifier {
      *
      * 正文只放摘要，够判断就行；完整内容由复制动作真正写入。
      */
-    static void showClipboardAsk(Context context, String callId, String text, String baseUrl, String credential) {
+    static void showClipboardAsk(Context context, String callId, String text, String baseUrl, String credential, long expiresAt) {
         Context appContext = context.getApplicationContext();
-        String preview = text.length() > 160 ? text.substring(0, 160) + "…" : text;
         Intent confirm = new Intent(appContext, ClipboardReceiver.class)
                 .setAction(ACTION_CLIPBOARD)
                 .putExtra("callId", callId)
                 .putExtra("text", text)
                 .putExtra("baseUrl", baseUrl)
-                .putExtra("credential", credential);
-        int flags = PendingIntent.FLAG_UPDATE_CURRENT
+                .putExtra("credential", credential)
+                .putExtra("expiresAt", expiresAt);
+        // 同一个 requestCode 若意外碰撞，宁可让旧动作失效，也不能把旧按钮换成新内容。
+        int flags = PendingIntent.FLAG_CANCEL_CURRENT
                 | (android.os.Build.VERSION.SDK_INT >= 23 ? PendingIntent.FLAG_IMMUTABLE : 0);
         PendingIntent pending = PendingIntent.getBroadcast(appContext, callId.hashCode(), confirm, flags);
-        Notification.Builder builder = baseBuilder(appContext, "clip")
-                .setContentTitle("电脑想把一段文字放进剪贴板")
-                .setContentText(preview)
-                .setStyle(new Notification.BigTextStyle().bigText(preview))
-                .addAction(new Notification.Action.Builder(null, "复制到剪贴板", pending).build());
-        manager(appContext).notify(notificationId("clip"), builder.build());
+        Notification.Builder builder = baseBuilder(appContext, "clip:" + callId)
+                .setContentTitle("电脑想复制以下全文（请展开核对）")
+                .setContentText(text)
+                .setStyle(new Notification.BigTextStyle().bigText(text))
+                .addAction(new Notification.Action.Builder(null, "核对全文后复制", pending).build());
+        manager(appContext).notify(notificationId("clip:" + callId), builder.build());
+    }
+
+    /** 点过就撤掉这条确认，免得同一张通知再被点第二次。 */
+    static void cancelClipboardAsk(Context context, String callId) {
+        if (callId == null || callId.isEmpty()) return;
+        manager(context.getApplicationContext()).cancel(notificationId("clip:" + callId));
     }
 
     private static Notification.Builder baseBuilder(Context context, String approvalId) {

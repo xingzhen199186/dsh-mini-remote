@@ -1811,6 +1811,9 @@ public final class MainActivity extends Activity {
 
     /** 武装状态存在壳这边：重启 App 后要记得上次是开着的。 */
     private static final String BRIDGE_PREF = "mini_bridge_armed";
+    /** 武装请求的序号与锁：只让最后一次操作决定电脑侧状态。 */
+    private long armSeq;
+    private final Object armLock = new Object();
 
     private boolean bridgeArmed() {
         return getSharedPreferences("mini_ui_prefs", MODE_PRIVATE)
@@ -1829,6 +1832,48 @@ public final class MainActivity extends Activity {
      * 第一步只有"在线/离线"，没有任何工具——所以这一页只回答一件事：
      * "电脑知道这台手机在不在"。
      */
+    /** JavaScript 调用不等于本人授权；敏感入口必须在原生界面里再确认一次。 */
+    private boolean confirmOnPhone(String title, String message) {
+        if (destroyed || !isResumed) return false;
+        final java.util.concurrent.CountDownLatch latch = new java.util.concurrent.CountDownLatch(1);
+        final boolean[] approved = { false };
+        final AlertDialog[] dialog = new AlertDialog[1];
+        runOnUiThread(() -> {
+            if (destroyed) {
+                latch.countDown();
+                return;
+            }
+            try {
+                dialog[0] = new AlertDialog.Builder(this)
+                        .setTitle(title)
+                        .setMessage(message)
+                        .setPositiveButton("允许", (d, w) -> {
+                            approved[0] = true;
+                            latch.countDown();
+                        })
+                        .setNegativeButton("拒绝", (d, w) -> latch.countDown())
+                        .setOnCancelListener(d -> latch.countDown())
+                        .create();
+                dialog[0].show();
+            } catch (Exception err) {
+                Log.w("MiniBridge", "原生确认框显示失败", err);
+                latch.countDown();
+            }
+        });
+        try {
+            if (!latch.await(30, java.util.concurrent.TimeUnit.SECONDS)) {
+                runOnUiThread(() -> {
+                    if (dialog[0] != null) dialog[0].dismiss();
+                });
+                return false;
+            }
+        } catch (InterruptedException err) {
+            Thread.currentThread().interrupt();
+            return false;
+        }
+        return approved[0];
+    }
+
     private final class BridgeBridge {
         @android.webkit.JavascriptInterface
         public String state() {
@@ -1845,19 +1890,39 @@ public final class MainActivity extends Activity {
 
         @android.webkit.JavascriptInterface
         public String arm(boolean armed) {
-            setBridgeArmed(armed);
+            if (armed && !confirmOnPhone("开启手机桥？",
+                    "开启后，电脑可以按你的授权读取手机状态、发送通知和文件，并在你确认后写剪贴板。实验版还可能读取非敏感界面的控件。是否允许？")) {
+                toastOnUi("未开启手机桥：没有获得本机确认");
+                return "{\"armed\":false,\"error\":\"没有获得本机确认\"}";
+            }
             // **必须真的去告诉电脑**（2026-11-09 修）：电脑那边的武装状态只由这条 POST 写。
             // 原来只在本机存了个开关就去轮询，于是每次问回来的都是"没武装"，
             // 心跳按"已被关掉"处理、立刻停——界面就永远停在"正在连接电脑"。
             final String base = loadedBase;
             final String cred = credentials == null ? null : credentials.deviceCredential();
+            // 每次开关换一个序号：只让最后一次操作写电脑，旧请求晚到也不许翻盘。
+            final long seq;
+            synchronized (armLock) {
+                seq = ++armSeq;
+                setBridgeArmed(armed);
+            }
             if (base != null && cred != null) {
                 new Thread(() -> {
                     try {
-                        Net.postJson(base + "/mini/api/bridge/arm",
+                        Net.Response response = Net.postJson(base + "/mini/api/bridge/arm",
                                 "{\"armed\":" + armed + "}", cred);
-                    } catch (Exception ignored) {
-                        // 发不出去就让心跳那边去报失败：界面会显示"连不上电脑"。
+                        if (!response.isSuccess()) {
+                            throw new IllegalStateException("HTTP " + response.status);
+                        }
+                    } catch (Exception err) {
+                        synchronized (armLock) {
+                            if (seq != armSeq) return;
+                            // 失败时本机先停用，不能只凭一个本地布尔值显示“已开启”。
+                            setBridgeArmed(false);
+                        }
+                        applyBridgeArm();
+                        Log.w("MiniBridge", "武装状态提交失败", err);
+                        toastOnUi("手机桥状态提交失败，已在本机停止：" + err.getMessage());
                     }
                 }, "mini-bridge-arm").start();
             }
@@ -1959,6 +2024,9 @@ public final class MainActivity extends Activity {
 
         @android.webkit.JavascriptInterface
         public String shot() {
+            if (!confirmOnPhone("允许这次截图？", "网页请求截取当前屏幕。截图可能包含私人信息，只有在确认当前屏幕安全后才继续。")) {
+                return "错误：没有获得本机确认";
+            }
             Class<?> cls = serviceClass();
             if (cls == null) {
                 return "这个版本没有探针";
@@ -1973,6 +2041,9 @@ public final class MainActivity extends Activity {
 
         @android.webkit.JavascriptInterface
         public String observe() {
+            if (!confirmOnPhone("允许这次屏幕观察？", "网页请求读取当前屏幕的控件名称和位置。银行、支付、密码、短信和相册界面会被拒绝。")) {
+                return "{\"ok\":false,\"error\":\"没有获得本机确认\"}";
+            }
             Class<?> cls = serviceClass();
             if (cls == null) {
                 return "{\"ok\":false,\"error\":\"这个版本没有探针\"}";
@@ -1986,6 +2057,9 @@ public final class MainActivity extends Activity {
 
         @android.webkit.JavascriptInterface
         public String tap(float x, float y) {
+            if (!confirmOnPhone("允许这次点击？", "网页请求在当前屏幕上点一下。请确认当前应用和点击位置不会造成修改、发送或付款。")) {
+                return "错误：没有获得本机确认";
+            }
             Class<?> cls = serviceClass();
             if (cls == null) {
                 return "这个版本没有探针";

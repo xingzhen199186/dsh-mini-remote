@@ -11,8 +11,12 @@ import org.json.JSONObject;
  * 用长轮询而不是定时轮询：服务端最多压 25 秒才回，所以一条连接就能同时承担
  * "报活"和"电脑有话要说"两件事，不用另开一条通道。
  */
-final class BridgePoller implements Runnable {
+final class BridgePoller {
     private volatile boolean running;
+    /** 每次启停都换一代：旧线程的迟到响应不能在新一代里执行动作。 */
+    private volatile long generation;
+    /** 启停互斥：界面线程和后台上报线程都会碰它。 */
+    private final Object lifecycle = new Object();
     private volatile boolean online;
     /** 连续失败次数：用来区分"还在连"和"根本连不上"，界面要说得不一样。 */
     private volatile int failures;
@@ -38,20 +42,32 @@ final class BridgePoller implements Runnable {
     }
 
     void start(String baseUrl, String credential) {
-        if (running) {
+        synchronized (lifecycle) {
+            if (running && java.util.Objects.equals(this.baseUrl, baseUrl)
+                    && java.util.Objects.equals(this.credential, credential)) {
+                return;
+            }
+            if (running) stopLocked();
             this.baseUrl = baseUrl;
             this.credential = credential;
-            return;
+            running = true;
+            final long token = ++generation;
+            thread = new Thread(() -> run(token), "mini-bridge");
+            thread.setDaemon(true);
+            thread.start();
         }
-        this.baseUrl = baseUrl;
-        this.credential = credential;
-        running = true;
-        thread = new Thread(this, "mini-bridge");
-        thread.setDaemon(true);
-        thread.start();
     }
 
     void stop() {
+        synchronized (lifecycle) {
+            stopLocked();
+        }
+        notifyChange();
+    }
+
+    /** 必须在 lifecycle 锁里调用；只换代并停线程，不碰回调。 */
+    private void stopLocked() {
+        generation++;
         running = false;
         online = false;
         failures = 0;
@@ -61,7 +77,6 @@ final class BridgePoller implements Runnable {
             thread.interrupt();
             thread = null;
         }
-        notifyChange();
     }
 
     boolean isOnline() {
@@ -79,9 +94,8 @@ final class BridgePoller implements Runnable {
         }
     }
 
-    @Override
-    public void run() {
-        while (running) {
+    private void run(long token) {
+        while (running && generation == token) {
             try {
                 // 第一拍**不要压 25 秒**：刚打开开关时用户盯着这一行，
                 // 等 25 秒才变"已连接"会让人以为坏了。先问一次立刻回，之后再长轮询。
@@ -89,12 +103,19 @@ final class BridgePoller implements Runnable {
                         + (firstPoll ? "&wait=0" : "&wait=1");
                 // 读超时要比服务端压的 25 秒更长，否则正常的长轮询会被当成失败。
                 Net.Response response = Net.getLong(url, credential, 35_000);
+                if (!running || generation != token) return;
                 boolean ok = response.isSuccess() && response.body != null && !response.body.isEmpty();
                 if (ok) {
                     JSONObject root = new JSONObject(response.body);
                     firstPoll = false;
-                    handleCalls(root.optJSONArray("calls"));
                     boolean armed = root.optBoolean("armed", false);
+                    // 先认授权再认动作：即使异常服务端在撤权响应里塞了 calls，也绝不执行。
+                    if (armed) {
+                        handleCalls(root.optJSONArray("calls"), token);
+                    } else if (root.optJSONArray("calls") != null
+                            && root.optJSONArray("calls").length() > 0) {
+                        android.util.Log.w("MiniBridge", "未武装响应带有调用，已整批拒绝");
+                    }
                     failures = 0;
                     backoffMs = 5_000;
                     online = armed;
@@ -109,22 +130,25 @@ final class BridgePoller implements Runnable {
                 } else {
                     failures++;
                     online = false;
+                    android.util.Log.w("MiniBridge", "轮询失败：HTTP " + response.status);
                     notifyChange();
-                    sleepQuietly(nextBackoff());
+                    sleepQuietly(nextBackoff(), token);
                 }
             } catch (Exception err) {
-                if (!running) {
+                if (!running || generation != token) {
                     return;
                 }
-                // 连不上就退一步再问：这里不打印、不弹提示——断了会由界面显示离线。
+                android.util.Log.w("MiniBridge", "轮询异常", err);
                 failures++;
                 online = false;
                 notifyChange();
-                sleepQuietly(nextBackoff());
+                sleepQuietly(nextBackoff(), token);
             }
         }
-        online = false;
-        notifyChange();
+        if (generation == token) {
+            online = false;
+            notifyChange();
+        }
     }
 
     /**
@@ -133,30 +157,53 @@ final class BridgePoller implements Runnable {
      * 现在只有一个：`phone_notify`。**执行完必须回报**，否则电脑那边会一直等到超时，
      * 用户看到的是"发了但没回应"。所以成功失败都要回一条。
      */
-    private void handleCalls(org.json.JSONArray calls) {
+    private void handleCalls(org.json.JSONArray calls, long token) {
         if (calls == null || calls.length() == 0) {
             return;
         }
         for (int i = 0; i < calls.length(); i++) {
+            // 一批动作执行到一半被停掉或换了线路：剩下的一个都不许再执行。
+            if (!running || generation != token) {
+                android.util.Log.w("MiniBridge", "手机桥已停止或换代，剩余调用不再执行");
+                return;
+            }
             org.json.JSONObject call = calls.optJSONObject(i);
             if (call == null) continue;
             final String id = call.optString("id", "");
             final String tool = call.optString("tool", "");
+            final long expiresAt = call.optLong("expiresAt", 0);
             org.json.JSONObject args = call.optJSONObject("args");
             if (id.isEmpty()) continue;
+            // 到期时间由服务端签发；缺失或已过期的动作一律不执行。
+            if (expiresAt <= System.currentTimeMillis()) {
+                report(id, false, "调用已经过期，手机拒绝执行");
+                continue;
+            }
             if ("phone_notify".equals(tool)) {
                 String title = args == null ? "" : args.optString("title", "");
                 String body = args == null ? "" : args.optString("body", "");
-                if (context != null) {
-                    Notifier.showFromComputer(context, title, body);
+                String problem = notificationProblem();
+                if (problem != null) {
+                    report(id, false, problem);
+                    continue;
                 }
-                report(id, true, "已显示通知");
+                try {
+                    Notifier.showFromComputer(context, title, body);
+                    report(id, true, "已显示通知");
+                } catch (Exception err) {
+                    report(id, false, "通知显示失败：" + err.getMessage());
+                }
             } else if ("phone_observe".equals(tool)) {
                 try {
                     // 无障碍服务只在 bridge 版本里，走反射拿，标准版调用会得到"不支持"。
                     Class<?> cls = Class.forName("com.dsh.miniremote.BridgeAccessibilityService");
                     String json = (String) cls.getDeclaredMethod("observe").invoke(null);
-                    reportRaw(id, true, json);
+                    org.json.JSONObject observed = new org.json.JSONObject(json);
+                    if (observed.optBoolean("ok", false)) {
+                        reportRaw(id, true, json);
+                    } else {
+                        report(id, false, observed.optString("error", "观察失败"));
+                    }
                 } catch (ClassNotFoundException err) {
                     report(id, false, "这个版本没有屏幕观察能力（需要实验版）");
                 } catch (Exception err) {
@@ -164,21 +211,41 @@ final class BridgePoller implements Runnable {
                 }
             } else if ("phone_set_clipboard".equals(tool)) {
                 // **不直接写**：只弹一条带按钮的通知，用户点了才算数。
-                String text = args == null ? "" : args.optString("text", "");
-                Notifier.showClipboardAsk(context, id, text, baseUrl, credential);
+                String problem = notificationProblem();
+                if (problem != null) {
+                    report(id, false, problem);
+                    continue;
+                }
+                try {
+                    String text = args == null ? "" : args.optString("text", "");
+                    Notifier.showClipboardAsk(context, id, text, baseUrl, credential, expiresAt);
+                } catch (Exception err) {
+                    report(id, false, "剪贴板确认通知显示失败：" + err.getMessage());
+                }
             } else if ("phone_send_file".equals(tool)) {
                 try {
                     String name = args == null ? "文件.txt" : args.optString("name", "文件.txt");
                     String text = args == null ? "" : args.optString("text", "");
                     String saved = saveToDownloads(name, text);
-                    Notifier.showFromComputer(context, "已保存到手机", "「" + name + "」已存到「下载/DSH」");
+                    try {
+                        Notifier.showFromComputer(context, "已保存到手机", "「" + name + "」已存到「下载/DSH」");
+                    } catch (Exception err) {
+                        // 文件已经存好，不能把通知失败误报成文件失败，诱导电脑再写一次。
+                        android.util.Log.w("MiniBridge", "文件已保存，但通知显示失败", err);
+                    }
                     report(id, true, "已保存：" + saved);
                 } catch (Exception err) {
                     report(id, false, "存文件失败：" + err.getMessage());
                 }
             } else if ("phone_status".equals(tool)) {
                 try {
-                    report(id, true, statusJson());
+                    String json = statusJson();
+                    org.json.JSONObject status = new org.json.JSONObject(json);
+                    if (status.has("error")) {
+                        report(id, false, "读不到手机状态：" + status.optString("error", "未知错误"));
+                    } else {
+                        report(id, true, json);
+                    }
                 } catch (Exception err) {
                     report(id, false, "读不到手机状态：" + err.getMessage());
                 }
@@ -186,6 +253,17 @@ final class BridgePoller implements Runnable {
                 report(id, false, "这个动作这台手机还不支持：" + tool);
             }
         }
+    }
+
+    /** 通知没权限时必须明确失败，不能向电脑谎报“已显示”。 */
+    private String notificationProblem() {
+        if (context == null) return "手机页面还没准备好，通知没有显示";
+        if (android.os.Build.VERSION.SDK_INT >= 33
+                && context.checkSelfPermission("android.permission.POST_NOTIFICATIONS")
+                != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            return "手机没有通知权限，请在系统设置里允许后再试";
+        }
+        return null;
     }
 
     /**
@@ -199,6 +277,18 @@ final class BridgePoller implements Runnable {
         String safe = name == null ? "文件.txt" : name.replaceAll("[\\\\/:*?\"<>|]", "_").trim();
         if (safe.isEmpty()) safe = "文件.txt";
         byte[] bytes = text == null ? new byte[0] : text.getBytes("UTF-8");
+        // MediaStore.Downloads / RELATIVE_PATH 是 Android 10（API 29）才有的；minSdk 是 28，
+        // 直接引用会在 Android 9 上崩，而不是“存不进去”。
+        if (android.os.Build.VERSION.SDK_INT < 29) {
+            java.io.File dir = new java.io.File(context.getExternalFilesDir(
+                    android.os.Environment.DIRECTORY_DOWNLOADS), "DSH");
+            if (!dir.exists() && !dir.mkdirs()) throw new IllegalStateException("建不出存放目录");
+            java.io.File out = new java.io.File(dir, safe);
+            try (java.io.FileOutputStream os = new java.io.FileOutputStream(out)) {
+                os.write(bytes);
+            }
+            return out.getAbsolutePath();
+        }
         android.content.ContentValues values = new android.content.ContentValues();
         values.put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, safe);
         values.put(android.provider.MediaStore.MediaColumns.MIME_TYPE, "text/plain");
@@ -272,14 +362,21 @@ final class BridgePoller implements Runnable {
 
     /** 给接收器用的静态回报（它拿不到 poller 实例）。 */
     static void reportStatic(String baseUrl, String credential, String id, boolean ok, String message) {
-        if (baseUrl == null || credential == null || id == null) return;
+        if (baseUrl == null || credential == null || id == null) {
+            android.util.Log.w("MiniBridge", "结果回报缺少地址、凭据或调用 id");
+            return;
+        }
         new Thread(() -> {
             try {
-                String payload = "{\"id\":\"" + id + "\",\"ok\":" + ok
+                String payload = "{\"id\":" + org.json.JSONObject.quote(id) + ",\"ok\":" + ok
                         + ",\"result\":" + org.json.JSONObject.quote(message) + "}";
-                Net.postJson(baseUrl + "/mini/api/bridge/result", payload, credential);
-            } catch (Exception ignored) {
-                // 回报失败不重试。
+                Net.Response response = Net.postJson(baseUrl + "/mini/api/bridge/result", payload, credential);
+                if (!response.isSuccess()) {
+                    android.util.Log.w("MiniBridge", "结果未被电脑接受：HTTP " + response.status);
+                }
+            } catch (Exception err) {
+                // 回报失败不重试；至少留下不含内容、不含凭据的诊断。
+                android.util.Log.w("MiniBridge", "结果回报失败", err);
             }
         }, "mini-bridge-report").start();
     }
@@ -293,14 +390,21 @@ final class BridgePoller implements Runnable {
     private void reportRaw(String id, boolean ok, String resultJson) {
         final String base = baseUrl;
         final String cred = credential;
-        if (base == null || cred == null) return;
+        if (base == null || cred == null) {
+            android.util.Log.w("MiniBridge", "结果回报缺少地址或设备凭据");
+            return;
+        }
         new Thread(() -> {
             try {
-                String payload = "{\"id\":\"" + id + "\",\"ok\":" + ok
+                String payload = "{\"id\":" + org.json.JSONObject.quote(id) + ",\"ok\":" + ok
                         + ",\"result\":" + resultJson + "}";
-                Net.postJson(base + "/mini/api/bridge/result", payload, cred);
-            } catch (Exception ignored) {
+                Net.Response response = Net.postJson(base + "/mini/api/bridge/result", payload, cred);
+                if (!response.isSuccess()) {
+                    android.util.Log.w("MiniBridge", "结果未被电脑接受：HTTP " + response.status);
+                }
+            } catch (Exception err) {
                 // 回报失败不重试：重试可能让同一件事执行两遍。
+                android.util.Log.w("MiniBridge", "结果回报失败", err);
             }
         }, "mini-bridge-report").start();
     }
@@ -312,12 +416,12 @@ final class BridgePoller implements Runnable {
         return wait;
     }
 
-    private void sleepQuietly(long millis) {
+    private void sleepQuietly(long millis, long token) {
         try {
             Thread.sleep(millis);
         } catch (InterruptedException err) {
             Thread.currentThread().interrupt();
-            running = false;
+            if (generation == token) running = false;
         }
     }
 }

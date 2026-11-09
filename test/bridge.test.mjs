@@ -148,3 +148,126 @@ test('手机桥：hello 不能把待执行的调用顺手取走', async () => {
   bridge.settle(DEVICE, taken.calls[0].id, { ok: true, result: 'ok' })
   assert.equal(await waiting, 'ok')
 })
+
+test('手机桥：arm 的响应不是取件通道', async () => {
+  const bridge = createBridge({ now: () => 0 })
+  bridge.hello(DEVICE, { protocol: 1 })
+  bridge.setArmed(DEVICE, true)
+  const waiting = bridge.call(DEVICE, 'phone_status', {}, 500)
+
+  const reply = bridge.setArmed(DEVICE, true)
+  assert.deepEqual(reply.calls, [], '重复武装也不能把动作藏在 arm 响应里取走')
+  const taken = await bridge.poll(DEVICE, { waitMs: 0 })
+  assert.equal(taken.calls.length, 1)
+  bridge.settle(DEVICE, taken.calls[0].id, { ok: true, result: 'ok' })
+  assert.equal(await waiting, 'ok')
+})
+
+test('手机桥：撤销武装后，排队动作不再交付', async () => {
+  const bridge = createBridge({ now: () => 0 })
+  bridge.hello(DEVICE, { protocol: 1 })
+  bridge.setArmed(DEVICE, true)
+  const waiting = bridge.call(DEVICE, 'phone_notify', {}, 40)
+
+  const reply = bridge.setArmed(DEVICE, false)
+  assert.equal(reply.armed, false)
+  assert.deepEqual(reply.calls, [])
+  // 直接重新武装，中间不能先 poll：旧任务也不许借复活。
+  bridge.setArmed(DEVICE, true)
+  const taken = await bridge.poll(DEVICE, { waitMs: 0 })
+  assert.deepEqual(taken.calls, [])
+  await assert.rejects(() => waiting, /已关闭/)
+})
+
+test('手机桥：已有调用时，长轮询必须立即取件而不是等到超时', async () => {
+  const bridge = createBridge({ now: () => 0 })
+  bridge.hello(DEVICE, { protocol: 1 })
+  bridge.setArmed(DEVICE, true)
+  const waiting = bridge.call(DEVICE, 'phone_status', {}, 500)
+
+  const started = Date.now()
+  const taken = await bridge.poll(DEVICE, { waitMs: 5_000 })
+  assert.ok(Date.now() - started < 200, '已有动作不该再压一个长轮询周期')
+  assert.equal(taken.calls.length, 1)
+  bridge.settle(DEVICE, taken.calls[0].id, { ok: true, result: 'ok' })
+  assert.equal(await waiting, 'ok')
+})
+
+test('手机桥：跨进程的旧结果不能认领新调用', async () => {
+  const oldBridge = createBridge({ now: () => 0 })
+  const newBridge = createBridge({ now: () => 0 })
+  for (const bridge of [oldBridge, newBridge]) {
+    bridge.hello(DEVICE, { protocol: 1 })
+    bridge.setArmed(DEVICE, true)
+  }
+  const oldWaiting = oldBridge.call(DEVICE, 'phone_status', {}, 500)
+  const oldTaken = await oldBridge.poll(DEVICE, { waitMs: 0 })
+  const newWaiting = newBridge.call(DEVICE, 'phone_observe', {}, 500)
+  const newTaken = await newBridge.poll(DEVICE, { waitMs: 0 })
+  const oldId = oldTaken.calls[0].id
+  const newId = newTaken.calls[0].id
+  assert.notEqual(oldId, newId, '不同进程不能从同一个顺序号重新编号')
+
+  assert.equal(newBridge.settle(DEVICE, oldId, { ok: true, result: '旧结果' }), false)
+  newBridge.settle(DEVICE, newId, { ok: true, result: '新结果' })
+  assert.equal(await newWaiting, '新结果')
+  oldBridge.settle(DEVICE, oldId, { ok: true, result: '旧结果' })
+  assert.equal(await oldWaiting, '旧结果')
+})
+
+test('手机桥：已经取走的调用，过期结果也不能被接受', async () => {
+  let clock = 0
+  const bridge = createBridge({ now: () => clock })
+  bridge.hello(DEVICE, { protocol: 1 })
+  bridge.setArmed(DEVICE, true)
+  const waiting = bridge.call(DEVICE, 'phone_status', {}, 100)
+  const taken = await bridge.poll(DEVICE, { waitMs: 0 })
+
+  clock = 101
+  assert.equal(bridge.settle(DEVICE, taken.calls[0].id, { ok: true, result: '迟到' }), false)
+  await assert.rejects(() => waiting, /过期/)
+})
+
+test('手机桥：手机失败时要把具体原因传给电脑', async () => {
+  const bridge = createBridge({ now: () => 0 })
+  bridge.hello(DEVICE, { protocol: 1 })
+  bridge.setArmed(DEVICE, true)
+  const waiting = bridge.call(DEVICE, 'phone_send_file', {}, 500)
+  const taken = await bridge.poll(DEVICE, { waitMs: 0 })
+  bridge.settle(DEVICE, taken.calls[0].id, { ok: false, result: '存文件失败：空间不足' })
+  await assert.rejects(() => waiting, /存文件失败：空间不足/)
+})
+
+test('手机桥：关闭授权后，手机迟到的成功回执不算数', async () => {
+  const bridge = createBridge({ now: () => 0 })
+  bridge.hello(DEVICE, { protocol: 1 })
+  bridge.setArmed(DEVICE, true)
+  const waiting = bridge.call(DEVICE, 'phone_set_clipboard', {}, 60_000)
+  const taken = await bridge.poll(DEVICE, { waitMs: 0 })
+
+  // 用户关掉了开关，随后才点了那张旧通知。
+  bridge.setArmed(DEVICE, false)
+  await assert.rejects(() => waiting, /已关闭/)
+  assert.equal(bridge.settle(DEVICE, taken.calls[0].id, { ok: true, result: '已复制' }), false)
+})
+
+test('手机桥：设备被撤销时，挂着的长轮询立刻作废，不再交付动作', async () => {
+  const bridge = createBridge({ now: () => 0 })
+  bridge.hello(DEVICE, { protocol: 1 })
+  bridge.setArmed(DEVICE, true)
+
+  // 先挂起一条长轮询；撤销必须把这条等待也放掉，而不是让它继续等。
+  const waitingPoll = bridge.poll(DEVICE, { waitMs: 5_000 })
+  await new Promise((r) => setTimeout(r, 10))
+  bridge.dropDevice(DEVICE)
+  const snapshot = await waitingPoll
+  assert.equal(snapshot.revoked, true)
+  assert.deepEqual(snapshot.calls, [])
+  assert.equal(bridge.isArmed(DEVICE), false)
+
+  // 队列里已经排好的动作也必须一并作废。
+  bridge.setArmed(DEVICE, true)
+  const waitingCall = bridge.call(DEVICE, 'phone_status', {}, 60_000)
+  bridge.dropDevice(DEVICE)
+  await assert.rejects(() => waitingCall, /撤销/)
+})
