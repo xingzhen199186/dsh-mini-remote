@@ -744,6 +744,10 @@ public final class MainActivity extends Activity {
             + "setTimeout(read,1200);"
             + "});"
             + "read();"
+            // 光靠"状态变化时推一次"不够：心跳上线的那一刻页面可能还没准备好，
+            // 那一次推送就落空了，而之后再没有变化、也就不会再推——界面永远停在
+            // 「正在连接电脑…」（2026-11-09 真机实测：状态本身是对的，只有界面不动）。
+            + "setInterval(read,3000);"
             + "})();";
 
     /**
@@ -2079,6 +2083,10 @@ public final class MainActivity extends Activity {
             pageReady = true;
             injectAppOnlyStyle();
             applyUiPrefs();
+            // **页面真正就绪后**再武装一次：注入那一刻往往还没有 base 地址，
+            // 那一次会直接跳过；而之后再没有别的时机去启动心跳，于是"开关是开的、
+            // 心跳却没跑"，界面永远停在"正在连接电脑"（2026-11-09 真机实测）。
+            applyBridgeArm();
             matchSystemBars();
             if (pendingShareJson != null) {
                 String json = pendingShareJson;

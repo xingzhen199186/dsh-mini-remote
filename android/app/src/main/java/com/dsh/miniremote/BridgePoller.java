@@ -18,6 +18,8 @@ final class BridgePoller implements Runnable {
     private volatile int failures;
     /** 有没有见过"已武装"：没见过的第一拍说没武装，多半是武装请求还在路上，不算关。 */
     private volatile boolean sawArmed;
+    /** 第一拍用短请求，别让用户干等一个长轮询周期。 */
+    private volatile boolean firstPoll = true;
     private Thread thread;
     private String baseUrl;
     private String credential;
@@ -46,6 +48,7 @@ final class BridgePoller implements Runnable {
         online = false;
         failures = 0;
         sawArmed = false;
+        firstPoll = true;
         if (thread != null) {
             thread.interrupt();
             thread = null;
@@ -72,12 +75,16 @@ final class BridgePoller implements Runnable {
     public void run() {
         while (running) {
             try {
-                String url = baseUrl + "/mini/api/bridge/poll?wait=1&protocol=1";
+                // 第一拍**不要压 25 秒**：刚打开开关时用户盯着这一行，
+                // 等 25 秒才变"已连接"会让人以为坏了。先问一次立刻回，之后再长轮询。
+                String url = baseUrl + "/mini/api/bridge/poll?protocol=1"
+                        + (firstPoll ? "&wait=0" : "&wait=1");
                 // 读超时要比服务端压的 25 秒更长，否则正常的长轮询会被当成失败。
                 Net.Response response = Net.getLong(url, credential, 35_000);
                 boolean ok = response.isSuccess() && response.body != null && !response.body.isEmpty();
                 if (ok) {
                     JSONObject root = new JSONObject(response.body);
+                    firstPoll = false;
                     boolean armed = root.optBoolean("armed", false);
                     failures = 0;
                     online = armed;
