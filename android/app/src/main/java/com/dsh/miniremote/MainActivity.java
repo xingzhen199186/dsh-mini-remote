@@ -734,7 +734,7 @@ public final class MainActivity extends Activity {
             + "b.id='miniJumpBlock';"
             + "b.innerHTML='<div class=\"row\"><div>"
             + "<div class=\"label\">打开别的 App 时被系统拦住？</div>"
-            + "<div class=\"hint\">荣耀/华为会问「是否允许跳转」。去「设置 → 隐私 → 其他隐私设置 → 应用自动跳转提醒」关掉就不再问。关掉后任何 App 互相拉起都不再提醒，自己判断。</div>"
+            + "<div class=\"hint\">荣耀/华为会问「是否允许跳转」。去「设置 → 隐私 → 其他隐私设置 → 应用自动跳转提醒」关掉就不再问（2026-11-10 荣耀实测路径）。关掉后任何 App 互相拉起都不再提醒，自己判断。</div>"
             + "</div><button class=\"btn\" id=\"miniJumpGo\" "
             // 用行内 onclick：真机上"插进去之后再绑事件"没生效（点了没反应），
             // 行内写法不依赖绑定时机，最稳。
