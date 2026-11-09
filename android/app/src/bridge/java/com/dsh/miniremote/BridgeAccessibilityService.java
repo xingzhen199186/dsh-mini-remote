@@ -112,6 +112,55 @@ public final class BridgeAccessibilityService extends AccessibilityService {
     }
 
     /**
+     * 一个控件的"人话标签"：自己的文字，没有就往下找两层。
+     *
+     * 输入框**一律不读当前值**（那里面可能是密码、验证码、住址），只给占位提示。
+     */
+    private static String labelOf(android.view.accessibility.AccessibilityNodeInfo node) {
+        try {
+            CharSequence own = node.getText();
+            if (own != null && own.length() > 0) {
+                return node.isEditable() ? "" : own.toString();
+            }
+            StringBuilder sb = new StringBuilder();
+            collectText(node, sb, 2);
+            return sb.toString();
+        } catch (Exception err) {
+            return "";
+        }
+    }
+
+    /** 这个控件里面还有没有"可点的孩子"——有的话它就是容器，不该当成一个条目。 */
+    private static boolean hasClickableChild(android.view.accessibility.AccessibilityNodeInfo node) {
+        for (int i = 0; i < node.getChildCount(); i++) {
+            android.view.accessibility.AccessibilityNodeInfo child = node.getChild(i);
+            if (child == null) continue;
+            if (child.isClickable() || child.isEditable()) return true;
+        }
+        return false;
+    }
+
+    private static void collectText(android.view.accessibility.AccessibilityNodeInfo node, StringBuilder out, int depth) {
+        if (node == null || depth < 0 || out.length() > 120) {
+            return;
+        }
+        CharSequence text = node.getText();
+        // 输入框的内容不收集：宁可少信息，也不把用户填过的东西读出来。
+        if (text != null && text.length() > 0 && !node.isEditable()) {
+            if (out.length() > 0) out.append(' ');
+            out.append(text);
+        }
+        CharSequence desc = node.getContentDescription();
+        if (desc != null && desc.length() > 0) {
+            if (out.length() > 0) out.append(' ');
+            out.append(desc);
+        }
+        for (int i = 0; i < node.getChildCount(); i++) {
+            collectText(node.getChild(i), out, depth - 1);
+        }
+    }
+
+    /**
      * 看一眼当前屏幕（P3 的第一个工具，2026-11-09）。
      *
      * 只读，不动任何东西。返回：前台包名、窗口标题、以及**可操作控件**的清单
@@ -143,10 +192,24 @@ public final class BridgeAccessibilityService extends AccessibilityService {
                 if (node == null) continue;
                 boolean clickable = node.isClickable();
                 boolean editable = node.isEditable();
-                if (clickable || editable || node.isScrollable()) {
+                // 容器要跳过：它自己也可点，但真正的条目在它的孩子里。
+                // 收进来会让模型看到"荣耀绿洲护眼 声音和振动 通知和状态栏 …"这样一整串，
+                // 等于把菜单压成一行，反而没法选（2026-11-09 实测）。
+                if (hasClickableChild(node)) {
+                    clickable = false;
+                }
+                if ((clickable || editable || node.isScrollable())) {
                     org.json.JSONObject item = new org.json.JSONObject();
                     item.put("i", index++);
-                    item.put("t", node.getText() == null ? "" : node.getText().toString());
+                    // **文字常常挂在子节点上**：安卓的列表行本身可点，但标签在它的孩子里。
+                    // 只读自己这一层，模型看到的是一串空白的"第 3 项"，等于没读（2026-11-09 实测）。
+                    String label = labelOf(node);
+                    // 一整串拼起来的标签说明这还是个容器（真机实测：首页那条把整个菜单
+                    // 压成了一行）。真正的条目名字都很短，超过 60 字就不当条目。
+                    if (label.length() > 60) {
+                        continue;
+                    }
+                    item.put("t", label);
                     item.put("d", node.getContentDescription() == null ? "" : node.getContentDescription().toString());
                     android.graphics.Rect rect = new android.graphics.Rect();
                     node.getBoundsInScreen(rect);
