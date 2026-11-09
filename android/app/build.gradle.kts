@@ -28,6 +28,12 @@ android {
         }
     }
 
+    buildFeatures {
+        // 更新检查要告诉电脑「我是哪个版本」（standard / bridge），
+        // 否则实验版会被标准版覆盖（2026-11-09）。
+        buildConfig = true
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false

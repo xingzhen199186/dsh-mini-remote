@@ -785,7 +785,7 @@ public final class MainActivity extends Activity {
             + "btn.addEventListener('click',function(){"
             + "if(!window.MiniUpdate){say('这个版本还不支持自动更新。');return;}"
             + "btn.disabled=true;say('正在查询…');"
-            + "fetch('/mini/api/app-update',{credentials:'same-origin'})"
+            + "fetch('/mini/api/app-update?flavor=" + com.dsh.miniremote.BuildConfig.FLAVOR + "',{credentials:'same-origin'})"
             + ".then(function(r){return r.json();})"
             + ".then(function(o){"
             + "if(!o||!o.ok){say((o&&o.error)||'电脑端暂时没有可发的安装包。');btn.disabled=false;return;}"

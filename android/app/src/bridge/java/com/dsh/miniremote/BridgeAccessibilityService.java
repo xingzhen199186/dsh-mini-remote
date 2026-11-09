@@ -229,6 +229,27 @@ public final class BridgeAccessibilityService extends AccessibilityService {
         return protectedNodeReason(root);
     }
 
+    /**
+     * 一个控件自己这一层的可见文字；输入框（含密码框）一律返回空。
+     *
+     * 只取这一层，不往下递归——否则一个列表会把整个页面的文字都拼进来。
+     */
+    private static String visibleTextOf(android.view.accessibility.AccessibilityNodeInfo node) {
+        try {
+            if (node.isEditable() || node.isPassword()) {
+                return "";
+            }
+            CharSequence text = node.getText();
+            if (text == null) {
+                return "";
+            }
+            String value = text.toString().trim();
+            return value.replace('\n', ' ');
+        } catch (Exception err) {
+            return "";
+        }
+    }
+
     /** 这个控件里面还有没有"可点的孩子"——有的话它就是容器，不该当成一个条目。 */
     private static boolean hasClickableChild(android.view.accessibility.AccessibilityNodeInfo node) {
         for (int i = 0; i < node.getChildCount(); i++) {
@@ -290,6 +311,10 @@ public final class BridgeAccessibilityService extends AccessibilityService {
                 return blocked.toString();
             }
             org.json.JSONArray items = new org.json.JSONArray();
+            // 屏幕上的**静态文字**（标题、计算器的显示区、列表说明）。
+            // 只让模型"能按"却"看不见按出来的结果"，它就没法自我核对（2026-11-09 真机：
+            // 按完 7+8 它答不出 15，因为显示屏不是可点控件）。输入框与其后代一律不收。
+            org.json.JSONArray texts = new org.json.JSONArray();
             lastTargets.clear();
             java.util.ArrayList<android.view.accessibility.AccessibilityNodeInfo> queue = new java.util.ArrayList<>();
             queue.add(root);
@@ -306,6 +331,14 @@ public final class BridgeAccessibilityService extends AccessibilityService {
                 // 等于把菜单压成一行，反而没法选（2026-11-09 实测）。
                 if (hasClickableChild(node)) {
                     clickable = false;
+                }
+                // 文字**在遍历里就收**，不限于可点控件：计算器的显示区点不了，
+                // 但模型必须看见它才算真的"看见结果"（2026-11-09 真机）。
+                if (texts.length() < 40) {
+                    String visible = visibleTextOf(node);
+                    if (!visible.isEmpty() && visible.length() <= 80) {
+                        texts.put(visible);
+                    }
                 }
                 if ((clickable || editable || node.isScrollable())) {
                     org.json.JSONObject item = new org.json.JSONObject();
@@ -340,6 +373,7 @@ public final class BridgeAccessibilityService extends AccessibilityService {
             out.put("locked", service.getSystemService(android.app.KeyguardManager.class) != null
                     && ((android.app.KeyguardManager) service.getSystemService(android.content.Context.KEYGUARD_SERVICE)).isKeyguardLocked());
             out.put("items", items);
+            out.put("texts", texts);
             lastObserveAt = System.currentTimeMillis();
             return out.toString();
         } catch (Exception err) {
