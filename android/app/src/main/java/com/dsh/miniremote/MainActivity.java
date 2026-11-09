@@ -615,7 +615,6 @@ public final class MainActivity extends Activity {
         webView.evaluateJavascript(COMPOSER_STATE_JS, null);
         webView.evaluateJavascript(CONN_SECTION_JS, null);
         webView.evaluateJavascript(UPDATE_UI_JS, null);
-        webView.evaluateJavascript(NOTIFY_TEST_JS, null);
         webView.evaluateJavascript(BRIDGE_UI_JS, null);
         applyBridgeArm();
     }
@@ -742,27 +741,6 @@ public final class MainActivity extends Activity {
             + "setTimeout(read,1200);"
             + "});"
             + "read();"
-            + "})();";
-
-    /** 设置页里那一行「通知自检」：点一下立刻发一条，并报告系统允不允许。 */
-    private static final String NOTIFY_TEST_JS = "(function(){"
-            + "if(window.__miniNotifyUi)return;"
-            + "var host=document.querySelector('#settings .sheet-body');"
-            + "if(!host)return;"
-            + "window.__miniNotifyUi=1;"
-            + "var block=document.createElement('div');"
-            + "block.id='miniNotifyBlock';"
-            + "block.innerHTML='<div class=\"row\"><div>"
-            + "<div class=\"label\">通知</div>"
-            + "<div class=\"hint\" id=\"miniNotifyHint\">任务跑完、需要你批准时，靠它提醒你</div>"
-            + "</div><div style=\"flex:0 0 auto\"><button class=\"btn\" id=\"miniNotifyBtn\">发一条</button></div></div>';"
-            + "host.insertBefore(block,host.firstChild);"
-            + "var btn=document.getElementById('miniNotifyBtn');"
-            + "var hint=document.getElementById('miniNotifyHint');"
-            + "btn.addEventListener('click',function(){"
-            + "if(!window.MiniNotify){hint.textContent='这个版本还不支持自检。';return;}"
-            + "hint.textContent=window.MiniNotify.test()||'';"
-            + "});"
             + "})();";
 
     /**
@@ -1887,7 +1865,11 @@ public final class MainActivity extends Activity {
     }
 
     /**
-     * 通知自检（2026-11-09）。
+     * 发一条通知（2026-11-09）。
+     *
+     * 现在**没有界面入口**：设置页那行「通知 · 发一条」是排障时临时加的，通知通了
+     * 就撤掉了。这个接口保留是因为 P2 的 `phone_notify` 要走的正是这条路径——
+     * 到时候它会被重新接上，不该为了一行界面而删掉。
      *
      * 起因：真机上"任务跑完"那条通知一次都没弹过，而**弹不出来有五六种可能**——
      * 系统通知权限被关、渠道被关、服务没在跑、轮询没连上、通知被建但立刻取消。
