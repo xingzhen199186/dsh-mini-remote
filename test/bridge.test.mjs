@@ -106,3 +106,17 @@ test('手机桥：手机不回话就按时失败，不无限等', async () => {
   await assert.rejects(() => bridge.call(DEVICE, 'phone_status', {}, 150), /超时|预期时间/)
   assert.ok(Date.now() - started >= 120, '要等够超时时间再失败')
 })
+
+test('手机桥：别的设备不能替它回话（结果绑定发起方）', async () => {
+  const bridge = createBridge({ now: () => 0 })
+  bridge.hello(DEVICE, { protocol: 1 })
+  bridge.setArmed(DEVICE, true)
+  const waiting = bridge.call(DEVICE, 'phone_status', {}, 300)
+  const taken = await bridge.poll(DEVICE, { waitMs: 0 })
+  const id = taken.calls[0].id
+
+  assert.equal(bridge.settle('另一台设备', id, { ok: true, result: '假结果' }), false,
+    '不属于这台设备的结果必须被拒')
+  bridge.settle(DEVICE, id, { ok: true, result: '真结果' })
+  assert.equal(await waiting, '真结果')
+})
