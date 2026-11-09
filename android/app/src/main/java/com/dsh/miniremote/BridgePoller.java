@@ -24,6 +24,12 @@ final class BridgePoller implements Runnable {
     private String baseUrl;
     private String credential;
     private Runnable onChange;
+    /** 发通知要用它；由 MainActivity 设进来。 */
+    private android.content.Context context;
+
+    void attach(android.content.Context ctx) {
+        this.context = ctx.getApplicationContext();
+    }
 
     void setOnChange(Runnable callback) {
         this.onChange = callback;
@@ -85,6 +91,7 @@ final class BridgePoller implements Runnable {
                 if (ok) {
                     JSONObject root = new JSONObject(response.body);
                     firstPoll = false;
+                    handleCalls(root.optJSONArray("calls"));
                     boolean armed = root.optBoolean("armed", false);
                     failures = 0;
                     online = armed;
@@ -115,6 +122,52 @@ final class BridgePoller implements Runnable {
         }
         online = false;
         notifyChange();
+    }
+
+    /**
+     * 执行电脑派下来的动作（P2 第二步）。
+     *
+     * 现在只有一个：`phone_notify`。**执行完必须回报**，否则电脑那边会一直等到超时，
+     * 用户看到的是"发了但没回应"。所以成功失败都要回一条。
+     */
+    private void handleCalls(org.json.JSONArray calls) {
+        if (calls == null || calls.length() == 0) {
+            return;
+        }
+        for (int i = 0; i < calls.length(); i++) {
+            org.json.JSONObject call = calls.optJSONObject(i);
+            if (call == null) continue;
+            final String id = call.optString("id", "");
+            final String tool = call.optString("tool", "");
+            org.json.JSONObject args = call.optJSONObject("args");
+            if (id.isEmpty()) continue;
+            if ("phone_notify".equals(tool)) {
+                String title = args == null ? "" : args.optString("title", "");
+                String body = args == null ? "" : args.optString("body", "");
+                if (context instanceof android.content.Context) {
+                    Notifier.showDone((android.content.Context) context, body.isEmpty() ? title : body);
+                }
+                report(id, true, "已显示通知");
+            } else {
+                report(id, false, "这个动作这台手机还不支持：" + tool);
+            }
+        }
+    }
+
+    /** 回报一次执行结果；回不上去就算了，电脑那边会按超时处理。 */
+    private void report(String id, boolean ok, String message) {
+        final String base = baseUrl;
+        final String cred = credential;
+        if (base == null || cred == null) return;
+        new Thread(() -> {
+            try {
+                String payload = "{\"id\":\"" + id + "\",\"ok\":" + ok
+                        + ",\"result\":\"" + message.replace("\"", "'") + "\"}";
+                Net.postJson(base + "/mini/api/bridge/result", payload, cred);
+            } catch (Exception ignored) {
+                // 回报失败不重试：重试可能让同一件事执行两遍。
+            }
+        }, "mini-bridge-report").start();
     }
 
     private void sleepQuietly(long millis) {

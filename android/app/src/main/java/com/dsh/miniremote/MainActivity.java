@@ -1865,6 +1865,7 @@ public final class MainActivity extends Activity {
     /** 按当前武装状态开/停心跳；页面加载完、切线路、开关变化都走这里。 */
     /** 心跳上线/掉线时，页面上的状态跟着变。 */
     private void hookBridgeCallback() {
+        bridgePoller.attach(this);
         bridgePoller.setOnChange(this::pushBridgeStatus);
     }
 
