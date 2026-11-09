@@ -151,6 +151,17 @@ final class BridgePoller implements Runnable {
                     Notifier.showFromComputer(context, title, body);
                 }
                 report(id, true, "已显示通知");
+            } else if ("phone_observe".equals(tool)) {
+                try {
+                    // 无障碍服务只在 bridge 版本里，走反射拿，标准版调用会得到"不支持"。
+                    Class<?> cls = Class.forName("com.dsh.miniremote.BridgeAccessibilityService");
+                    String json = (String) cls.getDeclaredMethod("observe").invoke(null);
+                    reportRaw(id, true, json);
+                } catch (ClassNotFoundException err) {
+                    report(id, false, "这个版本没有屏幕观察能力（需要实验版）");
+                } catch (Exception err) {
+                    report(id, false, "观察失败：" + err.getMessage());
+                }
             } else if ("phone_set_clipboard".equals(tool)) {
                 // **不直接写**：只弹一条带按钮的通知，用户点了才算数。
                 String text = args == null ? "" : args.optString("text", "");
