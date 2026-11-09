@@ -537,8 +537,10 @@ public final class MainActivity extends Activity {
                 + "#btnSend svg path{stroke:currentColor !important;stroke-width:2.6 !important;"
                 + "stroke-linecap:round !important;stroke-linejoin:round !important;fill:none !important;}"
                 // 品牌块：上行 DSH Everywhere，下行当前会话名（只在 App 里）
+                // 品牌块要**吃掉剩余宽度**：原来把状态文字藏起来之后，右边那两个按钮失去了
+                // 撑开它们的那根弹簧，于是往左挤了一截（2026-11-09 用户看出位置变了）。
                 + ".mini-brand-box{display:flex !important;flex-direction:column !important;"
-                + "line-height:1.2 !important;min-width:0 !important;flex:0 1 auto !important;}"
+                + "line-height:1.2 !important;min-width:0 !important;flex:1 1 auto !important;}"
                 + "#status{display:none !important;}"
                 + ".mini-brand-title{font-weight:600 !important;font-size:15px !important;"
                 + "letter-spacing:.3px !important;white-space:nowrap !important;}"
