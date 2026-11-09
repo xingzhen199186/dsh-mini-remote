@@ -531,6 +531,11 @@ public final class MainActivity extends Activity {
                 // 文字和下面那排图标之间留一点呼吸：padding-bottom 撑出来的是输入框
                 // 自己的底边，背景透明，所以露出来的是外框那一层色，不会出现色差
                 //（2026-11-08 用户要求）。
+                // **空状态下的垂直对齐**（2026-11-09 用户指正）：两个图标是绝对定位、按
+                // 顶栏中心对齐的；而输入框自己带着上下各 6 的 padding，文字重心就被推低
+                // 了约 6 像素，看起来文字比两侧图标低一截。这里把空状态的内边距归零，
+                // 文字就在 34 高的框里居中，正好与图标同一条中线。
+                + "body:not(.mini-typing) #input{padding-top:0 !important;padding-bottom:0 !important;}"
                 + "body.mini-typing #input{padding:6px 8px 18px 2px !important;}"
                 // 键盘起来时，底栏下面那点留白只剩原来的三分之一（26 → 9）。
                 + "body.mini-typing footer{padding-bottom:calc(env(safe-area-inset-bottom,0px) + 9px) !important;}"
