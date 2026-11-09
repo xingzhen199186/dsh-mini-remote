@@ -111,6 +111,8 @@ public final class MainActivity extends Activity {
         webView.addJavascriptInterface(new UiPrefsBridge(), "DshMiniUi");
         webView.addJavascriptInterface(new AppUpdateBridge(), "MiniUpdate");
         webView.addJavascriptInterface(new NotifyBridge(), "MiniNotify");
+        webView.addJavascriptInterface(new BridgeBridge(), "MiniBridge");
+        hookBridgeCallback();
         webView.setWebViewClient(new PairedHostClient());
         webView.setWebChromeClient(new FileChooserClient());
         // Android 13 起通知要运行时授权；不申请的话，锁屏提醒和「批准/拒绝」按钮
@@ -614,6 +616,8 @@ public final class MainActivity extends Activity {
         webView.evaluateJavascript(CONN_SECTION_JS, null);
         webView.evaluateJavascript(UPDATE_UI_JS, null);
         webView.evaluateJavascript(NOTIFY_TEST_JS, null);
+        webView.evaluateJavascript(BRIDGE_UI_JS, null);
+        applyBridgeArm();
     }
 
     /**
@@ -701,6 +705,43 @@ public final class MainActivity extends Activity {
             + "if(had&&!now){pinned=true;pinSoon();armWatch();}"
             + "had=now;"
             + "});}"
+            + "})();";
+
+    /**
+     * 设置页里那一行「手机桥」（P2 第一步）。
+     *
+     * 只有一个开关和一句话状态。**这不是装饰**：桥关着的时候，电脑那边根本看不到
+     * 这台手机，后面所有 `phone_*` 工具都不会出现——所以这个开关就是授权的意思。
+     */
+    private static final String BRIDGE_UI_JS = "(function(){"
+            + "if(window.__miniBridgeUi)return;"
+            + "var host=document.querySelector('#settings .sheet-body');"
+            + "if(!host)return;"
+            + "window.__miniBridgeUi=1;"
+            + "var block=document.createElement('div');"
+            + "block.id='miniBridgeBlock';"
+            + "block.innerHTML='<div class=\"row\"><div>"
+            + "<div class=\"label\">手机桥</div>"
+            + "<div class=\"hint\" id=\"miniBridgeHint\">关着时，电脑看不到这台手机</div>"
+            + "</div><div style=\"flex:0 0 auto\"><button class=\"btn\" id=\"miniBridgeBtn\">打开</button></div></div>';"
+            + "host.insertBefore(block,host.firstChild);"
+            + "var btn=document.getElementById('miniBridgeBtn');"
+            + "var hint=document.getElementById('miniBridgeHint');"
+            + "function paint(s){"
+            + "var armed=s&&s.armed===true;"
+            + "var online=s&&s.online===true;"
+            + "btn.textContent=armed?'关闭':'打开';"
+            + "hint.textContent=armed?(online?'已连接：电脑能看到这台手机':'正在连接电脑…'):'关着时，电脑看不到这台手机';"
+            + "}"
+            + "function read(){try{paint(JSON.parse(window.MiniBridge.state()||'{}'));}catch(e){}}"
+            + "window.miniBridgeStatus=function(){read();};"
+            + "btn.addEventListener('click',function(){"
+            + "var now=JSON.parse(window.MiniBridge.state()||'{}');"
+            + "var next=!(now&&now.armed===true);"
+            + "try{paint(JSON.parse(window.MiniBridge.arm(next)||'{}'));}catch(e){}"
+            + "setTimeout(read,1200);"
+            + "});"
+            + "read();"
             + "})();";
 
     /** 设置页里那一行「通知自检」：点一下立刻发一条，并报告系统允不允许。 */
@@ -1767,6 +1808,82 @@ public final class MainActivity extends Activity {
                 uiPrefs().edit().remove(key).apply();
             }
         }
+    }
+
+    /** 手机桥（P2 第一步）：武装开关 + 心跳。整个 Activity 一份。 */
+    private final BridgePoller bridgePoller = new BridgePoller();
+
+    /** 武装状态存在壳这边：重启 App 后要记得上次是开着的。 */
+    private static final String BRIDGE_PREF = "mini_bridge_armed";
+
+    private boolean bridgeArmed() {
+        return getSharedPreferences("mini_ui_prefs", MODE_PRIVATE)
+                .getBoolean(BRIDGE_PREF, false);
+    }
+
+    private void setBridgeArmed(boolean armed) {
+        getSharedPreferences("mini_ui_prefs", MODE_PRIVATE)
+                .edit().putBoolean(BRIDGE_PREF, armed).apply();
+    }
+
+    /**
+     * 手机桥（P2 第一步，2026-11-09）。
+     *
+     * **武装**是用户自己的动作：只有在这里打开，桥才开始心跳；关掉立刻停。
+     * 第一步只有"在线/离线"，没有任何工具——所以这一页只回答一件事：
+     * "电脑知道这台手机在不在"。
+     */
+    private final class BridgeBridge {
+        @android.webkit.JavascriptInterface
+        public String state() {
+            JSONObject root = new JSONObject();
+            try {
+                root.put("armed", bridgeArmed());
+                root.put("online", bridgePoller.isOnline());
+            } catch (JSONException ignored) {
+                return "{}";
+            }
+            return root.toString();
+        }
+
+        @android.webkit.JavascriptInterface
+        public String arm(boolean armed) {
+            setBridgeArmed(armed);
+            applyBridgeArm();
+            JSONObject root = new JSONObject();
+            try {
+                root.put("armed", armed);
+                root.put("online", bridgePoller.isOnline());
+            } catch (JSONException ignored) {
+                return "{}";
+            }
+            return root.toString();
+        }
+    }
+
+    /** 按当前武装状态开/停心跳；页面加载完、切线路、开关变化都走这里。 */
+    /** 心跳上线/掉线时，页面上的状态跟着变。 */
+    private void hookBridgeCallback() {
+        bridgePoller.setOnChange(this::pushBridgeStatus);
+    }
+
+    private void applyBridgeArm() {
+        if (bridgeArmed() && loadedBase != null && credentials != null) {
+            bridgePoller.start(loadedBase, credentials.deviceCredential());
+        } else {
+            bridgePoller.stop();
+        }
+        pushBridgeStatus();
+    }
+
+    /** 把"在线/离线"推给页面，免得界面自己去猜。 */
+    private void pushBridgeStatus() {
+        if (webView == null) {
+            return;
+        }
+        final String online = bridgePoller.isOnline() ? "true" : "false";
+        runOnUiThread(() -> webView.evaluateJavascript(
+                "window.miniBridgeStatus&&window.miniBridgeStatus(" + online + ")", null));
     }
 
     /**

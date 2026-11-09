@@ -273,6 +273,36 @@ public final class Net {
         return out.length() > 0 && (total <= 0 || out.length() == total);
     }
 
+    /**
+     * 读超时更长的 GET（2026-11-09）。
+     *
+     * 手机桥是**长轮询**：服务端会有意压住 25 秒再回。普通 8 秒的超时会把它当成失败，
+     * 于是客户端会一直重连、一直显示离线。这里单独给一条能等得起的通道。
+     */
+    public static Response getLong(String url, String deviceCredential, int readTimeoutMs) throws IOException {
+        HttpURLConnection connection = null;
+        try {
+            connection = open(url);
+            connection.setRequestMethod("GET");
+            connection.setConnectTimeout(CONNECT_TIMEOUT_MS);
+            connection.setReadTimeout(readTimeoutMs);
+            connection.setUseCaches(false);
+            connection.setInstanceFollowRedirects(false);
+            if (deviceCredential != null && !deviceCredential.isEmpty()) {
+                connection.setRequestProperty("X-Mini-Device", deviceCredential);
+            }
+            int status = connection.getResponseCode();
+            java.io.InputStream stream = status >= 200 && status < 300
+                    ? connection.getInputStream() : connection.getErrorStream();
+            String body = stream == null ? "" : readUtf8(stream);
+            return new Response(status, body);
+        } finally {
+            if (connection != null) {
+                connection.disconnect();
+            }
+        }
+    }
+
     public static Response get(String url, String deviceCredential) throws IOException {
         return request("GET", url, null, deviceCredential);
     }
