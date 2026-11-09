@@ -372,7 +372,12 @@ public final class MainActivity extends Activity {
                 var existing = row.querySelector('.mini-tailnet-hint');
                 var kind = row.getAttribute('data-kind');
                 var isTail = kind === 'tailscale' || kind === 'tailscale-https';
-                if (!(isTail && !reachable && tailnetSession && !tailnetConnected)) {
+                // 条件就是用户说的那两句：**这条线是红的**，而且**地址已经填好**。
+                // 之前我还额外要求"内置 Tailscale 没在跑"，结果真机上红着却不出提示——
+                // 那个条件是我自己加的、也没有证据支撑，去掉。没填地址的行本来就会显示
+                // 「未配置」，所以"账号地址都配好"这半句已经被它覆盖了。
+                var configured = !!row.getAttribute('data-url');
+                if (!(isTail && !reachable && configured)) {
                   if (existing) existing.remove();
                   return;
                 }
