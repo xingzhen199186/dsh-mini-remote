@@ -728,6 +728,19 @@ public final class MainActivity extends Activity {
             + "<div class=\"hint\" id=\"miniBridgeHint\">关着时，电脑看不到这台手机</div>"
             + "</div><div style=\"flex:0 0 auto\"><button class=\"btn\" id=\"miniBridgeBtn\">打开</button></div></div>';"
             + "host.insertBefore(block,host.firstChild);"
+            + "(function jumpRow(){"
+            + "if(document.getElementById('miniJumpBlock'))return;"
+            + "var b=document.createElement('div');"
+            + "b.id='miniJumpBlock';"
+            + "b.innerHTML='<div class=\"row\"><div>"
+            + "<div class=\"label\">打开别的 App 时被系统拦住？</div>"
+            + "<div class=\"hint\">荣耀/华为会问「是否允许跳转」。去「设置 → 隐私 → 其他隐私设置 → 应用自动跳转提醒」关掉就不再问。关掉后任何 App 互相拉起都不再提醒，自己判断。</div>"
+            + "</div><button class=\"btn\" id=\"miniJumpGo\" "
+            // 用行内 onclick：真机上"插进去之后再绑事件"没生效（点了没反应），
+            // 行内写法不依赖绑定时机，最稳。
+            + "onclick=\"MiniProbe.openPrivacySettings()\">去设置</button></div>';"
+            + "host.insertBefore(b,block.nextSibling);"
+            + "})();"
             + "var btn=document.getElementById('miniBridgeBtn');"
             + "var hint=document.getElementById('miniBridgeHint');"
             + "function paint(s){"
@@ -2034,6 +2047,41 @@ public final class MainActivity extends Activity {
             } catch (Exception err) {
                 return "错误：" + err.getMessage();
             }
+        }
+
+        /**
+         * 跳到系统的「应用跳转提醒」开关那儿（2026-11-10）。
+         *
+         * 安卓没给第三方 App 改这个开关的权限，只能带用户过去；而且荣耀用的是自家设置，
+         * 页面入口未必是标准那个——所以**依次试几个，都不行就退到设置首页**，
+         * 界面上写清页面名字让人自己找。假装能一键关掉才是骗人。
+         */
+        @android.webkit.JavascriptInterface
+        public void openPrivacySettings() {
+            runOnUiThread(() -> {
+                String[] candidates = {
+                        "android.settings.PRIVACY_SETTINGS",
+                        "android.settings.SECURITY_SETTINGS",
+                        "android.settings.APPLICATION_SETTINGS",
+                };
+                for (String action : candidates) {
+                    try {
+                        Intent intent = new Intent(action);
+                        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                        startActivity(intent);
+                        return;
+                    } catch (Exception ignored) {
+                        // 这个入口不存在，试下一个。
+                    }
+                }
+                try {
+                    Intent fallback = new Intent(android.provider.Settings.ACTION_SETTINGS);
+                    fallback.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                    startActivity(fallback);
+                } catch (Exception ignored) {
+                    toastOnUi("打不开系统设置");
+                }
+            });
         }
 
         @android.webkit.JavascriptInterface
