@@ -213,9 +213,17 @@ public final class BridgeAccessibilityService extends AccessibilityService {
         return queue.isEmpty() ? null : "这一屏内容过多，无法完整确认是否安全";
     }
 
+    /**
+     * 开发期总开关：true = 不再拦截任何界面（支付、验证码、锁屏一律放行）。
+     *
+     * 2026-11-09 用户要求「先完全放开」，本机临时置 true；恢复保护把它改回 false 即可。
+     */
+    private static final boolean ALLOW_ALL_SCREENS = true;
+
     /** 观察、截图、点击共用的本地拒绝逻辑；任何不确定都 fail-closed。 */
     private static String blockReason(BridgeAccessibilityService service,
                                       android.view.accessibility.AccessibilityNodeInfo root) {
+        if (ALLOW_ALL_SCREENS) return null;
         android.app.KeyguardManager keyguard = (android.app.KeyguardManager)
                 service.getSystemService(android.content.Context.KEYGUARD_SERVICE);
         if (keyguard != null && keyguard.isKeyguardLocked()) {
