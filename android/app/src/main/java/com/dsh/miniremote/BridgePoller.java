@@ -193,6 +193,13 @@ final class BridgePoller {
                 } catch (Exception err) {
                     report(id, false, "通知显示失败：" + err.getMessage());
                 }
+            } else if ("phone_open".equals(tool)) {
+                try {
+                    String pkg = args == null ? "" : args.optString("package", "").trim();
+                    report(id, true, openApp(context, pkg));
+                } catch (Exception err) {
+                    report(id, false, "打开失败：" + err.getMessage());
+                }
             } else if ("phone_tap".equals(tool)) {
                 try {
                     int index = args == null ? -1 : args.optInt("index", -1);
@@ -373,6 +380,29 @@ final class BridgePoller {
             }
         }
         return out.toString();
+    }
+
+    /**
+     * 把某个 App 调到前台（P3，2026-11-09）。
+     *
+     * 只用系统的"启动入口"去开，**不按包名拼 Intent**——拼出来的那条路能启动
+     * 不该启动的组件。找不到入口就老实说没有，不猜。
+     */
+    private static String openApp(android.content.Context context, String pkg) {
+        if (pkg == null || pkg.isEmpty()) {
+            throw new IllegalArgumentException("没有说要打开哪个 App");
+        }
+        if (pkg.equals(context.getPackageName())) {
+            throw new IllegalArgumentException("不用打开我自己");
+        }
+        android.content.pm.PackageManager pm = context.getPackageManager();
+        android.content.Intent launch = pm.getLaunchIntentForPackage(pkg);
+        if (launch == null) {
+            throw new IllegalArgumentException("这台手机上没有可打开的「" + pkg + "」");
+        }
+        launch.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
+        context.startActivity(launch);
+        return "已打开 " + pkg;
     }
 
     /** 给接收器用的静态回报（它拿不到 poller 实例）。 */
