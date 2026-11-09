@@ -125,49 +125,82 @@ public final class Net {
         void onBytes(long written);
     }
 
-    static boolean download(String url, String deviceCredential, java.io.File out, Progress progress) throws IOException {
-        HttpURLConnection connection = open(url);
-        connection.setRequestMethod("GET");
-        connection.setConnectTimeout(CONNECT_TIMEOUT_MS);
-        // 安装包大，读超时给足（默认 8 秒对几十兆不够用）。
-        connection.setReadTimeout(120_000);
-        connection.setUseCaches(false);
-        connection.setInstanceFollowRedirects(false);
-        if (deviceCredential != null && !deviceCredential.isEmpty()) {
-            connection.setRequestProperty("X-Mini-Device", deviceCredential);
+    /**
+     * 分段下载（2026-11-09）。
+     *
+     * **为什么不是一个请求拉完**：这条通路对"一次传一大块、连接活很久"的响应会卡住，
+     * 手机点下载后一直没动静就是它；而短请求一直是好的。所以每段只要 CHUNK 字节，
+     * 传完立刻断，再来下一段——把长连接拆成一串短连接。
+     *
+     * `total` 来自电脑端报的大小；每段都用 Range 要，服务端回 206。
+     * 任何一段失败就**如实返回失败**，不留半截文件去装。
+     */
+    static boolean download(String url, String deviceCredential, java.io.File out, long total, Progress progress) throws IOException {
+        final long chunk = 2L * 1024 * 1024;
+        java.io.File parent = out.getParentFile();
+        if (parent != null && !parent.exists() && !parent.mkdirs()) {
+            return false;
         }
-        try {
-            int status = connection.getResponseCode();
-            if (status < 200 || status >= 300) {
-                return false;
-            }
-            java.io.File parent = out.getParentFile();
-            if (parent != null && !parent.exists() && !parent.mkdirs()) {
-                return false;
-            }
-            try (java.io.InputStream in = connection.getInputStream();
-                 java.io.OutputStream os = new java.io.FileOutputStream(out)) {
-                byte[] buf = new byte[64 * 1024];
-                long written = 0;
-                int n;
-                while ((n = in.read(buf)) > 0) {
-                    os.write(buf, 0, n);
-                    written += n;
-                    if (progress != null) {
-                        // 每写一块报一次：26MB 大约 400 次，够用了，不必再节流。
-                        progress.onBytes(written);
+        long offset = 0;
+        try (java.io.OutputStream os = new java.io.FileOutputStream(out, false)) {
+            while (true) {
+                long end = (total > 0 ? Math.min(offset + chunk, total) : offset + chunk) - 1;
+                HttpURLConnection connection = open(url);
+                connection.setRequestMethod("GET");
+                connection.setConnectTimeout(CONNECT_TIMEOUT_MS);
+                // 每段很短，20 秒还不来就是真的卡住了：早点失败，别让用户干等。
+                connection.setReadTimeout(20_000);
+                connection.setUseCaches(false);
+                connection.setInstanceFollowRedirects(false);
+                if (deviceCredential != null && !deviceCredential.isEmpty()) {
+                    connection.setRequestProperty("X-Mini-Device", deviceCredential);
+                }
+                if (total > 0) {
+                    connection.setRequestProperty("Range", "bytes=" + offset + "-" + end);
+                }
+                try {
+                    int status = connection.getResponseCode();
+                    if (status == 416) {
+                        // 要过了头：说明已经收全了。
+                        break;
                     }
+                    if (status != 206 && status != 200) {
+                        return false;
+                    }
+                    long got = 0;
+                    try (java.io.InputStream in = connection.getInputStream()) {
+                        byte[] buf = new byte[64 * 1024];
+                        int n;
+                        while ((n = in.read(buf)) > 0) {
+                            os.write(buf, 0, n);
+                            got += n;
+                            offset += n;
+                            if (progress != null) {
+                                progress.onBytes(offset);
+                            }
+                        }
+                    }
+                    if (got == 0) {
+                        break;
+                    }
+                    if (status == 200) {
+                        // 服务端不认 Range，一次把整份给了：到此为止。
+                        break;
+                    }
+                } finally {
+                    connection.disconnect();
+                }
+                if (total > 0 && offset >= total) {
+                    break;
                 }
             }
-            return true;
         } catch (IOException err) {
             if (out.exists() && !out.delete()) {
-                // 删不掉就算了：下次下载会覆盖它。
+                // 删不掉也没关系：下次会覆盖。
             }
             throw err;
-        } finally {
-            connection.disconnect();
         }
+        return out.length() > 0 && (total <= 0 || out.length() == total);
     }
 
     public static Response get(String url, String deviceCredential) throws IOException {

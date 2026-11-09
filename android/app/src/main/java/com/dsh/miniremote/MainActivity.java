@@ -1732,7 +1732,8 @@ public final class MainActivity extends Activity {
                         java.io.File dir = new java.io.File(getCacheDir(), "update");
                         java.io.File out = new java.io.File(dir, "app.apk");
                         final long total = expectedBytes;
-                        boolean ok = Net.download(base + path, cred, out, written -> {
+                        // 服务器可能不认分段：那种情况下 total 未知，也照样能下完。
+                        boolean ok = Net.download(base + path, cred, out, total, written -> {
                             if (total <= 0) {
                                 return;
                             }
