@@ -538,6 +538,7 @@ public final class MainActivity extends Activity {
                 // 品牌块：上行 DSH Everywhere，下行当前会话名（只在 App 里）
                 + ".mini-brand-box{display:flex !important;flex-direction:column !important;"
                 + "line-height:1.2 !important;min-width:0 !important;flex:0 1 auto !important;}"
+                + "#status{display:none !important;}"
                 + ".mini-brand-title{font-weight:600 !important;font-size:15px !important;"
                 + "letter-spacing:.3px !important;white-space:nowrap !important;}"
                 + ".mini-brand-session{font-size:11px !important;color:var(--muted,#8a8a8a) !important;"
@@ -686,7 +687,7 @@ public final class MainActivity extends Activity {
             + "var list=(s&&s.sessions)||[];"
             + "var row=null;"
             + "for(var i=0;i<list.length;i++){if(list[i].id===id){row=list[i];break;}}"
-            + "paint(row&&row.title?String(row.title):'');"
+            + "paint(row&&row.title?String(row.title):'未命名会话');"
             + "}).catch(function(){});"
             + "}"
             + "pull();"
