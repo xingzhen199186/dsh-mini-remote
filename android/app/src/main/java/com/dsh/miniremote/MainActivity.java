@@ -1972,6 +1972,19 @@ public final class MainActivity extends Activity {
         }
 
         @android.webkit.JavascriptInterface
+        public String observe() {
+            Class<?> cls = serviceClass();
+            if (cls == null) {
+                return "{\"ok\":false,\"error\":\"这个版本没有探针\"}";
+            }
+            try {
+                return (String) cls.getDeclaredMethod("observe").invoke(null);
+            } catch (Exception err) {
+                return "{\"ok\":false,\"error\":\"" + String.valueOf(err.getMessage()).replace("\"", "'") + "\"}";
+            }
+        }
+
+        @android.webkit.JavascriptInterface
         public String tap(float x, float y) {
             Class<?> cls = serviceClass();
             if (cls == null) {

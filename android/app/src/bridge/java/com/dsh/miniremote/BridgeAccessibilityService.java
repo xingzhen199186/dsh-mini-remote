@@ -111,6 +111,68 @@ public final class BridgeAccessibilityService extends AccessibilityService {
         }
     }
 
+    /**
+     * 看一眼当前屏幕（P3 的第一个工具，2026-11-09）。
+     *
+     * 只读，不动任何东西。返回：前台包名、窗口标题、以及**可操作控件**的清单
+     * （序号、文字、描述、位置）。给模型看的不是整棵控件树——那太长，而是"能点的那些"。
+     *
+     * **刻意不返回**：密码框的内容、输入框里已填的字（只报"这里能输入"）、
+     * 以及任何看起来像敏感信息的东西。界面上有什么文字会如实返回，因为不返回就
+     * 判断不了该点哪里；但输入框的**当前值**一律不读。
+     */
+    static String observe() {
+        BridgeAccessibilityService service = instance;
+        if (service == null) {
+            return "{\"ok\":false,\"error\":\"无障碍还没开启\"}";
+        }
+        try {
+            android.view.accessibility.AccessibilityNodeInfo root = service.getRootInActiveWindow();
+            if (root == null) {
+                return "{\"ok\":false,\"error\":\"这一屏读不到（可能锁屏或系统界面）\"}";
+            }
+            String pkg = root.getPackageName() == null ? "" : root.getPackageName().toString();
+            org.json.JSONArray items = new org.json.JSONArray();
+            java.util.ArrayList<android.view.accessibility.AccessibilityNodeInfo> queue = new java.util.ArrayList<>();
+            queue.add(root);
+            int index = 0;
+            int visited = 0;
+            while (!queue.isEmpty() && visited < 400 && index < 60) {
+                android.view.accessibility.AccessibilityNodeInfo node = queue.remove(0);
+                visited++;
+                if (node == null) continue;
+                boolean clickable = node.isClickable();
+                boolean editable = node.isEditable();
+                if (clickable || editable || node.isScrollable()) {
+                    org.json.JSONObject item = new org.json.JSONObject();
+                    item.put("i", index++);
+                    item.put("t", node.getText() == null ? "" : node.getText().toString());
+                    item.put("d", node.getContentDescription() == null ? "" : node.getContentDescription().toString());
+                    android.graphics.Rect rect = new android.graphics.Rect();
+                    node.getBoundsInScreen(rect);
+                    item.put("b", rect.left + "," + rect.top + "," + rect.right + "," + rect.bottom);
+                    if (editable) item.put("edit", true);
+                    if (node.isScrollable()) item.put("scroll", true);
+                    if (node.isCheckable()) item.put("checked", node.isChecked());
+                    items.put(item);
+                }
+                for (int i = 0; i < node.getChildCount(); i++) {
+                    queue.add(node.getChild(i));
+                }
+            }
+            org.json.JSONObject out = new org.json.JSONObject();
+            out.put("ok", true);
+            out.put("pkg", pkg);
+            out.put("locked", service.getSystemService(android.app.KeyguardManager.class) != null
+                    && ((android.app.KeyguardManager) service.getSystemService(android.content.Context.KEYGUARD_SERVICE)).isKeyguardLocked());
+            out.put("items", items);
+            return out.toString();
+        } catch (Exception err) {
+            String message = String.valueOf(err.getMessage()).replace("\"", "'");
+            return "{\"ok\":false,\"error\":\"" + message + "\"}";
+        }
+    }
+
     /** 在屏幕上点一下（坐标为屏幕像素）。用于证明"注入手势"这条路是通的。 */
     static String tap(float x, float y) {
         BridgeAccessibilityService service = instance;
