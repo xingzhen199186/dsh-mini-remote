@@ -183,15 +183,21 @@ final class BridgePoller implements Runnable {
                     ctx.getSystemService(android.content.Context.KEYGUARD_SERVICE);
             android.net.ConnectivityManager conn = (android.net.ConnectivityManager)
                     ctx.getSystemService(android.content.Context.CONNECTIVITY_SERVICE);
+            // 网络这一项**单独兜住**：权限没给会抛 SecurityException，
+            // 而它排在赋值之前会把电量一起带走（2026-11-09 真机就是只回了一句报错）。
             boolean wifi = false;
             boolean mobile = false;
-            if (conn != null) {
-                android.net.Network active = conn.getActiveNetwork();
-                android.net.NetworkCapabilities caps = active == null ? null : conn.getNetworkCapabilities(active);
-                if (caps != null) {
-                    wifi = caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI);
-                    mobile = caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_CELLULAR);
+            try {
+                if (conn != null) {
+                    android.net.Network active = conn.getActiveNetwork();
+                    android.net.NetworkCapabilities caps = active == null ? null : conn.getNetworkCapabilities(active);
+                    if (caps != null) {
+                        wifi = caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI);
+                        mobile = caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_CELLULAR);
+                    }
                 }
+            } catch (Exception err) {
+                // 读不出网络就报 none，不要连累电量。
             }
             out.put("battery", level);
             out.put("charging", plugged > 0);

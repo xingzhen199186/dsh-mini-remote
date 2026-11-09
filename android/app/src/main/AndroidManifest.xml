@@ -12,6 +12,9 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <!-- 锁屏期间保住 CPU 与 Wi-Fi，否则 socket 挂着但数据要等解锁才读（2026-11-06）。 -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- 手机桥 `phone_status` 要报"连的是 Wi-Fi 还是流量"（2026-11-09）。
+         漏了这条，真机上整段状态会抛 SecurityException，连电量都一起读不到。 -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
 
     <application
