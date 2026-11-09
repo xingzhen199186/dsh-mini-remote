@@ -535,6 +535,14 @@ public final class MainActivity extends Activity {
                 + "#btnSend svg{width:20px !important;height:20px !important;display:block !important;}"
                 + "#btnSend svg path{stroke:currentColor !important;stroke-width:2.6 !important;"
                 + "stroke-linecap:round !important;stroke-linejoin:round !important;fill:none !important;}"
+                // 品牌块：上行 DSH Everywhere，下行当前会话名（只在 App 里）
+                + ".mini-brand-box{display:flex !important;flex-direction:column !important;"
+                + "line-height:1.2 !important;min-width:0 !important;flex:0 1 auto !important;}"
+                + ".mini-brand-title{font-weight:600 !important;font-size:15px !important;"
+                + "letter-spacing:.3px !important;white-space:nowrap !important;}"
+                + ".mini-brand-session{font-size:11px !important;color:var(--muted,#8a8a8a) !important;"
+                + "white-space:nowrap !important;overflow:hidden !important;text-overflow:ellipsis !important;"
+                + "max-width:46vw !important;}"
                 + "main{padding-bottom:24px !important;overflow-anchor:none !important;}";
         String js = "(function(){"
                 + "if(document.getElementById('mini-app-only-style'))return;"
@@ -543,6 +551,7 @@ public final class MainActivity extends Activity {
                 + "s.textContent=" + org.json.JSONObject.quote(css) + ";"
                 + "(document.head||document.documentElement).appendChild(s);"
                 + "})();";
+        webView.evaluateJavascript(BRAND_JS, null);
         webView.evaluateJavascript(STICKY_BOTTOM_JS, null);
         webView.evaluateJavascript(COMPOSER_WRAP_JS, null);
         webView.evaluateJavascript(js, null);
@@ -635,6 +644,60 @@ public final class MainActivity extends Activity {
             + "if(had&&!now){pinned=true;pinSoon();armWatch();}"
             + "had=now;"
             + "});}"
+            + "})();";
+
+    /**
+     * 顶栏：品牌名 + 当前会话名（2026-11-09 用户要求，**只在 App 里**，网页版不动）。
+     *
+     * 为什么放在外壳而不改页面：这是「手机 App 的界面长相」，网页版有它自己的一套，
+     * 改页面等于两边一起改。
+     *
+     * 会话名从哪来：页面把 `state` 关在闭包里，外面读不到；但 `/mini/api/state` 的快照
+     * 里带着 `boundSessionId` 和会话列表（每项有 title）。只在**加载时**和**点了会话之后**
+     * 各取一次——快照含整段历史，定时轮询会把流量白白烧掉。
+     */
+    private static final String BRAND_JS = "(function(){"
+            + "if(window.__miniBrand)return;"
+            + "var header=document.querySelector('header');"
+            + "var brand=header?header.querySelector('.brand'):null;"
+            + "if(!brand)return;"
+            + "window.__miniBrand=1;"
+            + "var box=document.createElement('span');"
+            + "box.className='mini-brand-box';"
+            + "var top=document.createElement('span');"
+            + "top.className='mini-brand-title';"
+            + "top.textContent='DSH Everywhere';"
+            + "var sub=document.createElement('span');"
+            + "sub.className='mini-brand-session';"
+            + "sub.textContent='';"
+            + "box.appendChild(top);box.appendChild(sub);"
+            + "brand.parentNode.replaceChild(box,brand);"
+            + "function paint(name){"
+            + "var text=name||'';"
+            + "if(sub.textContent===text)return;"
+            + "sub.textContent=text;"
+            + "sub.title=text;"            // 太长时手指按住能看到全名
+            + "}"
+            + "function pull(){"
+            + "fetch('/mini/api/state',{credentials:'same-origin'})"
+            + ".then(function(r){return r.json();})"
+            + ".then(function(s){"
+            + "var id=s&&s.boundSessionId;"
+            + "var list=(s&&s.sessions)||[];"
+            + "var row=null;"
+            + "for(var i=0;i<list.length;i++){if(list[i].id===id){row=list[i];break;}}"
+            + "paint(row&&row.title?String(row.title):'');"
+            + "}).catch(function(){});"
+            + "}"
+            + "pull();"
+            // 点了会话（含新建）之后再取一次：那是「当前会话」变化的唯一入口。
+            + "document.addEventListener('click',function(e){"
+            + "var t=e.target;"
+            + "while(t&&t!==document){"
+            + "if(t.getAttribute&&(t.getAttribute('data-sess')||t.id==='btnNav')){setTimeout(pull,900);return;}"
+            + "t=t.parentNode;"
+            + "}"
+            + "},true);"
             + "})();";
 
     private static final String COMPOSER_WRAP_JS = "(function(){"
