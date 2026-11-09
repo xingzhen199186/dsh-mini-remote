@@ -16,6 +16,8 @@ final class BridgePoller implements Runnable {
     private volatile boolean online;
     /** 连续失败次数：用来区分"还在连"和"根本连不上"，界面要说得不一样。 */
     private volatile int failures;
+    /** 有没有见过"已武装"：没见过的第一拍说没武装，多半是武装请求还在路上，不算关。 */
+    private volatile boolean sawArmed;
     private Thread thread;
     private String baseUrl;
     private String credential;
@@ -43,6 +45,7 @@ final class BridgePoller implements Runnable {
         running = false;
         online = false;
         failures = 0;
+        sawArmed = false;
         if (thread != null) {
             thread.interrupt();
             thread = null;
@@ -80,8 +83,11 @@ final class BridgePoller implements Runnable {
                     online = armed;
                     notifyChange();
                     // 武装被关掉（比如在电脑侧关的）就停：没有授权就不该继续问。
-                    if (!armed) {
+                    if (!armed && sawArmed) {
                         running = false;
+                    }
+                    if (armed) {
+                        sawArmed = true;
                     }
                 } else {
                     failures++;

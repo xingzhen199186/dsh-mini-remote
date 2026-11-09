@@ -1831,6 +1831,21 @@ public final class MainActivity extends Activity {
         @android.webkit.JavascriptInterface
         public String arm(boolean armed) {
             setBridgeArmed(armed);
+            // **必须真的去告诉电脑**（2026-11-09 修）：电脑那边的武装状态只由这条 POST 写。
+            // 原来只在本机存了个开关就去轮询，于是每次问回来的都是"没武装"，
+            // 心跳按"已被关掉"处理、立刻停——界面就永远停在"正在连接电脑"。
+            final String base = loadedBase;
+            final String cred = credentials == null ? null : credentials.deviceCredential();
+            if (base != null && cred != null) {
+                new Thread(() -> {
+                    try {
+                        Net.postJson(base + "/mini/api/bridge/arm",
+                                "{\"armed\":" + armed + "}", cred);
+                    } catch (Exception ignored) {
+                        // 发不出去就让心跳那边去报失败：界面会显示"连不上电脑"。
+                    }
+                }, "mini-bridge-arm").start();
+            }
             applyBridgeArm();
             JSONObject root = new JSONObject();
             try {
