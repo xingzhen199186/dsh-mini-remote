@@ -1,6 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!--
+        Android 11 起默认看不见别的 App：不加这段「可查询」，连"打开微信"都会报
+        "这台手机上没有这个 App"——2026-11-10 真机实测过（无障碍能读屏，但打不开）。
+        这里只声明"带启动入口的 App"，不给更宽的查询面。
+    -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+    </queries>
+
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- App 内检查更新：下载完要能唤起系统安装器（2026-11-09）。 -->

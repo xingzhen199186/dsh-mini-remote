@@ -349,16 +349,17 @@ public final class BridgeAccessibilityService extends AccessibilityService {
                     }
                 }
                 if ((clickable || editable || node.isScrollable())) {
-                    org.json.JSONObject item = new org.json.JSONObject();
-                    item.put("i", index++);
-                    // **文字常常挂在子节点上**：安卓的列表行本身可点，但标签在它的孩子里。
-                    // 只读自己这一层，模型看到的是一串空白的"第 3 项"，等于没读（2026-11-09 实测）。
+                    // **先把标签算出来再分配序号**：原来的顺序是先 i++ 再判长度，
+                    // 被丢掉的长标签项白白用掉一个号，后面每一项的序号都比它在列表里的
+                    // 位置大一位——真机上就出现"点 1 号却点到电话"（2026-11-10）。
                     String label = labelOf(node);
                     // 一整串拼起来的标签说明这还是个容器（真机实测：首页那条把整个菜单
                     // 压成了一行）。真正的条目名字都很短，超过 60 字就不当条目。
                     if (label.length() > 60) {
                         continue;
                     }
+                    org.json.JSONObject item = new org.json.JSONObject();
+                    item.put("i", index++);
                     item.put("t", label);
                     item.put("d", editable || node.isPassword() || node.getContentDescription() == null
                             ? "" : node.getContentDescription().toString());
@@ -412,6 +413,83 @@ public final class BridgeAccessibilityService extends AccessibilityService {
             return "{\"ok\":false,\"error\":\"" + result.replace("\"", "'") + "\"}";
         }
         return "{\"ok\":true,\"result\":\"" + result + "\"}";
+    }
+
+    /** 返回键。**不提供**主页与最近任务：那样会脱离授权范围（RFC 8.3）。 */
+    static String back() {
+        if (instance == null) {
+            return "{\"ok\":false,\"error\":\"无障碍还没开启\"}";
+        }
+        boolean done = instance.performGlobalAction(GLOBAL_ACTION_BACK);
+        return done ? "{\"ok\":true,\"result\":\"已返回\"}"
+                : "{\"ok\":false,\"error\":\"系统拒绝了这个返回动作\"}";
+    }
+
+    /** 滑动。只认四个方向，不让模型算像素。 */
+    static String swipe(String direction) {
+        if (instance == null) {
+            return "{\"ok\":false,\"error\":\"无障碍还没开启\"}";
+        }
+        android.util.DisplayMetrics metrics = instance.getResources().getDisplayMetrics();
+        float cx = metrics.widthPixels / 2f;
+        float cy = metrics.heightPixels / 2f;
+        float dx = 0;
+        float dy = 0;
+        String dir = direction == null ? "" : direction.trim();
+        if ("上".equals(dir) || "up".equalsIgnoreCase(dir)) {
+            dy = -metrics.heightPixels * 0.35f;
+        } else if ("下".equals(dir) || "down".equalsIgnoreCase(dir)) {
+            dy = metrics.heightPixels * 0.35f;
+        } else if ("左".equals(dir) || "left".equalsIgnoreCase(dir)) {
+            dx = -metrics.widthPixels * 0.35f;
+        } else if ("右".equals(dir) || "right".equalsIgnoreCase(dir)) {
+            dx = metrics.widthPixels * 0.35f;
+        } else {
+            return "{\"ok\":false,\"error\":\"方向只能是 上/下/左/右\"}";
+        }
+        Path path = new Path();
+        path.moveTo(cx, cy);
+        path.lineTo(cx + dx, cy + dy);
+        GestureDescription gesture = new GestureDescription.Builder()
+                .addStroke(new GestureDescription.StrokeDescription(path, 0, 240))
+                .build();
+        boolean dispatched = instance.dispatchGesture(gesture, null, null);
+        return dispatched ? "{\"ok\":true,\"result\":\"已向" + dir + "滑动\"}"
+                : "{\"ok\":false,\"error\":\"系统拒绝了这个滑动手势\"}";
+    }
+
+    /**
+     * 往第 index 个输入框里填字（P3，2026-11-09）。
+     *
+     * 先点一下让它获得焦点，再交给系统的"设置文本"动作——不逐字模拟按键：
+     * 逐字敲要处理输入法、联想、光标位置，中文尤其不可靠。
+     * **只填不发送**：提交要模型另外明确要求，避免误发消息。
+     */
+    static String input(int index, String text) {
+        if (instance == null) {
+            return "{\"ok\":false,\"error\":\"无障碍还没开启\"}";
+        }
+        if (text == null) {
+            text = "";
+        }
+        String tapped = tapIndex(index);
+        if (!tapped.contains("\"ok\":true")) {
+            return tapped;
+        }
+        android.view.accessibility.AccessibilityNodeInfo root = instance.getRootInActiveWindow();
+        if (root == null) {
+            return "{\"ok\":false,\"error\":\"读不到当前界面\"}";
+        }
+        android.view.accessibility.AccessibilityNodeInfo focused = root.findFocus(
+                android.view.accessibility.AccessibilityNodeInfo.FOCUS_INPUT);
+        if (focused == null) {
+            return "{\"ok\":false,\"error\":\"点了，但没有拿到输入焦点\"}";
+        }
+        android.os.Bundle args = new android.os.Bundle();
+        args.putCharSequence(android.view.accessibility.AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text);
+        boolean ok = focused.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_SET_TEXT, args);
+        return ok ? "{\"ok\":true,\"result\":\"已填入\"}"
+                : "{\"ok\":false,\"error\":\"这个输入框不接受直接填字\"}";
     }
 
     /** 在屏幕上点一下（坐标为屏幕像素）。用于证明"注入手势"这条路是通的。 */
