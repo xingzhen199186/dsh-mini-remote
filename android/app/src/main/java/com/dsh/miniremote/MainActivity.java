@@ -110,6 +110,7 @@ public final class MainActivity extends Activity {
         webView.addJavascriptInterface(new ConnectionBridge(), "MiniConn");
         webView.addJavascriptInterface(new UiPrefsBridge(), "DshMiniUi");
         webView.addJavascriptInterface(new AppUpdateBridge(), "MiniUpdate");
+        webView.addJavascriptInterface(new NotifyBridge(), "MiniNotify");
         webView.setWebViewClient(new PairedHostClient());
         webView.setWebChromeClient(new FileChooserClient());
         // Android 13 起通知要运行时授权；不申请的话，锁屏提醒和「批准/拒绝」按钮
@@ -612,6 +613,7 @@ public final class MainActivity extends Activity {
         webView.evaluateJavascript(COMPOSER_STATE_JS, null);
         webView.evaluateJavascript(CONN_SECTION_JS, null);
         webView.evaluateJavascript(UPDATE_UI_JS, null);
+        webView.evaluateJavascript(NOTIFY_TEST_JS, null);
     }
 
     /**
@@ -699,6 +701,27 @@ public final class MainActivity extends Activity {
             + "if(had&&!now){pinned=true;pinSoon();armWatch();}"
             + "had=now;"
             + "});}"
+            + "})();";
+
+    /** 设置页里那一行「通知自检」：点一下立刻发一条，并报告系统允不允许。 */
+    private static final String NOTIFY_TEST_JS = "(function(){"
+            + "if(window.__miniNotifyUi)return;"
+            + "var host=document.querySelector('#settings .sheet-body');"
+            + "if(!host)return;"
+            + "window.__miniNotifyUi=1;"
+            + "var block=document.createElement('div');"
+            + "block.id='miniNotifyBlock';"
+            + "block.innerHTML='<div class=\"row\"><div>"
+            + "<div class=\"label\">通知</div>"
+            + "<div class=\"hint\" id=\"miniNotifyHint\">任务跑完、需要你批准时，靠它提醒你</div>"
+            + "</div><div style=\"flex:0 0 auto\"><button class=\"btn\" id=\"miniNotifyBtn\">发一条</button></div></div>';"
+            + "host.insertBefore(block,host.firstChild);"
+            + "var btn=document.getElementById('miniNotifyBtn');"
+            + "var hint=document.getElementById('miniNotifyHint');"
+            + "btn.addEventListener('click',function(){"
+            + "if(!window.MiniNotify){hint.textContent='这个版本还不支持自检。';return;}"
+            + "hint.textContent=window.MiniNotify.test()||'';"
+            + "});"
             + "})();";
 
     /**
@@ -1732,6 +1755,31 @@ public final class MainActivity extends Activity {
         public void remove(String key) {
             if (isUiPrefKey(key)) {
                 uiPrefs().edit().remove(key).apply();
+            }
+        }
+    }
+
+    /**
+     * 通知自检（2026-11-09）。
+     *
+     * 起因：真机上"任务跑完"那条通知一次都没弹过，而**弹不出来有五六种可能**——
+     * 系统通知权限被关、渠道被关、服务没在跑、轮询没连上、通知被建但立刻取消。
+     * 让用户分辨这些不现实。这个桥只做两件事：**立刻发一条**，并把"系统到底允不允许"
+     * 一起报出来。能不能弹出，就不再靠猜。
+     */
+    private final class NotifyBridge {
+        @android.webkit.JavascriptInterface
+        public String test() {
+            try {
+                android.app.NotificationManager manager = getSystemService(android.app.NotificationManager.class);
+                boolean allowed = manager != null && manager.areNotificationsEnabled();
+                if (!allowed) {
+                    return "系统把这台设备的通知关掉了：到「设置 → 应用 → DSH Everywhere → 通知」里打开";
+                }
+                Notifier.showDone(MainActivity.this, "这是一条测试通知 · 如果你看到它，说明通知这条路是通的");
+                return "已发送。没看到的话，检查一下是否被下拉栏折叠进了「其他通知」";
+            } catch (Exception err) {
+                return "发送失败：" + err.getMessage();
             }
         }
     }
