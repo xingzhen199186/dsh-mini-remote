@@ -71,3 +71,38 @@ test('手机桥：第一步还不提供任何工具', () => {
   assert.deepEqual(status.rows[0].tools, [], 'P2 第一步不该冒然出现工具名')
   assert.equal(status.onlineDevices, 1)
 })
+
+test('手机桥：一次调用会被手机取走，回报后电脑拿到结果', async () => {
+  const bridge = createBridge({ now: () => 0 })
+  bridge.hello(DEVICE, { protocol: 1 })
+  bridge.setArmed(DEVICE, true)
+
+  const waiting = bridge.call(DEVICE, 'phone_notify', { title: '喝水' }, 5_000)
+  // 手机来取：poll 的返回里应带着那条调用
+  const taken = await bridge.poll(DEVICE, { waitMs: 0 })
+  assert.equal(taken.calls.length, 1, '手机应取到一条待执行的动作')
+  assert.equal(taken.calls[0].tool, 'phone_notify')
+  assert.equal(taken.calls[0].args.title, '喝水')
+
+  // 取走即清空：**不重投**，否则会重复打扰
+  const again = await bridge.poll(DEVICE, { waitMs: 0 })
+  assert.equal(again.calls.length, 0, '取走之后不该再给一遍')
+
+  bridge.settle(DEVICE, taken.calls[0].id, { ok: true, result: '已显示通知' })
+  assert.equal(await waiting, '已显示通知')
+})
+
+test('手机桥：没武装时不许调用（电脑不能自己打开开关）', async () => {
+  const bridge = createBridge({ now: () => 0 })
+  bridge.hello(DEVICE, { protocol: 1 })
+  await assert.rejects(() => bridge.call(DEVICE, 'phone_notify', {}, 100), /没打开|不在线/)
+})
+
+test('手机桥：手机不回话就按时失败，不无限等', async () => {
+  const bridge = createBridge({ now: () => 0 })
+  bridge.hello(DEVICE, { protocol: 1 })
+  bridge.setArmed(DEVICE, true)
+  const started = Date.now()
+  await assert.rejects(() => bridge.call(DEVICE, 'phone_status', {}, 150), /超时|预期时间/)
+  assert.ok(Date.now() - started >= 120, '要等够超时时间再失败')
+})
