@@ -681,8 +681,9 @@ public final class MainActivity extends Activity {
             + "if(!o||!o.ok){say((o&&o.error)||'电脑端暂时没有可发的安装包。');btn.disabled=false;return;}"
             + "var mine=window.MiniUpdate.selfHash?window.MiniUpdate.selfHash():'';"
             + "if(mine&&o.sha256&&mine===o.sha256){say('已经是最新版本。');btn.disabled=false;return;}"
-            + "say('发现新版本，正在下载（'+(Math.round((o.size||0)/1048576))+' MB）…');"
-            + "window.MiniUpdate.install(o.url);"
+            + "say('发现新版本，开始下载（'+(Math.round((o.size||0)/1048576))+' MB）…');"
+            + "window.__miniUpdateProgress=function(p){say('正在下载 '+p+'%…');};"
+            + "window.MiniUpdate.install(o.url, o.size||0);"
             + "setTimeout(function(){say('下载完成后会弹出安装界面。');btn.disabled=false;},1200);"
             + "})"
             + ".catch(function(){say('查询失败，检查一下连接。');btn.disabled=false;});"
@@ -1682,6 +1683,10 @@ public final class MainActivity extends Activity {
     private final class AppUpdateBridge {
         /** 本机安装包的指纹（算一次就记住：几十兆，没必要每次摸）。 */
         private String selfHash;
+        /** 页面告诉我们的总字节数（用来算百分比）；0 表示不知道。 */
+        private volatile long expectedBytes;
+        /** 上一次报过的百分比，避免同一个数字刷屏。 */
+        private volatile int lastPct = -1;
 
         @android.webkit.JavascriptInterface
         public String selfHash() {
@@ -1712,7 +1717,9 @@ public final class MainActivity extends Activity {
 
         /** 下载并唤起安装器。参数是站内路径（如 `/mini/api/app.apk`）。 */
         @android.webkit.JavascriptInterface
-        public void install(String path) {
+        public void install(String path, double totalBytes) {
+            expectedBytes = (long) totalBytes;
+            lastPct = -1;
             final String base = loadedBase;
             final String cred = credentials == null ? null : credentials.deviceCredential();
             if (base == null || path == null || path.isEmpty()) {
@@ -1724,7 +1731,19 @@ public final class MainActivity extends Activity {
                     try {
                         java.io.File dir = new java.io.File(getCacheDir(), "update");
                         java.io.File out = new java.io.File(dir, "app.apk");
-                        boolean ok = Net.download(base + path, cred, out);
+                        final long total = expectedBytes;
+                        boolean ok = Net.download(base + path, cred, out, written -> {
+                            if (total <= 0) {
+                                return;
+                            }
+                            final int pct = (int) Math.min(100, written * 100 / total);
+                            if (pct == lastPct) {
+                                return;
+                            }
+                            lastPct = pct;
+                            runOnUiThread(() -> webView.evaluateJavascript(
+                                    "window.__miniUpdateProgress&&window.__miniUpdateProgress(" + pct + ")", null));
+                        });
                         if (!ok) {
                             toastOnUi("安装包下载失败，等下再试。");
                             return;

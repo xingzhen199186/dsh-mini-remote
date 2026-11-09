@@ -120,7 +120,12 @@ public final class Net {
      * `get()` 返回的是字符串——用来接 APK 会把字节弄坏。这里直接流式写盘。
      * 返回是否成功；失败时文件删掉，别留一个半截的包让安装器去装。
      */
-    static boolean download(String url, String deviceCredential, java.io.File out) throws IOException {
+    /** 下载进度：给上层报"已经收了多少字节"，界面拿它算百分比。 */
+    interface Progress {
+        void onBytes(long written);
+    }
+
+    static boolean download(String url, String deviceCredential, java.io.File out, Progress progress) throws IOException {
         HttpURLConnection connection = open(url);
         connection.setRequestMethod("GET");
         connection.setConnectTimeout(CONNECT_TIMEOUT_MS);
@@ -143,9 +148,15 @@ public final class Net {
             try (java.io.InputStream in = connection.getInputStream();
                  java.io.OutputStream os = new java.io.FileOutputStream(out)) {
                 byte[] buf = new byte[64 * 1024];
+                long written = 0;
                 int n;
                 while ((n = in.read(buf)) > 0) {
                     os.write(buf, 0, n);
+                    written += n;
+                    if (progress != null) {
+                        // 每写一块报一次：26MB 大约 400 次，够用了，不必再节流。
+                        progress.onBytes(written);
+                    }
                 }
             }
             return true;
