@@ -14,6 +14,8 @@ import org.json.JSONObject;
 final class BridgePoller implements Runnable {
     private volatile boolean running;
     private volatile boolean online;
+    /** 连续失败次数：用来区分"还在连"和"根本连不上"，界面要说得不一样。 */
+    private volatile int failures;
     private Thread thread;
     private String baseUrl;
     private String credential;
@@ -40,6 +42,7 @@ final class BridgePoller implements Runnable {
     void stop() {
         running = false;
         online = false;
+        failures = 0;
         if (thread != null) {
             thread.interrupt();
             thread = null;
@@ -49,6 +52,10 @@ final class BridgePoller implements Runnable {
 
     boolean isOnline() {
         return online;
+    }
+
+    int failures() {
+        return failures;
     }
 
     private void notifyChange() {
@@ -69,6 +76,7 @@ final class BridgePoller implements Runnable {
                 if (ok) {
                     JSONObject root = new JSONObject(response.body);
                     boolean armed = root.optBoolean("armed", false);
+                    failures = 0;
                     online = armed;
                     notifyChange();
                     // 武装被关掉（比如在电脑侧关的）就停：没有授权就不该继续问。
@@ -76,6 +84,7 @@ final class BridgePoller implements Runnable {
                         running = false;
                     }
                 } else {
+                    failures++;
                     online = false;
                     notifyChange();
                     sleepQuietly(5_000);
@@ -85,6 +94,7 @@ final class BridgePoller implements Runnable {
                     return;
                 }
                 // 连不上就退一步再问：这里不打印、不弹提示——断了会由界面显示离线。
+                failures++;
                 online = false;
                 notifyChange();
                 sleepQuietly(5_000);

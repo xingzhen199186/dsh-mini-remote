@@ -730,7 +730,10 @@ public final class MainActivity extends Activity {
             + "var armed=s&&s.armed===true;"
             + "var online=s&&s.online===true;"
             + "btn.textContent=armed?'关闭':'打开';"
-            + "hint.textContent=armed?(online?'已连接：电脑能看到这台手机':'正在连接电脑…'):'关着时，电脑看不到这台手机';"
+            + "var fails=(s&&s.failures)||0;"
+            + "hint.textContent=armed"
+            + "?(online?'已连接：电脑能看到这台手机':(fails>=2?'连不上电脑：电脑端可能还没更新或重启':'正在连接电脑…'))"
+            + ":'关着时，电脑看不到这台手机';"
             + "}"
             + "function read(){try{paint(JSON.parse(window.MiniBridge.state()||'{}'));}catch(e){}}"
             + "window.miniBridgeStatus=function(){read();};"
@@ -1818,6 +1821,7 @@ public final class MainActivity extends Activity {
             try {
                 root.put("armed", bridgeArmed());
                 root.put("online", bridgePoller.isOnline());
+                root.put("failures", bridgePoller.failures());
             } catch (JSONException ignored) {
                 return "{}";
             }
