@@ -111,6 +111,7 @@ public final class MainActivity extends Activity {
         webView.addJavascriptInterface(new UiPrefsBridge(), "DshMiniUi");
         webView.addJavascriptInterface(new AppUpdateBridge(), "MiniUpdate");
         webView.addJavascriptInterface(new NotifyBridge(), "MiniNotify");
+        webView.addJavascriptInterface(new ProbeBridge(), "MiniProbe");
         webView.addJavascriptInterface(new BridgeBridge(), "MiniBridge");
         hookBridgeCallback();
         webView.setWebViewClient(new PairedHostClient());
@@ -616,6 +617,9 @@ public final class MainActivity extends Activity {
         webView.evaluateJavascript(CONN_SECTION_JS, null);
         webView.evaluateJavascript(UPDATE_UI_JS, null);
         webView.evaluateJavascript(BRIDGE_UI_JS, null);
+        webView.evaluateJavascript(
+                "try{eval(" + org.json.JSONObject.quote(PROBE_UI_JS) + ")}catch(e){window.__miniProbeError=String(e)}",
+                null);
         applyBridgeArm();
     }
 
@@ -1858,6 +1862,15 @@ public final class MainActivity extends Activity {
                 }, "mini-bridge-arm").start();
             }
             applyBridgeArm();
+            // 注入有时赶在页面真正稳定之前，会被下一次导航清掉（2026-11-09 实测：
+            // 探针脚本一次都没执行）。延迟再补一次，脚本自己是幂等的。
+            webView.postDelayed(() -> {
+                if (webView != null) {
+                    webView.evaluateJavascript(
+                            "try{eval(" + org.json.JSONObject.quote(PROBE_UI_JS) + ")}catch(e){window.__miniProbeError=String(e)}",
+                            null);
+                }
+            }, 2_000L);
             JSONObject root = new JSONObject();
             try {
                 root.put("armed", armed);
@@ -1894,6 +1907,123 @@ public final class MainActivity extends Activity {
         runOnUiThread(() -> webView.evaluateJavascript(
                 "window.miniBridgeStatus&&window.miniBridgeStatus(" + online + ")", null));
     }
+
+    /**
+     * P0 探针（2026-11-09）：只验证「开无障碍 → 截图 → 点一下」这条路通不通。
+     *
+     * 实现放在 bridge 构建版本里（standard 版根本没有那个类），所以这里用反射找它——
+     * 标准版调用这些方法只会得到"这个版本没有探针"，不会崩。
+     *
+     * **没有任何远程入口**：每一次截图/点击都必须是用户在设置页上亲手点的。
+     */
+    private final class ProbeBridge {
+        private Class<?> serviceClass() {
+            try {
+                return Class.forName("com.dsh.miniremote.BridgeAccessibilityService");
+            } catch (ClassNotFoundException err) {
+                return null;
+            }
+        }
+
+        @android.webkit.JavascriptInterface
+        public String status() {
+            JSONObject out = new JSONObject();
+            try {
+                Class<?> cls = serviceClass();
+                out.put("available", cls != null);
+                out.put("running", cls != null && (boolean) cls.getDeclaredMethod("isRunning")
+                        .invoke(null));
+            } catch (Exception err) {
+                try {
+                    out.put("available", false);
+                    out.put("error", String.valueOf(err.getMessage()));
+                } catch (JSONException ignored) {
+                    return "{}";
+                }
+            }
+            return out.toString();
+        }
+
+        @android.webkit.JavascriptInterface
+        public void openSettings() {
+            runOnUiThread(() -> {
+                try {
+                    Intent intent = new Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS);
+                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                    startActivity(intent);
+                } catch (Exception ignored) {
+                    // 打不开就算了：界面上的状态会显示"未开启"。
+                }
+            });
+        }
+
+        @android.webkit.JavascriptInterface
+        public String shot() {
+            Class<?> cls = serviceClass();
+            if (cls == null) {
+                return "这个版本没有探针";
+            }
+            try {
+                return (String) cls.getDeclaredMethod("takeShot", java.io.File.class)
+                        .invoke(null, new java.io.File(getCacheDir(), "probe"));
+            } catch (Exception err) {
+                return "错误：" + err.getMessage();
+            }
+        }
+
+        @android.webkit.JavascriptInterface
+        public String tap(float x, float y) {
+            Class<?> cls = serviceClass();
+            if (cls == null) {
+                return "这个版本没有探针";
+            }
+            try {
+                return (String) cls.getDeclaredMethod("tap", float.class, float.class)
+                        .invoke(null, x, y);
+            } catch (Exception err) {
+                return "错误：" + err.getMessage();
+            }
+        }
+    }
+
+    /** 设置页里的「P0 探针」一行：只在 bridge 构建版本里出现。 */
+    private static final String PROBE_UI_JS = "try{(function(){"
+            + "if(window.__miniProbeUi)return;"
+            + "window.__miniProbeHas=!!window.MiniProbe;"
+            + "var probe=window.MiniProbe;"
+            + "if(!probe)return;"
+            + "var st={};try{st=JSON.parse(probe.status()||'{}');}catch(e){st={failed:String(e)};}"
+            + "window.__miniProbeDbg=JSON.stringify(st);"
+            + "if(!st.available)return;"          // 标准版：整行都不出现
+            // 设置面板是按需渲染的：页面刚加载时它还没出现在 DOM 里。
+            // 所以找不到就先等，找到再插——**不能直接 return**（那会让这一行永远不出现）。
+            + "(function mount(){"
+            + "var host=document.querySelector('#settings .sheet-body');"
+            + "if(!host){setTimeout(mount,500);return;}"
+            + "window.__miniProbeUi=1;"
+            + "var block=document.createElement('div');"
+            + "block.id='miniProbeBlock';"
+            + "block.innerHTML='<div class=\"row\"><div>"
+            + "<div class=\"label\">P0 探针（实验）</div>"
+            + "<div class=\"hint\" id=\"miniProbeHint\">—</div>"
+            + "</div><div style=\"display:flex;gap:6px\">"
+            + "<button class=\"btn\" id=\"miniProbeOpen\">开无障碍</button>"
+            + "<button class=\"btn\" id=\"miniProbeShot\">截图</button>"
+            + "<button class=\"btn\" id=\"miniProbeTap\">点一下</button>"
+            + "</div></div>';"
+            + "host.insertBefore(block,host.firstChild);"
+            + "var hint=document.getElementById('miniProbeHint');"
+            + "function say(t){hint.textContent=t;}"
+            + "function sync(){try{var s=JSON.parse(probe.status()||'{}');"
+            + "say(s.running?'无障碍已开启，可以做下面两项':'无障碍未开启，先点「开无障碍」并找到 DSH Everywhere 打开');}catch(e){}}"
+            + "document.getElementById('miniProbeOpen').addEventListener('click',function(){probe.openSettings();setTimeout(sync,1500);});"
+            + "document.getElementById('miniProbeShot').addEventListener('click',function(){say('正在截图…');setTimeout(function(){say(probe.shot());},60);});"
+            + "document.getElementById('miniProbeTap').addEventListener('click',function(){"
+            + "var w=window.innerWidth,h=window.innerHeight;"
+            + "say(probe.tap(w*0.5,h*0.5));});"
+            + "sync();setInterval(sync,3000);"
+            + "})();"
+            + "})();}catch(e){window.__miniProbeError=String(e&&e.stack||e);}";
 
     /**
      * 发一条通知（2026-11-09）。
