@@ -535,7 +535,14 @@ public final class MainActivity extends Activity {
                 // 顶栏中心对齐的；而输入框自己带着上下各 6 的 padding，文字重心就被推低
                 // 了约 6 像素，看起来文字比两侧图标低一截。这里把空状态的内边距归零，
                 // 文字就在 34 高的框里居中，正好与图标同一条中线。
-                + "body:not(.mini-typing) #input{padding-top:0 !important;padding-bottom:0 !important;}"
+                // 空状态下要让文字与两侧图标同一条中线，只需要做一件事：
+                // **让输入框的高度恰好等于一行文字**，交给外层 flex 去居中。
+                // 上一版只清了上下内边距、却留着 min-height:34 —— 盒子仍比一行高，
+                // 文字贴着上沿，看着反而更高（2026-11-09 用户二次指正）。
+                // 行高沿用页面自己的 1.5，这样"字体大小"切到小/大时依然成立。
+                + "body:not(.mini-typing) #input{"
+                + "padding-top:0 !important;padding-bottom:0 !important;"
+                + "min-height:0 !important;height:auto !important;}"
                 + "body.mini-typing #input{padding:6px 8px 18px 2px !important;}"
                 // 键盘起来时，底栏下面那点留白只剩原来的三分之一（26 → 9）。
                 + "body.mini-typing footer{padding-bottom:calc(env(safe-area-inset-bottom,0px) + 9px) !important;}"
