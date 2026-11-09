@@ -2001,6 +2001,13 @@ public final class MainActivity extends Activity {
             + "var host=document.querySelector('#settings .sheet-body');"
             + "if(!host){setTimeout(mount,500);return;}"
             + "window.__miniProbeUi=1;"
+            // 三个按钮被挤成了竖排（真机截图里"开/无/障/碍"一行一个字）：
+            // 行内空间不够时按钮会自己换行。给这一行补两条样式，按钮保持单行。
+            + "if(!document.getElementById('miniProbeStyle')){"
+            + "var st=document.createElement('style');st.id='miniProbeStyle';"
+            + "st.textContent='#miniProbeBlock .btn{white-space:nowrap !important;}"
+            + "#miniProbeBlock .row{flex-wrap:wrap !important;gap:8px !important;}';"
+            + "(document.head||document.documentElement).appendChild(st);}"
             + "var block=document.createElement('div');"
             + "block.id='miniProbeBlock';"
             + "block.innerHTML='<div class=\"row\"><div>"
