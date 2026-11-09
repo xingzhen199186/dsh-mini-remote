@@ -130,6 +130,29 @@ public final class BridgeAccessibilityService extends AccessibilityService {
         }
     }
 
+    /**
+     * 这个包名是不是"碰不得"的界面。
+     *
+     * 名单按关键字匹配，宁可多挡：误挡只是少看一屏，漏挡可能把余额、卡号、验证码读出去。
+     */
+    private static boolean looksSensitive(String pkg) {
+        String p = pkg == null ? "" : pkg.toLowerCase(java.util.Locale.ROOT);
+        if (p.isEmpty()) {
+            return true;
+        }
+        String[] keys = {
+                "bank", "pay", "wallet", "alipay", "tenpay", "unionpay",
+                "icbc", "ccb", "abc", "boc", "cmb", "spdb", "cib", "pingan", "citic", "psbc",
+                "secure", "password", "keyguard", "settings",
+        };
+        for (String key : keys) {
+            if (p.contains(key)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     /** 这个控件里面还有没有"可点的孩子"——有的话它就是容器，不该当成一个条目。 */
     private static boolean hasClickableChild(android.view.accessibility.AccessibilityNodeInfo node) {
         for (int i = 0; i < node.getChildCount(); i++) {
@@ -181,6 +204,17 @@ public final class BridgeAccessibilityService extends AccessibilityService {
                 return "{\"ok\":false,\"error\":\"这一屏读不到（可能锁屏或系统界面）\"}";
             }
             String pkg = root.getPackageName() == null ? "" : root.getPackageName().toString();
+            // **受保护的界面一律不读**（2026-11-09 自查补上）。
+            // 无障碍能读到控件树，而 FLAG_SECURE 只挡截图、**不挡读树**——所以银行、
+            // 支付、密码管理器、系统设置这类界面必须靠包名挡在外面，不能指望"读不到"。
+            if (looksSensitive(pkg)) {
+                org.json.JSONObject blocked = new org.json.JSONObject();
+                blocked.put("ok", false);
+                blocked.put("blocked", true);
+                blocked.put("pkg", pkg);
+                blocked.put("error", "这一屏属于受保护界面（银行/支付/密码/系统设置），按规则不读");
+                return blocked.toString();
+            }
             org.json.JSONArray items = new org.json.JSONArray();
             java.util.ArrayList<android.view.accessibility.AccessibilityNodeInfo> queue = new java.util.ArrayList<>();
             queue.add(root);
