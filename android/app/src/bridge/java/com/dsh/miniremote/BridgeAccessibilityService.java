@@ -28,6 +28,10 @@ public final class BridgeAccessibilityService extends AccessibilityService {
     /** 运行中的实例；没开启无障碍时为 null。 */
     private static volatile BridgeAccessibilityService instance;
 
+    /** 上一次 observe 收集到的可点区域，顺序与返回给模型的序号一致。 */
+    private static final java.util.List<android.graphics.Rect> lastTargets = new java.util.ArrayList<>();
+    private static long lastObserveAt;
+
     static boolean isRunning() {
         return instance != null;
     }
@@ -286,6 +290,7 @@ public final class BridgeAccessibilityService extends AccessibilityService {
                 return blocked.toString();
             }
             org.json.JSONArray items = new org.json.JSONArray();
+            lastTargets.clear();
             java.util.ArrayList<android.view.accessibility.AccessibilityNodeInfo> queue = new java.util.ArrayList<>();
             queue.add(root);
             int index = 0;
@@ -318,6 +323,7 @@ public final class BridgeAccessibilityService extends AccessibilityService {
                             ? "" : node.getContentDescription().toString());
                     android.graphics.Rect rect = new android.graphics.Rect();
                     node.getBoundsInScreen(rect);
+                    lastTargets.add(new android.graphics.Rect(rect.left, rect.top, rect.right, rect.bottom));
                     item.put("b", rect.left + "," + rect.top + "," + rect.right + "," + rect.bottom);
                     if (editable) item.put("edit", true);
                     if (node.isScrollable()) item.put("scroll", true);
@@ -334,11 +340,36 @@ public final class BridgeAccessibilityService extends AccessibilityService {
             out.put("locked", service.getSystemService(android.app.KeyguardManager.class) != null
                     && ((android.app.KeyguardManager) service.getSystemService(android.content.Context.KEYGUARD_SERVICE)).isKeyguardLocked());
             out.put("items", items);
+            lastObserveAt = System.currentTimeMillis();
             return out.toString();
         } catch (Exception err) {
             String message = String.valueOf(err.getMessage()).replace("\"", "'");
             return "{\"ok\":false,\"error\":\"" + message + "\"}";
         }
+    }
+
+    /**
+     * 按**序号**点一下（P3 的第二个工具，2026-11-09）。
+     *
+     * 不按坐标：让模型算像素，错一次就可能点中"付款"。序号只在最近一次观察后
+     * 一小段时间内有效，过期就要求重新观察——界面变了还照旧点，是最危险的一种错。
+     */
+    static String tapIndex(int index) {
+        if (instance == null) {
+            return "{\"ok\":false,\"error\":\"无障碍还没开启\"}";
+        }
+        if (lastTargets.isEmpty() || System.currentTimeMillis() - lastObserveAt > 30_000) {
+            return "{\"ok\":false,\"error\":\"请先看一眼屏幕（观察一次），序号才有意义\"}";
+        }
+        if (index < 0 || index >= lastTargets.size()) {
+            return "{\"ok\":false,\"error\":\"没有第 " + index + " 个控件，先重新观察\"}";
+        }
+        android.graphics.Rect rect = lastTargets.get(index);
+        String result = tap(rect.centerX(), rect.centerY());
+        if (result.startsWith("错误")) {
+            return "{\"ok\":false,\"error\":\"" + result.replace("\"", "'") + "\"}";
+        }
+        return "{\"ok\":true,\"result\":\"" + result + "\"}";
     }
 
     /** 在屏幕上点一下（坐标为屏幕像素）。用于证明"注入手势"这条路是通的。 */

@@ -193,6 +193,21 @@ final class BridgePoller {
                 } catch (Exception err) {
                     report(id, false, "通知显示失败：" + err.getMessage());
                 }
+            } else if ("phone_tap".equals(tool)) {
+                try {
+                    int index = args == null ? -1 : args.optInt("index", -1);
+                    Class<?> cls = Class.forName("com.dsh.miniremote.BridgeAccessibilityService");
+                    String json = (String) cls.getDeclaredMethod("tapIndex", int.class).invoke(null, index);
+                    if (json.contains("\"ok\":true")) {
+                        reportRaw(id, true, json);
+                    } else {
+                        reportRaw(id, false, json);
+                    }
+                } catch (ClassNotFoundException err) {
+                    report(id, false, "这个版本没有点击能力（需要实验版）");
+                } catch (Exception err) {
+                    report(id, false, "点击失败：" + err.getMessage());
+                }
             } else if ("phone_observe".equals(tool)) {
                 try {
                     // 无障碍服务只在 bridge 版本里，走反射拿，标准版调用会得到"不支持"。
