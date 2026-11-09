@@ -148,6 +148,16 @@ final class BridgePoller implements Runnable {
                     Notifier.showFromComputer(context, title, body);
                 }
                 report(id, true, "已显示通知");
+            } else if ("phone_send_file".equals(tool)) {
+                try {
+                    String name = args == null ? "文件.txt" : args.optString("name", "文件.txt");
+                    String text = args == null ? "" : args.optString("text", "");
+                    String saved = saveToDownloads(name, text);
+                    Notifier.showFromComputer(context, "已保存到手机", "「" + name + "」已存到「下载/DSH」");
+                    report(id, true, "已保存：" + saved);
+                } catch (Exception err) {
+                    report(id, false, "存文件失败：" + err.getMessage());
+                }
             } else if ("phone_status".equals(tool)) {
                 try {
                     report(id, true, statusJson());
@@ -158,6 +168,34 @@ final class BridgePoller implements Runnable {
                 report(id, false, "这个动作这台手机还不支持：" + tool);
             }
         }
+    }
+
+    /**
+     * 把电脑发来的一段文本存进手机的「下载/DSH」（P2 第四步，2026-11-09）。
+     *
+     * 走 MediaStore 的 Downloads 集合：Android 10 起不需要存储权限，用户能在系统
+     * 「文件」里直接看到。**不覆盖同名文件**——同名时自动加序号，避免把用户原有的
+     * 文件冲掉（这是"送东西"该有的保守）。
+     */
+    private String saveToDownloads(String name, String text) throws Exception {
+        String safe = name == null ? "文件.txt" : name.replaceAll("[\\\\/:*?\"<>|]", "_").trim();
+        if (safe.isEmpty()) safe = "文件.txt";
+        byte[] bytes = text == null ? new byte[0] : text.getBytes("UTF-8");
+        android.content.ContentValues values = new android.content.ContentValues();
+        values.put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, safe);
+        values.put(android.provider.MediaStore.MediaColumns.MIME_TYPE, "text/plain");
+        values.put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH,
+                android.os.Environment.DIRECTORY_DOWNLOADS + "/DSH");
+        android.net.Uri uri = context.getContentResolver().insert(
+                android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, values);
+        if (uri == null) {
+            throw new IllegalStateException("系统没有给出存放位置");
+        }
+        try (java.io.OutputStream os = context.getContentResolver().openOutputStream(uri)) {
+            if (os == null) throw new IllegalStateException("写不进去");
+            os.write(bytes);
+        }
+        return safe;
     }
 
     /**
