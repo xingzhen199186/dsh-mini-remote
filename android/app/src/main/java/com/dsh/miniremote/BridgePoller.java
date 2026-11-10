@@ -560,6 +560,18 @@ final class BridgePoller {
                 JSONObject call = calls.optJSONObject(i);
                 if (call == null) continue;
                 long seq = call.optLong("seq", 0);
+                // **电脑重启后序号会从 1 重新数**，这时不能当重放丢掉——不然整台手机
+                // 从此收不到任何指令，而电脑那边看起来一切正常（2026-11-10 就是这么失灵的）。
+                // 所以按"本次进程"的标识换新纪元：标识变了就把已处理的最高序号清零。
+                String epoch = call.optString("sessionId", "");
+                if (!epoch.isEmpty()) {
+                    String known = prefs.getString("sessionId", "");
+                    if (!epoch.equals(known)) {
+                        prefs.edit().putString("sessionId", epoch).putLong("lastSeq", 0).apply();
+                        last = 0;
+                        highest = 0;
+                    }
+                }
                 if (seq > 0 && seq <= last) {
                     sawSmaller = true;
                     continue;
