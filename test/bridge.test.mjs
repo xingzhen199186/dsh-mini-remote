@@ -271,3 +271,16 @@ test('手机桥：设备被撤销时，挂着的长轮询立刻作废，不再�
   bridge.dropDevice(DEVICE)
   await assert.rejects(() => waitingCall, /撤销/)
 })
+
+test('手机桥：每条调用都带序号与消息号（供手机端挡重放）', async () => {
+  const bridge = createBridge({ now: () => 0 })
+  bridge.hello(DEVICE, { protocol: 1 })
+  bridge.setArmed(DEVICE, true)
+  const waiting = bridge.call(DEVICE, 'phone_status', {}, 500)
+  const taken = await bridge.poll(DEVICE, { waitMs: 0 })
+  const call = taken.calls[0]
+  assert.ok(call.seq >= 1, '必须有单调序号')
+  assert.ok(call.msgId && call.msgId.length >= 8, '必须有消息号')
+  bridge.settle(DEVICE, call.id, { ok: true, result: 'ok' })
+  await waiting
+})

@@ -1,5 +1,6 @@
 package com.dsh.miniremote;
 
+import org.json.JSONArray;
 import org.json.JSONObject;
 
 /**
@@ -127,7 +128,7 @@ final class BridgePoller {
                     boolean armed = root.optBoolean("armed", false);
                     // 先认授权再认动作：即使异常服务端在撤权响应里塞了 calls，也绝不执行。
                     if (armed) {
-                        handleCalls(root.optJSONArray("calls"), token);
+                        handleCalls(dropReplayed(root.optJSONArray("calls")), token);
                     } else if (root.optJSONArray("calls") != null
                             && root.optJSONArray("calls").length() > 0) {
                         android.util.Log.w("MiniBridge", "未武装响应带有调用，已整批拒绝");
@@ -245,7 +246,8 @@ final class BridgePoller {
                                 .invoke(null, args == null ? -1 : args.optInt("index", -1),
                                         args == null ? "" : args.optString("text", ""));
                     }
-                    reportRaw(id, json.contains("\"ok\":true"), json);
+                    // 动作做完顺手看一眼：把"做一步"和"看一眼"并成一次往返（2026-11-10）。
+                    reportRaw(id, json.contains("\"ok\":true"), withScreen(cls, json));
                 } catch (ClassNotFoundException err) {
                     report(id, false, "这个版本没有操作能力（需要实验版）");
                 } catch (Exception err) {
@@ -533,6 +535,68 @@ final class BridgePoller {
             }
         } catch (Exception err) {
             android.util.Log.w("MiniBridge", "重读地址失败：" + err.getMessage());
+        }
+    }
+
+    /**
+     * 丢掉重放或过期的调用（2026-11-10）。
+     *
+     * 电脑给每条调用配了一个单调递增的序号；手机记住已处理的最高那个，
+     * **比它小的整条不执行**。这样同一条指令被重复送达（或被人抓了报文再放一遍）
+     * 都不会执行第二次——重复点一下的代价可能是"又转了一次账"。
+     *
+     * 序号只在电脑本次进程内有效，重启后会重新计数，所以这里对"序号变小"只记日志、
+     * 不硬拒：宁可少挡一次，也不要让整台手机卡死在旧序号上。
+     */
+    private org.json.JSONArray dropReplayed(org.json.JSONArray calls) {
+        if (calls == null) {
+            return null;
+        }
+        try {
+            android.content.SharedPreferences prefs =
+                    context.getSharedPreferences("mini_bridge_seq", android.content.Context.MODE_PRIVATE);
+            long last = prefs.getLong("lastSeq", 0);
+            org.json.JSONArray kept = new org.json.JSONArray();
+            long highest = last;
+            boolean sawSmaller = false;
+            for (int i = 0; i < calls.length(); i += 1) {
+                JSONObject call = calls.optJSONObject(i);
+                if (call == null) continue;
+                long seq = call.optLong("seq", 0);
+                if (seq > 0 && seq <= last) {
+                    sawSmaller = true;
+                    continue;
+                }
+                kept.put(call);
+                if (seq > highest) highest = seq;
+            }
+            if (highest > last) {
+                prefs.edit().putLong("lastSeq", highest).apply();
+            }
+            if (sawSmaller) {
+                android.util.Log.w("MiniBridge", "有重放的调用被挡下（序号不大于已处理的最高值）");
+            }
+            return kept;
+        } catch (Exception err) {
+            android.util.Log.w("MiniBridge", "序号检查出错，按原样执行：" + err.getMessage());
+            return calls;
+        }
+    }
+
+    /**
+     * 在动作结果里附上"现在的屏幕"。
+     *
+     * 不附这一步的话，模型每次都要多调一次观察才能知道按完变成了什么样；
+     * 附上去之后一轮就能继续判断。观察失败不影响动作本身的成败。
+     */
+    private static String withScreen(Class<?> cls, String actionJson) {
+        try {
+            Object screen = cls.getDeclaredMethod("observe").invoke(null);
+            org.json.JSONObject merged = new org.json.JSONObject(actionJson);
+            merged.put("screen", new org.json.JSONObject(String.valueOf(screen)));
+            return merged.toString();
+        } catch (Exception err) {
+            return actionJson;
         }
     }
 

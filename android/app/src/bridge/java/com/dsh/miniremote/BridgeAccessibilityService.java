@@ -31,6 +31,9 @@ public final class BridgeAccessibilityService extends AccessibilityService {
     /** 上一次 observe 收集到的可点区域，顺序与返回给模型的序号一致。 */
     private static final java.util.List<android.graphics.Rect> lastTargets = new java.util.ArrayList<>();
     private static long lastObserveAt;
+    private static int lastObserveGeneration;
+    /** 界面代次：内容一变就 +1。序号与它绑定，界面变了旧序号立刻失效。 */
+    private static volatile int uiGeneration;
 
     static boolean isRunning() {
         return instance != null;
@@ -52,7 +55,17 @@ public final class BridgeAccessibilityService extends AccessibilityService {
 
     @Override
     public void onAccessibilityEvent(AccessibilityEvent event) {
-        // P0 不读界面内容：探针只需要能截图和点击。
+        // 只数代次，不读内容：界面一变（翻页、弹窗、列表滚动），
+        // 之前观察到的"第 3 个"就不再是同一个东西（2026-11-10）。
+        if (event == null) {
+            return;
+        }
+        int type = event.getEventType();
+        if (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
+                || type == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED
+                || type == AccessibilityEvent.TYPE_VIEW_SCROLLED) {
+            uiGeneration++;
+        }
     }
 
     @Override
@@ -384,6 +397,7 @@ public final class BridgeAccessibilityService extends AccessibilityService {
             out.put("items", items);
             out.put("texts", texts);
             lastObserveAt = System.currentTimeMillis();
+            lastObserveGeneration = uiGeneration;
             return out.toString();
         } catch (Exception err) {
             String message = String.valueOf(err.getMessage()).replace("\"", "'");
@@ -403,6 +417,10 @@ public final class BridgeAccessibilityService extends AccessibilityService {
         }
         if (lastTargets.isEmpty() || System.currentTimeMillis() - lastObserveAt > 30_000) {
             return "{\"ok\":false,\"error\":\"请先看一眼屏幕（观察一次），序号才有意义\"}";
+        }
+        // **界面已经变了**：序号指向的东西已经不是当初那一个，宁可不点。
+        if (lastObserveGeneration != uiGeneration) {
+            return "{\"ok\":false,\"error\":\"界面已经变了（翻页或弹出），请重新观察一次再点\"}";
         }
         if (index < 0 || index >= lastTargets.size()) {
             return "{\"ok\":false,\"error\":\"没有第 " + index + " 个控件，先重新观察\"}";
