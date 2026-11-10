@@ -14,9 +14,9 @@ final class SensitiveText {
             "(?:验证码|校验码|动态码)\\s*(?:是|为)?\\s*[:：]?\\s*(\\d{4,8})(?!\\d)");
     private static final Pattern ID = Pattern.compile("(?<!\\d)\\d{17}[\\dXx](?!\\d)");
     private static final Pattern PHONE = Pattern.compile("(?<!\\d)1[3-9]\\d{9}(?!\\d)");
-    /** 允许常见的空格/短横线分组；位数与 Luhn 在匹配后再核对。 */
+    /** 允许分组，但左右都不能从一条更长数字串的中间截出一段来冒充卡号。 */
     private static final Pattern CARD = Pattern.compile(
-            "(?<!\\d)(?:\\d[ -]?){15,18}\\d(?!\\d)(?![ -]\\d)");
+            "(?<!\\d)(?<!\\d[ -])(?:\\d[ -]?){15,18}\\d(?!\\d)(?![ -]\\d)");
 
     private SensitiveText() {
     }
