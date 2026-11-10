@@ -459,6 +459,26 @@ final class BridgePoller {
         }
         launch.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
         context.startActivity(launch);
+        // 有些手机（荣耀/华为）会弹"×× 想要打开 ××，是否允许"。这时前台不是目标 App，
+        // 而是系统管家。**在这一刻把指引说出来**，比在设置里常驻一行提示有用得多——
+        // 用户是在遇到问题的那一秒需要它，不是平时翻设置的时候。
+        try {
+            Thread.sleep(600);
+            Class<?> cls = Class.forName("com.dsh.miniremote.BridgeAccessibilityService");
+            String screen = (String) cls.getDeclaredMethod("observe").invoke(null);
+            org.json.JSONObject snap = new org.json.JSONObject(screen);
+            String front = snap.optString("pkg", "");
+            String texts = snap.optJSONArray("texts") == null ? "" : snap.optJSONArray("texts").toString();
+            boolean blocked = !front.equals(pkg) && (texts.contains("想要打开") || texts.contains("是否允许"));
+            if (blocked) {
+                return "已发出打开请求，但被系统拦下了：屏幕上在问「是否允许跳转」。\n"
+                        + "请用户在系统设置里关掉这个提醒，之后不再问：设置 → 隐私 → 其他隐私设置 → 应用自动跳转提醒。\n"
+                        + "不同手机路径不同，找不到就让用户自己在设置里搜「跳转」。\n"
+                        + "眼下也可以直接点那一屏上的「允许」，这一次就能打开。";
+            }
+        } catch (Exception ignored) {
+            // 检测不到就当正常打开了：宁可少说一句，也不要误报。
+        }
         return "已打开 " + pkg;
     }
 

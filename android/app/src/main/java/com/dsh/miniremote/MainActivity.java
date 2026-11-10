@@ -728,19 +728,8 @@ public final class MainActivity extends Activity {
             + "<div class=\"hint\" id=\"miniBridgeHint\">关着时，电脑看不到这台手机</div>"
             + "</div><div style=\"flex:0 0 auto\"><button class=\"btn\" id=\"miniBridgeBtn\">打开</button></div></div>';"
             + "host.insertBefore(block,host.firstChild);"
-            + "(function jumpRow(){"
-            + "if(document.getElementById('miniJumpBlock'))return;"
-            + "var b=document.createElement('div');"
-            + "b.id='miniJumpBlock';"
-            + "b.innerHTML='<div class=\"row\"><div>"
-            + "<div class=\"label\">打开别的 App 时被系统拦住？</div>"
-            + "<div class=\"hint\">荣耀/华为会问「是否允许跳转」。去「设置 → 隐私 → 其他隐私设置 → 应用自动跳转提醒」关掉就不再问（2026-11-10 荣耀实测路径）。关掉后任何 App 互相拉起都不再提醒，自己判断。</div>"
-            + "</div><button class=\"btn\" id=\"miniJumpGo\" "
-            // 用行内 onclick：真机上"插进去之后再绑事件"没生效（点了没反应），
-            // 行内写法不依赖绑定时机，最稳。
-            + "onclick=\"MiniProbe.openPrivacySettings()\">去设置</button></div>';"
-            + "host.insertBefore(b,block.nextSibling);"
-            + "})();"
+            // 这一行整块去掉了（2026-11-10）：不同手机的入口不一样，常驻提示等于让人自己猜；
+            // 改成"真的被系统拦住时"，由 phone_open 的返回直接告诉用户怎么做。
             + "var btn=document.getElementById('miniBridgeBtn');"
             + "var hint=document.getElementById('miniBridgeHint');"
             + "function paint(s){"
@@ -2115,48 +2104,41 @@ public final class MainActivity extends Activity {
     }
 
     /** 设置页里的「P0 探针」一行：只在 bridge 构建版本里出现。 */
+    /**
+     * 无障碍入口（2026-11-10 改）：原来这里是一整块"P0 探针"，含截图、点一下两个测试按钮。
+     *
+     * 那两个按钮是验证阶段用的脚手架——现在模型自己有截图和点击的通道，留着只会让人分不清
+     * "这按钮给谁点的"。所以整块撤掉，只保留真正需要的那个入口：
+     * **无障碍没开时，在「手机桥」那一行挂一个「开无障碍」按钮**——它是所有手机操作的前提，
+     * 而且普通用户很难自己翻到。
+     */
     private static final String PROBE_UI_JS = "try{(function(){"
             + "if(window.__miniProbeUi)return;"
-            + "window.__miniProbeHas=!!window.MiniProbe;"
             + "var probe=window.MiniProbe;"
             + "if(!probe)return;"
-            + "var st={};try{st=JSON.parse(probe.status()||'{}');}catch(e){st={failed:String(e)};}"
-            + "window.__miniProbeDbg=JSON.stringify(st);"
-            + "if(!st.available)return;"          // 标准版：整行都不出现
-            // 设置面板是按需渲染的：页面刚加载时它还没出现在 DOM 里。
-            // 所以找不到就先等，找到再插——**不能直接 return**（那会让这一行永远不出现）。
-            + "(function mount(){"
-            + "var host=document.querySelector('#settings .sheet-body');"
-            + "if(!host){setTimeout(mount,500);return;}"
+            + "var st={};try{st=JSON.parse(probe.status()||'{}');}catch(e){return;}"
+            + "if(!st.available)return;"
             + "window.__miniProbeUi=1;"
-            // 三个按钮被挤成了竖排（真机截图里"开/无/障/碍"一行一个字）：
-            // 行内空间不够时按钮会自己换行。给这一行补两条样式，按钮保持单行。
-            + "if(!document.getElementById('miniProbeStyle')){"
-            + "var st=document.createElement('style');st.id='miniProbeStyle';"
-            + "st.textContent='#miniProbeBlock .btn{white-space:nowrap !important;}"
-            + "#miniProbeBlock .row{flex-wrap:wrap !important;gap:8px !important;}';"
-            + "(document.head||document.documentElement).appendChild(st);}"
-            + "var block=document.createElement('div');"
-            + "block.id='miniProbeBlock';"
-            + "block.innerHTML='<div class=\"row\"><div>"
-            + "<div class=\"label\">P0 探针（实验）</div>"
-            + "<div class=\"hint\" id=\"miniProbeHint\">—</div>"
-            + "</div><div style=\"display:flex;gap:6px\">"
-            + "<button class=\"btn\" id=\"miniProbeOpen\">开无障碍</button>"
-            + "<button class=\"btn\" id=\"miniProbeShot\">截图</button>"
-            + "<button class=\"btn\" id=\"miniProbeTap\">点一下</button>"
-            + "</div></div>';"
-            + "host.insertBefore(block,host.firstChild);"
-            + "var hint=document.getElementById('miniProbeHint');"
-            + "function say(t){hint.textContent=t;}"
-            + "function sync(){try{var s=JSON.parse(probe.status()||'{}');"
-            + "say(s.running?'无障碍已开启：电脑可以读到这台手机屏幕上的文字（银行、支付、密码、短信、相册界面会被拒绝）':'无障碍未开启，先点「开无障碍」并找到 DSH Everywhere 打开');}catch(e){}}"
-            + "document.getElementById('miniProbeOpen').addEventListener('click',function(){probe.openSettings();setTimeout(sync,1500);});"
-            + "document.getElementById('miniProbeShot').addEventListener('click',function(){say('正在截图…');setTimeout(function(){say(probe.shot());},60);});"
-            + "document.getElementById('miniProbeTap').addEventListener('click',function(){"
-            + "var w=window.innerWidth,h=window.innerHeight;"
-            + "say(probe.tap(w*0.5,h*0.5));});"
-            + "sync();setInterval(sync,3000);"
+            + "(function mount(){"
+            + "var hint=document.getElementById('miniBridgeHint');"
+            + "if(!hint){setTimeout(mount,500);return;}"
+            + "if(st.running){"
+            // 已经开着：什么都不加，免得界面多一行废话
+            + "return;}"
+            + "if(document.getElementById('miniA11yGo'))return;"
+            + "var btn=document.createElement('button');"
+            + "btn.id='miniA11yGo';"
+            + "btn.className='btn';"
+            + "btn.textContent='开无障碍';"
+            + "btn.style.marginLeft='8px';"
+            + "btn.style.whiteSpace='nowrap';"
+            // 行内 onclick：真机上"插进去再绑事件"不生效（2026-11-10 实测）
+            + "btn.setAttribute('onclick','MiniProbe.openSettings()');"
+            + "hint.appendChild(btn);"
+            + "var tip=document.createElement('div');"
+            + "tip.className='hint';"
+            + "tip.textContent='手机上的操作要先开无障碍：设置 → 辅助功能 → 无障碍 → 找到 DSH 手机桥（实验）';"
+            + "hint.parentNode.appendChild(tip);"
             + "})();"
             + "})();}catch(e){window.__miniProbeError=String(e&&e.stack||e);}";
 
