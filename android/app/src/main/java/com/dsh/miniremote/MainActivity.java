@@ -899,7 +899,20 @@ public final class MainActivity extends Activity {
             + "<div class=\"label\">App 更新</div>"
             + "<div class=\"hint\" id=\"miniUpdateHint\">检查这台手机上的版本是不是最新的</div>"
             + "</div><div style=\"flex:0 0 auto\"><button class=\"btn\" id=\"miniUpdateBtn\">检查</button></div></div>';"
-            + "host.insertBefore(block,host.firstChild);"
+            // 位置：挪到「权限档位」之前（2026-11-10 李四审完的顺序）。
+            // 更新是偶发维护，占着首屏会让人以为"现在就该更新"；
+            // 日常要改的是连接、显示、提醒，那些应该在前面。
+            + "function place(){"
+            + "var perm=document.getElementById('permBlock');"
+            + "if(!perm){setTimeout(place,500);return;}"
+            // 先把「权限档位」挪到「进阶设置」之前：两件都改电脑能做什么，放在一起才顺；
+            // 夹在日常交互设置里反而像普通偏好（2026-11-10 李四审完的顺序）。
+            // **顺序有讲究**：得先挪它，再把更新插到它前面，否则更新会停在交互设置的上面。
+            + "var adv=document.getElementById('rowMirror')||document.getElementById('rowMirrorOpen');"
+            + "if(adv&&perm.nextElementSibling!==adv){adv.parentNode.insertBefore(perm,adv);}"
+            + "if(block.nextElementSibling!==perm)perm.parentNode.insertBefore(block,perm);"
+            + "}"
+            + "place();"
             + "var btn=document.getElementById('miniUpdateBtn');"
             + "var hint=document.getElementById('miniUpdateHint');"
             + "function say(t){hint.textContent=t;}"
