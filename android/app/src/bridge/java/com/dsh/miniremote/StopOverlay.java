@@ -48,7 +48,10 @@ final class StopOverlay {
         background.setColor(0xccb42318);
         background.setCornerRadius(dp(48));
         capsule.setBackground(background);
-        capsule.setOnClickListener(v -> onStop.run());
+        capsule.setOnClickListener(v -> {
+            wake();
+            onStop.run();
+        });
 
         WindowManager.LayoutParams next = new WindowManager.LayoutParams(
                 WindowManager.LayoutParams.WRAP_CONTENT,
@@ -58,8 +61,11 @@ final class StopOverlay {
                         | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
                 PixelFormat.TRANSLUCENT);
         next.gravity = Gravity.TOP | Gravity.END;
-        next.x = dp(16);
-        next.y = dp(160);
+        next.x = dp(10);
+        // 竖直放在屏幕中间偏下（2026-11-10 用户反馈）：原来 y=160dp 正好压住
+        // 设置页里「手机关/屏幕操作」那几行的按钮，看着像页面上长了个红疙瘩。
+        next.y = Math.max(dp(120),
+                service.getResources().getDisplayMetrics().heightPixels / 2 - dp(24));
         capsule.setOnTouchListener(new View.OnTouchListener() {
             float downX;
             float downY;
@@ -72,6 +78,7 @@ final class StopOverlay {
                 if (params == null) return false;
                 switch (event.getActionMasked()) {
                     case MotionEvent.ACTION_DOWN:
+                        wake();
                         downX = event.getRawX();
                         downY = event.getRawY();
                         startX = params.x;
@@ -102,6 +109,7 @@ final class StopOverlay {
             windowManager.addView(capsule, next);
             view = capsule;
             params = next;
+            wake();
         } catch (Exception err) {
             // 浮层只是停止的另一种入口；画不出来也不能影响原来的桥。
             android.util.Log.w("MiniBridge", "停止胶囊显示失败：" + err.getMessage());
@@ -110,8 +118,23 @@ final class StopOverlay {
         }
     }
 
+    private static final long IDLE_MS = 2500L;
+    private final android.os.Handler idleHandler =
+            new android.os.Handler(android.os.Looper.getMainLooper());
+    private final Runnable fadeOut = () -> {
+        if (view != null) view.setAlpha(0.55f);
+    };
+
+    /** 碰一下就恢复不透明，之后重新计时。看得见，但不抢眼。 */
+    private void wake() {
+        idleHandler.removeCallbacks(fadeOut);
+        if (view != null) view.setAlpha(1f);
+        idleHandler.postDelayed(fadeOut, IDLE_MS);
+    }
+
     /** 所有生命周期出口都走这里；重复移除也必须安全。 */
     void dismiss() {
+        idleHandler.removeCallbacks(fadeOut);
         TextView current = view;
         view = null;
         params = null;

@@ -29,6 +29,8 @@ public final class BridgeAccessibilityService extends AccessibilityService {
     private static volatile BridgeAccessibilityService instance;
     /** 浮层只在服务连接后创建，避免系统尚未 attach 时拿不到 WindowManager。 */
     private StopOverlay stopOverlay;
+    /** 当前前台是谁：用来判断"要不要在自己的界面上盖一个停止键"。 */
+    private volatile String foregroundPackage;
     private final BridgeControl.ArmedListener stopOverlayListener = armed -> syncStopOverlay();
     private final android.os.Handler overlayHandler = new android.os.Handler(android.os.Looper.getMainLooper());
     private final Runnable syncOverlayTask = this::syncStopOverlay;
@@ -50,7 +52,10 @@ public final class BridgeAccessibilityService extends AccessibilityService {
                 getSystemService(android.content.Context.POWER_SERVICE);
         boolean locked = keyguard != null && keyguard.isKeyguardLocked();
         boolean screenOn = power == null || power.isInteractive();
-        if (BridgeControl.isArmed(this) && !locked && screenOn) {
+        // 在我们自己的 App 里不显示（2026-11-10 用户反馈）：
+        // 这里本来就有手机桥开关，浮层只会挡住「关闭」按钮。
+        boolean mine = getPackageName().equals(foregroundPackage);
+        if (BridgeControl.isArmed(this) && !locked && screenOn && !mine) {
             stopOverlay.show();
         } else {
             stopOverlay.dismiss();
@@ -132,6 +137,9 @@ public final class BridgeAccessibilityService extends AccessibilityService {
         // 之前观察到的"第 3 个"就不再是同一个东西（2026-11-10）。
         if (event == null) {
             return;
+        }
+        if (event.getPackageName() != null) {
+            foregroundPackage = event.getPackageName().toString();
         }
         int type = event.getEventType();
         if (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
