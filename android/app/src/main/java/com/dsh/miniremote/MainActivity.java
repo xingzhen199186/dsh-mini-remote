@@ -801,7 +801,9 @@ public final class MainActivity extends Activity {
             + "window.__miniUpdateProgress=function(p){say('正在下载 '+p+'%…');};"
             + "window.__miniUpdateSwitch=function(){say('这条线路整块传不动，改成分段下载…');};"
             + "window.MiniUpdate.install(o.url, o.size||0);"
-            + "setTimeout(function(){say('下载完成后会弹出安装界面。');btn.disabled=false;},1200);"
+            // 原来这里会再写一句"下载完成后会弹出安装界面"（2026-11-10 用户要求去掉）：
+            // 进度百分比本身已经说明在下载，安装器弹出来是自然的事，多一句只是噪音。
+            + "setTimeout(function(){btn.disabled=false;},1200);"
             + "})"
             + ".catch(function(){say('查询失败，检查一下连接。');btn.disabled=false;});"
             + "});"
