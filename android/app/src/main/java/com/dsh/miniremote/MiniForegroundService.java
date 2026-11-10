@@ -111,10 +111,16 @@ public final class MiniForegroundService extends Service {
         }
         acquireLocks();
         wantBridge = intent != null && intent.getBooleanExtra(EXTRA_BRIDGE, false);
-        if (wantBridge && bridgePoller == null) {
-            bridgePoller = new BridgePoller();
-            bridgePoller.attach(this);
-            bridgePoller.start(baseUrl, credential);
+        if (wantBridge) {
+            if (bridgePoller == null) {
+                bridgePoller = new BridgePoller();
+                bridgePoller.attach(this);
+            }
+            // 服务启动可能晚于一次停止；读取授权与启动必须走同一个临界区。
+            BridgeControl.syncPoller(this, bridgePoller, baseUrl, credential);
+        } else if (bridgePoller != null) {
+            bridgePoller.stop();
+            bridgePoller = null;
         }
         if (!running) {
             running = true;

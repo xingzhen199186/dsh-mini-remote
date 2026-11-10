@@ -719,17 +719,12 @@ final class BridgePoller {
 
     /** 电脑重启后忘了我们（armed=false）时，补发一次本地开关的决定。 */
     private void rearmIfNeeded(long token) {
-        if (rearmTried || baseUrl == null || credential == null) {
+        if (rearmTried || baseUrl == null || credential == null
+                || context == null || !BridgeControl.isArmed(context)) {
             return;
         }
         rearmTried = true;
-        try {
-            String payload = "{\"armed\":true}";
-            Net.postJson(baseUrl + "/mini/api/bridge/arm", payload, credential);
-            android.util.Log.i("MiniBridge", "电脑端不记得这台手机了，已补发一次武装");
-        } catch (Exception err) {
-            android.util.Log.w("MiniBridge", "补发武装失败：" + err.getMessage());
-        }
+        BridgeControl.rearm(context, baseUrl, credential);
     }
 
     /** 5s → 10 → 20 → 40 → 60 封顶。断网时不该每 5 秒撞一次。 */

@@ -30,14 +30,27 @@ public final class BridgeAccessibilityService extends AccessibilityService {
     /** 浮层只在服务连接后创建，避免系统尚未 attach 时拿不到 WindowManager。 */
     private StopOverlay stopOverlay;
     private final BridgeControl.ArmedListener stopOverlayListener = armed -> syncStopOverlay();
+    private final android.os.Handler overlayHandler = new android.os.Handler(android.os.Looper.getMainLooper());
+    private final Runnable syncOverlayTask = this::syncStopOverlay;
+    private boolean screenReceiverRegistered;
+    /** 不能只等窗口事件：部分 ROM 锁屏/解锁只发系统广播。 */
+    private final android.content.BroadcastReceiver screenReceiver = new android.content.BroadcastReceiver() {
+        @Override
+        public void onReceive(android.content.Context context, android.content.Intent intent) {
+            syncStopOverlay();
+        }
+    };
 
     /** 解锁/锁屏与武装状态共用这一个判据；本方法不尝试亮屏或解锁。 */
     private void syncStopOverlay() {
         if (stopOverlay == null) return;
         android.app.KeyguardManager keyguard = (android.app.KeyguardManager)
                 getSystemService(android.content.Context.KEYGUARD_SERVICE);
+        android.os.PowerManager power = (android.os.PowerManager)
+                getSystemService(android.content.Context.POWER_SERVICE);
         boolean locked = keyguard != null && keyguard.isKeyguardLocked();
-        if (BridgeControl.isArmed(this) && !locked) {
+        boolean screenOn = power == null || power.isInteractive();
+        if (BridgeControl.isArmed(this) && !locked && screenOn) {
             stopOverlay.show();
         } else {
             stopOverlay.dismiss();
@@ -46,6 +59,15 @@ public final class BridgeAccessibilityService extends AccessibilityService {
 
     /** 服务真正离开时同时丢掉 View 与监听器；重复调用也安全。 */
     private void discardStopOverlay() {
+        overlayHandler.removeCallbacks(syncOverlayTask);
+        if (screenReceiverRegistered) {
+            try {
+                unregisterReceiver(screenReceiver);
+            } catch (Exception ignored) {
+                // 系统已先拆掉接收器时，服务销毁不应因此崩溃。
+            }
+            screenReceiverRegistered = false;
+        }
         BridgeControl.clearStopOverlayListener(stopOverlayListener);
         if (stopOverlay != null) {
             stopOverlay.dismiss();
@@ -73,6 +95,16 @@ public final class BridgeAccessibilityService extends AccessibilityService {
         stopOverlay = new StopOverlay(this,
                 () -> BridgeControl.setArmed(this, false, null, null, null));
         BridgeControl.setStopOverlayListener(stopOverlayListener);
+        android.content.IntentFilter filter = new android.content.IntentFilter();
+        filter.addAction(android.content.Intent.ACTION_SCREEN_ON);
+        filter.addAction(android.content.Intent.ACTION_SCREEN_OFF);
+        filter.addAction(android.content.Intent.ACTION_USER_PRESENT);
+        try {
+            registerReceiver(screenReceiver, filter);
+            screenReceiverRegistered = true;
+        } catch (Exception err) {
+            android.util.Log.w("MiniBridge", "亮屏/解锁监听注册失败：" + err.getMessage());
+        }
         syncStopOverlay();
     }
 
@@ -107,17 +139,20 @@ public final class BridgeAccessibilityService extends AccessibilityService {
                 || type == AccessibilityEvent.TYPE_VIEW_SCROLLED) {
             uiGeneration++;
         }
-        if (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
+        if (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
+                || type == AccessibilityEvent.TYPE_WINDOWS_CHANGED) {
             syncStopOverlay();
         }
     }
 
     @Override
     public void onInterrupt() {
-        // 中断不是撤权：只撤画面，桥的本地状态不变；下一次窗口事件会重新同步。
+        // 中断不是撤权：先撤画面；若系统没有再发窗口事件，也在本机状态未变时恢复。
         if (stopOverlay != null) {
             stopOverlay.dismiss();
         }
+        overlayHandler.removeCallbacks(syncOverlayTask);
+        overlayHandler.postDelayed(syncOverlayTask, 500);
     }
 
     /**

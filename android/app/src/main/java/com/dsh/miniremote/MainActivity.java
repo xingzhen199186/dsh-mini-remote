@@ -2148,11 +2148,8 @@ public final class MainActivity extends Activity {
     }
 
     private void applyBridgeArm() {
-        if (bridgeArmed() && loadedBase != null && credentials != null) {
-            bridgePoller.start(loadedBase, credentials.deviceCredential());
-        } else {
-            bridgePoller.stop();
-        }
+        BridgeControl.syncPoller(this, bridgePoller, loadedBase,
+                credentials == null ? null : credentials.deviceCredential());
         pushBridgeStatus();
     }
 

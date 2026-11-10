@@ -42,6 +42,17 @@ final class BridgeControl {
                 .getBoolean(ARMED, false);
     }
 
+    /** “读取授权→启停轮询”与撤权共用一把锁，旧启动动作不能落在停止之后。 */
+    static void syncPoller(Context context, BridgePoller poller, String baseUrl, String credential) {
+        synchronized (LOCK) {
+            if (isArmed(context) && baseUrl != null && credential != null) {
+                poller.start(baseUrl, credential);
+            } else {
+                poller.stop();
+            }
+        }
+    }
+
     static void setStopOverlayListener(ArmedListener listener) {
         stopOverlayListener = listener;
     }
@@ -93,6 +104,26 @@ final class BridgeControl {
             }
             android.util.Log.w("MiniBridge", "武装状态提交失败：" + failure);
             if (onFailure != null) onFailure.onFailure(failure);
+        });
+    }
+
+    /** 电脑忘记手机后的补报也走同一队列；撤权后排在前面的旧补报不能把桥重新打开。 */
+    static void rearm(Context context, String baseUrl, String credential) {
+        Context app = context.getApplicationContext();
+        if (!isArmed(app)) return;
+        ARM_REQUESTS.execute(() -> {
+            if (!isArmed(app)) return;
+            try {
+                Net.Response response = Net.postJson(baseUrl + "/mini/api/bridge/arm",
+                        "{\"armed\":true}", credential);
+                if (response.isSuccess()) {
+                    android.util.Log.i("MiniBridge", "电脑端不记得这台手机了，已补发一次武装");
+                } else {
+                    android.util.Log.w("MiniBridge", "补发武装失败：HTTP " + response.status);
+                }
+            } catch (Exception err) {
+                android.util.Log.w("MiniBridge", "补发武装失败：" + err.getMessage());
+            }
         });
     }
 
