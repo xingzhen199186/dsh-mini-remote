@@ -738,7 +738,7 @@ public final class MainActivity extends Activity {
             + "btn.textContent=armed?'关闭':'打开';"
             + "var fails=(s&&s.failures)||0;"
             + "hint.textContent=armed"
-            + "?(online?'已连接：电脑能看到这台手机':(fails>=2?'**开着但没连上**：电脑端可能还没更新或重启，正在自动重连':'正在连接电脑…'))"
+            + "?(online?'已连接：电脑能读这台手机的屏幕，也能点它':(fails>=2?'**开着但没连上**：电脑端可能还没更新或重启，正在自动重连':'正在连接电脑…'))"
             + ":'关着时，电脑看不到这台手机';"
             + "}"
             + "function read(){try{paint(JSON.parse(window.MiniBridge.state()||'{}'));}"
