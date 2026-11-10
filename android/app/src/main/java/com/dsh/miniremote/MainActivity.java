@@ -618,6 +618,7 @@ public final class MainActivity extends Activity {
         webView.evaluateJavascript(COMPOSER_STATE_JS, null);
         webView.evaluateJavascript(CONN_SECTION_JS, null);
         webView.evaluateJavascript(UPDATE_UI_JS, null);
+        webView.evaluateJavascript(BACK_UI_JS, null);
         webView.evaluateJavascript(BRIDGE_UI_JS, null);
         webView.evaluateJavascript(
                 "try{eval(" + org.json.JSONObject.quote(PROBE_UI_JS) + ")}catch(e){window.__miniProbeError=String(e)}",
@@ -766,6 +767,35 @@ public final class MainActivity extends Activity {
      * 放在 App 壳里，不改网页：网页版没有"安装包"这回事。
      * 顺序要有讲究——**先比指纹，再决定下不下**，不能一点就下几十兆。
      */
+    /**
+     * 让页面配合"返回手势"：把最上层的浮层关掉（2026-11-10）。
+     *
+     * 顺序是"最上面的先关"：先设置面板，再镜像，最后才是别的。
+     * 没有任何浮层时返回 false，交给系统按原样处理（翻页或退出）。
+     *
+     * 关法不写死具体按钮：先找面板里的"关闭"按钮点它（保持页面自己的状态一致），
+     * 找不到才退而求其次把面板隐藏起来。
+     */
+    private static final String BACK_UI_JS = "(function(){"
+            + "if(window.miniCloseTop)return;"
+            + "function visible(el){return !!el && !el.hasAttribute('hidden') && el.offsetParent!==null;}"
+            + "function closeByText(host){"
+            + "if(!host)return false;"
+            + "var btns=host.querySelectorAll('button,.btn,[role=button]');"
+            + "for(var i=0;i<btns.length;i++){"
+            + "if((btns[i].textContent||'').trim()==='关闭'){btns[i].click();return true;}"
+            + "}"
+            + "return false;"
+            + "}"
+            + "window.miniCloseTop=function(){"
+            + "var settings=document.getElementById('settings');"
+            + "if(visible(settings)){ if(closeByText(settings))return true; settings.setAttribute('hidden',''); return true; }"
+            + "var mirror=document.getElementById('mirror');"
+            + "if(visible(mirror)){ if(closeByText(mirror))return true; mirror.setAttribute('hidden',''); return true; }"
+            + "return false;"
+            + "};"
+            + "})();";
+
     private static final String UPDATE_UI_JS = "(function(){"
             + "if(window.__miniUpdateUi)return;"
             + "var host=document.querySelector('#settings .sheet-body');"
@@ -1972,6 +2002,8 @@ public final class MainActivity extends Activity {
                     webView.evaluateJavascript(
                             "try{eval(" + org.json.JSONObject.quote(PROBE_UI_JS) + ")}catch(e){window.__miniProbeError=String(e)}",
                             null);
+                    // 返回手势那个钩子同样要补一次：第一次注入常常赶在页面稳定前被导航冲掉。
+                    webView.evaluateJavascript(BACK_UI_JS, null);
                 }
             }, 2_000L);
             JSONObject root = new JSONObject();
@@ -2596,13 +2628,31 @@ public final class MainActivity extends Activity {
         }
     }
 
+    /**
+     * 系统返回手势/返回键（2026-11-10）。
+     *
+     * 手机上从边缘往右滑会触发"返回"，但设置面板是我们网页里的一层浮层，
+     * 原来这个手势会直接把页面往回翻甚至退出 App——**看起来像是滑动返回失灵**。
+     * 现在先问页面一句"有没有打开的浮层"，有就关掉，没有才走原来的逻辑。
+     */
     @Override
     public void onBackPressed() {
-        if (webView != null && webView.canGoBack()) {
-            webView.goBack();
-        } else {
+        if (webView == null) {
             super.onBackPressed();
+            return;
         }
+        webView.evaluateJavascript(
+                "(function(){try{return !!(window.miniCloseTop&&window.miniCloseTop());}catch(e){return false;}})()",
+                value -> {
+                    if ("true".equals(value)) {
+                        return; // 页面自己收掉了浮层，这一下返回就到此为止
+                    }
+                    if (webView != null && webView.canGoBack()) {
+                        webView.goBack();
+                    } else {
+                        MainActivity.super.onBackPressed();
+                    }
+                });
     }
 
     @Override
