@@ -25,6 +25,8 @@ final class BridgePoller {
     private volatile long lastOkMs;
     /** 这一代线程是否已经补发过武装，避免每轮都发。 */
     private volatile boolean rearmTried;
+    /** 桥开着时持有的唤醒锁：让 CPU 在屏幕熄灭后别睡太死。 */
+    private android.os.PowerManager.WakeLock wakeLock;
     /** 连续失败后的退避：别在断网时每 5 秒撞一次墙。 */
     private long backoffMs = 5_000;
     /** 有没有见过"已武装"：没见过的第一拍说没武装，多半是武装请求还在路上，不算关。 */
@@ -46,6 +48,45 @@ final class BridgePoller {
         this.onChange = callback;
     }
 
+    /**
+     * 拿一把"部分唤醒锁"（2026-11-10，用户要求）。
+     *
+     * 作用是**屏幕熄灭后 CPU 别睡太死**，长轮询能照常收发。
+     * 要说清它治不了什么：手机进入深度休眠（Doze）时系统会整体断网，
+     * **唤醒锁挡不住那一层**——真要稳，还得把 App 加进电池优化白名单。
+     * 代价是耗电会比自己休眠明显一些，所以只在桥开着的时候持有，关掉就放。
+     */
+    private void acquireWakeLock() {
+        if (context == null || wakeLock != null) {
+            return;
+        }
+        try {
+            android.os.PowerManager pm = (android.os.PowerManager)
+                    context.getSystemService(android.content.Context.POWER_SERVICE);
+            if (pm == null) {
+                return;
+            }
+            wakeLock = pm.newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK, "mini:bridge");
+            wakeLock.setReferenceCounted(false);
+            wakeLock.acquire();
+        } catch (Exception err) {
+            android.util.Log.w("MiniBridge", "拿不到唤醒锁：" + err.getMessage());
+            wakeLock = null;
+        }
+    }
+
+    private void releaseWakeLock() {
+        if (wakeLock == null) {
+            return;
+        }
+        try {
+            wakeLock.release();
+        } catch (Exception ignored) {
+            // 已经放了就放了，不值得为它报错。
+        }
+        wakeLock = null;
+    }
+
     void start(String baseUrl, String credential) {
         synchronized (lifecycle) {
             if (running && java.util.Objects.equals(this.baseUrl, baseUrl)
@@ -56,6 +97,7 @@ final class BridgePoller {
             this.baseUrl = baseUrl;
             this.credential = credential;
             running = true;
+            acquireWakeLock();
             final long token = ++generation;
             rearmTried = false;
             thread = new Thread(() -> run(token), "mini-bridge");
@@ -75,6 +117,7 @@ final class BridgePoller {
     private void stopLocked() {
         generation++;
         running = false;
+        releaseWakeLock();
         online = false;
         lastOkMs = 0;
         failures = 0;
