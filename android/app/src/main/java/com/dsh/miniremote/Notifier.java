@@ -102,9 +102,9 @@ public final class Notifier {
         String text = detail == null ? "" : detail.trim();
         Notification.Builder builder = baseBuilder(appContext, "done")
                 .setContentTitle("DSH 任务完成")
-                .setContentText(text.isEmpty() ? "可以回到电脑上看结果了。" : text)
+                .setContentText(text.isEmpty() ? "可以回到会话里看结果了。" : text)
                 .setStyle(new Notification.BigTextStyle()
-                        .bigText(text.isEmpty() ? "可以回到电脑上看结果了。" : text));
+                        .bigText(text.isEmpty() ? "可以回到会话里看结果了。" : text));
         manager(appContext).notify(notificationId("done"), builder.build());
     }
 
