@@ -172,6 +172,24 @@ public final class Notifier {
      *
      * 安卓 14 起，非闹钟/通话类应用要用户手动允许全屏通知，否则只会是一条普通通知。
      */
+    /**
+     * 本机到底允不允许"全屏通知"（2026-11-10）。
+     *
+     * 安卓 14 起，权限写着 granted 也可能被判成"没资格"——真正的判据是这个查询。
+     * 之前不看它就报"已发全屏通知"，属于老毛病：报告成功、实际没发生。
+     */
+    static boolean canWakeScreen(Context context) {
+        if (android.os.Build.VERSION.SDK_INT < 34) {
+            return true; // 低版本没有这道限制
+        }
+        try {
+            NotificationManager mgr = manager(context);
+            return mgr != null && mgr.canUseFullScreenIntent();
+        } catch (Exception err) {
+            return false;
+        }
+    }
+
     static void showWake(Context context, String text) {
         Context appContext = context.getApplicationContext();
         Intent open = new Intent(appContext, MainActivity.class)

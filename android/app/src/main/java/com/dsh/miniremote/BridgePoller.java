@@ -268,6 +268,14 @@ final class BridgePoller {
             } else if ("phone_wake".equals(tool)) {
                 try {
                     String text = args == null ? "" : args.optString("text", "");
+                    if (!Notifier.canWakeScreen(context)) {
+                        // 如实说"亮不了"，并告诉用户去哪儿开——比报一句假成功有用得多。
+                        report(id, false, "这台手机没允许本应用发「全屏通知」，所以屏幕不会亮。\n"
+                                + "可以这样做：App 设置页点「全屏通知设置」跳过去允许；\n"
+                                + "或者更省事的办法——在系统设置里搜「通知亮屏提示」并打开，"
+                                + "以后收到通知就会自动亮屏（不需要全屏通知）。");
+                        return;
+                    }
                     Notifier.showWake(context, text);
                     report(id, true, "已发全屏通知；手机有锁屏密码时仍需要用户自己解锁");
                 } catch (Exception err) {

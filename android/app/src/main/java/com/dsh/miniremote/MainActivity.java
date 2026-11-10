@@ -2088,6 +2088,41 @@ public final class MainActivity extends Activity {
          * 页面入口未必是标准那个——所以**依次试几个，都不行就退到设置首页**，
          * 界面上写清页面名字让人自己找。假装能一键关掉才是骗人。
          */
+        /** 跳到系统的「全屏通知」授权页（安卓 14 起才有这一页）。 */
+        @android.webkit.JavascriptInterface
+        public void openFullScreenSettings() {
+            runOnUiThread(() -> {
+                if (android.os.Build.VERSION.SDK_INT >= 34) {
+                    try {
+                        Intent intent = new Intent(android.provider.Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT);
+                        intent.setData(android.net.Uri.parse("package:" + getPackageName()));
+                        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                        startActivity(intent);
+                        return;
+                    } catch (Exception ignored) {
+                        // 跳不过去就退到应用详情页，让用户自己找。
+                    }
+                }
+                try {
+                    Intent fallback = new Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
+                    fallback.setData(android.net.Uri.parse("package:" + getPackageName()));
+                    fallback.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                    startActivity(fallback);
+                } catch (Exception ignored) {
+                    toastOnUi("打不开系统设置");
+                }
+            });
+        }
+
+        @android.webkit.JavascriptInterface
+        public boolean canWakeScreen() {
+            return Notifier.canWakeScreen(this_());
+        }
+
+        private android.content.Context this_() {
+            return MainActivity.this;
+        }
+
         @android.webkit.JavascriptInterface
         public void openPrivacySettings() {
             runOnUiThread(() -> {
@@ -2166,6 +2201,17 @@ public final class MainActivity extends Activity {
             + "if(st.running){"
             // 已经开着：什么都不加，免得界面多一行废话
             + "return;}"
+            + "(function wakeEntry(){"
+            + "if(document.getElementById('miniWakeGo'))return;"
+            + "var ok=true;try{ok=probe.canWakeScreen();}catch(e){ok=true;}"
+            + "if(ok)return;"   // 能亮就不打扰
+            + "var w=document.createElement('button');"
+            + "w.id='miniWakeGo';w.className='btn';w.textContent='全屏通知设置';"
+            + "w.style.marginLeft='8px';w.style.whiteSpace='nowrap';"
+            + "w.setAttribute('onclick','MiniProbe.openFullScreenSettings()');"
+            + "var anchor=document.getElementById('miniBridgeHint');"
+            + "if(anchor)anchor.appendChild(w);"
+            + "})();"
             + "if(document.getElementById('miniA11yGo'))return;"
             + "var btn=document.createElement('button');"
             + "btn.id='miniA11yGo';"
