@@ -273,7 +273,13 @@ public final class MiniForegroundService extends Service {
         // 任务不在了就等半分钟收摊：给「跑完了」那条通知留一点时间被人看见。
         if (nowRunning) {
             cancelIdleStop();
-        } else if (idleStop == null) {
+        } else if (idleStop == null && !wantBridge) {
+            /* **桥开着就不能自己收摊**（2026-11-10 真机撞上）。
+             *
+             * 原来这里不看 wantBridge：锁屏把界面收走后，服务接了桥的心跳，但"没有任务在跑"
+             * 三分钟后照旧 stopSelf——于是桥静默死掉，电脑那边从此看不到这台手机。
+             * 表现就是"锁屏一会儿再发通知，发不出去"。
+             */
             idleStop = new Runnable() {
                 @Override
                 public void run() {
