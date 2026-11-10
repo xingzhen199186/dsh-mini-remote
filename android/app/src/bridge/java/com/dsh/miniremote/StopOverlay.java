@@ -64,8 +64,9 @@ final class StopOverlay {
         next.x = dp(10);
         // 竖直放在屏幕中间偏下（2026-11-10 用户反馈）：原来 y=160dp 正好压住
         // 设置页里「手机关/屏幕操作」那几行的按钮，看着像页面上长了个红疙瘩。
-        next.y = Math.max(dp(120),
-                service.getResources().getDisplayMetrics().heightPixels / 2 - dp(24));
+        // 屏幕右侧偏下：竖直落在下方那段（约 2/3 处），从下往上看是"靠右下"的位置
+        //（2026-11-10 用户第三次定位：右上/中间都压内容，右侧偏下最不容易挡）。
+        next.y = Math.round(service.getResources().getDisplayMetrics().heightPixels * 2f / 3f);
         capsule.setOnTouchListener(new View.OnTouchListener() {
             float downX;
             float downY;
