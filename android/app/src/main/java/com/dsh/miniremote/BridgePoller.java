@@ -13,6 +13,9 @@ import org.json.JSONObject;
  * "报活"和"电脑有话要说"两件事，不用另开一条通道。
  */
 final class BridgePoller {
+    /** 弱引用只用于"撤权时停掉所有活跃轮询"，不让已停止的实例被集合拖着。 */
+    private static final java.util.Set<BridgePoller> ACTIVE = java.util.Collections.synchronizedSet(
+            java.util.Collections.newSetFromMap(new java.util.WeakHashMap<>()));
     private volatile boolean running;
     /** 每次启停都换一代：旧线程的迟到响应不能在新一代里执行动作。 */
     private volatile long generation;
@@ -34,8 +37,8 @@ final class BridgePoller {
     /** 第一拍用短请求，别让用户干等一个长轮询周期。 */
     private volatile boolean firstPoll = true;
     private Thread thread;
-    private String baseUrl;
-    private String credential;
+    private volatile String baseUrl;
+    private volatile String credential;
     private Runnable onChange;
     /** 发通知要用它；由 MainActivity 设进来。 */
     private android.content.Context context;
@@ -97,6 +100,7 @@ final class BridgePoller {
             this.baseUrl = baseUrl;
             this.credential = credential;
             running = true;
+            ACTIVE.add(this);
             acquireWakeLock();
             final long token = ++generation;
             rearmTried = false;
@@ -110,7 +114,24 @@ final class BridgePoller {
         synchronized (lifecycle) {
             stopLocked();
         }
+        ACTIVE.remove(this);
         notifyChange();
+    }
+
+    /** 返回撤权前正在用的线路；本机停止不依赖这些线路能否连上。 */
+    static java.util.List<String[]> stopAll() {
+        java.util.List<BridgePoller> pollers;
+        synchronized (ACTIVE) {
+            pollers = new java.util.ArrayList<>(ACTIVE);
+        }
+        java.util.List<String[]> routes = new java.util.ArrayList<>();
+        for (BridgePoller poller : pollers) {
+            if (poller.baseUrl != null && poller.credential != null) {
+                routes.add(new String[]{poller.baseUrl, poller.credential});
+            }
+            poller.stop();
+        }
+        return routes;
     }
 
     /** 必须在 lifecycle 锁里调用；只换代并停线程，不碰回调。 */

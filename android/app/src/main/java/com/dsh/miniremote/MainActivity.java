@@ -2024,20 +2024,9 @@ public final class MainActivity extends Activity {
     /** 手机桥（P2 第一步）：武装开关 + 心跳。整个 Activity 一份。 */
     private final BridgePoller bridgePoller = new BridgePoller();
 
-    /** 武装状态存在壳这边：重启 App 后要记得上次是开着的。 */
-    private static final String BRIDGE_PREF = "mini_bridge_armed";
-    /** 武装请求的序号与锁：只让最后一次操作决定电脑侧状态。 */
-    private long armSeq;
-    private final Object armLock = new Object();
-
+    /** 武装状态由统一控制器读写，设置页与停止胶囊才能看到同一个结果。 */
     private boolean bridgeArmed() {
-        return getSharedPreferences("mini_ui_prefs", MODE_PRIVATE)
-                .getBoolean(BRIDGE_PREF, false);
-    }
-
-    private void setBridgeArmed(boolean armed) {
-        getSharedPreferences("mini_ui_prefs", MODE_PRIVATE)
-                .edit().putBoolean(BRIDGE_PREF, armed).apply();
+        return BridgeControl.isArmed(this);
     }
 
     /**
@@ -2115,32 +2104,12 @@ public final class MainActivity extends Activity {
             // 心跳按"已被关掉"处理、立刻停——界面就永远停在"正在连接电脑"。
             final String base = loadedBase;
             final String cred = credentials == null ? null : credentials.deviceCredential();
-            // 每次开关换一个序号：只让最后一次操作写电脑，旧请求晚到也不许翻盘。
-            final long seq;
-            synchronized (armLock) {
-                seq = ++armSeq;
-                setBridgeArmed(armed);
-            }
-            if (base != null && cred != null) {
-                new Thread(() -> {
-                    try {
-                        Net.Response response = Net.postJson(base + "/mini/api/bridge/arm",
-                                "{\"armed\":" + armed + "}", cred);
-                        if (!response.isSuccess()) {
-                            throw new IllegalStateException("HTTP " + response.status);
-                        }
-                    } catch (Exception err) {
-                        synchronized (armLock) {
-                            if (seq != armSeq) return;
-                            // 失败时本机先停用，不能只凭一个本地布尔值显示“已开启”。
-                            setBridgeArmed(false);
-                        }
-                        applyBridgeArm();
-                        Log.w("MiniBridge", "武装状态提交失败", err);
-                        toastOnUi("手机桥状态提交失败，已在本机停止：" + err.getMessage());
-                    }
-                }, "mini-bridge-arm").start();
-            }
+            // 设置页和停止胶囊共用同一个控制器；离线停止也不会被远端回执翻盘。
+            BridgeControl.setArmed(MainActivity.this, armed, base, cred, message -> {
+                applyBridgeArm();
+                Log.w("MiniBridge", "武装状态提交失败：" + message);
+                toastOnUi("手机桥状态提交失败，已在本机停止：" + message);
+            });
             applyBridgeArm();
             // 注入有时赶在页面真正稳定之前，会被下一次导航清掉（2026-11-09 实测：
             // 探针脚本一次都没执行）。延迟再补一次，脚本自己是幂等的。

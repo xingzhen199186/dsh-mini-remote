@@ -27,6 +27,31 @@ import java.util.concurrent.TimeUnit;
 public final class BridgeAccessibilityService extends AccessibilityService {
     /** 运行中的实例；没开启无障碍时为 null。 */
     private static volatile BridgeAccessibilityService instance;
+    /** 浮层只在服务连接后创建，避免系统尚未 attach 时拿不到 WindowManager。 */
+    private StopOverlay stopOverlay;
+    private final BridgeControl.ArmedListener stopOverlayListener = armed -> syncStopOverlay();
+
+    /** 解锁/锁屏与武装状态共用这一个判据；本方法不尝试亮屏或解锁。 */
+    private void syncStopOverlay() {
+        if (stopOverlay == null) return;
+        android.app.KeyguardManager keyguard = (android.app.KeyguardManager)
+                getSystemService(android.content.Context.KEYGUARD_SERVICE);
+        boolean locked = keyguard != null && keyguard.isKeyguardLocked();
+        if (BridgeControl.isArmed(this) && !locked) {
+            stopOverlay.show();
+        } else {
+            stopOverlay.dismiss();
+        }
+    }
+
+    /** 服务真正离开时同时丢掉 View 与监听器；重复调用也安全。 */
+    private void discardStopOverlay() {
+        BridgeControl.clearStopOverlayListener(stopOverlayListener);
+        if (stopOverlay != null) {
+            stopOverlay.dismiss();
+            stopOverlay = null;
+        }
+    }
 
     /** 上一次 observe 收集到的可点区域，顺序与返回给模型的序号一致。 */
     private static final java.util.List<android.graphics.Rect> lastTargets = new java.util.ArrayList<>();
@@ -45,10 +70,24 @@ public final class BridgeAccessibilityService extends AccessibilityService {
     protected void onServiceConnected() {
         super.onServiceConnected();
         instance = this;
+        stopOverlay = new StopOverlay(this,
+                () -> BridgeControl.setArmed(this, false, null, null, null));
+        BridgeControl.setStopOverlayListener(stopOverlayListener);
+        syncStopOverlay();
+    }
+
+    @Override
+    public boolean onUnbind(android.content.Intent intent) {
+        discardStopOverlay();
+        if (instance == this) {
+            instance = null;
+        }
+        return super.onUnbind(intent);
     }
 
     @Override
     public void onDestroy() {
+        discardStopOverlay();
         if (instance == this) {
             instance = null;
         }
@@ -68,11 +107,17 @@ public final class BridgeAccessibilityService extends AccessibilityService {
                 || type == AccessibilityEvent.TYPE_VIEW_SCROLLED) {
             uiGeneration++;
         }
+        if (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
+            syncStopOverlay();
+        }
     }
 
     @Override
     public void onInterrupt() {
-        // 没有进行中的操作需要清理。
+        // 中断不是撤权：只撤画面，桥的本地状态不变；下一次窗口事件会重新同步。
+        if (stopOverlay != null) {
+            stopOverlay.dismiss();
+        }
     }
 
     /**
