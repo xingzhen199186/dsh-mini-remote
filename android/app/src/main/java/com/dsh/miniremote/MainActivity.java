@@ -608,7 +608,18 @@ public final class MainActivity extends Activity {
                  * 手机上用手指从边缘往右一滑就能关，按钮是多余的。
                  * **只在这里隐藏**，网页版照旧留着——浏览器里没有这个手势。
                  */
-                + "#btnSettingsClose{display:none !important;}";
+                + "#btnSettingsClose{display:none !important;}"
+                /* 设置页页眉改成"左边返回、中间标题"（2026-11-10 用户要求）：
+                 * 手机上从边缘滑一下就能返回，那个位置的按钮改成返回箭头更符合习惯。
+                 * 同样只在 App 里生效——网页版仍是原来的「设置 + 关闭」。
+                 */
+                + ".sheet-head{position:relative !important;}"
+                + ".sheet-head h2{text-align:center !important;flex:1 !important;}"
+                + "#miniBackBtn{position:absolute !important;left:6px !important;top:50% !important;"
+                + "transform:translateY(-50%) !important;background:transparent !important;"
+                + "border:0 !important;color:var(--fg,#1a1a1a) !important;font-size:24px !important;"
+                + "line-height:1 !important;padding:8px 12px !important;cursor:pointer !important;}"
+                + "@media (prefers-color-scheme: dark){#miniBackBtn{color:var(--fg,#eee) !important;}}";
         String js = "(function(){"
                 + "if(document.getElementById('mini-app-only-style'))return;"
                 + "var s=document.createElement('style');"
@@ -624,6 +635,7 @@ public final class MainActivity extends Activity {
         webView.evaluateJavascript(CONN_SECTION_JS, null);
         webView.evaluateJavascript(UPDATE_UI_JS, null);
         webView.evaluateJavascript(BACK_UI_JS, null);
+        webView.evaluateJavascript(SETTINGS_UI_JS, null);
         webView.evaluateJavascript(BRIDGE_UI_JS, null);
         webView.evaluateJavascript(
                 "try{eval(" + org.json.JSONObject.quote(PROBE_UI_JS) + ")}catch(e){window.__miniProbeError=String(e)}",
@@ -781,6 +793,31 @@ public final class MainActivity extends Activity {
      * 关法不写死具体按钮：先找面板里的"关闭"按钮点它（保持页面自己的状态一致），
      * 找不到才退而求其次把面板隐藏起来。
      */
+    /**
+     * 设置页页眉左侧的返回按钮（2026-11-10）。
+     *
+     * 点它就等于点页面原本那个「关闭」——不另写一套关闭逻辑，免得两处行为不一致。
+     * 只在 App 里插；网页版没有这段。
+     */
+    private static final String SETTINGS_UI_JS = "(function(){"
+            + "function mount(){"
+            + "var head=document.querySelector('#settings .sheet-head');"
+            + "if(!head){setTimeout(mount,500);return;}"
+            + "if(document.getElementById('miniBackBtn'))return;"
+            + "var b=document.createElement('button');"
+            + "b.id='miniBackBtn';b.type='button';b.textContent='\u2039';"
+            + "b.setAttribute('aria-label','返回');"
+            + "b.addEventListener('click',function(){"
+            + "var c=document.getElementById('btnSettingsClose');"
+            + "if(c){c.click();return;}"
+            + "var sh=document.getElementById('settings');"
+            + "if(sh)sh.classList.remove('open');"
+            + "});"
+            + "head.insertBefore(b,head.firstChild);"
+            + "}"
+            + "mount();"
+            + "})();";
+
     private static final String BACK_UI_JS = "(function(){"
             + "if(window.miniCloseTop)return;"
             // 注意：固定定位（position:fixed）的元素 offsetParent 恒为 null，
@@ -2011,6 +2048,7 @@ public final class MainActivity extends Activity {
                             null);
                     // 返回手势那个钩子同样要补一次：第一次注入常常赶在页面稳定前被导航冲掉。
                     webView.evaluateJavascript(BACK_UI_JS, null);
+                    webView.evaluateJavascript(SETTINGS_UI_JS, null);
                 }
             }, 2_000L);
             JSONObject root = new JSONObject();
@@ -2465,6 +2503,21 @@ public final class MainActivity extends Activity {
         public void onPageFinished(WebView view, String url) {
             pageReady = true;
             injectAppOnlyStyle();
+            /* 页面连上之后很可能再整页重载一次（鉴权/跳转），
+             * 那样 onPageFinished 里注入的东西会被新文档冲掉——表现就是
+             * 「品牌名没变、设置页样式没生效」。所以隔几秒补几次，页面稳了就自然停。
+             * 2026-11-10 真机撞上：注入全丢，只有接口还在（接口是按 WebView 注册的）。
+             */
+            for (int delay = 2000; delay <= 14000; delay += 3000) {
+                webView.postDelayed(() -> {
+                    if (destroyed || webView == null) {
+                        return;
+                    }
+                    injectAppOnlyStyle();
+                    webView.evaluateJavascript(BACK_UI_JS, null);
+                    webView.evaluateJavascript(SETTINGS_UI_JS, null);
+                }, delay);
+            }
             applyUiPrefs();
             // **页面真正就绪后**再武装一次：注入那一刻往往还没有 base 地址，
             // 那一次会直接跳过；而之后再没有别的时机去启动心跳，于是"开关是开的、
