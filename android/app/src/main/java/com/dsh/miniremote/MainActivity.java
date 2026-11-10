@@ -747,7 +747,16 @@ public final class MainActivity extends Activity {
             + "<div class=\"label\">手机桥</div>"
             + "<div class=\"hint\" id=\"miniBridgeHint\">关着时，电脑看不到这台手机</div>"
             + "</div><div style=\"flex:0 0 auto\"><button class=\"btn\" id=\"miniBridgeBtn\">打开</button></div></div>';"
-            + "host.insertBefore(block,host.firstChild);"
+            // 位置：紧跟在「连接」那一块下面（2026-11-10 用户要求）。
+            // 「连接」是"手机怎么连上电脑"，「手机桥」是"连上之后电脑能做什么"，
+            // 两件事前后脚，放一起才读得顺。连接块还没出来就等它一会儿。
+            + "function place(){"
+            + "var conn=document.getElementById('miniConnBlock');"
+            + "if(!conn){setTimeout(place,500);return;}"
+            + "if(block.previousElementSibling===conn)return;"
+            + "conn.insertAdjacentElement('afterend',block);"
+            + "}"
+            + "place();"
             // 这一行整块去掉了（2026-11-10）：不同手机的入口不一样，常驻提示等于让人自己猜；
             // 改成"真的被系统拦住时"，由 phone_open 的返回直接告诉用户怎么做。
             + "var btn=document.getElementById('miniBridgeBtn');"
