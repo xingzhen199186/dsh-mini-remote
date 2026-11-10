@@ -81,6 +81,7 @@ public final class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        applyWakeIntent(getIntent());
         PairingStore store = new PairingStore(this);
         try {
             credentials = store.load();
@@ -163,6 +164,7 @@ public final class MainActivity extends Activity {
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         setIntent(intent);
+        applyWakeIntent(intent);
         if (intent != null && intent.getBooleanExtra(EXTRA_BACKGROUND_HINT, false)) {
             intent.removeExtra(EXTRA_BACKGROUND_HINT);
             explainBackground(true);
@@ -1007,6 +1009,26 @@ public final class MainActivity extends Activity {
         } catch (Exception ignored) {
             // 连详情页都打不开就什么也不做，别让用户卡在一个空对话框上。
         }
+    }
+
+    /**
+     * 被"亮屏"通知叫起来时（2026-11-10）：
+     * 允许在有锁屏时把自己显示出来，并把熄着的屏幕点亮。
+     *
+     * **只是亮屏 + 显示，不是解锁**——有密码的话仍然停在锁屏上，用户得自己滑开。
+     */
+    private void applyWakeIntent(android.content.Intent intent) {
+        if (intent == null || !intent.getBooleanExtra("wakeup", false)) {
+            return;
+        }
+        if (android.os.Build.VERSION.SDK_INT >= 27) {
+            setShowWhenLocked(true);
+            setTurnScreenOn(true);
+        } else {
+            getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED
+                    | android.view.WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON);
+        }
+        intent.removeExtra("wakeup");
     }
 
     @Override

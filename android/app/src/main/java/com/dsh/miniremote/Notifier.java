@@ -162,6 +162,45 @@ public final class Notifier {
         manager(context.getApplicationContext()).cancel(notificationId("clip:" + callId));
     }
 
+    static final String WAKE_CHANNEL = "wake";
+
+    /**
+     * 全屏通知：把熄着的屏幕点亮，并把 App 带到前台（2026-11-10）。
+     *
+     * 这是安卓唯一"正规"的亮屏通道——闹钟、来电用的就是它。**不能解锁**，
+     * 手机有锁屏密码时仍然停在锁屏上，这是系统的安全底线，不是我们没申请到权限。
+     *
+     * 安卓 14 起，非闹钟/通话类应用要用户手动允许全屏通知，否则只会是一条普通通知。
+     */
+    static void showWake(Context context, String text) {
+        Context appContext = context.getApplicationContext();
+        Intent open = new Intent(appContext, MainActivity.class)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                .putExtra("wakeup", true);
+        int flags = PendingIntent.FLAG_UPDATE_CURRENT
+                | (android.os.Build.VERSION.SDK_INT >= 23 ? PendingIntent.FLAG_IMMUTABLE : 0);
+        PendingIntent pending = PendingIntent.getActivity(appContext, 7101, open, flags);
+
+        NotificationManager mgr = manager(appContext);
+        if (android.os.Build.VERSION.SDK_INT >= 26) {
+            NotificationChannel channel = new NotificationChannel(WAKE_CHANNEL, "唤醒手机",
+                    NotificationManager.IMPORTANCE_HIGH);
+            channel.setDescription("任务需要手机亮屏时使用");
+            channel.setSound(null, null);
+            mgr.createNotificationChannel(channel);
+        }
+        Notification.Builder builder = new Notification.Builder(appContext, WAKE_CHANNEL)
+                .setSmallIcon(R.drawable.ic_notify)
+                .setContentTitle("手机需要亮一下")
+                .setContentText(text == null || text.isEmpty() ? "点开继续" : text)
+                .setStyle(new Notification.BigTextStyle().bigText(text == null ? "点开继续" : text))
+                .setContentIntent(pending)
+                .setFullScreenIntent(pending, true)
+                .setAutoCancel(true)
+                .setCategory(Notification.CATEGORY_ALARM);
+        mgr.notify(notificationId("wake"), builder.build());
+    }
+
     private static Notification.Builder baseBuilder(Context context, String approvalId) {
         createChannel(context);
         Intent open = new Intent(context, MainActivity.class);

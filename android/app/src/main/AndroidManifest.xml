@@ -27,6 +27,11 @@
     <!-- 手机桥 `phone_status` 要报"连的是 Wi-Fi 还是流量"（2026-11-09）。
          漏了这条，真机上整段状态会抛 SecurityException，连电量都一起读不到。 -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!--
+        全屏通知：闹钟/来电那种，能把熄着的屏幕点亮（2026-11-10）。
+        安卓 14 起默认只允许闹钟/通话类应用使用，其余要在系统设置里由用户手动允许。
+    -->
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
 
     <application

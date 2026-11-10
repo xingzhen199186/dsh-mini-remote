@@ -222,6 +222,14 @@ final class BridgePoller {
                 } catch (Exception err) {
                     report(id, false, "通知显示失败：" + err.getMessage());
                 }
+            } else if ("phone_wake".equals(tool)) {
+                try {
+                    String text = args == null ? "" : args.optString("text", "");
+                    Notifier.showWake(context, text);
+                    report(id, true, "已发全屏通知；手机有锁屏密码时仍需要用户自己解锁");
+                } catch (Exception err) {
+                    report(id, false, "唤醒失败：" + err.getMessage());
+                }
             } else if ("phone_screenshot".equals(tool)) {
                 try {
                     Class<?> cls = Class.forName("com.dsh.miniremote.BridgeAccessibilityService");
