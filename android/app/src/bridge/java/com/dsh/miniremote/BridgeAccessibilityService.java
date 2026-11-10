@@ -54,7 +54,19 @@ public final class BridgeAccessibilityService extends AccessibilityService {
         boolean screenOn = power == null || power.isInteractive();
         // 在我们自己的 App 里不显示（2026-11-10 用户反馈）：
         // 这里本来就有手机桥开关，浮层只会挡住「关闭」按钮。
-        boolean mine = getPackageName().equals(foregroundPackage);
+        String front = foregroundPackage;
+        try {
+            android.view.accessibility.AccessibilityNodeInfo root = getRootInActiveWindow();
+            if (root != null && root.getPackageName() != null) {
+                front = root.getPackageName().toString();
+                foregroundPackage = front;
+            }
+        } catch (Exception ignored) {
+            // 读不到就用上一次记录的窗口，和原来一样。
+        }
+        // 在我们自己的 App 里不显示（2026-11-10 用户反馈）：
+        // 这里本来就有手机桥开关，浮层只会挡住「关闭」按钮。
+        boolean mine = getPackageName().equals(front);
         if (BridgeControl.isArmed(this) && !locked && screenOn && !mine) {
             stopOverlay.show();
         } else {
@@ -138,10 +150,14 @@ public final class BridgeAccessibilityService extends AccessibilityService {
         if (event == null) {
             return;
         }
-        if (event.getPackageName() != null) {
+        int type = event.getEventType();
+        // 只认"窗口换了"。内容变化、滚动这类事件也可能来自我们自己在后台的界面，
+        // 用它更新前台包，会让浮层以为"自家 App 在前台"而立刻把自己拆掉
+        //（真机现象：胶囊只活 151 毫秒）。
+        if (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
+                && event.getPackageName() != null) {
             foregroundPackage = event.getPackageName().toString();
         }
-        int type = event.getEventType();
         if (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
                 || type == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED
                 || type == AccessibilityEvent.TYPE_VIEW_SCROLLED) {
