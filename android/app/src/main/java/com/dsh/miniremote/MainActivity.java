@@ -1020,6 +1020,16 @@ public final class MainActivity extends Activity {
         if (poller != null && loadedBase != null) {
             startPolling(loadedBase);
         }
+        // 回到前台：如果刚才有"被系统拦住"的说明没来得及讲，现在弹出来。
+        if (pendingGuide != null) {
+            final String text = pendingGuide;
+            pendingGuide = null;
+            new android.app.AlertDialog.Builder(this)
+                    .setTitle("打开 App 被系统拦住了")
+                    .setMessage(text)
+                    .setPositiveButton("知道了", null)
+                    .show();
+        }
         // 回前台：前台轮询接手，长连接让位——两条同时跑只会重复提醒。
         MiniForegroundService.stop(this);
         // 桥的心跳也从服务手里收回界面这边（2026-11-09 加固）。
@@ -1952,6 +1962,15 @@ public final class MainActivity extends Activity {
     }
 
     /** 按当前武装状态开/停心跳；页面加载完、切线路、开关变化都走这里。 */
+    /**
+     * 等着给用户看的说明（2026-11-10）。
+     *
+     * 被系统拦住的那一刻，前台是别的 App，我们弹窗也看不见——所以先记下来，
+     * 等用户回到我们界面时再弹。**弹出去的东西必须是用户主动回到这里才出现的**，
+     * 不是凭空盖在别人头上。
+     */
+    static volatile String pendingGuide;
+
     /** 心跳上线/掉线时，页面上的状态跟着变。 */
     private void hookBridgeCallback() {
         bridgePoller.attach(this);

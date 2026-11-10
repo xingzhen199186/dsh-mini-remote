@@ -471,7 +471,15 @@ final class BridgePoller {
             String texts = snap.optJSONArray("texts") == null ? "" : snap.optJSONArray("texts").toString();
             boolean blocked = !front.equals(pkg) && (texts.contains("想要打开") || texts.contains("是否允许"));
             if (blocked) {
-                return "已发出打开请求，但被系统拦下了：屏幕上在问「是否允许跳转」。\n"
+                String guide = "系统在问「" + pkg + " 想要打开…是否允许」。\n\n"
+                        + "要么眼下直接点那一屏上的「允许」——这一次就能打开。\n"
+                        + "要么一次性关掉这个提醒：设置 → 隐私 → 其他隐私设置 → 应用自动跳转提醒。\n"
+                        + "不同手机路径不同，找不到就在设置里搜「跳转」。";
+                // 通知：不管用户在看哪个界面都能看到。
+                Notifier.showFromComputer(context, "打开 App 被系统拦住了", "点开看怎么解决（也可以直接点屏幕上的「允许」）");
+                // 弹窗：等用户回到我们界面再弹，不凭空盖在别人头上。
+                MainActivity.pendingGuide = guide;
+                return guide + "\n\n（已发通知提醒用户）\n"
                         + "请用户在系统设置里关掉这个提醒，之后不再问：设置 → 隐私 → 其他隐私设置 → 应用自动跳转提醒。\n"
                         + "不同手机路径不同，找不到就让用户自己在设置里搜「跳转」。\n"
                         + "眼下也可以直接点那一屏上的「允许」，这一次就能打开。";
