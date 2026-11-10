@@ -265,11 +265,8 @@ final class BridgePoller {
                     int index = args == null ? -1 : args.optInt("index", -1);
                     Class<?> cls = Class.forName("com.dsh.miniremote.BridgeAccessibilityService");
                     String json = (String) cls.getDeclaredMethod("tapIndex", int.class).invoke(null, index);
-                    if (json.contains("\"ok\":true")) {
-                        reportRaw(id, true, json);
-                    } else {
-                        reportRaw(id, false, json);
-                    }
+                    // 点完顺手带回一眼，和返回/滑动/输入保持一致。
+                    reportRaw(id, json.contains("\"ok\":true"), withScreen(cls, json));
                 } catch (ClassNotFoundException err) {
                     report(id, false, "这个版本没有点击能力（需要实验版）");
                 } catch (Exception err) {

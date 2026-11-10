@@ -427,6 +427,15 @@ public final class BridgeAccessibilityService extends AccessibilityService {
         }
         android.graphics.Rect rect = lastTargets.get(index);
         String result = tap(rect.centerX(), rect.centerY());
+        if (!result.startsWith("错误")) {
+            // 自己点的这一下会改变界面；刷新快照，让后续序号基于新画面重新算，
+            // 而不是让用户/模型为系统自己的动作付一次"重新观察"的代价。
+            try {
+                observe();
+            } catch (Exception ignored) {
+                // 刷新失败不影响这一下点击的结果。
+            }
+        }
         if (result.startsWith("错误")) {
             return "{\"ok\":false,\"error\":\"" + result.replace("\"", "'") + "\"}";
         }
