@@ -157,6 +157,7 @@ final class BridgePoller {
                     failures++;
                     online = false;
                     android.util.Log.w("MiniBridge", "轮询失败：HTTP " + response.status);
+                    refreshBaseUrlFromPrefs();
                     notifyChange();
                     sleepQuietly(nextBackoff(), token);
                 }
@@ -167,6 +168,7 @@ final class BridgePoller {
                 android.util.Log.w("MiniBridge", "轮询异常", err);
                 failures++;
                 online = false;
+                refreshBaseUrlFromPrefs();
                 notifyChange();
                 sleepQuietly(nextBackoff(), token);
             }
@@ -508,6 +510,30 @@ final class BridgePoller {
                 android.util.Log.w("MiniBridge", "结果回报失败", err);
             }
         }, "mini-bridge-report").start();
+    }
+
+    /**
+     * 连不上几次之后，重读一次"用户上次挑中的地址"（2026-11-10）。
+     *
+     * 后台服务那条心跳是在启动那一刻拿到地址的，之后就不再变；而电脑换端口
+     * （PORT_TRIES 会向后顺延）时，它会一直朝旧地址撞，永远不会自己发现。
+     * 这里只在**真的连不上**时才重读，正常连接不会被打断。
+     */
+    private void refreshBaseUrlFromPrefs() {
+        if (context == null || failures < 3) {
+            return;
+        }
+        try {
+            String latest = Connections.preferred(context);
+            if (latest != null && !latest.isEmpty() && !latest.equals(baseUrl)) {
+                android.util.Log.i("MiniBridge", "换用新地址重连：" + latest);
+                baseUrl = latest;
+                failures = 0;
+                backoffMs = 5_000;
+            }
+        } catch (Exception err) {
+            android.util.Log.w("MiniBridge", "重读地址失败：" + err.getMessage());
+        }
     }
 
     /** 电脑重启后忘了我们（armed=false）时，补发一次本地开关的决定。 */
