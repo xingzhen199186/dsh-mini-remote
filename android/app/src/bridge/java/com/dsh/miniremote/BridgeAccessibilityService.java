@@ -30,6 +30,8 @@ public final class BridgeAccessibilityService extends AccessibilityService {
 
     /** 上一次 observe 收集到的可点区域，顺序与返回给模型的序号一致。 */
     private static final java.util.List<android.graphics.Rect> lastTargets = new java.util.ArrayList<>();
+    /** 与 lastTargets 同序的标签，用来在界面变了之后核对"还是不是同一个控件"。 */
+    private static final java.util.List<String> lastLabels = new java.util.ArrayList<>();
     private static long lastObserveAt;
     private static int lastObserveGeneration;
     /** 界面代次：内容一变就 +1。序号与它绑定，界面变了旧序号立刻失效。 */
@@ -337,6 +339,7 @@ public final class BridgeAccessibilityService extends AccessibilityService {
             // 按完 7+8 它答不出 15，因为显示屏不是可点控件）。输入框与其后代一律不收。
             org.json.JSONArray texts = new org.json.JSONArray();
             lastTargets.clear();
+            lastLabels.clear();
             java.util.ArrayList<android.view.accessibility.AccessibilityNodeInfo> queue = new java.util.ArrayList<>();
             queue.add(root);
             int index = 0;
@@ -379,6 +382,7 @@ public final class BridgeAccessibilityService extends AccessibilityService {
                     android.graphics.Rect rect = new android.graphics.Rect();
                     node.getBoundsInScreen(rect);
                     lastTargets.add(new android.graphics.Rect(rect.left, rect.top, rect.right, rect.bottom));
+                    lastLabels.add(label);
                     item.put("b", rect.left + "," + rect.top + "," + rect.right + "," + rect.bottom);
                     if (editable) item.put("edit", true);
                     if (node.isScrollable()) item.put("scroll", true);
@@ -418,9 +422,21 @@ public final class BridgeAccessibilityService extends AccessibilityService {
         if (lastTargets.isEmpty() || System.currentTimeMillis() - lastObserveAt > 30_000) {
             return "{\"ok\":false,\"error\":\"请先看一眼屏幕（观察一次），序号才有意义\"}";
         }
-        // **界面已经变了**：序号指向的东西已经不是当初那一个，宁可不点。
+        /* 界面变了怎么办（2026-11-10 第二次修）。
+         *
+         * 一刀切拒绝是错的：计算器按下数字后，显示区会异步刷新，代次必然变，
+         * 于是"点 7 成功、点加失败"。但完全不管也不行——真翻页时序号会指到别处。
+         *
+         * 折中：变了就**重新观察一次**，核对同一序号上的控件**标签是否还是那个**；
+         * 一样就照点（说明只是显示刷新），不一样才拒绝。
+         */
         if (lastObserveGeneration != uiGeneration) {
-            return "{\"ok\":false,\"error\":\"界面已经变了（翻页或弹出），请重新观察一次再点\"}";
+            String expected = index < lastLabels.size() ? lastLabels.get(index) : "";
+            observe();
+            String actual = index < lastLabels.size() ? lastLabels.get(index) : null;
+            if (actual == null || !actual.equals(expected)) {
+                return "{\"ok\":false,\"error\":\"界面已经变了，第 " + index + " 个控件已不是原来那个，请重新观察再点\"}";
+            }
         }
         if (index < 0 || index >= lastTargets.size()) {
             return "{\"ok\":false,\"error\":\"没有第 " + index + " 个控件，先重新观察\"}";
