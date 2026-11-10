@@ -79,6 +79,8 @@ final class BridgeControl {
         } else {
             // 活跃轮询可能在界面或后台服务里；撤权时两边都必须停，不能只停当前页面。
             activeRoutes = BridgePoller.stopAll();
+            // 等待确认也属于在途动作：停止桥时不能只清电脑队列而留下手机上的卡。
+            ConfirmationControl.cancelAll();
         }
         List<String[]> routes = routesToNotify(app, armed, baseUrl, credential, activeRoutes);
         if (routes.isEmpty()) return;

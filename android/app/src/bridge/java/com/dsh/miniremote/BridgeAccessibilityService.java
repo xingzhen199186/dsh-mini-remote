@@ -539,6 +539,12 @@ public final class BridgeAccessibilityService extends AccessibilityService {
         return out.toString();
     }
 
+    /** 确认卡需要的是打码后的标签；原始 lastLabels 仍只服务内部定位。 */
+    static String targetLabel(int index) {
+        if (index < 0 || index >= lastLabels.size()) return "";
+        return SensitiveText.mask(lastLabels.get(index));
+    }
+
     /**
      * 按**序号**点一下（P3 的第二个工具，2026-11-09）。
      *

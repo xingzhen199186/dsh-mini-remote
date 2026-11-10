@@ -181,7 +181,9 @@ final class BridgePoller {
                 // 第一拍**不要压 25 秒**：刚打开开关时用户盯着这一行，
                 // 等 25 秒才变"已连接"会让人以为坏了。先问一次立刻回，之后再长轮询。
                 String url = baseUrl + "/mini/api/bridge/poll?protocol=1"
-                        + (firstPoll ? "&wait=0" : "&wait=1");
+                        + (firstPoll ? "&wait=0" : "&wait=1")
+                        // 复用现有轮询上报确认需求；默认档不多任何一次请求。
+                        + "&confirm=" + (ConfirmationControl.needsExtendedDeadline(context) ? "1" : "0");
                 // 读超时要比服务端压的 25 秒更长，否则正常的长轮询会被当成失败。
                 Net.Response response = Net.getLong(url, credential, 35_000);
                 if (!running || generation != token) return;
@@ -271,6 +273,21 @@ final class BridgePoller {
             if (expiresAt <= System.currentTimeMillis()) {
                 report(id, false, "调用已经过期，手机拒绝执行");
                 continue;
+            }
+            // 默认档 request() 直接放行，不建卡、不挂起、不起计时器；剪贴板保留自己的逐次确认。
+            if (!"phone_status".equals(tool) && !"phone_set_clipboard".equals(tool)) {
+                ConfirmationControl.Decision decision = ConfirmationControl.request(context, id,
+                        call.optString("taskId", ""), tool, confirmationTarget(tool, args));
+                if (!decision.allowed) {
+                    reportRaw(id, false, confirmationFailure(decision));
+                    continue;
+                }
+                // 等待可能持续了 30 秒；放行后必须重新确认代次与到期时刻。
+                if (!running || generation != token) return;
+                if (expiresAt <= System.currentTimeMillis()) {
+                    report(id, false, "确认完成时调用已经过期，动作未执行");
+                    continue;
+                }
             }
             if ("phone_notify".equals(tool)) {
                 String title = args == null ? "" : args.optString("title", "");
@@ -411,6 +428,46 @@ final class BridgePoller {
             } else {
                 report(id, false, "这个动作这台手机还不支持：" + tool);
             }
+        }
+    }
+
+    /** 确认卡只拿目标标签，不把输入正文、截图或完整参数摆到别的 App 上。 */
+    private static String confirmationTarget(String tool, org.json.JSONObject args) {
+        if ("phone_open".equals(tool)) return args == null ? "" : args.optString("package", "");
+        if ("phone_notify".equals(tool)) {
+            return SensitiveText.mask(args == null ? "" : args.optString("title", ""));
+        }
+        if ("phone_send_file".equals(tool)) {
+            return SensitiveText.mask(args == null ? "" : args.optString("name", "文件.txt"));
+        }
+        if ("phone_tap".equals(tool) || "phone_input".equals(tool)) {
+            int index = args == null ? -1 : args.optInt("index", -1);
+            try {
+                Class<?> cls = Class.forName("com.dsh.miniremote.BridgeAccessibilityService");
+                String label = (String) cls.getDeclaredMethod("targetLabel", int.class).invoke(null, index);
+                if (label != null && !label.isEmpty()) return label;
+            } catch (Exception ignored) {
+                // 读不到标签就只给序号，不为了画确认卡把原文拿到别处。
+            }
+            return "控件 #" + index;
+        }
+        if ("phone_swipe".equals(tool)) return "向" + (args == null ? "" : args.optString("direction", "")) + "滑动";
+        if ("phone_back".equals(tool)) return "返回键";
+        if ("phone_observe".equals(tool) || "phone_screenshot".equals(tool)) return "当前屏幕";
+        if ("phone_wake".equals(tool)) return "点亮屏幕";
+        return tool;
+    }
+
+    private static String confirmationFailure(ConfirmationControl.Decision decision) {
+        try {
+            org.json.JSONObject out = new org.json.JSONObject();
+            out.put("ok", false);
+            out.put("executed", false);
+            out.put("reason", decision.reason);
+            out.put("error", decision.error);
+            return out.toString();
+        } catch (Exception err) {
+            return "{\"ok\":false,\"executed\":false,\"reason\":\"confirm_error\",\"error\":\"确认失败，动作未执行\"}";
         }
     }
 

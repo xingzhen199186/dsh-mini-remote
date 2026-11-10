@@ -24,7 +24,7 @@ test('A1：内部定位表保留原始标签，模型投影不改序号与坐标
   assert.match(service, /lastTargets\.get\(index\)/)
   assert.match(service, /lastLabels\.get\(index\)/)
   const projectorStart = service.indexOf('private static String maskObserveForModel')
-  const projector = service.slice(projectorStart, service.indexOf('static String tapIndex', projectorStart))
+  const projector = service.slice(projectorStart, service.indexOf('\n    /**', projectorStart))
   assert.doesNotMatch(projector, /item\.put\("i"|item\.put\("b"|lastTargets|lastLabels/)
 })
 
