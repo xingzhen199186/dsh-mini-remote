@@ -284,3 +284,13 @@ test('手机桥：每条调用都带序号与消息号（供手机端挡重放�
   bridge.settle(DEVICE, call.id, { ok: true, result: 'ok' })
   await waiting
 })
+
+test('手机桥：失败时要把手机的原始返回带出来，不能只说一句执行失败', async () => {
+  const bridge = createBridge({ now: () => 0 })
+  bridge.hello(DEVICE, { protocol: 1 })
+  bridge.setArmed(DEVICE, true)
+  const waiting = bridge.call(DEVICE, 'phone_tap', { index: 13 }, 500)
+  const taken = await bridge.poll(DEVICE, { waitMs: 0 })
+  bridge.settle(DEVICE, taken.calls[0].id, { ok: false, result: { ok: false, error: '没有第 13 个控件' } })
+  await assert.rejects(() => waiting, /没有第 13 个控件/)
+})
