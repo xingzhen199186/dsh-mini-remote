@@ -603,7 +603,12 @@ public final class MainActivity extends Activity {
                 + ".mini-brand-session{font-size:11px !important;color:var(--muted,#8a8a8a) !important;"
                 + "white-space:nowrap !important;overflow:hidden !important;text-overflow:ellipsis !important;"
                 + "max-width:46vw !important;}"
-                + "main{padding-bottom:24px !important;overflow-anchor:none !important;}";
+                + "main{padding-bottom:24px !important;overflow-anchor:none !important;}"
+                /* 设置页右上那个「关闭」按钮在 App 里去掉（2026-11-10 用户要求）：
+                 * 手机上用手指从边缘往右一滑就能关，按钮是多余的。
+                 * **只在这里隐藏**，网页版照旧留着——浏览器里没有这个手势。
+                 */
+                + "#btnSettingsClose{display:none !important;}";
         String js = "(function(){"
                 + "if(document.getElementById('mini-app-only-style'))return;"
                 + "var s=document.createElement('style');"
