@@ -20,6 +20,10 @@ final class BridgePoller {
     private volatile boolean online;
     /** 连续失败次数：用来区分"还在连"和"根本连不上"，界面要说得不一样。 */
     private volatile int failures;
+    /** 上一次收到 200 响应的时间；界面用它判断"真的连上了"而不是"以为连上了"。 */
+    private volatile long lastOkMs;
+    /** 这一代线程是否已经补发过武装，避免每轮都发。 */
+    private volatile boolean rearmTried;
     /** 连续失败后的退避：别在断网时每 5 秒撞一次墙。 */
     private long backoffMs = 5_000;
     /** 有没有见过"已武装"：没见过的第一拍说没武装，多半是武装请求还在路上，不算关。 */
@@ -52,6 +56,7 @@ final class BridgePoller {
             this.credential = credential;
             running = true;
             final long token = ++generation;
+            rearmTried = false;
             thread = new Thread(() -> run(token), "mini-bridge");
             thread.setDaemon(true);
             thread.start();
@@ -70,6 +75,7 @@ final class BridgePoller {
         generation++;
         running = false;
         online = false;
+        lastOkMs = 0;
         failures = 0;
         sawArmed = false;
         firstPoll = true;
@@ -79,8 +85,18 @@ final class BridgePoller {
         }
     }
 
+    /**
+     * 真的连上了吗——判据是**最近 45 秒内收到过一次成功响应**，
+     * 不是"服务端说我们已授权"。后者在电脑重启后会一直是 false 却又不报错，
+     * 界面就会显示"已连接"而实际上什么也调不动（2026-11-10 李四审计指出）。
+     */
     boolean isOnline() {
-        return online;
+        return online && System.currentTimeMillis() - lastOkMs < 45_000;
+    }
+
+    /** 开关是开的、但最近没连上：界面要如实说这句话，而不是继续显示"已连接"。 */
+    boolean isStale() {
+        return online && System.currentTimeMillis() - lastOkMs >= 45_000;
     }
 
     int failures() {
@@ -119,12 +135,22 @@ final class BridgePoller {
                     failures = 0;
                     backoffMs = 5_000;
                     online = armed;
+                    lastOkMs = System.currentTimeMillis();
                     notifyChange();
-                    // 武装被关掉（比如在电脑侧关的）就停：没有授权就不该继续问。
-                    if (!armed && sawArmed) {
-                        running = false;
-                    }
-                    if (armed) {
+                    /* **电脑不记得，不等于用户撤权**（2026-11-10）。
+                     *
+                     * 原来这里一旦看到 armed=false 就自己停心跳，而且要人手动拨一次开关才能
+                     * 回来——因为电脑端的武装状态只存在内存里，每次重启电脑就全没了
+                     * （lib/bridge.js 里 entry.armed 是内存字段）。于是"重启电脑"被手机
+                     * 误读成"用户关掉了开关"，整套手机能力静默失效，而界面仍显示"已连接"。
+                     *
+                     * 现在的分工：**停不停只由本地开关决定**；电脑说没武装，手机就补发一次
+                     * 自己的决定（每代只补一次，失败按既有退避重试）。这不等于电脑替用户
+                     * 开权限——补发的仍然是手机本地那个开关的意思。
+                     */
+                    if (!armed) {
+                        rearmIfNeeded(token);
+                    } else {
                         sawArmed = true;
                     }
                 } else {
@@ -482,6 +508,21 @@ final class BridgePoller {
                 android.util.Log.w("MiniBridge", "结果回报失败", err);
             }
         }, "mini-bridge-report").start();
+    }
+
+    /** 电脑重启后忘了我们（armed=false）时，补发一次本地开关的决定。 */
+    private void rearmIfNeeded(long token) {
+        if (rearmTried || baseUrl == null || credential == null) {
+            return;
+        }
+        rearmTried = true;
+        try {
+            String payload = "{\"armed\":true}";
+            Net.postJson(baseUrl + "/mini/api/bridge/arm", payload, credential);
+            android.util.Log.i("MiniBridge", "电脑端不记得这台手机了，已补发一次武装");
+        } catch (Exception err) {
+            android.util.Log.w("MiniBridge", "补发武装失败：" + err.getMessage());
+        }
     }
 
     /** 5s → 10 → 20 → 40 → 60 封顶。断网时不该每 5 秒撞一次。 */
