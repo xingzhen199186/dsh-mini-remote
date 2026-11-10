@@ -2267,45 +2267,44 @@ public final class MainActivity extends Activity {
      * **无障碍没开时，在「手机桥」那一行挂一个「开无障碍」按钮**——它是所有手机操作的前提，
      * 而且普通用户很难自己翻到。
      */
+    /**
+     * 无障碍入口（2026-11-10 第二次改）。
+     *
+     * 第一版只在注入那一刻看一次状态，然后把「开无障碍」按钮和提示一直挂在页面上——
+     * 于是用户自己开好无障碍之后，那行提示还赖着不走。现在改成**每两秒重看一次**：
+     * 开着就撤掉按钮和提示，关着就补上。
+     */
     private static final String PROBE_UI_JS = "try{(function(){"
-            + "if(window.__miniProbeUi)return;"
+            + "if(window.__miniProbeStarted)return;"
             + "var probe=window.MiniProbe;"
             + "if(!probe)return;"
-            + "var st={};try{st=JSON.parse(probe.status()||'{}');}catch(e){return;}"
-            + "if(!st.available)return;"
-            + "window.__miniProbeUi=1;"
-            + "(function mount(){"
+            + "var st0={};try{st0=JSON.parse(probe.status()||'{}');}catch(e){return;}"
+            + "if(!st0.available)return;"
+            + "window.__miniProbeStarted=1;"
+            + "function a11yOn(){try{return JSON.parse(probe.status()||'{}').running===true;}catch(e){return false;}}"
+            + "function paint(){"
             + "var hint=document.getElementById('miniBridgeHint');"
-            + "if(!hint){setTimeout(mount,500);return;}"
-            + "if(st.running){"
-            // 已经开着：什么都不加，免得界面多一行废话
-            + "return;}"
-            + "(function wakeEntry(){"
-            + "if(document.getElementById('miniWakeGo'))return;"
-            + "var ok=true;try{ok=probe.canWakeScreen();}catch(e){ok=true;}"
-            + "if(ok)return;"   // 能亮就不打扰
-            + "var w=document.createElement('button');"
-            + "w.id='miniWakeGo';w.className='btn';w.textContent='全屏通知设置';"
-            + "w.style.marginLeft='8px';w.style.whiteSpace='nowrap';"
-            + "w.setAttribute('onclick','MiniProbe.openFullScreenSettings()');"
-            + "var anchor=document.getElementById('miniBridgeHint');"
-            + "if(anchor)anchor.appendChild(w);"
-            + "})();"
-            + "if(document.getElementById('miniA11yGo'))return;"
-            + "var btn=document.createElement('button');"
-            + "btn.id='miniA11yGo';"
-            + "btn.className='btn';"
-            + "btn.textContent='开无障碍';"
-            + "btn.style.marginLeft='8px';"
-            + "btn.style.whiteSpace='nowrap';"
-            // 行内 onclick：真机上"插进去再绑事件"不生效（2026-11-10 实测）
+            + "if(!hint){setTimeout(paint,500);return;}"
+            + "var on=a11yOn();"
+            + "var btn=document.getElementById('miniA11yGo');"
+            + "var tip=document.getElementById('miniA11yTip');"
+            + "if(on){if(btn)btn.remove();if(tip)tip.remove();return;}"
+            + "if(!btn){"
+            + "btn=document.createElement('button');"
+            + "btn.id='miniA11yGo';btn.className='btn';btn.textContent='开无障碍';"
+            + "btn.style.marginLeft='8px';btn.style.whiteSpace='nowrap';"
             + "btn.setAttribute('onclick','MiniProbe.openSettings()');"
             + "hint.appendChild(btn);"
-            + "var tip=document.createElement('div');"
-            + "tip.className='hint';"
+            + "}"
+            + "if(!tip){"
+            + "tip=document.createElement('div');"
+            + "tip.id='miniA11yTip';tip.className='hint';"
             + "tip.textContent='手机上的操作要先开无障碍：设置 → 辅助功能 → 无障碍 → 找到 DSH 手机桥（实验）';"
             + "hint.parentNode.appendChild(tip);"
-            + "})();"
+            + "}"
+            + "}"
+            + "paint();"
+            + "setInterval(paint,2000);"
             + "})();}catch(e){window.__miniProbeError=String(e&&e.stack||e);}";
 
     /**
