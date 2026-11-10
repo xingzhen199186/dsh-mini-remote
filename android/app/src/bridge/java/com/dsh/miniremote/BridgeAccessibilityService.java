@@ -506,11 +506,37 @@ public final class BridgeAccessibilityService extends AccessibilityService {
             out.put("texts", texts);
             lastObserveAt = System.currentTimeMillis();
             lastObserveGeneration = uiGeneration;
-            return out.toString();
+            return maskObserveForModel(out);
         } catch (Exception err) {
             String message = String.valueOf(err.getMessage()).replace("\"", "'");
             return "{\"ok\":false,\"error\":\"" + message + "\"}";
         }
+    }
+
+    /**
+     * observe 的统一出口：只处理给模型看的 JSON 投影。
+     *
+     * lastTargets / lastLabels 在遍历控件时已经另行保存，这里不碰它们，所以序号、坐标
+     * 与点击定位不因打码改变。以后新增工具只要复用 observe()，就不会绕过这道处理。
+     */
+    private static String maskObserveForModel(org.json.JSONObject out) throws org.json.JSONException {
+        org.json.JSONArray items = out.optJSONArray("items");
+        if (items != null) {
+            for (int i = 0; i < items.length(); i++) {
+                org.json.JSONObject item = items.optJSONObject(i);
+                if (item == null) continue;
+                item.put("t", SensitiveText.mask(item.optString("t", "")));
+                item.put("d", SensitiveText.mask(item.optString("d", "")));
+            }
+        }
+        org.json.JSONArray texts = out.optJSONArray("texts");
+        if (texts != null) {
+            for (int i = 0; i < texts.length(); i++) {
+                String value = texts.optString(i, "");
+                texts.put(i, SensitiveText.mask(value));
+            }
+        }
+        return out.toString();
     }
 
     /**

@@ -786,6 +786,7 @@ public final class MainActivity extends Activity {
             + "<span id=\"miniA11yChev\" aria-hidden=\"true\">\u203a</span></div>"
             + "<div id=\"miniA11yBody\" hidden>"
             + "<div class=\"hint\">允许电脑读取屏幕控件，并按编号点击。</div>"
+            + "<div class=\"hint\" id=\"miniA11yMask\">文字会打码，截图仍是原始画面。</div>"
             + "<div class=\"hint\" id=\"miniA11yPath\">设置 → 辅助功能 → 无障碍 → DSH 手机桥（实验）</div>"
             + "<button class=\"btn\" id=\"miniA11yGo\">开无障碍</button>"
             + "</div></div>';"
