@@ -619,7 +619,18 @@ public final class MainActivity extends Activity {
                 + "transform:translateY(-50%) !important;background:transparent !important;"
                 + "border:0 !important;color:var(--fg,#1a1a1a) !important;font-size:24px !important;"
                 + "line-height:1 !important;padding:8px 12px !important;cursor:pointer !important;}"
-                + "@media (prefers-color-scheme: dark){#miniBackBtn{color:var(--fg,#eee) !important;}}";
+                + "@media (prefers-color-scheme: dark){#miniBackBtn{color:var(--fg,#eee) !important;}}"
+                /* 「屏幕操作（无障碍）」做成手机桥的从属行：缩进 + 左侧一道细线，
+                 * 读起来是"桥的能力之一"，而不是另一件不相干的事（2026-11-10 李四定的版式）。 */
+                + "#miniA11yRow{margin:6px 0 0 10px !important;padding:8px 0 0 10px !important;"
+                + "border-left:2px solid var(--line,#d8dce3) !important;align-items:flex-start !important;gap:12px !important;}"
+                + "#miniA11yRow .label{font-size:13px !important;font-weight:500 !important;}"
+                + "#miniA11yRow .hint{margin-top:4px !important;line-height:1.5 !important;}"
+                + "#miniBridgeBlock{align-items:flex-start !important;gap:12px !important;}"
+                + "#miniBridgeError{margin:4px 0 8px !important;padding:6px 8px !important;"
+                + "border-radius:6px !important;color:#b42318 !important;background:#fff1f0 !important;"
+                + "line-height:1.5 !important;white-space:normal !important;}"
+                + "#miniBridgeError[hidden]{display:none !important;}";
         String js = "(function(){"
                 + "if(document.getElementById('mini-app-only-style'))return;"
                 + "var s=document.createElement('style');"
@@ -637,9 +648,6 @@ public final class MainActivity extends Activity {
         webView.evaluateJavascript(BACK_UI_JS, null);
         webView.evaluateJavascript(SETTINGS_UI_JS, null);
         webView.evaluateJavascript(BRIDGE_UI_JS, null);
-        webView.evaluateJavascript(
-                "try{eval(" + org.json.JSONObject.quote(PROBE_UI_JS) + ")}catch(e){window.__miniProbeError=String(e)}",
-                null);
         applyBridgeArm();
     }
 
@@ -743,18 +751,34 @@ public final class MainActivity extends Activity {
             + "window.__miniBridgeUi=1;"
             + "var block=document.createElement('div');"
             + "block.id='miniBridgeBlock';"
-            + "block.innerHTML='<div class=\"row\"><div>"
+            + "block.className='row';"
+            + "block.innerHTML='<div style=\"flex:1;min-width:0\">"
             + "<div class=\"label\">手机桥</div>"
-            + "<div class=\"hint\" id=\"miniBridgeHint\">关着时，电脑看不到这台手机</div>"
-            + "</div><div style=\"flex:0 0 auto\"><button class=\"btn\" id=\"miniBridgeBtn\">打开</button></div></div>';"
+            + "<div class=\"hint\" id=\"miniBridgeHint\">正在读状态…</div>"
+            + "</div><div style=\"flex:0 0 auto\"><button class=\"btn\" id=\"miniBridgeBtn\">打开</button></div>';"
             // 位置：紧跟在「连接」那一块下面（2026-11-10 用户要求）。
             // 「连接」是"手机怎么连上电脑"，「手机桥」是"连上之后电脑能做什么"，
             // 两件事前后脚，放一起才读得顺。连接块还没出来就等它一会儿。
+            // 错误行：平时隐藏，有具体原因时才出现（不覆盖正常状态）
+            + "var err=document.createElement('div');"
+            + "err.id='miniBridgeError';err.className='hint';err.setAttribute('role','alert');"
+            + "err.setAttribute('hidden','');"
+            // 无障碍：桥的从属能力，做成常驻次级行——**任何状态下都在**，
+            // 只是文字和按钮变。原来开着就整块消失，读者会以为这一项坏了（2026-11-10 李四建议）。
+            + "var a11y=document.createElement('div');"
+            + "a11y.id='miniA11yRow';a11y.className='row';"
+            + "a11y.innerHTML='<div style=\"flex:1;min-width:0\">"
+            + "<div class=\"label\">屏幕操作（无障碍）</div>"
+            + "<div class=\"hint\" id=\"miniA11yHint\">正在读状态…</div>"
+            + "</div><div style=\"flex:0 0 auto\"><button class=\"btn\" id=\"miniA11yGo\">开无障碍</button></div>';"
             + "function place(){"
             + "var conn=document.getElementById('miniConnBlock');"
             + "if(!conn){setTimeout(place,500);return;}"
-            + "if(block.previousElementSibling===conn)return;"
+            + "if(err.previousElementSibling!==block){"
             + "conn.insertAdjacentElement('afterend',block);"
+            + "block.insertAdjacentElement('afterend',err);"
+            + "err.insertAdjacentElement('afterend',a11y);"
+            + "}"
             + "}"
             + "place();"
             // 这一行整块去掉了（2026-11-10）：不同手机的入口不一样，常驻提示等于让人自己猜；
@@ -767,9 +791,24 @@ public final class MainActivity extends Activity {
             + "btn.textContent=armed?'关闭':'打开';"
             + "var fails=(s&&s.failures)||0;"
             + "hint.textContent=armed"
-            + "?(online?'已连接：电脑能读这台手机的屏幕，也能点它':(fails>=2?'**开着但没连上**：电脑端可能还没更新或重启，正在自动重连':'正在连接电脑…'))"
+            + "?(online?'已连接：电脑可以与这台手机收发指令':(fails>=2?'已开启，但还没连上电脑，正在自动重连':'正在连接电脑…'))"
             + ":'关着时，电脑看不到这台手机';"
             + "}"
+            // 无障碍那一行：开着说清能力，关着给路径；任何情况都给一个去设置的入口
+            + "function paintA11y(){"
+            + "var box=document.getElementById('miniA11yHint');"
+            + "var go=document.getElementById('miniA11yGo');"
+            + "if(!box||!go)return;"
+            + "var on=false;"
+            + "try{on=JSON.parse(window.MiniProbe.status()||'{}').running===true;}catch(e){"
+            + "box.textContent='状态读不到（可能刚更新过 App）';go.textContent='去设置';return;}"
+            + "if(on){box.textContent='已开启：电脑能读屏，并按编号点击控件';go.textContent='去设置';}"
+            + "else{box.textContent='未开启：电脑不能读屏或点击。设置 → 辅助功能 → 无障碍 → 找到 DSH 手机桥（实验）';go.textContent='开无障碍';}"
+            + "}"
+            + "var goBtn=document.getElementById('miniA11yGo');"
+            + "if(goBtn){goBtn.setAttribute('onclick','MiniProbe.openSettings()');}"
+            + "paintA11y();"
+            + "setInterval(paintA11y,2000);"
             + "function read(){try{paint(JSON.parse(window.MiniBridge.state()||'{}'));}"
             + "catch(e){var h=document.getElementById('miniBridgeHint');"
             + "if(h)h.textContent='状态读不到（界面与手机可能已断开）';}}"
@@ -2052,9 +2091,6 @@ public final class MainActivity extends Activity {
             // 探针脚本一次都没执行）。延迟再补一次，脚本自己是幂等的。
             webView.postDelayed(() -> {
                 if (webView != null) {
-                    webView.evaluateJavascript(
-                            "try{eval(" + org.json.JSONObject.quote(PROBE_UI_JS) + ")}catch(e){window.__miniProbeError=String(e)}",
-                            null);
                     // 返回手势那个钩子同样要补一次：第一次注入常常赶在页面稳定前被导航冲掉。
                     webView.evaluateJavascript(BACK_UI_JS, null);
                     webView.evaluateJavascript(SETTINGS_UI_JS, null);
@@ -2267,54 +2303,6 @@ public final class MainActivity extends Activity {
         }
     }
 
-    /** 设置页里的「P0 探针」一行：只在 bridge 构建版本里出现。 */
-    /**
-     * 无障碍入口（2026-11-10 改）：原来这里是一整块"P0 探针"，含截图、点一下两个测试按钮。
-     *
-     * 那两个按钮是验证阶段用的脚手架——现在模型自己有截图和点击的通道，留着只会让人分不清
-     * "这按钮给谁点的"。所以整块撤掉，只保留真正需要的那个入口：
-     * **无障碍没开时，在「手机桥」那一行挂一个「开无障碍」按钮**——它是所有手机操作的前提，
-     * 而且普通用户很难自己翻到。
-     */
-    /**
-     * 无障碍入口（2026-11-10 第二次改）。
-     *
-     * 第一版只在注入那一刻看一次状态，然后把「开无障碍」按钮和提示一直挂在页面上——
-     * 于是用户自己开好无障碍之后，那行提示还赖着不走。现在改成**每两秒重看一次**：
-     * 开着就撤掉按钮和提示，关着就补上。
-     */
-    private static final String PROBE_UI_JS = "try{(function(){"
-            + "if(window.__miniProbeStarted)return;"
-            + "var probe=window.MiniProbe;"
-            + "if(!probe)return;"
-            + "var st0={};try{st0=JSON.parse(probe.status()||'{}');}catch(e){return;}"
-            + "if(!st0.available)return;"
-            + "window.__miniProbeStarted=1;"
-            + "function a11yOn(){try{return JSON.parse(probe.status()||'{}').running===true;}catch(e){return false;}}"
-            + "function paint(){"
-            + "var hint=document.getElementById('miniBridgeHint');"
-            + "if(!hint){setTimeout(paint,500);return;}"
-            + "var on=a11yOn();"
-            + "var btn=document.getElementById('miniA11yGo');"
-            + "var tip=document.getElementById('miniA11yTip');"
-            + "if(on){if(btn)btn.remove();if(tip)tip.remove();return;}"
-            + "if(!btn){"
-            + "btn=document.createElement('button');"
-            + "btn.id='miniA11yGo';btn.className='btn';btn.textContent='开无障碍';"
-            + "btn.style.marginLeft='8px';btn.style.whiteSpace='nowrap';"
-            + "btn.setAttribute('onclick','MiniProbe.openSettings()');"
-            + "hint.appendChild(btn);"
-            + "}"
-            + "if(!tip){"
-            + "tip=document.createElement('div');"
-            + "tip.id='miniA11yTip';tip.className='hint';"
-            + "tip.textContent='手机上的操作要先开无障碍：设置 → 辅助功能 → 无障碍 → 找到 DSH 手机桥（实验）';"
-            + "hint.parentNode.appendChild(tip);"
-            + "}"
-            + "}"
-            + "paint();"
-            + "setInterval(paint,2000);"
-            + "})();}catch(e){window.__miniProbeError=String(e&&e.stack||e);}";
 
     /**
      * 发一条通知（2026-11-09）。
