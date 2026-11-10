@@ -109,6 +109,20 @@ public final class Notifier {
     }
 
     /**
+     * 锁屏时电脑要操作手机：只发一条**不含内容**的提醒（2026-11-10）。
+     *
+     * 不写是什么动作、不写目标——锁屏通知会在通知栏和息屏界面露出文字，谁站在旁边都能看见。
+     * 这里也不尝试亮屏或解锁，让用户自己决定要不要看。
+     */
+    static void showConfirmHint(Context context) {
+        Context appContext = context.getApplicationContext();
+        Notification.Builder builder = baseBuilder(appContext, "confirm-hint")
+                .setContentTitle("电脑想操作手机，需要你确认")
+                .setContentText("解锁后打开这个提醒即可看到。");
+        manager(appContext).notify(notificationId("confirm-hint"), builder.build());
+    }
+
+    /**
      * 电脑主动发来的一条通知（2026-11-09，`phone_notify`）。
      *
      * 和「任务完成」那条分开：标题要用**电脑给的那个**，不能一律写死成"DSH 任务完成"——

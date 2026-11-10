@@ -46,6 +46,12 @@ final class ConfirmationControl {
             this.mode = mode;
             this.deadline = deadline;
         }
+
+        /** 卡上这句解释“这次问了之后还算不算数”，避免用户以为按了允许就永久放行。 */
+        String modeText() {
+            if (ConfirmationState.TASK.equals(mode)) return "只影响本轮任务，下一轮会重新询问。";
+            return "每执行一次都会问一次。";
+        }
     }
 
     static final class Decision {

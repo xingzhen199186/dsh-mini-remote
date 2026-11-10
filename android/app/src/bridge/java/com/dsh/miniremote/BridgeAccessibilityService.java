@@ -29,6 +29,34 @@ public final class BridgeAccessibilityService extends AccessibilityService {
     private static volatile BridgeAccessibilityService instance;
     /** 浮层只在服务连接后创建，避免系统尚未 attach 时拿不到 WindowManager。 */
     private StopOverlay stopOverlay;
+    private ConfirmOverlay confirmOverlay;
+    /**
+     * 锁屏时不亮屏、不解锁：卡片根本画不出来，只发一条不含内容的通知。
+     * 30 秒仍照算——人没看到提示就当作没有回答。
+     */
+    private final ConfirmationControl.CardListener confirmListener = new ConfirmationControl.CardListener() {
+        @Override
+        public void onCard(ConfirmationControl.Card card) {
+            boolean locked = false;
+            try {
+                android.app.KeyguardManager keyguard = (android.app.KeyguardManager)
+                        getSystemService(android.content.Context.KEYGUARD_SERVICE);
+                locked = keyguard != null && keyguard.isKeyguardLocked();
+            } catch (Exception ignored) {
+                // 读不到锁屏状态时按“没锁”处理，卡片照常显示。
+            }
+            if (locked) {
+                Notifier.showConfirmHint(BridgeAccessibilityService.this);
+                return;
+            }
+            if (confirmOverlay != null) confirmOverlay.show(card, this);
+        }
+
+        @Override
+        public void onCardClosed() {
+            if (confirmOverlay != null) confirmOverlay.dismiss();
+        }
+    };
     /** 当前前台是谁：用来判断"要不要在自己的界面上盖一个停止键"。 */
     private volatile String foregroundPackage;
     private final BridgeControl.ArmedListener stopOverlayListener = armed -> syncStopOverlay();
@@ -86,6 +114,11 @@ public final class BridgeAccessibilityService extends AccessibilityService {
             screenReceiverRegistered = false;
         }
         BridgeControl.clearStopOverlayListener(stopOverlayListener);
+        ConfirmationControl.clearCardListener(confirmListener);
+        if (confirmOverlay != null) {
+            confirmOverlay.dismiss();
+            confirmOverlay = null;
+        }
         if (stopOverlay != null) {
             stopOverlay.dismiss();
             stopOverlay = null;
@@ -112,6 +145,8 @@ public final class BridgeAccessibilityService extends AccessibilityService {
         stopOverlay = new StopOverlay(this,
                 () -> BridgeControl.setArmed(this, false, null, null, null));
         BridgeControl.setStopOverlayListener(stopOverlayListener);
+        confirmOverlay = new ConfirmOverlay(this);
+        ConfirmationControl.setCardListener(confirmListener);
         android.content.IntentFilter filter = new android.content.IntentFilter();
         filter.addAction(android.content.Intent.ACTION_SCREEN_ON);
         filter.addAction(android.content.Intent.ACTION_SCREEN_OFF);

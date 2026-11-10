@@ -787,6 +787,15 @@ public final class MainActivity extends Activity {
             + "<div id=\"miniA11yBody\" hidden>"
             + "<div class=\"hint\">允许电脑读取屏幕控件，并按编号点击。</div>"
             + "<div class=\"hint\" id=\"miniA11yMask\">文字会打码，截图仍是原始画面。</div>"
+            // 确认档放在能力说明之后、按钮之前（2026-11-10 用户指定位置）：
+            // 先知道“它能做什么、文字会打码”，再决定“每次要不要先问我”。
+            + "<div class=\"hint\" id=\"miniConfirmLabel\">电脑操作手机前：</div>"
+            + "<div class=\"hint\" id=\"miniConfirmRow\">"
+            + "<button class=\"btn\" id=\"miniConfirmOff\">始终免确认</button>"
+            + "<button class=\"btn\" id=\"miniConfirmTask\">本任务免确认</button>"
+            + "<button class=\"btn\" id=\"miniConfirmEach\">每次都问</button>"
+            + "</div>"
+            + "<div class=\"hint\" id=\"miniConfirmHint\"></div>"
             + "<div class=\"hint\" id=\"miniA11yPath\">设置 → 辅助功能 → 无障碍 → DSH 手机桥（实验）</div>"
             + "<button class=\"btn\" id=\"miniA11yGo\">开无障碍</button>"
             + "</div></div>';"
@@ -850,6 +859,28 @@ public final class MainActivity extends Activity {
             + "setOpen(window.__miniA11yOpen===true);"
             + "var goBtn=document.getElementById('miniA11yGo');"
             + "if(goBtn){goBtn.setAttribute('onclick','MiniProbe.openSettings()');}"
+            // 档位：三个按钮常驻，当前选中只在这里标出来；收起态不塞状态词（用户要求）。
+            + "function paintConfirm(){"
+            + "var mode='off';"
+            + "try{mode=(JSON.parse(window.MiniProbe.confirmMode()||'{}').mode)||'off';}catch(e){}"
+            + "var map={off:'miniConfirmOff',task:'miniConfirmTask',each:'miniConfirmEach'};"
+            + "for(var k in map){var b=document.getElementById(map[k]);"
+            + "if(b){b.style.fontWeight=(k===mode?'700':'400');"
+            + "b.style.opacity=(k===mode?'1':'0.65');}}"
+            + "var hint=document.getElementById('miniConfirmHint');"
+            + "if(hint){hint.textContent=mode==='off'?'电脑操作手机时不打扰你。'"
+            + ":(mode==='task'?'同一轮任务只问一次，下一轮重新问。':'每个动作都会先问一次。');}"
+            + "}"
+            + "window.__miniPickConfirm=function(mode){"
+            + "try{window.MiniProbe.confirmMode(mode);}catch(e){}"
+            + "paintConfirm();};"
+            + "var offBtn=document.getElementById('miniConfirmOff');"
+            + "var taskBtn=document.getElementById('miniConfirmTask');"
+            + "var eachBtn=document.getElementById('miniConfirmEach');"
+            + "if(offBtn)offBtn.setAttribute('onclick',\"window.__miniPickConfirm('off')\");"
+            + "if(taskBtn)taskBtn.setAttribute('onclick',\"window.__miniPickConfirm('task')\");"
+            + "if(eachBtn)eachBtn.setAttribute('onclick',\"window.__miniPickConfirm('each')\");"
+            + "paintConfirm();"
             + "paintA11y();"
             + "setInterval(paintA11y,2000);"
             + "function read(){try{paint(JSON.parse(window.MiniBridge.state()||'{}'));}"
@@ -2198,6 +2229,26 @@ public final class MainActivity extends Activity {
                 }
             }
             return out.toString();
+        }
+
+        @android.webkit.JavascriptInterface
+        public String confirmMode() {
+            try {
+                JSONObject out = new JSONObject();
+                out.put("mode", ConfirmationControl.selectedMode(MainActivity.this));
+                return out.toString();
+            } catch (JSONException err) {
+                return "{\"mode\":\"off\"}";
+            }
+        }
+
+        /**
+         * 切档只写设置，**不打断正在跑的那一轮**（2026-11-10 用户要求）：
+         * 新档位从下一个任务编号开始生效，手机侧 ConfirmationState 会一直用旧档跑完当前轮。
+         */
+        @android.webkit.JavascriptInterface
+        public void confirmMode(String mode) {
+            ConfirmationControl.setSelectedMode(MainActivity.this, mode);
         }
 
         @android.webkit.JavascriptInterface
