@@ -778,7 +778,9 @@ public final class MainActivity extends Activity {
      */
     private static final String BACK_UI_JS = "(function(){"
             + "if(window.miniCloseTop)return;"
-            + "function visible(el){return !!el && !el.hasAttribute('hidden') && el.offsetParent!==null;}"
+            // 注意：固定定位（position:fixed）的元素 offsetParent 恒为 null，
+            // 用它是查不出"看得见"的——第一版就这么写错了，结果返回手势照样退出 App。
+            + "function visible(el){return !!el && !el.hasAttribute('hidden') && el.getClientRects().length>0;}"
             + "function closeByText(host){"
             + "if(!host)return false;"
             + "var btns=host.querySelectorAll('button,.btn,[role=button]');"
