@@ -37,14 +37,19 @@ test('A2：本任务档多一个「允许本任务」，每次档没有', () => 
   assert.match(control, /只影响本轮任务/)
 })
 
-test('A2：锁屏只发不含内容的通知，不亮屏不解锁', () => {
+test('A2：锁屏只发不含内容的通知，解锁后补摆仍在等的卡', () => {
   assert.match(service, /isKeyguardLocked\(\)/)
   assert.match(service, /Notifier\.showConfirmHint\(BridgeAccessibilityService\.this\)/)
+  // 通知说要解锁后能看，就必须真的有东西补出来，否则这句承诺是空的。
+  assert.match(service, /ConfirmationControl\.currentCard\(\)/)
+  assert.match(service, /showPendingCardIfAny\(\)/)
+  assert.match(service, /ACTION_USER_PRESENT/)
+  assert.match(service, /Notifier\.cancelConfirmHint/)
   const start = notifier.indexOf('static void showConfirmHint')
   const rest = notifier.slice(start + 'static void showConfirmHint'.length)
   const body = rest.slice(0, rest.indexOf('\n    /**'))
   assert.doesNotMatch(body, /card\.|target|标题|package|\.text\b/, '锁屏通知不写动作内容')
-  assert.doesNotMatch(service, /screenOn.*showConfirmHint|wakeUp|disableKeyguard/)
+  assert.doesNotMatch(service, /wakeUp|disableKeyguard|FLAG_SHOW_WHEN_LOCKED/)
 })
 
 test('A2：档位入口在屏幕操作展开区，位于按钮之前，收起态不带状态词', () => {

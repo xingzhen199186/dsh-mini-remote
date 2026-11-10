@@ -122,6 +122,15 @@ public final class Notifier {
         manager(appContext).notify(notificationId("confirm-hint"), builder.build());
     }
 
+    /** 卡已经结束（答了或超时）时把锁屏提示一起撤掉，别让通知栏留一条已经作废的提醒。 */
+    static void cancelConfirmHint(Context context) {
+        try {
+            manager(context.getApplicationContext()).cancel(notificationId("confirm-hint"));
+        } catch (Exception ignored) {
+            // 通知服务不可用时撤不掉也不影响动作结果。
+        }
+    }
+
     /**
      * 电脑主动发来的一条通知（2026-11-09，`phone_notify`）。
      *

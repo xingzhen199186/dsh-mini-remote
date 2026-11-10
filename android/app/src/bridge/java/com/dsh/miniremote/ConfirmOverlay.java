@@ -127,6 +127,11 @@ final class ConfirmOverlay {
         }
     }
 
+    /** 卡是否正摆在屏幕上；补摆时用它避免反复重建造成闪动。 */
+    boolean isShowing() {
+        return view != null;
+    }
+
     private int dp(int value) {
         return Math.round(value * service.getResources().getDisplayMetrics().density);
     }

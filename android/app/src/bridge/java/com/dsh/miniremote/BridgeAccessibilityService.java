@@ -49,12 +49,14 @@ public final class BridgeAccessibilityService extends AccessibilityService {
                 Notifier.showConfirmHint(BridgeAccessibilityService.this);
                 return;
             }
+            // 解锁后窗口一变也补摆一次，不必非等到下一条系统广播。
             if (confirmOverlay != null) confirmOverlay.show(card, this);
         }
 
         @Override
         public void onCardClosed() {
             if (confirmOverlay != null) confirmOverlay.dismiss();
+            Notifier.cancelConfirmHint(BridgeAccessibilityService.this);
         }
     };
     /** 当前前台是谁：用来判断"要不要在自己的界面上盖一个停止键"。 */
@@ -68,8 +70,27 @@ public final class BridgeAccessibilityService extends AccessibilityService {
         @Override
         public void onReceive(android.content.Context context, android.content.Intent intent) {
             syncStopOverlay();
+            // 锁屏时只发了通知、没摆卡；解锁这一刻把仍在等的那张补出来，
+            // 否则通知承诺的"解锁后能看到"就是一句空话，动作必然白等到超时。
+            showPendingCardIfAny();
         }
     };
+
+    /** 锁屏期间攒下的那张卡，在解锁后补摆出来；没有在等卡就什么都不做。 */
+    private void showPendingCardIfAny() {
+        ConfirmationControl.Card waiting = ConfirmationControl.currentCard();
+        if (waiting == null || confirmOverlay == null || confirmOverlay.isShowing()) return;
+        boolean locked;
+        try {
+            android.app.KeyguardManager keyguard = (android.app.KeyguardManager)
+                    getSystemService(android.content.Context.KEYGUARD_SERVICE);
+            locked = keyguard != null && keyguard.isKeyguardLocked();
+        } catch (Exception err) {
+            locked = false;
+        }
+        if (locked) return;
+        confirmOverlay.show(waiting, confirmListener);
+    }
 
     /** 解锁/锁屏与武装状态共用这一个判据；本方法不尝试亮屏或解锁。 */
     private void syncStopOverlay() {
@@ -201,6 +222,8 @@ public final class BridgeAccessibilityService extends AccessibilityService {
         if (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
                 || type == AccessibilityEvent.TYPE_WINDOWS_CHANGED) {
             syncStopOverlay();
+            // 解锁或切回前台时也补摆一次，不依赖某一条广播一定到。
+            showPendingCardIfAny();
         }
     }
 
