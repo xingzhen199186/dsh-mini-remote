@@ -2497,6 +2497,7 @@ public final class MainActivity extends Activity {
          * @param expectedSha256 查询更新时服务端给的指纹；**残包按它命名**，下完按它校验。
          *        这样"同一个文件"一定对应同一份内容，不会把别的版本的残段拼进来。
          */
+        @android.webkit.JavascriptInterface
         public void install(String path, double totalBytes, String expectedSha256) {
             if (downloading) {
                 // 连点两次不该起两条下载线程写同一文件。
