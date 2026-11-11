@@ -30,6 +30,7 @@ final class ConfirmationControl {
 
     private static final String PREFS = "mini_ui_prefs";
     private static final String MODE = "phone_confirm_mode";
+    private static final String AUTO_OFF_TASK = "phone_auto_off_task";
     /**
      * 已经放行的任务编号（2026-11-11）。
      *
@@ -190,7 +191,23 @@ final class ConfirmationControl {
         // 只要不进等待，那条路径就不可能再被堵住。
         if (!SUPPORTED) return allow();
         final Context app = context.getApplicationContext();
+        // 上一轮若被"第一次允许后自动免确认"切到了 OFF，新一轮开始就切回本任务档。
+        String autoOffTask = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .getString(AUTO_OFF_TASK, null);
+        if (autoOffTask != null && !autoOffTask.isEmpty() && !autoOffTask.equals(taskId)) {
+            setSelectedMode(app, ConfirmationState.TASK);
+            app.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().remove(AUTO_OFF_TASK).apply();
+        }
         final String selected = selectedMode(app);
+        // 诊断（2026-11-11）：把"读到的档位 / 算出的 mode / 授权是否还在"落到文件，
+        // 否则"本任务免确认退化成每次都问"只能靠猜。
+        try {
+            java.io.File f = new java.io.File(app.getFilesDir(), "confirm-debug.log");
+            String line = selected + " | task=" + taskId + " | mode=" + state.modeForTask(taskId, selected)
+                    + " | granted=" + state.taskGranted(taskId) + "\n";
+            java.nio.file.Files.write(f.toPath(), line.getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                    java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.APPEND);
+        } catch (Exception ignored) { }
         // 默认档的快路径：不读任务状态、不建卡、不起计时，直接和今天完全一样。
         if (ConfirmationState.OFF.equals(selected) && !state.needsExtendedDeadline(selected)) {
             return allow();
@@ -282,6 +299,13 @@ final class ConfirmationControl {
             if (allow && grantTask && current.card.mode == ConfirmationState.TASK) {
                 state.grantCurrentTask(current.card.taskId);
                 granted = true;
+                /* 用户定的方式（2026-11-11）：第一次允许后直接免确认，
+                 * 但**记下这是自动切的、属于哪一轮**——下一轮任务编号一变就自动切回来，
+                 * 这样"不再被每步打扰"和"每轮重新问"两件事都在。
+                 */
+                setSelectedMode(current.app, ConfirmationState.OFF);
+                current.app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                        .edit().putString(AUTO_OFF_TASK, current.card.taskId).apply();
             }
             target = current;
             outcome = allow ? allow() : failure("user_rejected", "用户拒绝了这次操作，动作未执行");
