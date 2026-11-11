@@ -29,6 +29,7 @@ public class TermuxResultService extends IntentService {
             String stdout = "";
             String stderr = "";
             Integer exitCode = null;
+            String lastErr = "";
 
             for (String key : intent.getExtras().keySet()) {
                 Object value = intent.getExtras().get(key);
@@ -38,9 +39,13 @@ public class TermuxResultService extends IntentService {
                         Object v = inner.get(k);
                         String text = v == null ? "null" : String.valueOf(v);
                         if (raw.length() < 4000) raw.append(k).append(" = ").append(text).append('\n');
-                        if (k.endsWith("_STDOUT")) stdout = text;
-                        else if (k.endsWith("_STDERR")) stderr = text;
-                        else if (k.endsWith("_EXIT_CODE") && v instanceof Integer) exitCode = (Integer) v;
+                        // 真机确认过的名字就是 stdout / stderr / errmsg / *_original_length。
+                        // 但版本之间可能带前缀，所以用"包含"来判断；带 length 的是长度，跳过。
+                        String lower = k.toLowerCase();
+                        if (lower.contains("stdout") && !lower.contains("length")) stdout = text;
+                        else if (lower.contains("stderr") && !lower.contains("length")) stderr = text;
+                        else if (lower.contains("exit") && v instanceof Integer) exitCode = (Integer) v;
+                        else if (lower.contains("errmsg")) lastErr = text;
                     }
                 }
             }
@@ -50,6 +55,7 @@ public class TermuxResultService extends IntentService {
             out.put("stdout", stdout);
             out.put("stderr", stderr);
             if (exitCode != null) out.put("exitCode", exitCode);
+            if (!lastErr.isEmpty()) out.put("termuxError", lastErr);
             // 第一次联调要看的原始键值；解析稳定之后这一行可以不留。
             out.put("raw", raw.toString());
             TermuxRun.deliver(id, out.toString());

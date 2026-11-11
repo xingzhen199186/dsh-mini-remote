@@ -68,7 +68,7 @@ final class TermuxRun {
         // 用 $PREFIX 下的 bash 跑 -c，这样支持管道、重定向这些日常写法。
         intent.putExtra(EXTRA_COMMAND_PATH, "$PREFIX/bin/bash");
         intent.putExtra(EXTRA_ARGUMENTS, new String[]{"-c", command});
-        intent.putExtra(EXTRA_WORKDIR, "~");
+        // 不传工作目录：默认就是 Termux 的家目录。传 "~" 会被当成字面量 "/~" 而不存在。
         intent.putExtra(EXTRA_BACKGROUND, true);
         intent.putExtra(EXTRA_SESSION_ACTION, "0");
         intent.putExtra(EXTRA_LABEL, "电脑请求执行命令");
