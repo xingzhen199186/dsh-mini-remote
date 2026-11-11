@@ -30,6 +30,8 @@ final class ConfirmationControl {
 
     private static final String PREFS = "mini_ui_prefs";
     private static final String MODE = "phone_confirm_mode";
+    /** 内部临时档位：用户点过"允许"之后用它压住提问，**不反映到界面按钮上**。 */
+    private static final String EFFECTIVE = "phone_confirm_effective";
     /** 被"允许一次后切免确认"临时改过的会话；用户发来新指令时切回提问档。 */
     private static final String AUTO_OFF_TASK = "phone_auto_off_session";
     /**
@@ -145,19 +147,30 @@ final class ConfirmationControl {
     private ConfirmationControl() {
     }
 
-    static String selectedMode(Context context) {
-        // 关掉期间**不看已存储的档位**：有人之前存过 each/task 也一样当 off
-        // （否则升级后行为会跟界面说明不一致，用户以为已经不用确认了，实际还在等）。
-        if (!SUPPORTED) return ConfirmationState.OFF;
+    /** 界面显示用：**永远是用户自己选的那一档**，不受内部临时状态影响。 */
+    static String chosenMode(Context context) {
         return ConfirmationState.normalize(context.getApplicationContext()
                 .getSharedPreferences(PREFS, Context.MODE_PRIVATE)
                 .getString(MODE, ConfirmationState.OFF));
     }
 
+    static String selectedMode(Context context) {
+        // 关掉期间**不看已存储的档位**：有人之前存过 each/task 也一样当 off
+        // （否则升级后行为会跟界面说明不一致，用户以为已经不用确认了，实际还在等）。
+        if (!SUPPORTED) return ConfirmationState.OFF;
+        android.content.SharedPreferences prefs =
+                context.getApplicationContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+        String effective = prefs.getString(EFFECTIVE, null);
+        if (effective != null) return ConfirmationState.normalize(effective);
+        return ConfirmationState.normalize(prefs.getString(MODE, ConfirmationState.OFF));
+    }
+
     /** 只改下一轮使用的档位；当前任务仍由 ConfirmationState 里那份固定档位回答。 */
     static void setSelectedMode(Context context, String mode) {
         context.getApplicationContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-                .edit().putString(MODE, ConfirmationState.normalize(mode)).apply();
+                .edit().putString(MODE, ConfirmationState.normalize(mode))
+                // 用户亲手改档位：内部临时状态作废，以他选的为准。
+                .remove(EFFECTIVE).apply();
     }
 
     static boolean needsExtendedDeadline(Context context) {
@@ -314,7 +327,9 @@ final class ConfirmationControl {
                  * 但**记下这是自动切的、属于哪一轮**——下一轮任务编号一变就自动切回来，
                  * 这样"不再被每步打扰"和"每轮重新问"两件事都在。
                  */
-                setSelectedMode(current.app, ConfirmationState.OFF);
+                // 只压**内部**档位：界面上的按钮仍显示用户选的"本任务免确认"。
+                current.app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                        .edit().putString(EFFECTIVE, ConfirmationState.OFF).apply();
                 // 记**会话**而不是轮次：轮次每一步都会变，按它比对永远对不上。
                 current.app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
                         .edit().putString(AUTO_OFF_TASK, sessionOfTask(current.card.taskId)).apply();
@@ -459,8 +474,8 @@ final class ConfirmationControl {
             String autoOff = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
                     .getString(AUTO_OFF_TASK, null);
             if (autoOff == null || !autoOff.equals(sessionId)) return;
-            setSelectedMode(app, ConfirmationState.TASK);
-            app.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().remove(AUTO_OFF_TASK).apply();
+            app.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+                    .remove(EFFECTIVE).remove(AUTO_OFF_TASK).apply();
         }
     }
 

@@ -29,7 +29,8 @@ test('手机按会话切回，不按轮次（轮次每步都变）', () => {
   const control = raw.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')
   assert.match(control, /sessionOfTask\(current\.card\.taskId\)/)
   assert.match(control, /autoOff\.equals\(sessionId\)/)
-  assert.match(control, /setSelectedMode\(app, ConfirmationState\.TASK\)/)
+  // 切回不是改用户的选择，而是清掉内部临时档位——界面按钮始终显示用户选的那一档。
+  assert.match(control, /remove\(EFFECTIVE\)\.remove\(AUTO_OFF_TASK\)/)
 })
 
 test('档位是字符串，必须用 equals 比较（== 只会比对象）', () => {

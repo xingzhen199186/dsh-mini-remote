@@ -2278,7 +2278,9 @@ public final class MainActivity extends Activity {
         public String confirmMode() {
             try {
                 JSONObject out = new JSONObject();
-                out.put("mode", ConfirmationControl.selectedMode(MainActivity.this));
+                // 界面按钮只反映**用户自己选的那一档**。点过"允许"之后内部会临时压成
+                // 免确认，但那不该让按钮跳走（2026-11-11 用户要求）。
+                out.put("mode", ConfirmationControl.chosenMode(MainActivity.this));
                 return out.toString();
             } catch (JSONException err) {
                 return "{\"mode\":\"off\"}";
