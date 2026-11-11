@@ -19,3 +19,14 @@ test('停止浮层只在"正在操作手机"时出现', () => {
   const poller = read('android/app/src/main/java/com/dsh/miniremote/BridgePoller.java')
   assert.match(poller, /TaskState\.busy = root\.optBoolean\("busy"/)
 })
+
+test('只有动界面/看屏幕的动作才算操作手机', () => {
+  const bridge = read('lib/bridge.js')
+  const listed = bridge.slice(bridge.indexOf('const TOUCHING_TOOLS'), bridge.indexOf('const notices'))
+  for (const tool of ['phone_tap', 'phone_swipe', 'phone_input', 'phone_back', 'phone_open', 'phone_wake', 'phone_observe', 'phone_screenshot']) {
+    assert.match(listed, new RegExp(`'${tool}'`), `${tool} 应算操作手机`)
+  }
+  for (const tool of ['phone_status', 'phone_notify', 'phone_send_file', 'phone_set_clipboard']) {
+    assert.doesNotMatch(listed, new RegExp(`'${tool}'`), `${tool} 不该算操作手机`)
+  }
+})
