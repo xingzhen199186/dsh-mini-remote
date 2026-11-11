@@ -209,6 +209,17 @@ final class BridgePoller {
                 boolean ok = response.isSuccess() && response.body != null && !response.body.isEmpty();
                 if (ok) {
                     JSONObject root = new JSONObject(response.body);
+                    // 电脑放进轮询回应的一次性通知：这一轮任务真的结束了。
+                    org.json.JSONArray notices = root.optJSONArray("notices");
+                    if (notices != null) {
+                        for (int n = 0; n < notices.length(); n++) {
+                            JSONObject notice = notices.optJSONObject(n);
+                            if (notice == null) continue;
+                            if ("task-ended".equals(notice.optString("kind"))) {
+                                ConfirmationControl.onTaskEnded(notice.optString("taskId", ""));
+                            }
+                        }
+                    }
                     firstPoll = false;
                     boolean armed = root.optBoolean("armed", false);
                     // 先认授权再认动作：即使异常服务端在撤权响应里塞了 calls，也绝不执行。

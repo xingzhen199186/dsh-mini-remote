@@ -30,6 +30,8 @@ final class ConfirmationControl {
 
     private static final String PREFS = "mini_ui_prefs";
     private static final String MODE = "phone_confirm_mode";
+    /** 被"允许一次后切免确认"临时改过的任务编号；这一轮结束（turn/end）时切回来。 */
+    private static final String AUTO_OFF_TASK = "phone_auto_off_task";
     /**
      * 已经放行的任务编号（2026-11-11）。
      *
@@ -303,6 +305,8 @@ final class ConfirmationControl {
                  * 这样"不再被每步打扰"和"每轮重新问"两件事都在。
                  */
                 setSelectedMode(current.app, ConfirmationState.OFF);
+                current.app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                        .edit().putString(AUTO_OFF_TASK, current.card.taskId).apply();
             }
             target = current;
             outcome = allow ? allow() : failure("user_rejected", "用户拒绝了这次操作，动作未执行");
@@ -411,6 +415,25 @@ final class ConfirmationControl {
             CardListener listener = cardListener;
             if (listener != null) listener.onCardClosed();
         });
+    }
+
+    /**
+     * 这一轮任务真的结束了（电脑在 turn/end 时告知）：
+     * 把"允许一次后临时切成的免确认"切回本任务档，下一轮重新问。
+     *
+     * **只在这里切回**：工具调用之间不切——那正是之前每个动作都弹卡的错判。
+     */
+    static void onTaskEnded(String taskId) {
+        if (!SUPPORTED || taskId == null) return;
+        synchronized (LOCK) {
+            Context app = pending != null ? pending.app : null;
+            if (app == null) return;
+            String autoOff = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                    .getString(AUTO_OFF_TASK, null);
+            if (autoOff == null || !autoOff.equals(taskId)) return;
+            setSelectedMode(app, ConfirmationState.TASK);
+            app.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().remove(AUTO_OFF_TASK).apply();
+        }
     }
 
     private static Decision allow() {
