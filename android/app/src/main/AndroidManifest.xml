@@ -7,6 +7,8 @@
         这里只声明"带启动入口的 App"，不给更宽的查询面。
     -->
     <queries>
+        <!-- Android 11 起，看不到对方 App 就发不出 intent（Termux 的 RUN_COMMAND 需要它）。 -->
+        <package android:name="com.termux" />
         <intent>
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.LAUNCHER" />
@@ -33,6 +35,8 @@
     -->
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
+
+    <uses-permission android:name="com.termux.permission.RUN_COMMAND" />
 
     <application
         android:icon="@mipmap/ic_launcher"
@@ -105,6 +109,11 @@
             android:name=".MiniForegroundService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
+
+        <!-- 只用来接收 Termux 回传的命令结果，别的 App 不能碰（exported=false）。 -->
+        <service
+            android:name=".TermuxResultService"
+            android:exported="false" />
 
         <!-- 拍照那条：相机把照片写进缓存目录，再把 content:// 交回网页（2026-11-06）。 -->
         <provider

@@ -379,6 +379,16 @@ final class BridgePoller {
                     return;
                 }
             }
+            if ("phone_shell".equals(tool)) {
+                // 在手机上的 Termux 里执行命令（2026-11-12）。这是**任意命令执行**，
+                // 所以它和点屏幕一样走确认档位，不另开旁路。
+                String command = args == null ? "" : args.optString("command", "");
+                int waitSeconds = args == null ? 30 : Math.max(5, Math.min(120, args.optInt("timeoutSeconds", 30)));
+                String result = TermuxRun.exec(context, command, waitSeconds);
+                boolean ok = result.contains("\"ok\":true");
+                reportRaw(id, ok, result);
+                return;
+            }
             if ("phone_notify".equals(tool)) {
                 String title = args == null ? "" : args.optString("title", "");
                 String body = args == null ? "" : args.optString("body", "");
