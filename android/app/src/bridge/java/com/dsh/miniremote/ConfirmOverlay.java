@@ -57,6 +57,14 @@ final class ConfirmOverlay {
         detail.setPadding(0, dp(8), 0, dp(12));
         box.addView(detail);
 
+        // 倒计时让人看得见还剩多久；到点卡片自己消失，不会一直挂在屏幕上。
+        countdown = new TextView(service);
+        countdown.setTextSize(13);
+        countdown.setTextColor(0xff8a9099);
+        countdown.setPadding(0, 0, 0, dp(10));
+        box.addView(countdown);
+        startCountdown(card.deadline);
+
         LinearLayout buttons = new LinearLayout(service);
         buttons.setOrientation(LinearLayout.HORIZONTAL);
         buttons.setGravity(Gravity.END);
@@ -83,15 +91,24 @@ final class ConfirmOverlay {
                 Math.min(dp(340), service.getResources().getDisplayMetrics().widthPixels - dp(32)),
                 WindowManager.LayoutParams.WRAP_CONTENT,
                 WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
-                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
-                        | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+                // 不再是 FLAG_NOT_FOCUSABLE（2026-11-11 真机）：不可获得焦点的浮层
+                // 在荣耀上按钮能画出来却收不到点击。FLAG_NOT_TOUCH_MODAL 保留，
+                // 这样卡片以外的区域照旧能点到底下的界面，不会把整块屏幕扣住。
+                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
                 PixelFormat.TRANSLUCENT);
+        // 卡片自己要能拿焦点，子按钮的点击才会被派发；但不许因此把输入法顶掉。
+        next.softInputMode = WindowManager.LayoutParams.SOFT_INPUT_STATE_UNCHANGED
+                | WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING;
         next.gravity = Gravity.TOP | Gravity.CENTER_HORIZONTAL;
         next.y = dp(96);
+        box.setFocusable(true);
+        box.setFocusableInTouchMode(true);
         try {
             windowManager.addView(box, next);
             view = box;
             params = next;
+            // 抢一次焦点是这次修复的关键：窗口拿到焦点后，触摸才会沿 View 树派发到按钮。
+            box.requestFocus();
         } catch (Exception err) {
             // 画不出来就必须让调用方失败，不能看起来像“问了但没答”。
             android.util.Log.w("MiniBridge", "确认卡显示失败：" + err.getMessage());
@@ -127,6 +144,30 @@ final class ConfirmOverlay {
         }
     }
 
+    private TextView countdown;
+    private long deadlineAt;
+    private final android.os.Handler ticker = new android.os.Handler(android.os.Looper.getMainLooper());
+    private final Runnable tick = new Runnable() {
+        @Override
+        public void run() {
+            if (view == null || countdown == null) return;
+            long left = deadlineAt - System.currentTimeMillis();
+            if (left <= 0) {
+                // 到点自己消失；真正的失败结果由 ConfirmationControl 结算后回给电脑。
+                dismiss();
+                return;
+            }
+            countdown.setText("还剩 " + ((left + 999) / 1000) + " 秒");
+            ticker.postDelayed(this, 250);
+        }
+    };
+
+    private void startCountdown(long deadline) {
+        deadlineAt = deadline;
+        ticker.removeCallbacks(tick);
+        ticker.post(tick);
+    }
+
     /** 卡是否正摆在屏幕上；补摆时用它避免反复重建造成闪动。 */
     boolean isShowing() {
         return view != null;
@@ -138,6 +179,8 @@ final class ConfirmOverlay {
 
     /** 所有出口都走这里；重复撤卡也必须安全。 */
     void dismiss() {
+        ticker.removeCallbacks(tick);
+        countdown = null;
         LinearLayout current = view;
         view = null;
         params = null;
