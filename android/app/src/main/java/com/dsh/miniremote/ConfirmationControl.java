@@ -70,10 +70,16 @@ final class ConfirmationControl {
             this.deadline = deadline;
         }
 
-        /** 卡上那句解释“这次问了之后还算不算数”，避免用户以为按了允许就永久放行。 */
+        /**
+         * 卡上这句必须让用户一眼看出**自己选的是哪一档**（2026-11-11）。
+         *
+         * 之前两档的文字都偏解释性（"只影响本轮任务"／"每执行一次都会问一次"），
+         * 而按钮完全一样，于是"到底切没切档"从界面上看不出来，
+         * 排查时只能靠猜。现在换成两句互相排斥的结论，各自说清按下去会发生什么。
+         */
         String modeText() {
-            if (ConfirmationState.TASK.equals(mode)) return "只影响本轮任务，下一轮会重新询问。";
-            return "每执行一次都会问一次。";
+            if (ConfirmationState.TASK.equals(mode)) return "本轮不再询问";
+            return "本次有效，下个动作还会问";
         }
 
         /** 动作说人话；通知正文和浮层共用同一句，两个入口不许各说各的。 */

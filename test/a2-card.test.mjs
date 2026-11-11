@@ -36,7 +36,7 @@ test('A2：本任务档多一个「允许本任务」，每次档没有', () => 
   assert.match(notifier, /ConfirmationState\.TASK\.equals\(card\.mode\)/)
   assert.ok(notifier.includes('允许本任务'))
   assert.ok(card.includes('拒绝') && card.includes('允许'))
-  assert.match(control, /只影响本轮任务/)
+  assert.match(control, /本轮不再询问/)
 })
 
 test('A2：锁屏也照常出卡，确认入口是通知不是浮层', () => {

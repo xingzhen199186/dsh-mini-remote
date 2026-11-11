@@ -64,6 +64,14 @@ final class ConfirmOverlay {
         detail.setPadding(0, dp(8), 0, dp(8));
         box.addView(detail);
 
+        // 档位印在屏幕上：两档按钮现在一样，不留这行就分不出"到底切没切档"。
+        TextView tier = new TextView(service);
+        tier.setText(card.modeText());
+        tier.setTextSize(13);
+        tier.setTextColor(0xff1f6feb);
+        tier.setPadding(0, 0, 0, dp(6));
+        box.addView(tier);
+
         countdown = new TextView(service);
         countdown.setTextSize(13);
         countdown.setTextColor(0xff8a9099);
