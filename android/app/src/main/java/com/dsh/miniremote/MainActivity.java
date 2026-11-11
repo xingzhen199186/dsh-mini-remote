@@ -1010,7 +1010,7 @@ public final class MainActivity extends Activity {
             + "window.__miniUpdateProgress=function(p,mb){say('正在下载 '+p+'%'+(mb?'（'+mb+'）':'')+'…');};"
             + "window.__miniUpdateSwitch=function(){say('这条线路整块传不动，改成分段下载…');};"
             + "window.__miniUpdateFail=function(detail){say(detail);};"
-            + "window.MiniUpdate.install(o.url, o.size||0);"
+            + "window.MiniUpdate.install(o.url, o.size||0, o.sha256||'');"
             // 原来这里会再写一句"下载完成后会弹出安装界面"（2026-11-10 用户要求去掉）：
             // 进度百分比本身已经说明在下载，安装器弹出来是自然的事，多一句只是噪音。
             + "setTimeout(function(){btn.disabled=false;},1200);"
@@ -2423,6 +2423,8 @@ public final class MainActivity extends Activity {
         private volatile long expectedBytes;
         /** 上一次报过的百分比，避免同一个数字刷屏。 */
         private volatile int lastPct = -1;
+        /** 是否正在下载：防止连点开出几个线程写同一个文件。 */
+        private volatile boolean downloading;
 
         @android.webkit.JavascriptInterface
         public String selfHash() {
@@ -2454,6 +2456,19 @@ public final class MainActivity extends Activity {
         /** 下载并唤起安装器。参数是站内路径（如 `/mini/api/app.apk`）。 */
         @android.webkit.JavascriptInterface
         public void install(String path, double totalBytes) {
+            install(path, totalBytes, "");
+        }
+
+        /**
+         * @param expectedSha256 查询更新时服务端给的指纹；**残包按它命名**，下完按它校验。
+         *        这样"同一个文件"一定对应同一份内容，不会把别的版本的残段拼进来。
+         */
+        public void install(String path, double totalBytes, String expectedSha256) {
+            if (downloading) {
+                // 连点两次不该起两条下载线程写同一文件。
+                return;
+            }
+            downloading = true;
             expectedBytes = (long) totalBytes;
             lastPct = -1;
             final String base = loadedBase;
@@ -2488,8 +2503,10 @@ public final class MainActivity extends Activity {
                         java.io.File dir = new java.io.File(getCacheDir(), "update");
                         // 文件名带上总大小（2026-11-11）：换版本就是换文件，
                         // 所以上次的残包不会被拿来拼——大小对不上根本不会用同一个路径。
-                        java.io.File out = new java.io.File(dir,
-                                "app-" + ((long) totalBytes) + ".apk");
+                        String tag = (expectedSha256 == null || expectedSha256.isEmpty())
+                                ? String.valueOf((long) totalBytes)
+                                : expectedSha256.substring(0, Math.min(16, expectedSha256.length()));
+                        java.io.File out = new java.io.File(dir, "app-" + tag + ".apk");
                         final long total = expectedBytes;
                         // 服务器可能不认分段：那种情况下 total 未知，也照样能下完。
                         Net.DownloadOutcome outcome = Net.downloadPreferWhole(base + path, cred, out, total, written -> {
@@ -2510,18 +2527,39 @@ public final class MainActivity extends Activity {
                                 "window.__miniUpdateSwitch&&window.__miniUpdateSwitch()", null)));
                         if (!outcome.ok) {
                             // 用户在外面用流量，必须知道是"该换网络"还是"再点一次就行"。
+                            String detail;
                             if (!outcome.connected) {
-                                toastOnUi("连不上电脑。手机能上网吗？电脑那边还开着吗？");
+                                detail = "连不上电脑。手机能上网吗？电脑那边还开着吗？";
                             } else {
-                                int done = total > 0 ? (int) Math.min(100, outcome.written * 100 / total) : 0;
-                                toastOnUi("下载到 " + done + "% 断了，网络不稳。信号好些后再点一次更新。");
+                                detail = "下载没完成（已收 " + (outcome.written / 1024) + " KB / 共 "
+                                        + (total / 1024) + " KB）。再点一次会接着下。";
                             }
+                            // 落到更新那一行，而不是一闪而过的提示（之前只 toast，界面看着像卡死）。
+                            runOnUiThread(() -> {
+                                if (webView != null) {
+                                    webView.evaluateJavascript(
+                                            "window.__miniUpdateFail&&window.__miniUpdateFail("
+                                                    + org.json.JSONObject.quote(detail) + ")", null);
+                                }
+                            });
+                            toastOnUi(detail);
                             return;
+                        }
+                        // 下完先验内容（2026-11-11）：只比长度不够——长度对了也可能拼错包。
+                        // 指纹对不上就删掉、如实报错，绝不把来路不明的包交给安装器。
+                        if (expectedSha256 != null && !expectedSha256.isEmpty()) {
+                            String actual = sha256Of(out);
+                            if (!expectedSha256.equalsIgnoreCase(actual)) {
+                                // 不删文件：留着给续传排查；但**绝不安装**。
+                                toastOnUi("下载的安装包内容对不上（可能中途换过包），没有安装。请再点一次检查。");
+                                return;
+                            }
                         }
                         launchInstaller(out);
                     } catch (Exception err) {
                         toastOnUi("安装包下载失败：" + err.getMessage());
                     } finally {
+                        downloading = false;
                         if (heldLock != null && heldLock.isHeld()) {
                             heldLock.release();
                         }
@@ -2534,6 +2572,25 @@ public final class MainActivity extends Activity {
                     }
                 }
             }, "mini-update").start();
+        }
+    }
+
+    /** 算一个文件的 SHA-256；读不出来返回空串（调用方据此判失败，不猜）。 */
+    private static String sha256Of(java.io.File file) {
+        try (java.io.InputStream in = new java.io.FileInputStream(file)) {
+            java.security.MessageDigest md = java.security.MessageDigest.getInstance("SHA-256");
+            byte[] buf = new byte[64 * 1024];
+            int n;
+            while ((n = in.read(buf)) > 0) {
+                md.update(buf, 0, n);
+            }
+            StringBuilder sb = new StringBuilder();
+            for (byte b : md.digest()) {
+                sb.append(String.format("%02x", b));
+            }
+            return sb.toString();
+        } catch (Exception err) {
+            return "";
         }
     }
 

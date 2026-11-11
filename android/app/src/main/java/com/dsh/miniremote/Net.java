@@ -179,6 +179,18 @@ public final class Net {
      */
     static DownloadOutcome downloadPreferWhole(String url, String credential, java.io.File out, long total,
                                                Progress progress, Switch onSwitch) throws IOException {
+        // 超过 8MB 直接分段（2026-11-11）：整块传在流量下几乎必在尾部断一次，
+        // 分段才是实测稳的那条路。这个早退之前丢过一次，别再删。
+        if (total > 8L * 1024 * 1024) {
+            if (onSwitch != null) {
+                onSwitch.onSwitchToChunked();
+            }
+            long resumable = out.exists() ? out.length() : 0;
+            if (resumable > total) {
+                resumable = 0;
+            }
+            return download(url, credential, out, total, progress, resumable, SEGMENT_RETRIES);
+        }
         DownloadOutcome whole = downloadWhole(url, credential, out, total, progress);
         if (whole.ok) {
             return whole;
