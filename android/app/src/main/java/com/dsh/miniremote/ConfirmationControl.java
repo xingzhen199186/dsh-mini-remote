@@ -217,6 +217,7 @@ final class ConfirmationControl {
         // 否则"本任务免确认退化成每次都问"只能靠猜。
         try {
             java.io.File f = new java.io.File(app.getFilesDir(), "confirm-debug.log");
+            if (f.length() > 32 * 1024) f.delete();
             String line = selected + " | task=" + taskId + " | mode=" + state.modeForTask(taskId, selected)
                     + " | granted=" + state.taskGranted(taskId) + "\n";
             java.nio.file.Files.write(f.toPath(), line.getBytes(java.nio.charset.StandardCharsets.UTF_8),
@@ -433,6 +434,8 @@ final class ConfirmationControl {
     static void debugLog(Context context, String line) {
         try {
             java.io.File f = new java.io.File(context.getFilesDir(), "answer-debug.log");
+            // 只留最近一小段：这类日志是排查用的，不该在用户手机里无限长大。
+            if (f.length() > 32 * 1024) f.delete();
             java.nio.file.Files.write(f.toPath(),
                     (line + "\n").getBytes(java.nio.charset.StandardCharsets.UTF_8),
                     java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.APPEND);
