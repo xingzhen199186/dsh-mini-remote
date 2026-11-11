@@ -469,6 +469,10 @@ public final class BridgeAccessibilityService extends AccessibilityService {
             return "{\"ok\":false,\"error\":\"无障碍还没开启\"}";
         }
         try {
+            // 先收起通知栏（2026-11-11）：确认要下拉通知栏点「允许」，
+            // 于是 observe 和 tapIndex 内部那次"重新观察"都会读到通知栏而不是 App。
+            // 放在 observe 里，**无论谁调**都先收——包括 tapIndex 代次核对时的那次重看。
+            dismissShadeIfNeeded();
             android.view.accessibility.AccessibilityNodeInfo root = service.getRootInActiveWindow();
             String pkg = root == null || root.getPackageName() == null ? "" : root.getPackageName().toString();
             // FLAG_SECURE 只挡截图，不挡无障碍读树；锁屏、敏感 App、密码框和容器内支付页
