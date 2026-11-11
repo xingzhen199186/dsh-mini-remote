@@ -2465,7 +2465,10 @@ public final class MainActivity extends Activity {
                 public void run() {
                     try {
                         java.io.File dir = new java.io.File(getCacheDir(), "update");
-                        java.io.File out = new java.io.File(dir, "app.apk");
+                        // 文件名带上总大小（2026-11-11）：换版本就是换文件，
+                        // 所以上次的残包不会被拿来拼——大小对不上根本不会用同一个路径。
+                        java.io.File out = new java.io.File(dir,
+                                "app-" + ((long) totalBytes) + ".apk");
                         final long total = expectedBytes;
                         // 服务器可能不认分段：那种情况下 total 未知，也照样能下完。
                         Net.DownloadOutcome outcome = Net.downloadPreferWhole(base + path, cred, out, total, written -> {
