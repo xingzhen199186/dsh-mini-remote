@@ -49,9 +49,23 @@ test('卡死路径：发通知不在锁内，主线程不会被系统调用拖�
   assert.doesNotMatch(locked, /Notifier\.|showConfirmCard/)
 })
 
-test('卡死路径：settle 唤醒不持有锁执行外部动作', () => {
+test('卡死路径：结算与撤通知都在锁外，主线程不边持锁边等系统', () => {
+  const answer = control.slice(control.indexOf('static boolean answerCard'))
+  const body = answer.slice(0, answer.indexOf('static void cancelAll'))
+  // 用花括号配对找到 synchronized 块的真正结尾，再判断 settle 是否在它之后。
+  const open = body.indexOf('synchronized (LOCK) {')
+  assert.ok(open > 0, 'answerCard 里应有同步块')
+  let depth = 0
+  let end = -1
+  for (let i = body.indexOf('{', open); i < body.length; i++) {
+    if (body[i] === '{') depth++
+    else if (body[i] === '}') { depth--; if (depth === 0) { end = i; break } }
+  }
+  assert.ok(end > 0, '同步块应有结尾')
+  const settleAt = body.indexOf('settle(target, outcome);')
+  assert.ok(settleAt > end, 'settle 必须在同步块之外')
+  // settle 自己内部也只做赋值，撤通知与主线程回调都在同步块之后。
   const settle = control.slice(control.indexOf('private static void settle'))
-  const body = settle.slice(0, settle.indexOf('private static Decision allow'))
-  // 撤通知与主线程回调都要在同步块之后。
-  assert.ok(body.indexOf('}') < body.indexOf('Notifier.cancelConfirmCard'))
+  const settleBody = settle.slice(0, settle.indexOf('private static Decision allow'))
+  assert.ok(settleBody.indexOf('Notifier.cancelConfirmCard') > settleBody.indexOf('current.done.countDown()'))
 })

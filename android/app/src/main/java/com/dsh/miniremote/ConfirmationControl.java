@@ -235,17 +235,22 @@ final class ConfirmationControl {
         // 关掉期间按钮点了也不做事：这条路径从主线程（广播接收器）进来，
         // 必须第一时间返回，绝不在这里等锁或等任何东西。
         if (!SUPPORTED) return false;
-        Pending current;
+        Pending target;
+        Decision outcome;
         synchronized (LOCK) {
-            current = pending;
+            Pending current = pending;
             if (current == null) return false;
             if (cardId == null || !cardId.equals(current.card.id)) return false;
             if (allow && grantTask && current.card.mode == ConfirmationState.TASK) {
                 state.grantCurrentTask(current.card.taskId);
             }
-            settle(current, allow ? allow() : failure("user_rejected", "用户拒绝了这次操作，动作未执行"));
-            return true;
+            target = current;
+            outcome = allow ? allow() : failure("user_rejected", "用户拒绝了这次操作，动作未执行");
         }
+        // **结算放在锁外**（2026-11-11 卡死事故）：结算里要撤通知、要 post 主线程，
+        // 这些都是系统调用；拿着锁做，等于让主线程排队等系统。
+        settle(target, outcome);
+        return true;
     }
 
     /** B1 停止复用这里：当前卡与正在等卡的线程一起结束，之后的回执不能再执行。 */
@@ -255,8 +260,8 @@ final class ConfirmationControl {
             epoch++;
             state.clear();
             current = pending;
-            if (current != null) settle(current, stopped());
         }
+        if (current != null) settle(current, stopped());
     }
 
     /**
