@@ -221,6 +221,8 @@ final class BridgePoller {
                         }
                     }
                     firstPoll = false;
+                    // 电脑是否正在操作这台手机：决定"停止"浮层要不要出现。
+                    TaskState.busy = root.optBoolean("busy", false);
                     boolean armed = root.optBoolean("armed", false);
                     // 先认授权再认动作：即使异常服务端在撤权响应里塞了 calls，也绝不执行。
                     if (armed) {

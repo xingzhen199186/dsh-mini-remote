@@ -103,7 +103,10 @@ public final class BridgeAccessibilityService extends AccessibilityService {
         // 在我们自己的 App 里不显示（2026-11-10 用户反馈）：
         // 这里本来就有手机桥开关，浮层只会挡住「关闭」按钮。
         boolean mine = getPackageName().equals(front);
-        if (BridgeControl.isArmed(this) && !locked && screenOn && !mine) {
+        /* 只在**正在操作手机**的任务期间显示（2026-11-12 用户要求）。
+         * 原先只要离开本 App 就出现，平时浏览别的东西也一直挂着红按钮。 */
+        boolean taskOnPhone = TaskState.busy;
+        if (BridgeControl.isArmed(this) && !locked && screenOn && !mine && taskOnPhone) {
             stopOverlay.show();
         } else {
             stopOverlay.dismiss();
