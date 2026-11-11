@@ -798,6 +798,8 @@ public final class MainActivity extends Activity {
             + "<div class=\"hint\" id=\"miniConfirmHint\">电脑操作手机时不打扰你。</div>"
             + "<div class=\"hint\" id=\"miniA11yPath\">设置 → 辅助功能 → 无障碍 → DSH 手机桥（实验）</div>"
             + "<button class=\"btn\" id=\"miniA11yGo\">开无障碍</button>"
+            + "<div id=\"miniIdleNote\" class=\"hint\" style=\"margin-top:6px\" hidden></div>"
+            + "<div id=\"miniActionLog\" style=\"margin-top:8px\"></div>"
             + "</div></div>';"
             + "function place(){"
             + "var conn=document.getElementById('miniConnBlock');"
@@ -862,6 +864,35 @@ public final class MainActivity extends Activity {
             // 档位选择器已停用（见上方那句说明），这里不再绑定任何按钮。
             + "paintA11y();"
             + "setInterval(paintA11y,2000);"
+            // 最近操作记录 + 空闲自动停止提示（D1/C1）。
+            + "var TOOL_NAME={phone_observe:'读屏',phone_tap:'点击',phone_open:'打开App',"
+            + "phone_back:'返回',phone_swipe:'滑动',phone_input:'输入',phone_screenshot:'截图',"
+            + "phone_notify:'通知',phone_status:'状态',phone_send_file:'送文件',"
+            + "phone_set_clipboard:'剪贴板',phone_wake:'亮屏'};"
+            + "function paintLog(){"
+            + "var box=document.getElementById('miniActionLog');"
+            + "if(!box)return;"
+            + "try{"
+            + "var idle=window.MiniProbe.lastIdleStop?window.MiniProbe.lastIdleStop():0;"
+            + "var note=document.getElementById('miniIdleNote');"
+            + "if(note){"
+            + "if(idle&&Date.now()-idle<30*60*1000){note.hidden=false;"
+            + "note.textContent='最近一个任务已自动停止：连续 10 分钟没有手机操作（桥仍连着，新任务可照常开始）。';}"
+            + "else{note.hidden=true;}"
+            + "}"
+            + "var list=JSON.parse(window.MiniProbe.actionLog()||'[]');"
+            + "if(!list.length){box.innerHTML='';return;}"
+            + "var html='<div class=\"hint\" style=\"margin-bottom:4px\">最近操作：</div>';"
+            + "for(var i=0;i<list.length;i++){var e=list[i];"
+            + "var name=TOOL_NAME[e.tool]||e.tool;"
+            + "var ok=e.ok?'':' <span style=\"color:#b42318\">（失败）</span>';"
+            + "html+='<div class=\"hint\" style=\"font-size:12px;line-height:1.5\">'+e.time+' · '+name"
+            + "+(e.target?'「'+e.target+'」':'')+ok+'</div>';}"
+            + "box.innerHTML=html;"
+            + "}catch(e){}"
+            + "}"
+            + "paintLog();"
+            + "setInterval(paintLog,4000);"
             // 三档切换：点一下存一次，文案跟着变；**从下一轮任务生效**（跑到一半不换规则）。
             + "function paintConfirm(){"
             + "var hint=document.getElementById('miniConfirmHint');"
@@ -2210,6 +2241,18 @@ public final class MainActivity extends Activity {
             } catch (ClassNotFoundException err) {
                 return null;
             }
+        }
+
+        /** 最近几条操作记录（D1），给设置页回看用。 */
+        @android.webkit.JavascriptInterface
+        public String actionLog() {
+            return ActionLog.recent(MainActivity.this, 8);
+        }
+
+        /** 最近一次因空闲被停下的时刻（C1）；0 表示没有。 */
+        @android.webkit.JavascriptInterface
+        public long lastIdleStop() {
+            return BridgePoller.lastIdleStopAt;
         }
 
         @android.webkit.JavascriptInterface

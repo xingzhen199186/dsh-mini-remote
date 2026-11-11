@@ -303,6 +303,17 @@ final class BridgePoller {
      * 一共只有一条执行线程，所以这些动作天然串行——即便某个要等 90 秒，
      * 后面排队的也只是排在后面，不会插队、不会叠卡。
      */
+    /** 当前正在执行的动作与目标，给操作记录用（执行线程只有一条，串行，不会互相覆盖）。 */
+    private volatile String activeTool = "";
+    private volatile String activeTarget = "";
+
+    /** 连续多久没有手机动作就判定"这个任务停了"（2026-11-11，C1）。 */
+    private static final long IDLE_TIMEOUT_MS = 10L * 60 * 1000;
+    /** 每个 taskId 最后一次真的做了动作的时刻；心跳、轮询、状态读取都不算。 */
+    private static final java.util.Map<String, Long> TASK_LAST_ACTION = new java.util.HashMap<>();
+    /** 最近一次因超时被停下的任务，给设置页看。 */
+    static volatile long lastIdleStopAt = 0;
+
     private void executeCall(org.json.JSONObject call, long token) {
         // 排到队尾时桥可能已经停了或换了线路：老动作一律不执行。
         if (!running || generation != token) {
@@ -313,11 +324,24 @@ final class BridgePoller {
             final String tool = call.optString("tool", "");
             final long expiresAt = call.optLong("expiresAt", 0);
             org.json.JSONObject args = call.optJSONObject("args");
+            activeTool = tool;
+            activeTarget = confirmationTarget(tool, args);
             if (id.isEmpty()) return;
             // 到期时间由服务端签发；缺失或已过期的动作一律不执行。
             if (expiresAt <= System.currentTimeMillis()) {
                 report(id, false, "调用已经过期，手机拒绝执行");
                 return;
+            }
+            // C1 任务级空闲超时：这个 taskId 已经 10 分钟没动作了，就结束它。
+            // **只停这个任务**，不撤桥——phone_status 仍可用，下一个任务（新 taskId）照常能开始。
+            final String taskId = call.optString("taskId", "");
+            if (!"phone_status".equals(tool)) {
+                Long last = TASK_LAST_ACTION.get(taskId);
+                if (last != null && System.currentTimeMillis() - last > IDLE_TIMEOUT_MS) {
+                    lastIdleStopAt = System.currentTimeMillis();
+                    report(id, false, "这个任务已连续 10 分钟没有手机操作，已自动停止（idle_timeout）");
+                    return;
+                }
             }
             // 默认档 request() 直接放行，不建卡、不挂起、不起计时器；剪贴板保留自己的逐次确认。
             if (!"phone_status".equals(tool) && !"phone_set_clipboard".equals(tool)) {
@@ -329,6 +353,8 @@ final class BridgePoller {
                     reportRaw(id, false, confirmationFailure(decision));
                     return;
                 }
+                // 确认放行、马上要做动作了：给这个任务续命（C1）。
+                TASK_LAST_ACTION.put(taskId, System.currentTimeMillis());
                 // 等待可能持续了 30 秒；放行后必须重新确认代次与到期时刻。
                 if (!running || generation != token) return;
                 if (expiresAt <= System.currentTimeMillis()) {
@@ -703,6 +729,9 @@ final class BridgePoller {
 
     /** result 已经是 JSON 片段（对象或带引号的字符串）。 */
     private void reportRaw(String id, boolean ok, String resultJson) {
+        // 每个动作落一条记录（D1）：时间、动作、打码后的目标、成没成。
+        // 观察与截图也算——"读过什么"同样是需要被监督的行为。
+        ActionLog.record(context, activeTool, activeTarget, ok);
         final String base = baseUrl;
         final String cred = credential;
         if (base == null || cred == null) {
