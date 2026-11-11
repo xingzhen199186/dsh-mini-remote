@@ -1007,7 +1007,7 @@ public final class MainActivity extends Activity {
             + "var mine=window.MiniUpdate.selfHash?window.MiniUpdate.selfHash():'';"
             + "if(mine&&o.sha256&&mine===o.sha256){say('已经是最新版本（'+selfTag+'）。');btn.disabled=false;return;}"
             + "say('发现新版本：本机 '+selfTag+' → 电脑 '+String(o.sha256||'').slice(0,8)+'，开始下载（'+(Math.round((o.size||0)/1048576))+' MB）…');"
-            + "window.__miniUpdateProgress=function(p){say('正在下载 '+p+'%…');};"
+            + "window.__miniUpdateProgress=function(p,mb){say('正在下载 '+p+'%'+(mb?'（'+mb+'）':'')+'…');};"
             + "window.__miniUpdateSwitch=function(){say('这条线路整块传不动，改成分段下载…');};"
             + "window.MiniUpdate.install(o.url, o.size||0);"
             // 原来这里会再写一句"下载完成后会弹出安装界面"（2026-11-10 用户要求去掉）：
@@ -2478,7 +2478,10 @@ public final class MainActivity extends Activity {
                             }
                             lastPct = pct;
                             runOnUiThread(() -> webView.evaluateJavascript(
-                                    "window.__miniUpdateProgress&&window.__miniUpdateProgress(" + pct + ")", null));
+                                    "window.__miniUpdateProgress&&window.__miniUpdateProgress(" + pct
+                                            + "," + org.json.JSONObject.quote(String.format(
+                                                    java.util.Locale.US, "%.1f / %.1f MB",
+                                                    written / 1048576.0, total / 1048576.0)) + ")", null));
                         }, () -> runOnUiThread(() -> webView.evaluateJavascript(
                                 "window.__miniUpdateSwitch&&window.__miniUpdateSwitch()", null)));
                         if (!outcome.ok) {
