@@ -31,26 +31,13 @@ public final class BridgeAccessibilityService extends AccessibilityService {
     private StopOverlay stopOverlay;
     private ConfirmOverlay confirmOverlay;
     /**
-     * 锁屏时不亮屏、不解锁：卡片根本画不出来，只发一条不含内容的通知。
-     * 30 秒仍照算——人没看到提示就当作没有回答。
+     * 浮层只做展示（2026-11-11）：确认入口已经挪到通知，因为荣耀不让无障碍浮层收触摸。
+     * 这里不判断锁屏，也不尝试亮屏解锁——它不接收点击，出现在锁屏上也不会有副作用。
      */
     private final ConfirmationControl.CardListener confirmListener = new ConfirmationControl.CardListener() {
         @Override
         public void onCard(ConfirmationControl.Card card) {
-            boolean locked = false;
-            try {
-                android.app.KeyguardManager keyguard = (android.app.KeyguardManager)
-                        getSystemService(android.content.Context.KEYGUARD_SERVICE);
-                locked = keyguard != null && keyguard.isKeyguardLocked();
-            } catch (Exception ignored) {
-                // 读不到锁屏状态时按“没锁”处理，卡片照常显示。
-            }
-            if (locked) {
-                Notifier.showConfirmHint(BridgeAccessibilityService.this);
-                return;
-            }
-            // 解锁后窗口一变也补摆一次，不必非等到下一条系统广播。
-            if (confirmOverlay != null) confirmOverlay.show(card, this);
+            if (confirmOverlay != null) confirmOverlay.show(card);
         }
 
         @Override
@@ -89,7 +76,7 @@ public final class BridgeAccessibilityService extends AccessibilityService {
             locked = false;
         }
         if (locked) return;
-        confirmOverlay.show(waiting, confirmListener);
+        confirmOverlay.show(waiting);
     }
 
     /** 解锁/锁屏与武装状态共用这一个判据；本方法不尝试亮屏或解锁。 */

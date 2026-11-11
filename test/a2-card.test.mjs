@@ -23,28 +23,30 @@ test('A2：同屏只留一张卡，显示前先撤旧的', () => {
   assert.match(card, /void dismiss\(\)/)
 })
 
-test('A2：按钮最小可点高度 48dp，只写动作与打码目标', () => {
-  assert.match(card, /setMinHeight\(dp\(48\)\)/)
-  assert.match(card, /SensitiveText\.mask|card\.target/)
+test('A2：浮层只写动作与打码目标，不摆正文和截图', () => {
+  // 按钮已经挪到通知（系统绘制），浮层不再有可点区域。
+  assert.match(card, /card\.actionText\(\)/)
+  assert.match(card, /card\.target/)
   assert.doesNotMatch(card, /args\.optString\("text"/, '卡上不摆输入正文')
   assert.doesNotMatch(card, /base64/i, '卡上不摆截图')
 })
 
 test('A2：本任务档多一个「允许本任务」，每次档没有', () => {
-  assert.match(card, /ConfirmationState\.TASK\.equals\(card\.mode\)/)
-  assert.ok(card.includes('允许本任务'))
+  // 「允许本任务」只出现在任务档，且由通知提供（系统绘制按钮，浮层点不动）。
+  assert.match(notifier, /ConfirmationState\.TASK\.equals\(card\.mode\)/)
+  assert.ok(notifier.includes('允许本任务'))
   assert.ok(card.includes('拒绝') && card.includes('允许'))
   assert.match(control, /只影响本轮任务/)
 })
 
-test('A2：锁屏只发不含内容的通知，解锁后补摆仍在等的卡', () => {
+test('A2：锁屏也照常出卡，确认入口是通知不是浮层', () => {
   assert.match(service, /isKeyguardLocked\(\)/)
-  assert.match(service, /Notifier\.showConfirmHint\(BridgeAccessibilityService\.this\)/)
+  // 确认通知由状态机直接发出，不再依赖无障碍服务在场。
+  assert.match(control, /Notifier\.showConfirmCard\(app, card\)/)
   // 通知说要解锁后能看，就必须真的有东西补出来，否则这句承诺是空的。
   assert.match(service, /ConfirmationControl\.currentCard\(\)/)
   assert.match(service, /showPendingCardIfAny\(\)/)
   assert.match(service, /ACTION_USER_PRESENT/)
-  assert.match(service, /Notifier\.cancelConfirmHint/)
   const start = notifier.indexOf('static void showConfirmHint')
   const rest = notifier.slice(start + 'static void showConfirmHint'.length)
   const body = rest.slice(0, rest.indexOf('\n    /**'))

@@ -5,17 +5,19 @@ import android.content.Context;
 import android.graphics.PixelFormat;
 import android.graphics.drawable.GradientDrawable;
 import android.view.Gravity;
-import android.view.View;
 import android.view.WindowManager;
-import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
 /**
- * 确认卡：无障碍通道里的一张浮层，不申请悬浮窗权限。
+ * 确认卡的**纯展示**浮层（2026-11-11 降级）。
  *
- * 这个类只管“把问题摆出来、把按钮点到的结果交回去”，是否该问、问完算不算数
- * 全部由 ConfirmationControl 决定。同屏只留一张卡，换卡前先撤旧的。
+ * 原来这里有「允许／拒绝／允许本任务」三个按钮，真机（荣耀）上画得出来却完全收不到触摸：
+ * 系统层不允许无障碍浮层接收点击（日志里有 `AppOps ... op=CREATE_ACCESSIBILITY_OVERLAY`）。
+ * 改窗口焦点参数救不回来，所以确认入口整体挪到了通知，按钮由系统绘制、由系统派发点击。
+ *
+ * 这个浮层留下来只做一件事：让用户**看见**有东西在等确认。它不放按钮、
+ * 不接收点击，因此系统允不允许它收触摸都无所谓；真正的决定在通知上按。
  */
 final class ConfirmOverlay {
     private final AccessibilityService service;
@@ -28,13 +30,10 @@ final class ConfirmOverlay {
         this.windowManager = (WindowManager) service.getSystemService(Context.WINDOW_SERVICE);
     }
 
-    /** 卡上只写动作和打码后的目标；不摆输入正文、不摆截图。 */
-    void show(ConfirmationControl.Card card, ConfirmationControl.CardListener listener) {
+    /** 只写动作和打码后的目标；不摆输入正文、不摆截图，也不放按钮。 */
+    void show(ConfirmationControl.Card card) {
         dismiss();
-        if (windowManager == null) {
-            listener.onCardClosed();
-            return;
-        }
+        if (windowManager == null) return;
         LinearLayout box = new LinearLayout(service);
         box.setOrientation(LinearLayout.VERTICAL);
         box.setPadding(dp(18), dp(16), dp(18), dp(16));
@@ -50,97 +49,47 @@ final class ConfirmOverlay {
         box.addView(title);
 
         TextView detail = new TextView(service);
-        detail.setText(actionText(card) + "\n" + (card.target.isEmpty() ? "" : card.target)
-                + "\n\n" + card.modeText());
+        detail.setText(card.actionText()
+                + (card.target == null || card.target.isEmpty() ? "" : "：" + card.target));
         detail.setTextSize(14);
         detail.setTextColor(0xff4a5058);
-        detail.setPadding(0, dp(8), 0, dp(12));
+        detail.setPadding(0, dp(8), 0, dp(8));
         box.addView(detail);
 
-        // 倒计时让人看得见还剩多久；到点卡片自己消失，不会一直挂在屏幕上。
+        TextView how = new TextView(service);
+        how.setText("请在通知栏点「允许」或「拒绝」。");
+        how.setTextSize(13);
+        how.setTextColor(0xff1f6feb);
+        box.addView(how);
+
+        // 倒计时让人看得见还剩多久；到点自己消失，不会一直挂在屏幕上。
         countdown = new TextView(service);
         countdown.setTextSize(13);
         countdown.setTextColor(0xff8a9099);
-        countdown.setPadding(0, 0, 0, dp(10));
+        countdown.setPadding(0, dp(6), 0, 0);
         box.addView(countdown);
         startCountdown(card.deadline);
-
-        LinearLayout buttons = new LinearLayout(service);
-        buttons.setOrientation(LinearLayout.HORIZONTAL);
-        buttons.setGravity(Gravity.END);
-        if (ConfirmationState.TASK.equals(card.mode)) {
-            buttons.addView(button("允许本任务", () -> {
-                ConfirmationControl.answer(true);
-                listener.onCardClosed();
-                dismiss();
-            }));
-        }
-        buttons.addView(button("拒绝", () -> {
-            ConfirmationControl.answer(false);
-            listener.onCardClosed();
-            dismiss();
-        }));
-        buttons.addView(button("允许", () -> {
-            ConfirmationControl.answer(true);
-            listener.onCardClosed();
-            dismiss();
-        }));
-        box.addView(buttons);
 
         WindowManager.LayoutParams next = new WindowManager.LayoutParams(
                 Math.min(dp(340), service.getResources().getDisplayMetrics().widthPixels - dp(32)),
                 WindowManager.LayoutParams.WRAP_CONTENT,
                 WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
-                // 不再是 FLAG_NOT_FOCUSABLE（2026-11-11 真机）：不可获得焦点的浮层
-                // 在荣耀上按钮能画出来却收不到点击。FLAG_NOT_TOUCH_MODAL 保留，
-                // 这样卡片以外的区域照旧能点到底下的界面，不会把整块屏幕扣住。
-                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+                // 只展示：既不抢焦点，也不吞触摸，底下的界面照常能用。
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                        | WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+                        | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
                 PixelFormat.TRANSLUCENT);
-        // 卡片自己要能拿焦点，子按钮的点击才会被派发；但不许因此把输入法顶掉。
-        next.softInputMode = WindowManager.LayoutParams.SOFT_INPUT_STATE_UNCHANGED
-                | WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING;
         next.gravity = Gravity.TOP | Gravity.CENTER_HORIZONTAL;
         next.y = dp(96);
-        box.setFocusable(true);
-        box.setFocusableInTouchMode(true);
         try {
             windowManager.addView(box, next);
             view = box;
             params = next;
-            // 抢一次焦点是这次修复的关键：窗口拿到焦点后，触摸才会沿 View 树派发到按钮。
-            box.requestFocus();
         } catch (Exception err) {
-            // 画不出来就必须让调用方失败，不能看起来像“问了但没答”。
-            android.util.Log.w("MiniBridge", "确认卡显示失败：" + err.getMessage());
+            // 展示不出来不影响确认：真正要决策的那条通知还在。
+            android.util.Log.w("MiniBridge", "确认浮层显示失败：" + err.getMessage());
             view = null;
             params = null;
-            listener.onCardClosed();
-        }
-    }
-
-    private Button button(String label, Runnable tap) {
-        Button button = new Button(service);
-        button.setText(label);
-        // 48dp 是最小可点面积；按钮文字短，靠这里保证手指够得着。
-        button.setMinHeight(dp(48));
-        button.setMinWidth(dp(96));
-        button.setOnClickListener(v -> tap.run());
-        return button;
-    }
-
-    private String actionText(ConfirmationControl.Card card) {
-        switch (card.tool) {
-            case "phone_tap": return "点一下屏幕上这个控件";
-            case "phone_open": return "打开一个 App";
-            case "phone_notify": return "发一条通知";
-            case "phone_swipe": return "滑动屏幕";
-            case "phone_back": return "按返回键";
-            case "phone_input": return "往输入框里填字";
-            case "phone_screenshot": return "截一张屏";
-            case "phone_observe": return "读一次屏幕文字";
-            case "phone_wake": return "点亮屏幕";
-            case "phone_send_file": return "把一个文件存到手机";
-            default: return "执行 " + card.tool;
         }
     }
 
@@ -185,15 +134,6 @@ final class ConfirmOverlay {
         view = null;
         params = null;
         if (current == null || windowManager == null) return;
-        for (int i = 0; i < current.getChildCount(); i++) {
-            View child = current.getChildAt(i);
-            if (child instanceof LinearLayout) {
-                LinearLayout row = (LinearLayout) child;
-                for (int j = 0; j < row.getChildCount(); j++) {
-                    row.getChildAt(j).setOnClickListener(null);
-                }
-            }
-        }
         try {
             windowManager.removeViewImmediate(current);
         } catch (Exception ignored) {
