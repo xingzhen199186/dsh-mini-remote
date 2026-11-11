@@ -651,6 +651,16 @@ final class BridgePoller {
         }
     }
 
+    /** Termux 装没装（Android 11 起还要靠清单里的 queries 才看得见）。 */
+    private boolean termuxInstalled() {
+        try {
+            context.getPackageManager().getPackageInfo("com.termux", 0);
+            return true;
+        } catch (Exception err) {
+            return false;
+        }
+    }
+
     private String statusJson() {
         org.json.JSONObject out = new org.json.JSONObject();
         /* 确认链路的现场读数（2026-11-11）：把手机端最近几次"读到的档位 / 算出的模式 /
@@ -668,6 +678,12 @@ final class BridgePoller {
             }
             out.put("confirmDebug", dbg);
             out.put("installedHash", installedHash());
+            // 手机终端（Termux）这条路能不能用：装没装、权限给没给。
+            // 报错时说清楚是哪一步缺，别让人从一句英文异常里猜。
+            out.put("termuxInstalled", termuxInstalled());
+            out.put("termuxPermitted",
+                    context.checkSelfPermission("com.termux.permission.RUN_COMMAND")
+                            == android.content.pm.PackageManager.PERMISSION_GRANTED);
         } catch (Exception ignored) { }
         try {
             android.content.Context ctx = context;
