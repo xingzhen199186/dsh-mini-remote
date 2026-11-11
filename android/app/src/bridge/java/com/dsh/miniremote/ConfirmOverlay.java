@@ -74,13 +74,17 @@ final class ConfirmOverlay {
         LinearLayout row = new LinearLayout(service);
         row.setOrientation(LinearLayout.HORIZONTAL);
         if (ConfirmationState.TASK.equals(card.mode)) {
-            row.addView(tapButton("允许本任务", () ->
+            // 本任务档：拒绝 / 允许（允许即整轮免确认）
+            row.addView(tapButton("拒绝", () ->
+                    ConfirmationControl.answerCard(card.id, false, false)));
+            row.addView(tapButton("允许", () ->
                     ConfirmationControl.answerCard(card.id, true, true)));
+        } else {
+            row.addView(tapButton("拒绝", () ->
+                    ConfirmationControl.answerCard(card.id, false, false)));
+            row.addView(tapButton("允许", () ->
+                    ConfirmationControl.answerCard(card.id, true, false)));
         }
-        row.addView(tapButton("拒绝", () ->
-                ConfirmationControl.answerCard(card.id, false, false)));
-        row.addView(tapButton("允许", () ->
-                ConfirmationControl.answerCard(card.id, true, false)));
         box.addView(row);
 
         WindowManager.LayoutParams next = new WindowManager.LayoutParams(

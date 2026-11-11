@@ -233,10 +233,15 @@ public final class Notifier {
                     .setAutoCancel(false)
                     .setOngoing(false);
             if (ConfirmationState.TASK.equals(card.mode)) {
-                builder.addAction(gateAction(appContext, gateAction, "允许本任务", DECISION_ALLOW_TASK, 1));
+                // 本任务档只留两个按钮（2026-11-11 用户要求）：
+                // 这档的意思就是"问一次、之后整轮别问"，所以「允许」就直接授权整个任务，
+                // 不必再多一个"允许本任务"——那会让人以为还有别的选择。
+                builder.addAction(gateAction(appContext, gateAction, "拒绝", DECISION_DENY, 2));
+                builder.addAction(gateAction(appContext, gateAction, "允许", DECISION_ALLOW_TASK, 3));
+            } else {
+                builder.addAction(gateAction(appContext, gateAction, "拒绝", DECISION_DENY, 2));
+                builder.addAction(gateAction(appContext, gateAction, "允许", DECISION_ALLOW, 3));
             }
-            builder.addAction(gateAction(appContext, gateAction, "拒绝", DECISION_DENY, 2));
-            builder.addAction(gateAction(appContext, gateAction, "允许", DECISION_ALLOW, 3));
             // 划掉通知 = 拒绝：系统会把"被划掉"当成一次回答，不用自己盯着。
             builder.setDeleteIntent(gateIntent(appContext, gateAction, DECISION_DENY, 7));
             long left = card.deadline - System.currentTimeMillis();
