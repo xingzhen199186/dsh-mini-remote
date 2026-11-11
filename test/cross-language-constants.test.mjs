@@ -44,3 +44,17 @@ test('每个手机工具都真的被注册（不是被挤成别人参数）', ()
   const registers = [...host.matchAll(/tools\.register\(defineTool\(\{/g)].length
   assert.ok(registers >= firmly.length, `注册数 ${registers} 少于工具数 ${firmly.length}`)
 })
+
+test('有 Termux 才优先走终端，没有就回落点屏幕（两条都保留）', () => {
+  const bridge = read('lib/bridge.js')
+  const server = read('lib/server.js')
+  // 手机随心跳上报，电脑记下来。
+  assert.match(server, /termux: url\.searchParams\.get\('termux'\) === '1'/)
+  assert.match(bridge, /if \(typeof info\.termux === 'boolean'\) entry\.termux = info\.termux/)
+  // 指引必须分两种情形，且都保留无障碍那条路。
+  assert.match(host, /if \(!armed\.termux\)/)
+  assert.match(host, /do not call phone_shell/)
+  assert.match(host, /Both routes stay available/)
+  // 不给终端单独编"永远确认"的规则：确认档位仍是那三档。
+  assert.doesNotMatch(host, /phone_shell[\s\S]{0,200}alwaysConfirm/)
+})

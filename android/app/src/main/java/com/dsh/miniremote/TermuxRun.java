@@ -45,6 +45,29 @@ final class TermuxRun {
     private TermuxRun() {
     }
 
+    private static Boolean cachedAvailable;
+    private static long cachedAt = 0;
+
+    /**
+     * 这条终端路现在能不能用（装了 Termux、也授权了）。
+     * 结果缓存几秒，因为它每次心跳都会问一次。
+     */
+    static boolean available(Context context) {
+        long nowMs = System.currentTimeMillis();
+        if (cachedAvailable != null && nowMs - cachedAt < 5000) return cachedAvailable;
+        boolean ok = false;
+        try {
+            context.getPackageManager().getPackageInfo(TERMUX_PACKAGE, 0);
+            ok = context.checkSelfPermission("com.termux.permission.RUN_COMMAND")
+                    == android.content.pm.PackageManager.PERMISSION_GRANTED;
+        } catch (Exception err) {
+            ok = false;
+        }
+        cachedAvailable = ok;
+        cachedAt = nowMs;
+        return ok;
+    }
+
     static synchronized int nextExecutionId() {
         return nextId++;
     }
