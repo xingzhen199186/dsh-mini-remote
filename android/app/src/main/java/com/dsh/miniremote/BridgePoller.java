@@ -385,8 +385,44 @@ final class BridgePoller {
                 // 在手机上的 Termux 里执行命令（2026-11-12）。这是**任意命令执行**，
                 // 所以它和点屏幕一样走确认档位，不另开旁路。
                 String command = args == null ? "" : args.optString("command", "");
-                int waitSeconds = args == null ? 30 : Math.max(5, Math.min(120, args.optInt("timeoutSeconds", 30)));
-                String result = TermuxRun.exec(context, command, waitSeconds);
+                String workdir = args == null ? null : args.optString("workdir", null);
+                String stdin = args != null && args.has("stdin") ? args.optString("stdin", null) : null;
+                boolean background = args != null && args.optBoolean("background", false);
+                String result;
+                if (background) {
+                    // 长任务：立刻返回编号，之后用 phone_shell_output / phone_shell_stop。
+                    String jobId = java.util.UUID.randomUUID().toString().substring(0, 8);
+                    String started = TermuxRun.startJob(context, jobId, command, workdir);
+                    result = started.contains("\"ok\":true")
+                            ? "{\"ok\":true,\"jobId\":\"" + jobId + "\",\"note\":\"已在后台开始，用 phone_shell_output 查看、phone_shell_stop 停止\"}"
+                            : started;
+                } else {
+                    int waitSeconds = args == null ? 30
+                            : Math.max(5, Math.min(120, args.optInt("timeoutSeconds", 30)));
+                    result = TermuxRun.exec(context, command, waitSeconds, workdir, stdin);
+                }
+                boolean ok = result.contains("\"ok\":true");
+                reportRaw(id, ok, result);
+                return;
+            }
+            if ("phone_shell_output".equals(tool)) {
+                String jobId = args == null ? "" : args.optString("job", "");
+                if (jobId.isEmpty()) {
+                    report(id, false, "要指定 job（发起后台命令时拿到的编号）");
+                    return;
+                }
+                String result = TermuxRun.jobOutput(context, jobId);
+                boolean ok = result.contains("\"ok\":true");
+                reportRaw(id, ok, result);
+                return;
+            }
+            if ("phone_shell_stop".equals(tool)) {
+                String jobId = args == null ? "" : args.optString("job", "");
+                if (jobId.isEmpty()) {
+                    report(id, false, "要指定 job（发起后台命令时拿到的编号）");
+                    return;
+                }
+                String result = TermuxRun.stopJob(context, jobId);
                 boolean ok = result.contains("\"ok\":true");
                 reportRaw(id, ok, result);
                 return;

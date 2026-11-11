@@ -37,6 +37,10 @@ final class TermuxRun {
     private static final String EXTRA_LABEL = "com.termux.RUN_COMMAND_COMMAND_LABEL";
     private static final String EXTRA_DESCRIPTION = "com.termux.RUN_COMMAND_COMMAND_DESCRIPTION";
     private static final String EXTRA_PENDING_INTENT = "com.termux.RUN_COMMAND_PENDING_INTENT";
+    private static final String EXTRA_STDIN = "com.termux.RUN_COMMAND_STDIN";
+
+    /** 后台任务的现场：脚本把输出和进程号写在这里，供"查看"和"停止"用。 */
+    private static final String JOB_DIR = "$HOME/.dsh_jobs";
 
     /** 每次执行一个编号，结果回来时按它对上。 */
     private static final ConcurrentHashMap<Integer, ArrayBlockingQueue<String>> SLOTS = new ConcurrentHashMap<>();
@@ -78,6 +82,16 @@ final class TermuxRun {
      * @return JSON：{ok, stdout, stderr, exitCode, raw?}；失败时带 error。
      */
     static String exec(Context context, String command, int timeoutSeconds) {
+        return exec(context, command, timeoutSeconds, null, null);
+    }
+
+    /**
+     * 执行一条命令（可指定工作目录、可喂 stdin）。
+     *
+     * @param workdir 工作目录；null 就用 Termux 自己的家目录。
+     * @param stdin   喂给命令的内容；null 表示没有。
+     */
+    static String exec(Context context, String command, int timeoutSeconds, String workdir, String stdin) {
         if (command == null || command.trim().isEmpty()) {
             return "{\"ok\":false,\"error\":\"命令是空的\"}";
         }
@@ -94,6 +108,12 @@ final class TermuxRun {
         // 不传工作目录：默认就是 Termux 的家目录。传 "~" 会被当成字面量 "/~" 而不存在。
         intent.putExtra(EXTRA_BACKGROUND, true);
         intent.putExtra(EXTRA_SESSION_ACTION, "0");
+        if (workdir != null && !workdir.trim().isEmpty()) {
+            intent.putExtra(EXTRA_WORKDIR, workdir.trim());
+        }
+        if (stdin != null) {
+            intent.putExtra(EXTRA_STDIN, stdin);
+        }
         intent.putExtra(EXTRA_LABEL, "电脑请求执行命令");
         intent.putExtra(EXTRA_DESCRIPTION, "由手机遥控执行");
 
@@ -126,6 +146,49 @@ final class TermuxRun {
         } finally {
             SLOTS.remove(id);
         }
+    }
+
+    /**
+     * 发起一条后台命令，立刻返回一个任务编号，不等它跑完（2026-11-12）。
+     *
+     * 为什么需要：装包、下载、批处理动辄几分钟，同步等一定会超时；超时后命令还在手机里跑，
+     * 电脑却以为失败了，会重跑，造成重复安装、重复删除。所以拆成"发起 / 查看 / 停止"。
+     */
+    static String startJob(Context context, String jobId, String command, String workdir) {
+        String dir = workdir == null || workdir.trim().isEmpty() ? "" : "cd " + quote(workdir.trim()) + " ; ";
+        // 逐条记录退出码，让"查看"能判断是跑完还是失败。
+        String script = "mkdir -p " + JOB_DIR + " ; "
+                + "{ " + dir + command + " ; echo \"__DSH_EXIT__$?\" ; } "
+                + "> " + JOB_DIR + "/" + jobId + ".out 2>&1 & "
+                + "echo $! > " + JOB_DIR + "/" + jobId + ".pid ; echo started";
+        return exec(context, script, 20, null, null);
+    }
+
+    /** 看一个后台任务：还在跑吗、输出了什么。 */
+    static String jobOutput(Context context, String jobId) {
+        String out = JOB_DIR + "/" + jobId + ".out";
+        String pid = JOB_DIR + "/" + jobId + ".pid";
+        // 只回最后两万字节：一次塞太多会被系统截断，也容易压垮通道。
+        String script = "if [ ! -f " + out + " ]; then echo \"__DSH_NOJOB__\" ; exit 0 ; fi ; "
+                + "tail -c 20000 " + out + " ; "
+                + "if [ -f " + pid + " ] && kill -0 \"$(cat " + pid + ")\" 2>/dev/null ; "
+                + "then echo \"__DSH_RUNNING__\" ; fi";
+        return exec(context, script, 30, null, null);
+    }
+
+    /** 停掉一个后台任务（连同它派生的子进程）。 */
+    static String stopJob(Context context, String jobId) {
+        String pid = JOB_DIR + "/" + jobId + ".pid";
+        String script = "if [ ! -f " + pid + " ] ; then echo \"__DSH_NOJOB__\" ; exit 0 ; fi ; "
+                + "p=\"$(cat " + pid + ")\" ; "
+                + "pkill -P \"$p\" 2>/dev/null ; kill -9 \"$p\" 2>/dev/null ; "
+                + "rm -f " + pid + " ; echo stopped";
+        return exec(context, script, 20, null, null);
+    }
+
+    /** 给工作目录路径加引号，避免空格把它拆开。 */
+    private static String quote(String value) {
+        return "'" + value.replace("'", "'\\''") + "'";
     }
 
     /** 结果服务收到回传后把它交到这里。 */
