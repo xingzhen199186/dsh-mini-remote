@@ -122,6 +122,113 @@ public final class Notifier {
         manager(appContext).notify(notificationId("confirm-hint"), builder.build());
     }
 
+    /** 确认通知的渠道：要能横幅弹出，否则用户根本不知道有东西在等他。 */
+    private static final String CONFIRM_CHANNEL_ID = "mini_confirm";
+    static final String ACTION_CONFIRM = "com.dsh.miniremote.CONFIRM";
+    static final String EXTRA_CONFIRM_CARD = "confirmCardId";
+    static final String EXTRA_CONFIRM_DECISION = "confirmDecision";
+    static final String DECISION_ALLOW = "allow";
+    static final String DECISION_DENY = "deny";
+    static final String DECISION_ALLOW_TASK = "allowTask";
+
+    /**
+     * 能不能发通知。关掉了就必须立刻失败——不能让人干等 90 秒才等来一个超时。
+     */
+    static boolean canPostConfirm(Context context) {
+        try {
+            NotificationManager mgr = manager(context.getApplicationContext());
+            if (mgr == null) return false;
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) return true;
+            return mgr.areNotificationsEnabled();
+        } catch (Exception err) {
+            return false;
+        }
+    }
+
+    /**
+     * 电脑要操作手机：确认卡做成通知（2026-11-11）。
+     *
+     * 为什么不再是浮层：荣耀系统层不允许无障碍浮层接收触摸（日志里有
+     * `AppOps: op=CREATE_ACCESSIBILITY_OVERLAY`），按钮画得出来但点不动。
+     * 通知上的按钮由系统绘制、由系统派发点击，绕开了这条限制。
+     *
+     * 返回 false 表示通知没发出去（权限被关），调用方必须据此如实失败。
+     */
+    static boolean showConfirmCard(Context context, ConfirmationControl.Card card) {
+        Context appContext = context.getApplicationContext();
+        try {
+            NotificationManager mgr = manager(appContext);
+            if (mgr == null) return false;
+            createConfirmChannel(appContext);
+            Notification.Builder builder = new Notification.Builder(appContext, CONFIRM_CHANNEL_ID)
+                    .setSmallIcon(R.drawable.ic_notify)
+                    .setLargeIcon(android.graphics.BitmapFactory.decodeResource(
+                            appContext.getResources(), R.mipmap.ic_launcher))
+                    .setContentTitle("电脑想操作你的手机")
+                    .setContentText(card.actionText())
+                    .setStyle(new Notification.BigTextStyle().bigText(card.bodyText()))
+                    .setCategory(Notification.CATEGORY_ALARM)
+                    .setPriority(Notification.PRIORITY_HIGH)
+                    .setVisibility(Notification.VISIBILITY_PRIVATE)
+                    // 不自动消失：它代表一件还没决定的事，撤不撤由状态机说了算。
+                    .setAutoCancel(false)
+                    .setOngoing(false);
+            if (ConfirmationState.TASK.equals(card.mode)) {
+                builder.addAction(action(appContext, card, "允许本任务", DECISION_ALLOW_TASK));
+            }
+            builder.addAction(action(appContext, card, "拒绝", DECISION_DENY));
+            builder.addAction(action(appContext, card, "允许", DECISION_ALLOW));
+            mgr.notify(confirmNotificationId(card.id), builder.build());
+            return true;
+        } catch (Exception err) {
+            android.util.Log.w("MiniBridge", "确认通知发不出来：" + err.getMessage());
+            return false;
+        }
+    }
+
+    /** 允许、拒绝、超时、停止——所有终局都要撤掉这条通知，别留一条已经作废的提醒。 */
+    static void cancelConfirmCard(Context context, String cardId) {
+        if (context == null || cardId == null) return;
+        try {
+            NotificationManager mgr = manager(context.getApplicationContext());
+            if (mgr == null) return;
+            mgr.cancel(confirmNotificationId(cardId));
+        } catch (Exception ignored) {
+            // 撤不掉不影响动作结果；下一次确认会用新的编号。
+        }
+    }
+
+    private static Notification.Action action(Context context, ConfirmationControl.Card card,
+                                              String label, String decision) {
+        Intent intent = new Intent(context, ConfirmActionReceiver.class);
+        intent.setAction(ACTION_CONFIRM);
+        intent.putExtra(EXTRA_CONFIRM_CARD, card.id);
+        intent.putExtra(EXTRA_CONFIRM_DECISION, decision);
+        // 每张卡各自一套 requestCode：旧通知的按钮不会顶掉新通知的按钮。
+        PendingIntent pending = PendingIntent.getBroadcast(context,
+                (card.id + decision).hashCode(), intent, pendingIntentFlags());
+        return new Notification.Action.Builder(null, label, pending).build();
+    }
+
+    private static int confirmNotificationId(String cardId) {
+        return 0x4d530000 ^ (cardId == null ? 0 : cardId.hashCode());
+    }
+
+    private static void createConfirmChannel(Context context) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+            return;
+        }
+        NotificationManager mgr = manager(context);
+        if (mgr == null || mgr.getNotificationChannel(CONFIRM_CHANNEL_ID) != null) return;
+        NotificationChannel channel = new NotificationChannel(
+                CONFIRM_CHANNEL_ID, "确认电脑操作", NotificationManager.IMPORTANCE_HIGH);
+        channel.setDescription("电脑要操作这台手机时，在这里点允许或拒绝。");
+        channel.setSound(null, null);
+        channel.enableVibration(false);
+        channel.setLockscreenVisibility(Notification.VISIBILITY_PRIVATE);
+        mgr.createNotificationChannel(channel);
+    }
+
     /** 卡已经结束（答了或超时）时把锁屏提示一起撤掉，别让通知栏留一条已经作废的提醒。 */
     static void cancelConfirmHint(Context context) {
         try {

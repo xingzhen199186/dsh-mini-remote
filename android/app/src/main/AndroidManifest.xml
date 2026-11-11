@@ -122,6 +122,14 @@
             android:name=".ClipboardReceiver"
             android:exported="false" />
 
+        <!--
+            确认卡改成通知之后的按钮落点（2026-11-11）。
+            exported=false：只有本应用自己构造的 PendingIntent 能拉起它，外部 App 发不进来。
+        -->
+        <receiver
+            android:name=".ConfirmActionReceiver"
+            android:exported="false" />
+
         <!-- 无障碍服务只存在于 src/bridge，standard 不合并该声明。 -->
     </application>
 </manifest>

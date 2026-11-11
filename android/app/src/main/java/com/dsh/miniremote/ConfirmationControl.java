@@ -8,7 +8,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
 /**
- * 确认动作的唯一状态机。卡片由无障碍服务托管，动作线程只等待决定。
+ * 确认动作的唯一状态机。通知是唯一确认入口，浮层只做展示。
  *
  * 档位持久化；待确认动作、任务放行和计时器只活在内存里。进程被杀后没有旧卡可恢复，
  * 也不会把当初尚未回答的动作补做一遍。
@@ -51,10 +51,34 @@ final class ConfirmationControl {
             this.deadline = deadline;
         }
 
-        /** 卡上这句解释“这次问了之后还算不算数”，避免用户以为按了允许就永久放行。 */
+        /** 卡上那句解释“这次问了之后还算不算数”，避免用户以为按了允许就永久放行。 */
         String modeText() {
             if (ConfirmationState.TASK.equals(mode)) return "只影响本轮任务，下一轮会重新询问。";
             return "每执行一次都会问一次。";
+        }
+
+        /** 动作说人话；通知正文和浮层共用同一句，两个入口不许各说各的。 */
+        String actionText() {
+            switch (tool) {
+                case "phone_tap": return "点一下屏幕上这个控件";
+                case "phone_open": return "打开一个 App";
+                case "phone_notify": return "发一条通知";
+                case "phone_swipe": return "滑动屏幕";
+                case "phone_back": return "按返回键";
+                case "phone_input": return "往输入框里填字";
+                case "phone_screenshot": return "截一张屏";
+                case "phone_observe": return "读一次屏幕文字";
+                case "phone_wake": return "点亮屏幕";
+                case "phone_send_file": return "把一个文件存到手机";
+                default: return "执行 " + tool;
+            }
+        }
+
+        /** 通知正文：动作 + 打码后的目标，不含输入正文和截图。 */
+        String bodyText() {
+            String head = actionText();
+            if (target != null && !target.isEmpty()) head = head + "：" + target;
+            return head + "\n" + modeText();
         }
     }
 
@@ -73,10 +97,12 @@ final class ConfirmationControl {
 
     private static final class Pending {
         final Card card;
+        final Context app;
         final CountDownLatch done = new CountDownLatch(1);
         volatile Decision decision;
 
-        Pending(Card card) {
+        Pending(Context app, Card card) {
+            this.app = app;
             this.card = card;
         }
     }
@@ -116,21 +142,23 @@ final class ConfirmationControl {
 
     /** 同一时刻只让一张卡占住执行口；另一动作等自己的原期限，不叠卡也不加长时间。 */
     static Decision request(Context context, String id, String taskId, String tool, String target) {
-        final String selected = selectedMode(context);
+        final Context app = context.getApplicationContext();
+        final String selected = selectedMode(app);
         // 默认档的快路径：不读任务状态、不建卡、不起计时，直接和今天完全一样。
         if (ConfirmationState.OFF.equals(selected) && !state.needsExtendedDeadline(selected)) {
             return allow();
         }
-        final long deadline = System.currentTimeMillis() + CONFIRM_MS;
-        final long requestedEpoch;
-        synchronized (LOCK) {
-            requestedEpoch = epoch;
+        // 通知被系统关掉时，确认根本没法问出口：立刻如实失败，不能挂着空等 90 秒。
+        if (!Notifier.canPostConfirm(app)) {
+            return failure("confirm_unavailable", "手机没允许发通知，确认卡显示不出来，动作未执行");
         }
+        final long deadline = System.currentTimeMillis() + CONFIRM_MS;
+        final long requestedEpoch = epoch;
         while (true) {
             Pending occupied = null;
             synchronized (LOCK) {
                 if (requestedEpoch != epoch) return stopped();
-                if (!BridgeControl.isArmed(context)) {
+                if (!BridgeControl.isArmed(app)) {
                     return failure("not_armed", "手机桥已关闭，动作未执行");
                 }
                 String mode = state.modeForTask(taskId, selected);
@@ -138,12 +166,13 @@ final class ConfirmationControl {
                 if (mode == ConfirmationState.TASK && state.taskGranted(taskId)) return allow();
                 if (pending == null) {
                     Card card = new Card(id, taskId, tool, target, mode, deadline);
-                    Pending created = new Pending(card);
+                    Pending created = new Pending(app, card);
                     pending = created;
                     occupied = created;
-                    // 跳出锁后再碰 UI；监听器不存在时明确失败，不做看不见的执行。
-                    if (cardListener == null) {
-                        settle(created, failure("confirm_unavailable", "手机当前无法显示确认卡，动作未执行"));
+                    // 通知是唯一确认入口；浮层只是“有东西在等你”的展示。
+                    if (!Notifier.showConfirmCard(app, card)) {
+                        settle(created, failure("confirm_unavailable",
+                                "确认通知发不出来，动作未执行"));
                     } else {
                         MAIN.post(() -> {
                             CardListener listener = cardListener;
@@ -160,12 +189,17 @@ final class ConfirmationControl {
         }
     }
 
-    static boolean answer(boolean allow) {
+    /**
+     * 用户点了通知上的按钮。**只认当前这一张卡**：旧通知、连点第二次都不作数，
+     * 所以同一个动作不可能被执行两遍。
+     */
+    static boolean answerCard(String cardId, boolean allow, boolean grantTask) {
         Pending current;
         synchronized (LOCK) {
             current = pending;
             if (current == null) return false;
-            if (allow && current.card.mode == ConfirmationState.TASK) {
+            if (cardId == null || !cardId.equals(current.card.id)) return false;
+            if (allow && grantTask && current.card.mode == ConfirmationState.TASK) {
                 state.grantCurrentTask(current.card.taskId);
             }
             settle(current, allow ? allow() : failure("user_rejected", "用户拒绝了这次操作，动作未执行"));
@@ -208,7 +242,7 @@ final class ConfirmationControl {
         }
     }
 
-    /** 第一个终局生效；清卡与唤醒只发生一次。 */
+    /** 第一个终局生效；撤通知、清卡与唤醒只发生一次。 */
     private static void settle(Pending current, Decision decision) {
         synchronized (LOCK) {
             if (pending != current) return;
@@ -216,6 +250,7 @@ final class ConfirmationControl {
             current.decision = decision;
             current.done.countDown();
         }
+        Notifier.cancelConfirmCard(current.app, current.card.id);
         MAIN.post(() -> {
             CardListener listener = cardListener;
             if (listener != null) listener.onCardClosed();
