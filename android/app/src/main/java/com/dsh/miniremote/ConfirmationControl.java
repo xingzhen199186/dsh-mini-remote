@@ -30,7 +30,6 @@ final class ConfirmationControl {
 
     private static final String PREFS = "mini_ui_prefs";
     private static final String MODE = "phone_confirm_mode";
-    private static final String AUTO_OFF_TASK = "phone_auto_off_task";
     /**
      * 已经放行的任务编号（2026-11-11）。
      *
@@ -304,8 +303,6 @@ final class ConfirmationControl {
                  * 这样"不再被每步打扰"和"每轮重新问"两件事都在。
                  */
                 setSelectedMode(current.app, ConfirmationState.OFF);
-                current.app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-                        .edit().putString(AUTO_OFF_TASK, current.card.taskId).apply();
             }
             target = current;
             outcome = allow ? allow() : failure("user_rejected", "用户拒绝了这次操作，动作未执行");
