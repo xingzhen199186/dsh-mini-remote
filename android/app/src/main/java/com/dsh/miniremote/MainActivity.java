@@ -787,10 +787,15 @@ public final class MainActivity extends Activity {
             + "<div id=\"miniA11yBody\" hidden>"
             + "<div class=\"hint\">允许电脑读取屏幕控件，并按编号点击。</div>"
             + "<div class=\"hint\" id=\"miniA11yMask\">文字会打码，截图仍是原始画面。</div>"
-            // 三档确认已停用（2026-11-11 真机）：荣耀上浮层收不到触摸、通知按钮无响应，
-            // 点完按钮回 App 还会卡死。选择器整块藏起来，只留一句说明，
-            // 免得用户以为能选、选了却什么也没发生。代码仍在，换机型可恢复。
-            + "<div class=\"hint\" id=\"miniConfirmOff\">本机暂不支持操作前确认（系统限制），已固定为免确认。</div>"
+            // 三档确认（2026-11-11 重写后重新放出）：确认走**通知按钮**，
+            // 每道题一个随机 action、划掉即拒绝、到点由系统撤。
+            // 曾经的卡死来自"在锁里做系统调用"，那条路径已经改掉。
+            + "<div class=\"hint\" id=\"miniConfirmLabel\">电脑操作手机前：</div>"
+            + "<div id=\"miniConfirmSeg\" style=\"display:flex;gap:6px;flex-wrap:wrap;margin:6px 0 2px\">"
+            + "<button class=\"btn\" data-mode=\"off\">始终免确认</button>"
+            + "<button class=\"btn\" data-mode=\"task\">本任务免确认</button>"
+            + "<button class=\"btn\" data-mode=\"each\">每次都问</button></div>"
+            + "<div class=\"hint\" id=\"miniConfirmHint\">电脑操作手机时不打扰你。</div>"
             + "<div class=\"hint\" id=\"miniA11yPath\">设置 → 辅助功能 → 无障碍 → DSH 手机桥（实验）</div>"
             + "<button class=\"btn\" id=\"miniA11yGo\">开无障碍</button>"
             + "</div></div>';"
@@ -857,6 +862,27 @@ public final class MainActivity extends Activity {
             // 档位选择器已停用（见上方那句说明），这里不再绑定任何按钮。
             + "paintA11y();"
             + "setInterval(paintA11y,2000);"
+            // 三档切换：点一下存一次，文案跟着变；**从下一轮任务生效**（跑到一半不换规则）。
+            + "function paintConfirm(){"
+            + "var hint=document.getElementById('miniConfirmHint');"
+            + "var seg=document.getElementById('miniConfirmSeg');"
+            + "if(!hint||!seg)return;"
+            + "var mode='off';"
+            + "try{mode=(JSON.parse(window.MiniProbe.confirmMode()||'{}').mode)||'off';}catch(e){}"
+            + "var btns=seg.querySelectorAll('button');"
+            + "for(var i=0;i<btns.length;i++){"
+            + "var b=btns[i];var on=b.getAttribute('data-mode')===mode;"
+            + "b.style.background=on?'#2f6fed':'#fff';b.style.color=on?'#fff':'#1a1a1a';"
+            + "b.style.borderColor=on?'#2f6fed':'#d8dce3';"
+            + "if(!b.__wired){b.__wired=1;b.addEventListener('click',function(){"
+            + "try{window.MiniProbe.confirmMode(this.getAttribute('data-mode'));}catch(e){}"
+            + "paintConfirm();});}"
+            + "}"
+            + "hint.textContent=mode==='each'?'每个动作都会先问一次（通知栏点允许）。'"
+            + ":(mode==='task'?'每轮任务只问一次，下一轮重新问。':'电脑操作手机时不打扰你。');"
+            + "}"
+            + "paintConfirm();"
+            + "setInterval(paintConfirm,3000);"
             + "function read(){try{paint(JSON.parse(window.MiniBridge.state()||'{}'));}"
             + "catch(e){var h=document.getElementById('miniBridgeHint');"
             + "if(h)h.textContent='状态读不到（界面与手机可能已断开）';}}"

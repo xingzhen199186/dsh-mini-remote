@@ -139,7 +139,12 @@ public final class Notifier {
             NotificationManager mgr = manager(context.getApplicationContext());
             if (mgr == null) return false;
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) return true;
-            return mgr.areNotificationsEnabled();
+            if (!mgr.areNotificationsEnabled()) return false;
+            // 渠道还没建时不算失败（第一次发之前会建）；建了但重要性被调低就算失败——
+            // 那种情况下通知不会横幅弹出，用户很容易错过（DSH Go 也检查这一项）。
+            if (Build.VERSION.SDK_INT < 26) return true;
+            NotificationChannel channel = mgr.getNotificationChannel(CONFIRM_CHANNEL_ID);
+            return channel == null || channel.getImportance() >= NotificationManager.IMPORTANCE_HIGH;
         } catch (Exception err) {
             return false;
         }
@@ -154,6 +159,54 @@ public final class Notifier {
      *
      * 返回 false 表示通知没发出去（权限被关），调用方必须据此如实失败。
      */
+    /**
+     * 每张卡一个随机 action，配套一个**只在这道题活着期间存在**的私有接收器。
+     *
+     * 照 DSH Go 的做法：旧通知上的按钮命中不了新的提问；接收器用
+     * RECEIVER_NOT_EXPORTED 注册，别的应用发不进来，系统派发的按钮点击照常能到
+     *（PendingIntent 以我们的身份执行）。
+     */
+    private static final java.util.Map<String, android.content.BroadcastReceiver> GATES =
+            new java.util.HashMap<>();
+    private static final java.util.Map<String, String> GATE_ACTIONS = new java.util.HashMap<>();
+
+    private static String openGate(Context app, final String cardId) {
+        final String action = app.getPackageName() + ".MINI_CONFIRM."
+                + java.util.UUID.randomUUID().toString().replace("-", "").substring(0, 16);
+        android.content.BroadcastReceiver receiver = new android.content.BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, android.content.Intent intent) {
+                if (intent == null) return;
+                String decision = intent.getStringExtra(EXTRA_CONFIRM_DECISION);
+                if (decision == null) return;
+                // 只做一次比对和一次唤醒；answerCard 内部自己 post 主线程，接收器立刻返回。
+                ConfirmationControl.answerCard(cardId,
+                        !DECISION_DENY.equals(decision),
+                        DECISION_ALLOW_TASK.equals(decision));
+            }
+        };
+        if (android.os.Build.VERSION.SDK_INT >= 33) {
+            app.registerReceiver(receiver, new android.content.IntentFilter(action),
+                    Context.RECEIVER_NOT_EXPORTED);
+        } else {
+            app.registerReceiver(receiver, new android.content.IntentFilter(action));
+        }
+        GATES.put(cardId, receiver);
+        GATE_ACTIONS.put(cardId, action);
+        return action;
+    }
+
+    private static void closeGate(Context app, String cardId) {
+        android.content.BroadcastReceiver receiver = GATES.remove(cardId);
+        GATE_ACTIONS.remove(cardId);
+        if (receiver == null) return;
+        try {
+            app.unregisterReceiver(receiver);
+        } catch (Exception ignored) {
+            // 已经注销过：不值得为它报错。
+        }
+    }
+
     static boolean showConfirmCard(Context context, ConfirmationControl.Card card) {
         // 这台机型上确认功能已停用（浮层收不到触摸、通知按钮无响应），
         // 不再创建确认通知；状态机那边也不会调到这里。
@@ -162,7 +215,12 @@ public final class Notifier {
         try {
             NotificationManager mgr = manager(appContext);
             if (mgr == null) return false;
+            // 先确认"这条通知真能弹出"：总开关、渠道是否有、重要级别够不够。
+            // 不可用就立刻返回 false，让调用方如实失败——而不是挂满超时（DSH Go 的做法）。
+            if (!canPostConfirm(appContext)) return false;
             createConfirmChannel(appContext);
+            if (!canPostConfirm(appContext)) return false;
+            String gateAction = openGate(appContext, card.id);
             Notification.Builder builder = new Notification.Builder(appContext, CONFIRM_CHANNEL_ID)
                     .setSmallIcon(R.drawable.ic_notify)
                     .setLargeIcon(android.graphics.BitmapFactory.decodeResource(
@@ -177,10 +235,17 @@ public final class Notifier {
                     .setAutoCancel(false)
                     .setOngoing(false);
             if (ConfirmationState.TASK.equals(card.mode)) {
-                builder.addAction(action(appContext, card, "允许本任务", DECISION_ALLOW_TASK));
+                builder.addAction(gateAction(appContext, gateAction, "允许本任务", DECISION_ALLOW_TASK, 1));
             }
-            builder.addAction(action(appContext, card, "拒绝", DECISION_DENY));
-            builder.addAction(action(appContext, card, "允许", DECISION_ALLOW));
+            builder.addAction(gateAction(appContext, gateAction, "拒绝", DECISION_DENY, 2));
+            builder.addAction(gateAction(appContext, gateAction, "允许", DECISION_ALLOW, 3));
+            // 划掉通知 = 拒绝：系统会把"被划掉"当成一次回答，不用自己盯着。
+            builder.setDeleteIntent(gateIntent(appContext, gateAction, DECISION_DENY, 7));
+            long left = card.deadline - System.currentTimeMillis();
+            if (android.os.Build.VERSION.SDK_INT >= 26 && left > 0) {
+                // 到点由系统撤掉：进程被冻住也不影响它按时消失。
+                builder.setTimeoutAfter(left);
+            }
             mgr.notify(confirmNotificationId(card.id), builder.build());
             return true;
         } catch (Exception err) {
@@ -193,7 +258,9 @@ public final class Notifier {
     static void cancelConfirmCard(Context context, String cardId) {
         if (context == null || cardId == null) return;
         try {
-            NotificationManager mgr = manager(context.getApplicationContext());
+            Context app = context.getApplicationContext();
+            closeGate(app, cardId);
+            NotificationManager mgr = manager(app);
             if (mgr == null) return;
             mgr.cancel(confirmNotificationId(cardId));
         } catch (Exception ignored) {
@@ -201,16 +268,19 @@ public final class Notifier {
         }
     }
 
-    private static Notification.Action action(Context context, ConfirmationControl.Card card,
-                                              String label, String decision) {
-        Intent intent = new Intent(context, ConfirmActionReceiver.class);
-        intent.setAction(ACTION_CONFIRM);
-        intent.putExtra(EXTRA_CONFIRM_CARD, card.id);
-        intent.putExtra(EXTRA_CONFIRM_DECISION, decision);
-        // 每张卡各自一套 requestCode：旧通知的按钮不会顶掉新通知的按钮。
-        PendingIntent pending = PendingIntent.getBroadcast(context,
-                (card.id + decision).hashCode(), intent, pendingIntentFlags());
-        return new Notification.Action.Builder(null, label, pending).build();
+    /** 按钮与"划掉"共用同一个私有 action，只是 decision 不同。 */
+    private static PendingIntent gateIntent(Context context, String action, String decision, int code) {
+        Intent intent = new Intent(action)
+                .setPackage(context.getPackageName())
+                .putExtra(EXTRA_CONFIRM_DECISION, decision);
+        return PendingIntent.getBroadcast(context, action.hashCode() * 8 + code, intent,
+                pendingIntentFlags());
+    }
+
+    private static Notification.Action gateAction(Context context, String action,
+                                                  String label, String decision, int code) {
+        return new Notification.Action.Builder(null, label,
+                gateIntent(context, action, decision, code)).build();
     }
 
     private static int confirmNotificationId(String cardId) {

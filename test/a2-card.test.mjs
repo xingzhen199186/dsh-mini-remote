@@ -55,16 +55,15 @@ test('A2：锁屏也照常出卡，确认入口是通知不是浮层', () => {
   assert.doesNotMatch(service, /wakeUp|disableKeyguard|FLAG_SHOW_WHEN_LOCKED/)
 })
 
-test('A2：档位选择器已停用，只留一句说明', () => {
-  // 2026-11-11 真机：荣耀上浮层收不到触摸、通知按钮无响应，三档确认整体停用。
-  // 选择器藏起来，避免“能选但选了没用”的误导；代码仍在，换机型可恢复。
-  assert.ok(activity.includes('本机暂不支持操作前确认（系统限制），已固定为免确认。'))
-  assert.doesNotMatch(activity, /miniConfirmTask|miniConfirmEach/)
-  assert.match(activity, /id=\\"miniConfirmOff\\"/)
+test('A2：三档选择器在设置页里，且只有一处入口', () => {
+  // 重写之后重新放出（2026-11-11）：确认走通知按钮，不再依赖浮层。
+  assert.match(activity, /miniConfirmSeg/)
+  assert.match(activity, /始终免确认/)
+  assert.match(activity, /本任务免确认/)
+  assert.match(activity, /每次都问/)
 })
 
-test('A2：档位接口仍在，但读取一律按免确认处理', () => {
-  // 留着接口是为了以后恢复；现在的实现必须无视已存的值。
-  assert.match(control, /static final boolean SUPPORTED = false/)
-  assert.match(control, /if \(!SUPPORTED\) return ConfirmationState\.OFF/)
+test('A2：档位接口读写同一处，切换后从下一轮生效', () => {
+  assert.match(control, /static final boolean SUPPORTED = true/)
+  assert.match(activity, /MiniProbe\.confirmMode\(this\.getAttribute\('data-mode'\)\)/)
 })

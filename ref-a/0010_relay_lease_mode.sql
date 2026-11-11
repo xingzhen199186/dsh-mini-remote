@@ -1,0 +1,11 @@
+-- dsh-market: which transport serves one lease's relay hostname.
+--
+-- Additive: the default is 'quick', which is exactly the transport every
+-- instance rides today, so the column changes no behavior until an operator
+-- flips one instance with a single UPDATE. 'bridge' hands the hostname to the
+-- instance's Durable Object meeting point (src/relay-bridge.js) instead of the
+-- Worker's quick-tunnel proxy, and flipping it back is the rollback.
+--
+-- The registry row keeps its own copy of nothing: a row absent here means the
+-- instance never claimed, and the proxy path reads that as 'quick' too.
+ALTER TABLE relay_leases ADD COLUMN mode TEXT NOT NULL DEFAULT 'quick';

@@ -1,0 +1,509 @@
+/**
+ * dsh-market relay control plane: named-tunnel leases beside the quick-tunnel
+ * registry (`relay.js`). Additive on purpose — the wildcard Worker route, the
+ * proxy path and the registration endpoints keep working untouched, so every
+ * instance that has not migrated still rides its quick tunnel.
+ *
+ * The tunnel transports (quick, named) converge three Cloudflare objects for
+ * one instance: a remote-managed tunnel named `dsh-relay-<id>`, that tunnel's
+ * ingress (the instance hostname plus the catch-all rule remote-managed tunnels
+ * require), and an exact proxied CNAME `<id>.dsh-market.com ->
+ * <tunnel-id>.cfargotunnel.com`. The lease row in D1 points at them so
+ * release/retire/GC can settle them later. The bridge transport owns none of
+ * them: its data plane is the instance's Durable Object, so a bridged claim
+ * sends no account call at all and keeps only the hostname.
+ *
+ * Trust model: a lease is secret-authenticated exactly like a registration
+ * (SHA-256 hash, constant-time compare, `new_secret` on the first claim) and
+ * rate-limited on the same buckets. The account-wide Cloudflare API token
+ * never leaves the Worker; the per-instance tunnel token is returned once to
+ * the caller that proved possession of the id secret and is never logged.
+ */
+
+import {
+  ID_RE,
+  REGISTER_MAX_PER_ID,
+  REGISTER_MAX_PER_IP,
+  REGISTER_WINDOW_MS,
+  SECRET_RE,
+  json,
+  sha256Hex,
+  timingSafeEqualStr,
+} from './relay.js'
+
+/** Tunnel names live in the relay's own account namespace (`dsh-relay-*`). */
+const TUNNEL_NAME_PREFIX = 'dsh-relay-'
+/** The relay hostnames this worker also serves as its public apex zone. */
+const RELAY_ZONE_SUFFIX = '.dsh-market.com'
+/** The CNAME target shape a named tunnel resolves through. */
+const TUNNEL_TARGET_SUFFIX = '.cfargotunnel.com'
+/** Remote-managed tunnels require a rule that matches everything else. */
+const CATCH_ALL_SERVICE = 'http_status:404'
+/** Rows not seen for this long are recovered by the cron GC (as the registry). */
+export const LEASE_TTL_MS = 90 * 24 * 60 * 60 * 1000
+/** How soon a caller should retry a claim that lost its upstream. */
+export const CF_RETRY_AFTER_MS = 5_000
+/** The Cloudflare API origin (`client/v4`). */
+const CF_API_BASE = 'https://api.cloudflare.com/client/v4'
+/** Where a bridge connector dials. The market apex, like the claim endpoint
+ * itself: a relay hostname would route the upgrade through the data plane it
+ * is trying to replace. */
+export const RELAY_BRIDGE_ENDPOINT = 'wss://dsh-market.com/api/relay/bridge'
+/**
+ * What one bridge upgrade presents as its credential: the lease's own id and
+ * secret. That pair is the only long-lived credential an instance holds, it is
+ * stored here as a hash and compared in constant time, and the claim reply
+ * names it instead of echoing it -- a second copy of a secret in a response
+ * body is a leak surface with nothing to show for it.
+ */
+export const RELAY_BRIDGE_CREDENTIAL = 'lease-secret'
+
+/** The tunnel name one instance owns. */
+export function relayTunnelName(id) {
+  return TUNNEL_NAME_PREFIX + id
+}
+
+/** The relay hostname one instance owns (the phone's bookmark). */
+export function relayHostname(id) {
+  return id + RELAY_ZONE_SUFFIX
+}
+
+/** The proxied CNAME target that routes one hostname into its tunnel. */
+export function relayDnsTarget(tunnelId) {
+  return tunnelId + TUNNEL_TARGET_SUFFIX
+}
+
+/**
+ * The ingress a lease's tunnel must carry: the instance hostname toward the
+ * local origin port the claim named, then the catch-all rule. The service is
+ * loopback because the connector runs on the user's machine.
+ */
+export function leaseIngress(id, port) {
+  return [
+    { hostname: relayHostname(id), service: 'http://127.0.0.1:' + String(port) },
+    { service: CATCH_ALL_SERVICE },
+  ]
+}
+
+/**
+ * Which connector serves the relay hostname. The per-instance column is the
+ * migration switch and the rollback: `quick` keeps today's Worker proxy path,
+ * `bridge` hands the hostname to the instance's Durable Object meeting point.
+ * A row that has not been flipped keeps the deployment-wide answer, which is
+ * what the earlier named-tunnel switch still reads.
+ * @param env - the Worker environment.
+ * @param lease - this id's lease row, when it has one.
+ */
+export function relayModeOf(env, lease) {
+  if (lease !== undefined && lease !== null && lease.mode === 'bridge') return 'bridge'
+  return env.RELAY_MODE === 'named' ? 'named' : 'quick'
+}
+
+/** One JSON body, or undefined for a body that is not a JSON object. */
+async function readJsonBody(request) {
+  try {
+    const body = await request.json()
+    return typeof body === 'object' && body !== null ? body : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/** The local origin port one claim names, or undefined when it is unusable. */
+function originPortOf(origin) {
+  if (typeof origin !== 'object' || origin === null) return undefined
+  const port = origin.port
+  if (typeof port !== 'number' || !Number.isInteger(port) || port < 1 || port > 65_535) return undefined
+  return port
+}
+
+/**
+ * One Cloudflare API call against the scoped account token. Errors carry the
+ * method, path and Cloudflare's own message so the logs explain a 502 — the
+ * bearer token and the per-instance tunnel token never appear in either.
+ */
+async function cfCall(config, method, path, body) {
+  const response = await fetch(CF_API_BASE + path, {
+    method,
+    headers: { authorization: 'Bearer ' + config.token, 'content-type': 'application/json' },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  })
+  const payload = await response.json().catch(() => undefined)
+  if (!response.ok || payload === undefined || payload.success === false) {
+    const first = payload && Array.isArray(payload.errors) ? payload.errors[0] : undefined
+    const detail = first && typeof first.message === 'string' ? first.message : 'HTTP ' + String(response.status)
+    throw new Error('cloudflare api ' + method + ' ' + path + ': ' + detail)
+  }
+  return payload.result
+}
+
+/**
+ * The Cloudflare client one lease runs on. Every method returns the normalized
+ * value the lease path needs, so an injected double in tests only has to answer
+ * these names.
+ * @param config - the scoped token plus its account and zone ids.
+ */
+export function createCloudflareRelayApi(config) {
+  const account = '/accounts/' + config.accountId
+  const zone = '/zones/' + config.zoneId
+  return {
+    /** Find the tunnel that already carries this exact name, if any. */
+    async findTunnel(name) {
+      const result = await cfCall(config, 'GET', account + '/cfd_tunnel?name=' + encodeURIComponent(name) + '&is_deleted=false')
+      const tunnels = Array.isArray(result) ? result : []
+      return tunnels.find((tunnel) => tunnel && tunnel.name === name && !tunnel.deleted_at)
+    },
+    /** Create one remote-managed (dashboard-configured) tunnel. */
+    async createTunnel(name) {
+      return await cfCall(config, 'POST', account + '/cfd_tunnel', { name, config_src: 'cloudflare' })
+    },
+    /** Write the tunnel's ingress (the instance hostname plus catch-all). */
+    async putTunnelConfiguration(tunnelId, ingress) {
+      return await cfCall(config, 'PUT', account + '/cfd_tunnel/' + tunnelId + '/configurations', { config: { ingress } })
+    },
+    /** Read the connector token of one tunnel. */
+    async getTunnelToken(tunnelId) {
+      const result = await cfCall(config, 'GET', account + '/cfd_tunnel/' + tunnelId + '/token')
+      return typeof result === 'string' ? result : result && result.token
+    },
+    /** Find the CNAME already standing on this exact name, if any. */
+    async findDnsRecord(name) {
+      const result = await cfCall(config, 'GET', zone + '/dns_records?type=CNAME&name=' + encodeURIComponent(name))
+      const records = Array.isArray(result) ? result : []
+      return records.find((record) => record && record.name === name)
+    },
+    /** Create one proxied CNAME toward the tunnel. */
+    async createDnsRecord(record) {
+      return await cfCall(config, 'POST', zone + '/dns_records', record)
+    },
+    /** Replace one CNAME whose target drifted (a re-created tunnel). */
+    async updateDnsRecord(recordId, record) {
+      return await cfCall(config, 'PUT', zone + '/dns_records/' + recordId, record)
+    },
+    /** Remove one record. */
+    async deleteDnsRecord(recordId) {
+      return await cfCall(config, 'DELETE', zone + '/dns_records/' + recordId)
+    },
+    /** Remove one tunnel. */
+    async deleteTunnel(tunnelId) {
+      return await cfCall(config, 'DELETE', account + '/cfd_tunnel/' + tunnelId)
+    },
+  }
+}
+
+/**
+ * The client for one environment: an injected double wins (that is how the
+ * offline tests exercise every path), otherwise the Worker secrets must all be
+ * present — an unconfigured Worker answers 503 instead of inventing resources.
+ */
+export function relayApiOf(env) {
+  if (env.CF_RELAY_API !== undefined) return env.CF_RELAY_API
+  const token = env.CF_API_TOKEN
+  const accountId = env.CF_ACCOUNT_ID
+  const zoneId = env.CF_ZONE_ID
+  if (typeof token !== 'string' || token === '') return undefined
+  if (typeof accountId !== 'string' || accountId === '') return undefined
+  if (typeof zoneId !== 'string' || zoneId === '') return undefined
+  return createCloudflareRelayApi({ token, accountId, zoneId })
+}
+
+/** The lease row of one id, or undefined. */
+async function leaseOf(env, id) {
+  return await env.DB.prepare('SELECT secret_hash, tunnel_id, hostname, state, mode FROM relay_leases WHERE id = ?1').bind(id).first()
+}
+
+/** One rate-limit window of the current minute for a bucket. */
+function windowOf(bucket) {
+  return { bucket, windowStart: Math.floor(Date.now() / REGISTER_WINDOW_MS) * REGISTER_WINDOW_MS }
+}
+
+/** Spend one unit of a window inside the caller's batch. */
+function spendStatement(env, window) {
+  return env.DB.prepare(
+    'INSERT INTO relay_rate_limit (bucket, window_start, count) VALUES (?1, ?2, 1) ON CONFLICT(bucket, window_start) DO UPDATE SET count = count + 1'
+  ).bind(window.bucket, window.windowStart)
+}
+
+/** Read a window's budget before spending a Cloudflare round trip on it. */
+async function spentOf(env, windows) {
+  const results = await env.DB.batch(windows.map((window) =>
+    env.DB.prepare('SELECT count FROM relay_rate_limit WHERE bucket = ?1 AND window_start = ?2').bind(window.bucket, window.windowStart)))
+  return windows.map((_, index) => {
+    const rows = results[index] && results[index].results
+    return Number(rows && rows[0] && rows[0].count) || 0
+  })
+}
+
+/**
+ * Converge the three pieces one lease names, keyed by name rather than by the
+ * row: a claim that died halfway writes nothing to D1, so the next attempt
+ * must find the pieces it already created instead of duplicating them.
+ * @returns the tunnel id, hostname, CNAME target and connector token.
+ */
+async function convergeLease(api, id, port) {
+  const name = relayTunnelName(id)
+  let tunnel = await api.findTunnel(name)
+  if (tunnel === undefined) tunnel = await api.createTunnel(name)
+  const tunnelId = tunnel.id
+  await api.putTunnelConfiguration(tunnelId, leaseIngress(id, port))
+  const hostname = relayHostname(id)
+  const target = relayDnsTarget(tunnelId)
+  const record = await api.findDnsRecord(hostname)
+  if (record === undefined) {
+    await api.createDnsRecord({ type: 'CNAME', name: hostname, content: target, proxied: true })
+  } else if (record.content !== target || record.proxied !== true) {
+    await api.updateDnsRecord(record.id, { type: 'CNAME', name: hostname, content: target, proxied: true })
+  }
+  const token = await api.getTunnelToken(tunnelId)
+  if (typeof token !== 'string' || token === '') throw new Error('the tunnel token endpoint returned no token')
+  return { tunnelId, hostname, target, token }
+}
+
+/**
+ * The lease of a bridged instance: the hostname it keeps and nothing in the
+ * account. A bridge's data plane is its Durable Object, so this claim sends no
+ * Cloudflare call at all -- not even a token fetch -- and the row's tunnel id
+ * stays empty, which is exactly what the cron GC reads as "owns no account
+ * resource" when it reclaims the row later.
+ * @returns the hostname alone; no tunnel id, no CNAME target, no token.
+ */
+function bridgedLease(id) {
+  return { tunnelId: '', hostname: relayHostname(id) }
+}
+
+/**
+ * Remove one lease's public source in the order the design fixes: the DNS
+ * record first, then the tunnel, so there is never a window in which the
+ * hostname still resolves and points at a tunnel that is already gone.
+ */
+async function removeLeaseSource(api, id, tunnelId) {
+  const record = await api.findDnsRecord(relayHostname(id))
+  if (record !== undefined) await api.deleteDnsRecord(record.id)
+  if (typeof tunnelId === 'string' && tunnelId !== '') await api.deleteTunnel(tunnelId)
+}
+
+/** Spend windows without a follow-up write (a claim that lost its upstream). */
+async function spendWindows(env, windows) {
+  try {
+    await env.DB.batch(windows.map((window) => spendStatement(env, window)))
+  } catch { /* best-effort: the limit is a guard, not a ledger */ }
+}
+
+/** The 502 every upstream failure of the lease path answers with. */
+function cfUnavailable(detail) {
+  if (detail !== undefined) console.warn('relay control: ' + detail)
+  return json({ ok: false, error: 'cf-api-unavailable', retryAfterMs: CF_RETRY_AFTER_MS }, 502)
+}
+
+/**
+ * Claim one lease: for the tunnel transports, find-or-create the tunnel,
+ * converge its ingress and its CNAME and read the connector token; for the
+ * bridge transport, converge nothing in the account. Either way the row is
+ * upserted afterwards, so a failed claim leaves no half-written lease behind
+ * and the next attempt converges by name.
+ */
+export async function handleRelayClaim(request, env) {
+  if (request.method !== 'PUT') return json({ ok: false, error: 'method-not-allowed' }, 405)
+  const body = await readJsonBody(request)
+  if (body === undefined) return json({ ok: false, error: 'invalid-json' }, 400)
+  const id = typeof body.id === 'string' ? body.id : ''
+  const secret = typeof body.secret === 'string' ? body.secret : ''
+  const port = originPortOf(body.origin)
+  if (!ID_RE.test(id) || !SECRET_RE.test(secret) || port === undefined) return json({ ok: false, error: 'invalid-params' }, 400)
+  // Fail closed before anything is created or written: an unconfigured Worker
+  // must neither touch the account nor leave a lease row behind.
+  const api = relayApiOf(env)
+  if (api === undefined) return json({ ok: false, error: 'cf-api-unconfigured' }, 503)
+
+  const secretHash = await sha256Hex(secret)
+  let existing
+  try {
+    existing = await leaseOf(env, id)
+  } catch {
+    return json({ ok: false, error: 'storage-unavailable' }, 503)
+  }
+  if (existing) {
+    if (!timingSafeEqualStr(existing.secret_hash, secretHash)) return json({ ok: false, error: 'auth-failed' }, 403)
+  } else {
+    // First claim: the caller must present the same secret twice, exactly as
+    // the registry endpoint requires, so an id cannot be squatted by a guess.
+    if (body.register === false) return json({ ok: false, error: 'unknown-id' }, 404)
+    if (!SECRET_RE.test(body.new_secret || '') || body.new_secret !== secret) {
+      return json({ ok: false, error: 'invalid-params' }, 400)
+    }
+  }
+
+  // The registry and the lease share both windows: alternating between the two
+  // endpoints must not buy a second budget.
+  const ip = request.headers.get('cf-connecting-ip') || 'unknown'
+  const perIp = windowOf('ip:' + ip)
+  const perId = windowOf('id:' + id)
+  let spent
+  try {
+    spent = await spentOf(env, [perIp, perId])
+  } catch {
+    return json({ ok: false, error: 'storage-unavailable' }, 503)
+  }
+  if (spent[0] >= REGISTER_MAX_PER_IP || spent[1] >= REGISTER_MAX_PER_ID) {
+    return json({ ok: false, error: 'rate-limited' }, 429)
+  }
+
+  // The row's own mode decides the whole account half of this claim, so it is
+  // read before anything is created: a bridged instance owns no Cloudflare
+  // object and must not be given one back on every claim.
+  const mode = relayModeOf(env, existing)
+
+  let lease
+  try {
+    lease = mode === 'bridge' ? bridgedLease(id) : await convergeLease(api, id, port)
+  } catch (error) {
+    // The attempt still costs a window: a caller holding a valid secret must
+    // not be able to loop upstream failures at the account API for free.
+    await spendWindows(env, [perIp, perId])
+    return cfUnavailable('claim convergence failed for ' + id + ': ' + (error instanceof Error ? error.message : String(error)))
+  }
+
+  const now = Date.now()
+  const pluginVersion = typeof body.plugin === 'object' && body.plugin !== null && typeof body.plugin.version === 'string'
+    ? body.plugin.version
+    : null
+  try {
+    await env.DB.batch([
+      spendStatement(env, perIp),
+      spendStatement(env, perId),
+      env.DB.prepare(
+        'INSERT INTO relay_leases (id, secret_hash, tunnel_id, hostname, origin_port, plugin_version, state, created_at, last_seen_at) '
+        + 'VALUES (?1, ?2, ?3, ?4, ?5, ?6, \'active\', ?7, ?7) '
+        + 'ON CONFLICT(id) DO UPDATE SET secret_hash = excluded.secret_hash, tunnel_id = excluded.tunnel_id, hostname = excluded.hostname, '
+        + 'origin_port = excluded.origin_port, plugin_version = excluded.plugin_version, state = \'active\', last_seen_at = excluded.last_seen_at'
+      ).bind(id, secretHash, lease.tunnelId, lease.hostname, port, pluginVersion, now),
+    ])
+  } catch {
+    return json({ ok: false, error: 'storage-unavailable' }, 503)
+  }
+  // A bridged claim carries neither half of the tunnel contract: the caller
+  // reads the hostname and the bridge grant and must tolerate their absence,
+  // which is what keeps it from starting a connector with nothing to run.
+  const tunnelHalf = mode === 'bridge' ? {} : { tunnel: { id: lease.tunnelId, token: lease.token } }
+  const dnsHalf = mode === 'bridge' ? {} : { dns: { target: lease.target } }
+  return json({
+    // The row's own mode, so a flip reaches the plugin on its next claim
+    // without a redeploy; the upsert above never writes the column, so a claim
+    // cannot undo an operator's flip.
+    mode,
+    ...tunnelHalf,
+    hostname: lease.hostname,
+    ...dnsHalf,
+    // Everything a bridge connector needs to dial and authenticate; nothing
+    // secret travels here (see RELAY_BRIDGE_CREDENTIAL).
+    bridge: {
+      endpoint: RELAY_BRIDGE_ENDPOINT,
+      instance: id,
+      credential: RELAY_BRIDGE_CREDENTIAL,
+    },
+  })
+}
+
+/** Authenticate one id/secret pair against its lease row. */
+async function authenticatedLease(env, id, secret) {
+  let lease
+  try {
+    lease = await leaseOf(env, id)
+  } catch {
+    return { status: 503, body: { ok: false, error: 'storage-unavailable' } }
+  }
+  // An unknown id answers like a wrong secret: the endpoint is not an
+  // existence oracle for other instances' hostnames.
+  if (!lease || !timingSafeEqualStr(lease.secret_hash, await sha256Hex(secret))) {
+    return { status: 403, body: { ok: false, error: 'auth-failed' } }
+  }
+  return { status: 200, lease }
+}
+
+/**
+ * Release one lease: mark the row released and touch nothing in the account.
+ * The tunnel and the CNAME stay, so re-enabling an instance is a claim that
+ * creates nothing and only reads one token (a bridged lease reads nothing).
+ */
+export async function handleRelayRelease(request, env) {
+  if (request.method !== 'POST') return json({ ok: false, error: 'method-not-allowed' }, 405)
+  const body = await readJsonBody(request)
+  if (body === undefined) return json({ ok: false, error: 'invalid-json' }, 400)
+  const id = typeof body.id === 'string' ? body.id : ''
+  const secret = typeof body.secret === 'string' ? body.secret : ''
+  if (!ID_RE.test(id) || !SECRET_RE.test(secret)) return json({ ok: false, error: 'invalid-params' }, 400)
+  const auth = await authenticatedLease(env, id, secret)
+  if (auth.status !== 200) return json(auth.body, auth.status)
+  try {
+    await env.DB.prepare('UPDATE relay_leases SET state = \'released\', released_at = ?2 WHERE id = ?1').bind(id, Date.now()).run()
+  } catch {
+    return json({ ok: false, error: 'storage-unavailable' }, 503)
+  }
+  return json({ ok: true })
+}
+
+/**
+ * Retire one lease: the only path that removes a relay source. The record goes
+ * first, then the tunnel, then the row — a retry converges because removing an
+ * already-absent record or tunnel is not an error.
+ */
+export async function handleRelayRetire(request, env) {
+  if (request.method !== 'POST') return json({ ok: false, error: 'method-not-allowed' }, 405)
+  const body = await readJsonBody(request)
+  if (body === undefined) return json({ ok: false, error: 'invalid-json' }, 400)
+  const id = typeof body.id === 'string' ? body.id : ''
+  const secret = typeof body.secret === 'string' ? body.secret : ''
+  if (!ID_RE.test(id) || !SECRET_RE.test(secret)) return json({ ok: false, error: 'invalid-params' }, 400)
+  const auth = await authenticatedLease(env, id, secret)
+  if (auth.status !== 200) return json(auth.body, auth.status)
+  const api = relayApiOf(env)
+  if (api === undefined) return json({ ok: false, error: 'cf-api-unconfigured' }, 503)
+  try {
+    await removeLeaseSource(api, id, auth.lease.tunnel_id)
+  } catch (error) {
+    return cfUnavailable('retire failed for ' + id + ': ' + (error instanceof Error ? error.message : String(error)))
+  }
+  try {
+    await env.DB.prepare('DELETE FROM relay_leases WHERE id = ?1').bind(id).run()
+  } catch {
+    return json({ ok: false, error: 'storage-unavailable' }, 503)
+  }
+  return json({ ok: true })
+}
+
+/**
+ * Cron GC: recover leases not seen for 90 days (the registry's TTL), settling
+ * each one in the retire order. A row whose tunnel cannot be removed is left
+ * alone — dropping it would orphan a tunnel nothing points at any more — and
+ * an unconfigured Worker settles only the rows that own no account resource.
+ * @returns how many rows were removed.
+ */
+export async function pruneRelayLeases(env) {
+  let stale
+  try {
+    stale = await env.DB.prepare('SELECT id, tunnel_id FROM relay_leases WHERE last_seen_at < ?1').bind(Date.now() - LEASE_TTL_MS).all()
+  } catch {
+    return { pruned: 0 }
+  }
+  const rows = stale && Array.isArray(stale.results) ? stale.results : []
+  if (rows.length === 0) return { pruned: 0 }
+  const api = relayApiOf(env)
+  let pruned = 0
+  for (const row of rows) {
+    const tunnelId = typeof row.tunnel_id === 'string' ? row.tunnel_id : ''
+    try {
+      if (tunnelId === '') {
+        await env.DB.prepare('DELETE FROM relay_leases WHERE id = ?1').bind(row.id).run()
+        pruned += 1
+        continue
+      }
+      if (api === undefined) continue
+      await removeLeaseSource(api, row.id, tunnelId)
+      await env.DB.prepare('DELETE FROM relay_leases WHERE id = ?1').bind(row.id).run()
+      pruned += 1
+    } catch {
+      // Best-effort: the row keeps its tunnel id, so the next tick retries.
+    }
+  }
+  return { pruned }
+}

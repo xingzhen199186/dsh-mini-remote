@@ -26,7 +26,7 @@ final class ConfirmationControl {
      * 关掉不等于删掉：代码整段留着，换一台手机（或系统放开限制）时只改这一处即可。
      * 现在任何一个入口都不会走到“等确认”，所以卡死路径不可达。
      */
-    static final boolean SUPPORTED = false;
+    static final boolean SUPPORTED = true;
 
     private static final String PREFS = "mini_ui_prefs";
     private static final String MODE = "phone_confirm_mode";

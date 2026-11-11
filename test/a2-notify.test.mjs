@@ -15,8 +15,9 @@ test('A2：确认走通知，三个按钮由 PendingIntent 广播派发', () => 
   assert.match(notifier, /PendingIntent\.getBroadcast/)
   assert.ok(notifier.includes('允许本任务') && notifier.includes('拒绝') && notifier.includes('允许'))
   assert.match(notifier, /ConfirmationState\.TASK\.equals\(card\.mode\)/)
-  assert.match(notifier, /ConfirmActionReceiver\.class/)
-  assert.match(manifest, /android:name="\.ConfirmActionReceiver"[\s\S]*?android:exported="false"/)
+  // 重写后：不做固定类名广播，而是每道题一个随机 action（旧通知的按钮命中不了新题）。
+  assert.match(notifier, /MINI_CONFIRM\./)
+  assert.match(notifier, /RECEIVER_NOT_EXPORTED/)
 })
 
 test('A2：通知按钮复用同一套状态机，不另写一份答案处理', () => {
