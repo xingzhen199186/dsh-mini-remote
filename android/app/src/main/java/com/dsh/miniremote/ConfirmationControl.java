@@ -14,6 +14,20 @@ import java.util.concurrent.TimeUnit;
  * 也不会把当初尚未回答的动作补做一遍。
  */
 final class ConfirmationControl {
+    /**
+     * 这台机型上，操作前确认暂时关掉（2026-11-11 真机结论，荣耀 MagicOS / Android 15）。
+     *
+     * 三条实测，缺一不可地否掉了这条路：
+     *   1. 无障碍浮层画得出来、按钮也显示正常，但**完全收不到触摸**
+     *      （系统日志 `AppOps ... op=CREATE_ACCESSIBILITY_OVERLAY` 直接拒绝）；
+     *   2. 改成通知按钮后，通知能弹出、三个按钮都在，**点下去仍然没有反应**；
+     *   3. 点完按钮回到 App，**界面会卡死**——这是最不能接受的一条。
+     *
+     * 关掉不等于删掉：代码整段留着，换一台手机（或系统放开限制）时只改这一处即可。
+     * 现在任何一个入口都不会走到“等确认”，所以卡死路径不可达。
+     */
+    static final boolean SUPPORTED = false;
+
     private static final String PREFS = "mini_ui_prefs";
     private static final String MODE = "phone_confirm_mode";
     /**
@@ -116,6 +130,9 @@ final class ConfirmationControl {
     }
 
     static String selectedMode(Context context) {
+        // 关掉期间**不看已存储的档位**：有人之前存过 each/task 也一样当 off
+        // （否则升级后行为会跟界面说明不一致，用户以为已经不用确认了，实际还在等）。
+        if (!SUPPORTED) return ConfirmationState.OFF;
         return ConfirmationState.normalize(context.getApplicationContext()
                 .getSharedPreferences(PREFS, Context.MODE_PRIVATE)
                 .getString(MODE, ConfirmationState.OFF));
@@ -128,6 +145,8 @@ final class ConfirmationControl {
     }
 
     static boolean needsExtendedDeadline(Context context) {
+        // 关掉期间不延长电脑侧等待：没有确认要等，就不该多留时间。
+        if (!SUPPORTED) return false;
         return state.needsExtendedDeadline(selectedMode(context));
     }
 
@@ -152,6 +171,10 @@ final class ConfirmationControl {
 
     static Decision request(Context context, String id, String taskId, String tool, String target,
                             Abort abort) {
+        // 关掉期间这里是**第一句**：不建卡、不发通知、不起计时、不进任何等待。
+        // 之所以放在最前面，是因为今天出过「点完通知按钮回 App 卡死」，
+        // 只要不进等待，那条路径就不可能再被堵住。
+        if (!SUPPORTED) return allow();
         final Context app = context.getApplicationContext();
         final String selected = selectedMode(app);
         // 默认档的快路径：不读任务状态、不建卡、不起计时，直接和今天完全一样。
@@ -179,16 +202,9 @@ final class ConfirmationControl {
                     Pending created = new Pending(app, card);
                     pending = created;
                     occupied = created;
-                    // 通知是唯一确认入口；浮层只是“有东西在等你”的展示。
-                    if (!Notifier.showConfirmCard(app, card)) {
-                        settle(created, failure("confirm_unavailable",
-                                "确认通知发不出来，动作未执行"));
-                    } else {
-                        MAIN.post(() -> {
-                            CardListener listener = cardListener;
-                            if (listener != null) listener.onCard(card);
-                        });
-                    }
+                    // **发通知要在锁外做**（2026-11-11 卡死事故）：发通知会走系统调用，
+                    // 而广播接收器在主线程上也要拿这把锁；锁里再等系统，界面就会停住。
+                    startPrompt(app, created);
                     return awaitDecision(created, abort);
                 }
             }
@@ -199,11 +215,26 @@ final class ConfirmationControl {
         }
     }
 
+    /** 摆出确认通知并通知浮层；**不持锁**，因为它会碰系统服务与主线程。 */
+    private static void startPrompt(Context app, Pending created) {
+        if (!Notifier.showConfirmCard(app, created.card)) {
+            settle(created, failure("confirm_unavailable", "确认通知发不出来，动作未执行"));
+            return;
+        }
+        MAIN.post(() -> {
+            CardListener listener = cardListener;
+            if (listener != null) listener.onCard(created.card);
+        });
+    }
+
     /**
      * 用户点了通知上的按钮。**只认当前这一张卡**：旧通知、连点第二次都不作数，
      * 所以同一个动作不可能被执行两遍。
      */
     static boolean answerCard(String cardId, boolean allow, boolean grantTask) {
+        // 关掉期间按钮点了也不做事：这条路径从主线程（广播接收器）进来，
+        // 必须第一时间返回，绝不在这里等锁或等任何东西。
+        if (!SUPPORTED) return false;
         Pending current;
         synchronized (LOCK) {
             current = pending;

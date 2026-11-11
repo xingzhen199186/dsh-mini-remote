@@ -42,7 +42,8 @@ test('A2：本任务档多一个「允许本任务」，每次档没有', () => 
 test('A2：锁屏也照常出卡，确认入口是通知不是浮层', () => {
   assert.match(service, /isKeyguardLocked\(\)/)
   // 确认通知由状态机直接发出，不再依赖无障碍服务在场。
-  assert.match(control, /Notifier\.showConfirmCard\(app, card\)/)
+  // 通知由状态机在锁外发出（startPrompt），浮层只是展示。
+  assert.match(control, /Notifier\.showConfirmCard\(app, created\.card\)/)
   // 通知说要解锁后能看，就必须真的有东西补出来，否则这句承诺是空的。
   assert.match(service, /ConfirmationControl\.currentCard\(\)/)
   assert.match(service, /showPendingCardIfAny\(\)/)
@@ -54,18 +55,16 @@ test('A2：锁屏也照常出卡，确认入口是通知不是浮层', () => {
   assert.doesNotMatch(service, /wakeUp|disableKeyguard|FLAG_SHOW_WHEN_LOCKED/)
 })
 
-test('A2：档位入口在屏幕操作展开区，位于按钮之前，收起态不带状态词', () => {
-  const body = activity.slice(activity.indexOf('id=\\"miniA11yBody\\"'), activity.indexOf('id=\\"miniA11yGo\\"'))
-  assert.ok(body.includes('miniConfirmOff') && body.includes('miniConfirmTask') && body.includes('miniConfirmEach'))
-  assert.ok(activity.indexOf('miniConfirmRow') < activity.indexOf('id=\\"miniA11yGo\\"'))
-  // 收起态那一行只写“屏幕操作 + 已开启/未开启”，不能塞档位词。
-  const head = activity.slice(activity.indexOf('id=\\"miniA11yHead\\"'), activity.indexOf('id=\\"miniA11yBody\\"'))
-  assert.doesNotMatch(head, /免确认|每次/)
+test('A2：档位选择器已停用，只留一句说明', () => {
+  // 2026-11-11 真机：荣耀上浮层收不到触摸、通知按钮无响应，三档确认整体停用。
+  // 选择器藏起来，避免“能选但选了没用”的误导；代码仍在，换机型可恢复。
+  assert.ok(activity.includes('本机暂不支持操作前确认（系统限制），已固定为免确认。'))
+  assert.doesNotMatch(activity, /miniConfirmTask|miniConfirmEach/)
+  assert.match(activity, /id=\\"miniConfirmOff\\"/)
 })
 
-test('A2：设置页切档只写设置，接口读写都通过 MiniProbe', () => {
-  assert.match(activity, /public String confirmMode\(\)/)
-  assert.match(activity, /public void confirmMode\(String mode\)/)
-  assert.match(activity, /ConfirmationControl\.setSelectedMode\(MainActivity\.this, mode\)/)
-  assert.match(activity, /MiniProbe\.confirmMode\(\)/)
+test('A2：档位接口仍在，但读取一律按免确认处理', () => {
+  // 留着接口是为了以后恢复；现在的实现必须无视已存的值。
+  assert.match(control, /static final boolean SUPPORTED = false/)
+  assert.match(control, /if \(!SUPPORTED\) return ConfirmationState\.OFF/)
 })

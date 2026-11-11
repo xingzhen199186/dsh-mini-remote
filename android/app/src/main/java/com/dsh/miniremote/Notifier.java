@@ -155,6 +155,9 @@ public final class Notifier {
      * 返回 false 表示通知没发出去（权限被关），调用方必须据此如实失败。
      */
     static boolean showConfirmCard(Context context, ConfirmationControl.Card card) {
+        // 这台机型上确认功能已停用（浮层收不到触摸、通知按钮无响应），
+        // 不再创建确认通知；状态机那边也不会调到这里。
+        if (!ConfirmationControl.SUPPORTED) return false;
         Context appContext = context.getApplicationContext();
         try {
             NotificationManager mgr = manager(appContext);

@@ -32,6 +32,8 @@ final class ConfirmOverlay {
 
     /** 只写动作和打码后的目标；不摆输入正文、不摆截图，也不放按钮。 */
     void show(ConfirmationControl.Card card) {
+        // 这台机型上确认功能已停用：不再画确认浮层（画了也点不动，只会挡内容）。
+        if (!ConfirmationControl.SUPPORTED) return;
         dismiss();
         if (windowManager == null) return;
         LinearLayout box = new LinearLayout(service);
