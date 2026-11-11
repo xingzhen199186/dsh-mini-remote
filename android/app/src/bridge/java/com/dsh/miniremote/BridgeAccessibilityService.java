@@ -627,7 +627,14 @@ public final class BridgeAccessibilityService extends AccessibilityService {
             return "{\"ok\":false,\"error\":\"无障碍还没开启\"}";
         }
         if (lastTargets.isEmpty() || System.currentTimeMillis() - lastObserveAt > 30_000) {
-            return "{\"ok\":false,\"error\":\"请先看一眼屏幕（观察一次），序号才有意义\"}";
+            /* 序号过期：**先自己重新看一眼**，不要直接把球丢回去（2026-11-11 真机）。
+             *
+             * 「每次都问」档下，observe 和 tap 各要确认一次，用户点允许那几十秒
+             * 正好超过 30 秒保鲜期；而且每次确认都会把通知栏拉下来，前台随之改变。
+             * 于是"读得到、点不了"。这里自动刷新快照，后面"界面变了核对标签"
+             * 那道保护还在——真翻页时照样会拦住，不会因此点错。
+             */
+            observe();
         }
         /* 界面变了怎么办（2026-11-10 第二次修）。
          *
