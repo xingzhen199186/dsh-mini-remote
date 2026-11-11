@@ -32,3 +32,15 @@ test('电脑发出的任务结束通知，手机认的是同一个名字', () =>
   assert.match(bridge, /kind: 'task-ended'/)
   assert.match(poller, /"task-ended"\.equals\(notice\.optString\("kind"\)\)/)
 })
+
+test('每个手机工具都真的被注册（不是被挤成别人参数）', () => {
+  // 2026-11-12 真事故：插新工具时少了一个 `}))`，于是下一个工具对象变成了
+  // defineTool 的第二个参数——不报错、不崩，那个工具直接消失。
+  const firmly = [...host.matchAll(/name: '(phone_[a-z_]+)',/g)]
+  assert.ok(firmly.length >= 12, `工具数量异常：${firmly.length}`)
+  // 坏形状：`},` 后面紧跟 `{` 再紧跟 name，说明被并进了上一个 defineTool。
+  assert.doesNotMatch(host, /\},\n\s*\{\n\s*name: 'phone_/)
+  // 注册调用数必须不少于工具数，否则有工具没有自己的 register。
+  const registers = [...host.matchAll(/tools\.register\(defineTool\(\{/g)].length
+  assert.ok(registers >= firmly.length, `注册数 ${registers} 少于工具数 ${firmly.length}`)
+})
