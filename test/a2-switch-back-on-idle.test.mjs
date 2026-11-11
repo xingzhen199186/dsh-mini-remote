@@ -4,16 +4,14 @@ import { readFileSync } from 'node:fs'
 
 const read = (p) => readFileSync(new URL(`../${p}`, import.meta.url), 'utf8')
 
-test('切回档位只发生在代理空闲，不在 turn/end 或工具调用之间', () => {
+test('自动切回已停用：允许一次之后一直不问', () => {
   const index = read('lib/index.js')
-  // turn/end 在每一步之后都会发，拿它当"任务做完"会让每步重新问一次。
-  const hook = index.slice(index.indexOf("ctx.on('agent/status'"))
-  assert.match(hook.slice(0, 1200), /status === 'idle'[\s\S]{0,300}taskEnded/)
-  // turn/end 不能再触发切回。
+  // turn/end 与 agent 空闲都会在每个工具步之间触发，拿它们当"任务做完"
+  // 会让"允许一次"每步重新武装成弹卡。现在两条都不再通知手机。
   const turnEnd = index.indexOf("event?.type === 'turn/end'")
-  if (turnEnd > 0) {
-    assert.doesNotMatch(index.slice(turnEnd, turnEnd + 200), /taskEnded/)
-  }
+  if (turnEnd > 0) assert.doesNotMatch(index.slice(turnEnd, turnEnd + 200), /taskEnded/)
+  const statusHook = index.slice(index.indexOf("ctx.on('agent/status'"))
+  assert.doesNotMatch(statusHook.slice(0, 800), /phoneBridge\.taskEnded/)
 })
 
 test('电脑把任务结束放进轮询回应，手机取走即清', () => {
