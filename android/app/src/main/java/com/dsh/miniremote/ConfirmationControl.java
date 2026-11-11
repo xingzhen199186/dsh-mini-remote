@@ -191,13 +191,13 @@ final class ConfirmationControl {
         // 只要不进等待，那条路径就不可能再被堵住。
         if (!SUPPORTED) return allow();
         final Context app = context.getApplicationContext();
-        // 上一轮若被"第一次允许后自动免确认"切到了 OFF，新一轮开始就切回本任务档。
-        String autoOffTask = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-                .getString(AUTO_OFF_TASK, null);
-        if (autoOffTask != null && !autoOffTask.isEmpty() && !autoOffTask.equals(taskId)) {
-            setSelectedMode(app, ConfirmationState.TASK);
-            app.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().remove(AUTO_OFF_TASK).apply();
-        }
+        /* 曾经在这里做过"下一轮自动切回本任务档"，**已删**（2026-11-11 真机）。
+         *
+         * 原因：turn 编号在**每个工具调用之间也会变**，所以"换一轮"这个判据被
+         * 每个动作各触发一次——刚切到免确认，下一个动作又被切回本任务档，
+         * 于是三个动作弹了三次卡。用户要的是"允许一次，之后别再问"，
+         * 那就切过去别切回来：想恢复提问，由用户自己在设置里改档位。
+         */
         final String selected = selectedMode(app);
         // 诊断（2026-11-11）：把"读到的档位 / 算出的 mode / 授权是否还在"落到文件，
         // 否则"本任务免确认退化成每次都问"只能靠猜。
