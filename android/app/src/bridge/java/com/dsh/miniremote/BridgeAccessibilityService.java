@@ -599,6 +599,32 @@ public final class BridgeAccessibilityService extends AccessibilityService {
      * 不按坐标：让模型算像素，错一次就可能点中"付款"。序号只在最近一次观察后
      * 一小段时间内有效，过期就要求重新观察——界面变了还照旧点，是最危险的一种错。
      */
+    /**
+     * 确认放行之后，前台常常停在**通知栏**——因为用户是下拉通知栏去点「允许」的。
+     * 这时紧接着读屏/点击，读到的就是通知栏的控件，而不是用户正在用的 App
+     *（2026-11-11 真机：observe 返回 pkg=com.android.systemui，设置图标自然找不到）。
+     *
+     * 所以在观察/点击之前，若前台是通知栏，先把它收起来。读不到根节点就什么都不做。
+     */
+    static void dismissShadeIfNeeded() {
+        if (instance == null) return;
+        try {
+            android.view.accessibility.AccessibilityNodeInfo root = instance.getRootInActiveWindow();
+            String pkg = root != null && root.getPackageName() != null
+                    ? root.getPackageName().toString() : "";
+            if (!"com.android.systemui".equals(pkg)) return;
+            if (android.os.Build.VERSION.SDK_INT >= 31) {
+                instance.performGlobalAction(GLOBAL_ACTION_DISMISS_NOTIFICATION_SHADE);
+            } else {
+                instance.performGlobalAction(GLOBAL_ACTION_BACK);
+            }
+            // 收起是个动画，给界面一点时间回到原来的 App。
+            Thread.sleep(350);
+        } catch (Exception ignored) {
+            // 收不起来就按原样读：宁可读到通知栏，也不要让动作失败。
+        }
+    }
+
     static String tapIndex(int index) {
         if (instance == null) {
             return "{\"ok\":false,\"error\":\"无障碍还没开启\"}";

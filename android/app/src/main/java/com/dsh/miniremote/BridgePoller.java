@@ -408,6 +408,7 @@ final class BridgePoller {
                 try {
                     int index = args == null ? -1 : args.optInt("index", -1);
                     Class<?> cls = Class.forName("com.dsh.miniremote.BridgeAccessibilityService");
+                    cls.getDeclaredMethod("dismissShadeIfNeeded").invoke(null);
                     String json = (String) cls.getDeclaredMethod("tapIndex", int.class).invoke(null, index);
                     // 点完顺手带回一眼，和返回/滑动/输入保持一致。
                     reportRaw(id, json.contains("\"ok\":true"), withScreen(cls, json));
@@ -420,6 +421,7 @@ final class BridgePoller {
                 try {
                     // 无障碍服务只在 bridge 版本里，走反射拿，标准版调用会得到"不支持"。
                     Class<?> cls = Class.forName("com.dsh.miniremote.BridgeAccessibilityService");
+                    cls.getDeclaredMethod("dismissShadeIfNeeded").invoke(null);
                     String json = (String) cls.getDeclaredMethod("observe").invoke(null);
                     org.json.JSONObject observed = new org.json.JSONObject(json);
                     if (observed.optBoolean("ok", false)) {
