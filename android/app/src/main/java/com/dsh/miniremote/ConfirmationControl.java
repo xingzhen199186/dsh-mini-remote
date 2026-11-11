@@ -30,8 +30,8 @@ final class ConfirmationControl {
 
     private static final String PREFS = "mini_ui_prefs";
     private static final String MODE = "phone_confirm_mode";
-    /** 被"允许一次后切免确认"临时改过的任务编号；这一轮结束（turn/end）时切回来。 */
-    private static final String AUTO_OFF_TASK = "phone_auto_off_task";
+    /** 被"允许一次后切免确认"临时改过的会话；用户发来新指令时切回提问档。 */
+    private static final String AUTO_OFF_TASK = "phone_auto_off_session";
     /**
      * 已经放行的任务编号（2026-11-11）。
      *
@@ -305,8 +305,9 @@ final class ConfirmationControl {
                  * 这样"不再被每步打扰"和"每轮重新问"两件事都在。
                  */
                 setSelectedMode(current.app, ConfirmationState.OFF);
+                // 记**会话**而不是轮次：轮次每一步都会变，按它比对永远对不上。
                 current.app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-                        .edit().putString(AUTO_OFF_TASK, current.card.taskId).apply();
+                        .edit().putString(AUTO_OFF_TASK, sessionOfTask(current.card.taskId)).apply();
             }
             target = current;
             outcome = allow ? allow() : failure("user_rejected", "用户拒绝了这次操作，动作未执行");
@@ -403,6 +404,13 @@ final class ConfirmationControl {
     }
 
     /** 第一个终局生效；撤通知、清卡与唤醒只发生一次。 */
+    /** 任务编号形如 `进程:会话:轮次`，取出其中的会话部分。 */
+    private static String sessionOfTask(String taskId) {
+        if (taskId == null) return "";
+        String[] parts = taskId.split(":");
+        return parts.length >= 3 ? parts[1] : taskId;
+    }
+
     private static void settle(Pending current, Decision decision) {
         synchronized (LOCK) {
             if (pending != current) return;
@@ -423,14 +431,14 @@ final class ConfirmationControl {
      *
      * **只在这里切回**：工具调用之间不切——那正是之前每个动作都弹卡的错判。
      */
-    static void onTaskEnded(String taskId) {
-        if (!SUPPORTED || taskId == null) return;
+    static void onTaskEnded(String sessionId) {
+        if (!SUPPORTED || sessionId == null || sessionId.isEmpty()) return;
         synchronized (LOCK) {
             Context app = pending != null ? pending.app : null;
             if (app == null) return;
             String autoOff = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
                     .getString(AUTO_OFF_TASK, null);
-            if (autoOff == null || !autoOff.equals(taskId)) return;
+            if (autoOff == null || !autoOff.equals(sessionId)) return;
             setSelectedMode(app, ConfirmationState.TASK);
             app.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().remove(AUTO_OFF_TASK).apply();
         }

@@ -216,7 +216,7 @@ final class BridgePoller {
                             JSONObject notice = notices.optJSONObject(n);
                             if (notice == null) continue;
                             if ("task-ended".equals(notice.optString("kind"))) {
-                                ConfirmationControl.onTaskEnded(notice.optString("taskId", ""));
+                                ConfirmationControl.onTaskEnded(notice.optString("sessionId", ""));
                             }
                         }
                     }
