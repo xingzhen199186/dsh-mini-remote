@@ -24,14 +24,18 @@ test('电脑把任务结束放进轮询回应，手机取走即清', () => {
 })
 
 test('手机按会话切回，不按轮次（轮次每步都变）', () => {
-  const control = read('android/app/src/main/java/com/dsh/miniremote/ConfirmationControl.java')
+  const raw = read('android/app/src/main/java/com/dsh/miniremote/ConfirmationControl.java')
+  // 注释里可能写着"曾经用过 =="，只检查真正的代码。
+  const control = raw.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')
   assert.match(control, /sessionOfTask\(current\.card\.taskId\)/)
   assert.match(control, /autoOff\.equals\(sessionId\)/)
   assert.match(control, /setSelectedMode\(app, ConfirmationState\.TASK\)/)
 })
 
 test('档位是字符串，必须用 equals 比较（== 只会比对象）', () => {
-  const control = read('android/app/src/main/java/com/dsh/miniremote/ConfirmationControl.java')
+  const raw = read('android/app/src/main/java/com/dsh/miniremote/ConfirmationControl.java')
+  // 注释里可能写着"曾经用过 =="，只检查真正的代码。
+  const control = raw.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')
   // 2026-11-11 根因：`card.mode == ConfirmationState.TASK` 永远为假，
   // 于是"允许"只放行一次，每步都弹卡。
   assert.doesNotMatch(control, /\bmode == ConfirmationState\./)

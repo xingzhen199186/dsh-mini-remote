@@ -82,7 +82,7 @@ test('A2：非默认档的等待计时器与过期时间同一个上限', async 
 test('A2：默认档不建待确认卡，不起计时器', () => {
   const control = read('android/app/src/main/java/com/dsh/miniremote/ConfirmationControl.java')
   assert.match(control, /if \(ConfirmationState\.OFF\.equals\(selected\) && !state\.needsExtendedDeadline\(selected\)\)/)
-  assert.match(control, /if \(mode == ConfirmationState\.OFF\) return allow\(\)/)
+  assert.match(control, /if \(ConfirmationState\.OFF\.equals\(mode\)\) return allow\(\)/)
   assert.match(control, /if \(pending == null\)/)
   assert.match(control, /CONFIRM_MS = 90_000L/)
   assert.match(control, /private static final ConfirmationState state/)
