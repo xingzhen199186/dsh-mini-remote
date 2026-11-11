@@ -135,58 +135,109 @@ public final class Net {
      * `total` 来自电脑端报的大小；每段都用 Range 要，服务端回 206。
      * 任何一段失败就**如实返回失败**，不留半截文件去装。
      */
-    /**
-     * 先整块传，卡住就自动改分段（2026-11-09 用户要求"先试老机制"）。
-     *
-     * 老机制（一个请求传完）在真机上曾整块卡死过，但那是另一种可能：也许只是慢。
-     * 所以这里给它一次机会——**但必须有止损**：15 秒内一个字节都没进来，就判定卡住，
-     * 立刻改用分段。这样"试老办法"不会变成"干等"。
-     *
-     * `onSwitch` 用来告诉界面"换了方式"，别让用户以为重头开始。
-     */
+    /** 换了下载方式时告诉界面，别让用户以为进度归零是卡住了。 */
     interface Switch {
         void onSwitchToChunked();
     }
 
-    static boolean downloadPreferWhole(String url, String credential, java.io.File out, long total,
-                                       Progress progress, Switch onSwitch) throws IOException {
-        try {
-            boolean ok = downloadWhole(url, credential, out, total, progress);
-            if (ok) {
-                return true;
-            }
-        } catch (IOException err) {
-            // 超时/断流都落在这里：当作"卡住"，继续走分段。
+    /**
+     * 下载结果（2026-11-11）。
+     *
+     * 失败要分两种：**完全连不上**和**下到一半断了**。用户在外面用流量，
+     * 前者该换网络/检查电脑，后者只要信号回稳再点一次就行——一句话说错，
+     * 他就会去折腾本来没坏的东西。
+     */
+    static final class DownloadOutcome {
+        final boolean ok;
+        /** 已经落盘的字节数；失败时用它告诉用户下到了哪儿。 */
+        final long written;
+        /** 是否收到过任何字节。false 表示从头到尾没连上。 */
+        final boolean connected;
+
+        DownloadOutcome(boolean ok, long written, boolean connected) {
+            this.ok = ok;
+            this.written = written;
+            this.connected = connected;
         }
+    }
+
+    /** 整块传的读超时。流量下 27MB 的尾部停顿超过 15 秒很常见，别把「慢」当成「死」。 */
+    private static final int WHOLE_READ_TIMEOUT_MS = 45_000;
+    /** 单段读超时：每段只有 2MB，20 秒还不来就是真的卡住了。 */
+    private static final int SEGMENT_READ_TIMEOUT_MS = 20_000;
+    /** 同一段连续失败几次才放弃。 */
+    private static final int SEGMENT_RETRIES = 3;
+    /** 整块传断尾后，最多补几轮。 */
+    private static final int RESUME_ROUNDS = 3;
+
+    /**
+     * 先整块传，断在尾部就接着下，最后才退到分段（2026-11-09 起，2026-11-11 修）。
+     *
+     * 原来的毛病：整块传到 100% 只是收尾读超时，却被判定失败，然后分段从 0 重来；
+     * 27MB 白下两遍，流量用户直接被劝退。现在的顺序是：
+     * 整块传 → 有部分字节就从断点用 Range 补（最多 3 轮）→ 真的连不上才分段。
+     */
+    static DownloadOutcome downloadPreferWhole(String url, String credential, java.io.File out, long total,
+                                               Progress progress, Switch onSwitch) throws IOException {
+        DownloadOutcome whole = downloadWhole(url, credential, out, total, progress);
+        if (whole.ok) {
+            return whole;
+        }
+        // 整块传拿到了部分字节：从断点接着要剩下的，绝不从头再来。
+        long offset = total > 0 ? whole.written : 0;
+        if (offset > 0 && (total <= 0 || offset < total)) {
+            for (int round = 1; round <= RESUME_ROUNDS; round++) {
+                DownloadOutcome resumed = download(url, credential, out, total, progress, offset, 1);
+                if (resumed.ok) {
+                    return resumed;
+                }
+                if (!resumed.connected) {
+                    return resumed;
+                }
+                offset = resumed.written;
+                if (total > 0 && offset >= total) {
+                    break;
+                }
+            }
+            if (total > 0 && offset >= total) {
+                return new DownloadOutcome(true, offset, true);
+            }
+        }
+        // 走到这儿说明整块传这条路走不通：告诉界面换了方式，然后分段继续（同样从已有字节接）。
         if (onSwitch != null) {
             onSwitch.onSwitchToChunked();
         }
-        return download(url, credential, out, total, progress);
+        long start = total > 0 ? Math.min(out.exists() ? out.length() : 0, total) : out.exists() ? out.length() : 0;
+        if (whole.connected && whole.written > start) {
+            start = whole.written;
+        }
+        return download(url, credential, out, total, progress, start, SEGMENT_RETRIES);
     }
 
-    /** 整块传：一个请求，从 0 到 total。15 秒没数据就算失败。 */
-    static boolean downloadWhole(String url, String deviceCredential, java.io.File out, long total,
-                                 Progress progress) throws IOException {
+    /** 整块传：一个请求，从 0 到 total。45 秒没有新数据才算断。 */
+    static DownloadOutcome downloadWhole(String url, String deviceCredential, java.io.File out, long total,
+                                         Progress progress) throws IOException {
         java.io.File parent = out.getParentFile();
         if (parent != null && !parent.exists() && !parent.mkdirs()) {
-            return false;
+            return new DownloadOutcome(false, 0, false);
         }
         HttpURLConnection connection = open(url);
         connection.setRequestMethod("GET");
         connection.setConnectTimeout(CONNECT_TIMEOUT_MS);
-        // 15 秒：整块传如果连数据都不来，就不必再等。
-        connection.setReadTimeout(15_000);
+        // 45 秒（2026-11-11 真机）：15 秒太短，27MB 在 5G 上尾部停顿一次就被判死，
+        // 于是整份白下、再从 0 分段重来。宁肯多等一会儿，也不要重下 27MB。
+        connection.setReadTimeout(WHOLE_READ_TIMEOUT_MS);
         connection.setUseCaches(false);
         connection.setInstanceFollowRedirects(false);
         if (deviceCredential != null && !deviceCredential.isEmpty()) {
             connection.setRequestProperty("X-Mini-Device", deviceCredential);
         }
+        long written = 0;
         try {
             int status = connection.getResponseCode();
             if (status != 200) {
-                return false;
+                return new DownloadOutcome(false, 0, false);
             }
-            long written = 0;
             try (java.io.InputStream in = connection.getInputStream();
                  java.io.OutputStream os = new java.io.FileOutputStream(out, false)) {
                 byte[] buf = new byte[64 * 1024];
@@ -199,78 +250,127 @@ public final class Net {
                     }
                 }
             }
-            return written > 0 && (total <= 0 || written == total);
+            return new DownloadOutcome(written > 0 && (total <= 0 || written == total), written, written > 0);
+        } catch (IOException err) {
+            // 读到一半断了：把已落盘的字节数带回去，让上层从断点接，而不是从 0 重来。
+            return new DownloadOutcome(false, written, written > 0);
         } finally {
             connection.disconnect();
         }
     }
 
-    static boolean download(String url, String deviceCredential, java.io.File out, long total, Progress progress) throws IOException {
+    /**
+     * 分段下载（2026-11-09 起，2026-11-11 加重试）。
+     *
+     * 每段失败就**从当前断点**再要一次，不是从这一段的起点重来：字节是顺序追加的，
+     * 从断点接才不会把同一段写两遍（那会让整个包错位）。同一段连续三次都失败才报错。
+     */
+    static DownloadOutcome download(String url, String deviceCredential, java.io.File out, long total,
+                                    Progress progress, long startOffset, int segmentRetries) throws IOException {
         final long chunk = 2L * 1024 * 1024;
         java.io.File parent = out.getParentFile();
         if (parent != null && !parent.exists() && !parent.mkdirs()) {
-            return false;
+            return new DownloadOutcome(false, startOffset, startOffset > 0);
         }
-        long offset = 0;
-        try (java.io.OutputStream os = new java.io.FileOutputStream(out, false)) {
-            while (true) {
+        long offset = Math.max(0, startOffset);
+        boolean connected = offset > 0;
+        try (java.io.OutputStream os = new java.io.FileOutputStream(out, offset > 0)) {
+            while (total <= 0 || offset < total) {
                 long end = (total > 0 ? Math.min(offset + chunk, total) : offset + chunk) - 1;
-                HttpURLConnection connection = open(url);
-                connection.setRequestMethod("GET");
-                connection.setConnectTimeout(CONNECT_TIMEOUT_MS);
-                // 每段很短，20 秒还不来就是真的卡住了：早点失败，别让用户干等。
-                connection.setReadTimeout(20_000);
-                connection.setUseCaches(false);
-                connection.setInstanceFollowRedirects(false);
-                if (deviceCredential != null && !deviceCredential.isEmpty()) {
-                    connection.setRequestProperty("X-Mini-Device", deviceCredential);
-                }
-                if (total > 0) {
-                    connection.setRequestProperty("Range", "bytes=" + offset + "-" + end);
-                }
-                try {
-                    int status = connection.getResponseCode();
-                    if (status == 416) {
-                        // 要过了头：说明已经收全了。
-                        break;
-                    }
-                    if (status != 206 && status != 200) {
-                        return false;
-                    }
-                    long got = 0;
-                    try (java.io.InputStream in = connection.getInputStream()) {
-                        byte[] buf = new byte[64 * 1024];
-                        int n;
-                        while ((n = in.read(buf)) > 0) {
-                            os.write(buf, 0, n);
-                            got += n;
-                            offset += n;
-                            if (progress != null) {
-                                progress.onBytes(offset);
+                long segmentStart = offset;
+                boolean advanced = false;
+                boolean finished = false;
+                IOException last = null;
+                for (int attempt = 1; attempt <= Math.max(1, segmentRetries); attempt++) {
+                    HttpURLConnection connection = open(url);
+                    try {
+                        connection.setRequestMethod("GET");
+                        connection.setConnectTimeout(CONNECT_TIMEOUT_MS);
+                        connection.setReadTimeout(SEGMENT_READ_TIMEOUT_MS);
+                        connection.setUseCaches(false);
+                        connection.setInstanceFollowRedirects(false);
+                        if (deviceCredential != null && !deviceCredential.isEmpty()) {
+                            connection.setRequestProperty("X-Mini-Device", deviceCredential);
+                        }
+                        if (total > 0) {
+                            connection.setRequestProperty("Range", "bytes=" + offset + "-" + end);
+                        }
+                        int status = connection.getResponseCode();
+                        if (status == 416) {
+                            // 要过了头：说明已经收全了。
+                            finished = true;
+                            break;
+                        }
+                        if (status == 200 && offset > 0) {
+                            // 服务端不认续传，回了一整份：接着写会把前面的字节写重、整包错位。
+                            // 宁可如实失败，也不交付一个坏包裹。
+                            last = new IOException("服务器不支持断点续传");
+                            break;
+                        }
+                        if (status != 206 && status != 200) {
+                            last = new IOException("下载失败（HTTP " + status + "）");
+                            continue;
+                        }
+                        try (java.io.InputStream in = connection.getInputStream()) {
+                            byte[] buf = new byte[64 * 1024];
+                            int n;
+                            while ((n = in.read(buf)) > 0) {
+                                os.write(buf, 0, n);
+                                offset += n;
+                                advanced = true;
+                                connected = true;
+                                if (progress != null) {
+                                    progress.onBytes(offset);
+                                }
                             }
                         }
-                    }
-                    if (got == 0) {
+                        if (status == 200) {
+                            // 服务端不认 Range（offset 还是 0），一次把整份给了：到此为止。
+                            finished = true;
+                            break;
+                        }
+                        last = null;
                         break;
+                    } catch (IOException err) {
+                        // 这一段断了：下面从**当前 offset** 重试，接着写。
+                        last = err;
+                        if (offset > segmentStart) {
+                            advanced = true;
+                        }
+                        // 抖一下就立刻重连，多半还是会失败；给网络一点回稳的时间。
+                        if (attempt < Math.max(1, segmentRetries)) {
+                            try {
+                                Thread.sleep(400L * attempt);
+                            } catch (InterruptedException stop) {
+                                Thread.currentThread().interrupt();
+                                return new DownloadOutcome(false, offset, connected);
+                            }
+                        }
+                    } finally {
+                        connection.disconnect();
                     }
-                    if (status == 200) {
-                        // 服务端不认 Range，一次把整份给了：到此为止。
-                        break;
-                    }
-                } finally {
-                    connection.disconnect();
+                }
+                if (finished) {
+                    break;
+                }
+                if (last != null) {
+                    // 三次都失败：把已下了多少带回去，上层据此告诉用户是断了还是没连上。
+                    return new DownloadOutcome(false, offset, connected);
+                }
+                if (!advanced) {
+                    // 一点字节都没进来，再转下去也是空转。
+                    return new DownloadOutcome(false, offset, connected);
                 }
                 if (total > 0 && offset >= total) {
                     break;
                 }
             }
         } catch (IOException err) {
-            if (out.exists() && !out.delete()) {
-                // 删不掉也没关系：下次会覆盖。
-            }
-            throw err;
+            return new DownloadOutcome(false, offset, connected);
         }
-        return out.length() > 0 && (total <= 0 || out.length() == total);
+        long length = out.exists() ? out.length() : 0;
+        boolean ok = length > 0 && (total <= 0 || length == total);
+        return new DownloadOutcome(ok, Math.max(offset, length), connected);
     }
 
     /**

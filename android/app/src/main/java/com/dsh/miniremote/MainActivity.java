@@ -2468,7 +2468,7 @@ public final class MainActivity extends Activity {
                         java.io.File out = new java.io.File(dir, "app.apk");
                         final long total = expectedBytes;
                         // 服务器可能不认分段：那种情况下 total 未知，也照样能下完。
-                        boolean ok = Net.downloadPreferWhole(base + path, cred, out, total, written -> {
+                        Net.DownloadOutcome outcome = Net.downloadPreferWhole(base + path, cred, out, total, written -> {
                             if (total <= 0) {
                                 return;
                             }
@@ -2481,8 +2481,14 @@ public final class MainActivity extends Activity {
                                     "window.__miniUpdateProgress&&window.__miniUpdateProgress(" + pct + ")", null));
                         }, () -> runOnUiThread(() -> webView.evaluateJavascript(
                                 "window.__miniUpdateSwitch&&window.__miniUpdateSwitch()", null)));
-                        if (!ok) {
-                            toastOnUi("安装包下载失败，等下再试。");
+                        if (!outcome.ok) {
+                            // 用户在外面用流量，必须知道是"该换网络"还是"再点一次就行"。
+                            if (!outcome.connected) {
+                                toastOnUi("连不上电脑。手机能上网吗？电脑那边还开着吗？");
+                            } else {
+                                int done = total > 0 ? (int) Math.min(100, outcome.written * 100 / total) : 0;
+                                toastOnUi("下载到 " + done + "% 断了，网络不稳。信号好些后再点一次更新。");
+                            }
                             return;
                         }
                         launchInstaller(out);
