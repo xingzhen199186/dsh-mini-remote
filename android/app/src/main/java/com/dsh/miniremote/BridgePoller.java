@@ -37,6 +37,11 @@ final class BridgePoller {
     /** 第一拍用短请求，别让用户干等一个长轮询周期。 */
     private volatile boolean firstPoll = true;
     private Thread thread;
+    /**
+     * 动作执行线程（2026-11-11）：单线程，保证动作串行、最多一张卡。
+     * **心跳不在这条线上**——它堵住了也不能连累轮询，反过来也一样。
+     */
+    private volatile java.util.concurrent.ExecutorService actions;
     private volatile String baseUrl;
     private volatile String credential;
     private Runnable onChange;
@@ -104,6 +109,12 @@ final class BridgePoller {
             acquireWakeLock();
             final long token = ++generation;
             rearmTried = false;
+            // 动作队列跟着这一代重建：上一代的残留动作不会跑到新连接上执行。
+            actions = java.util.concurrent.Executors.newSingleThreadExecutor(runnable -> {
+                Thread worker = new Thread(runnable, "mini-bridge-action");
+                worker.setDaemon(true);
+                return worker;
+            });
             thread = new Thread(() -> run(token), "mini-bridge");
             thread.setDaemon(true);
             thread.start();
@@ -138,6 +149,14 @@ final class BridgePoller {
     private void stopLocked() {
         generation++;
         running = false;
+        // 停止要能打断正在等确认的动作，否则这条线程会吊到 90 秒才收尾。
+        // 先让状态机把待确认判为失败，再掐执行线程。
+        ConfirmationControl.cancelAll();
+        java.util.concurrent.ExecutorService pool = actions;
+        actions = null;
+        if (pool != null) {
+            pool.shutdownNow();
+        }
         releaseWakeLock();
         online = false;
         lastOkMs = 0;
@@ -247,32 +266,58 @@ final class BridgePoller {
     }
 
     /**
-     * 执行电脑派下来的动作（P2 第二步）。
+     * 把电脑派下来的动作交给执行线程（2026-11-11 结构性拆分）。
      *
-     * 现在只有一个：`phone_notify`。**执行完必须回报**，否则电脑那边会一直等到超时，
-     * 用户看到的是"发了但没回应"。所以成功失败都要回一条。
+     * 原来这里是**直接在轮询线程里执行**的：一旦某个动作要等用户确认（最长 90 秒），
+     * 整条心跳就停住了——不取指令、不报活，电脑那边 130 秒后只能报
+     * 「手机没有在预期时间内回话」。真机实测就是这么失败的。
+     *
+     * 现在这里只做一件事：按收到的顺序把动作排进单线程队列，然后**立刻回去轮询**。
+     * 队列是单线程的，所以"同一时刻只处理一个动作、最多一张卡"的语义没变。
      */
     private void handleCalls(org.json.JSONArray calls, long token) {
         if (calls == null || calls.length() == 0) {
             return;
         }
+        final java.util.concurrent.ExecutorService pool = actions;
+        if (pool == null) {
+            android.util.Log.w("MiniBridge", "执行线程不在了，这一批动作不排队");
+            return;
+        }
         for (int i = 0; i < calls.length(); i++) {
-            // 一批动作执行到一半被停掉或换了线路：剩下的一个都不许再执行。
-            if (!running || generation != token) {
-                android.util.Log.w("MiniBridge", "手机桥已停止或换代，剩余调用不再执行");
-                return;
-            }
             org.json.JSONObject call = calls.optJSONObject(i);
             if (call == null) continue;
-            final String id = call.optString("id", "");
+            try {
+                pool.execute(() -> executeCall(call, token));
+            } catch (java.util.concurrent.RejectedExecutionException stopped) {
+                // 停止时 shutdownNow 会让后来的排队直接失败：不许再执行，也不许重投。
+                android.util.Log.w("MiniBridge", "手机桥已停止，剩余调用不再执行");
+                return;
+            }
+        }
+    }
+
+    /**
+     * 在一个动作自己的线程里执行它；等确认也发生在这里。
+     *
+     * 一共只有一条执行线程，所以这些动作天然串行——即便某个要等 90 秒，
+     * 后面排队的也只是排在后面，不会插队、不会叠卡。
+     */
+    private void executeCall(org.json.JSONObject call, long token) {
+        // 排到队尾时桥可能已经停了或换了线路：老动作一律不执行。
+        if (!running || generation != token) {
+            android.util.Log.w("MiniBridge", "手机桥已停止或换代，剩余调用不再执行");
+            return;
+        }
+        final String id = call.optString("id", "");
             final String tool = call.optString("tool", "");
             final long expiresAt = call.optLong("expiresAt", 0);
             org.json.JSONObject args = call.optJSONObject("args");
-            if (id.isEmpty()) continue;
+            if (id.isEmpty()) return;
             // 到期时间由服务端签发；缺失或已过期的动作一律不执行。
             if (expiresAt <= System.currentTimeMillis()) {
                 report(id, false, "调用已经过期，手机拒绝执行");
-                continue;
+                return;
             }
             // 默认档 request() 直接放行，不建卡、不挂起、不起计时器；剪贴板保留自己的逐次确认。
             if (!"phone_status".equals(tool) && !"phone_set_clipboard".equals(tool)) {
@@ -280,13 +325,13 @@ final class BridgePoller {
                         call.optString("taskId", ""), tool, confirmationTarget(tool, args));
                 if (!decision.allowed) {
                     reportRaw(id, false, confirmationFailure(decision));
-                    continue;
+                    return;
                 }
                 // 等待可能持续了 30 秒；放行后必须重新确认代次与到期时刻。
                 if (!running || generation != token) return;
                 if (expiresAt <= System.currentTimeMillis()) {
                     report(id, false, "确认完成时调用已经过期，动作未执行");
-                    continue;
+                    return;
                 }
             }
             if ("phone_notify".equals(tool)) {
@@ -295,7 +340,7 @@ final class BridgePoller {
                 String problem = notificationProblem();
                 if (problem != null) {
                     report(id, false, problem);
-                    continue;
+                    return;
                 }
                 try {
                     Notifier.showFromComputer(context, title, body);
@@ -390,7 +435,7 @@ final class BridgePoller {
                 String problem = notificationProblem();
                 if (problem != null) {
                     report(id, false, problem);
-                    continue;
+                    return;
                 }
                 try {
                     String text = args == null ? "" : args.optString("text", "");
@@ -428,7 +473,6 @@ final class BridgePoller {
             } else {
                 report(id, false, "这个动作这台手机还不支持：" + tool);
             }
-        }
     }
 
     /** 确认卡只拿目标标签，不把输入正文、截图或完整参数摆到别的 App 上。 */
