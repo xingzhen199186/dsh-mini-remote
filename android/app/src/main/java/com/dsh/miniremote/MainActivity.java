@@ -1000,10 +1000,9 @@ public final class MainActivity extends Activity {
             + "btn.addEventListener('click',function(){"
             + "if(!window.MiniUpdate){say('这个版本还不支持自动更新。');return;}"
             + "btn.disabled=true;say('正在查询…');"
-            + "var cred=(window.MiniUpdate&&window.MiniUpdate.deviceCredential)?window.MiniUpdate.deviceCredential():'';"
-            + "fetch('/mini/api/app-update?flavor=" + com.dsh.miniremote.BuildConfig.FLAVOR + "',{credentials:'same-origin',headers:cred?{'X-Mini-Device':cred}:{}})"
-            + ".then(function(r){return r.json();})"
-            + ".then(function(o){"
+            + "var raw='';try{raw=window.MiniUpdate.checkUpdate();}catch(e){raw='';}"
+            + "var o=null;try{o=JSON.parse(raw||'{}');}catch(e){o=null;}"
+            + "(function(){"
             + "if(!o||!o.ok){say((o&&o.error)||'电脑端暂时没有可发的安装包。');btn.disabled=false;return;}"
             + "var mine=window.MiniUpdate.selfHash?window.MiniUpdate.selfHash():'';"
             + "if(mine&&o.sha256&&mine===o.sha256){say('已经是最新版本（'+selfTag+'）。');btn.disabled=false;return;}"
@@ -1015,8 +1014,7 @@ public final class MainActivity extends Activity {
             // 原来这里会再写一句"下载完成后会弹出安装界面"（2026-11-10 用户要求去掉）：
             // 进度百分比本身已经说明在下载，安装器弹出来是自然的事，多一句只是噪音。
             + "setTimeout(function(){btn.disabled=false;},1200);"
-            + "})"
-            + ".catch(function(){say('查询失败，检查一下连接。');btn.disabled=false;});"
+            + "})();"
             + "});"
             + "})();";
 
@@ -2431,6 +2429,29 @@ public final class MainActivity extends Activity {
         @android.webkit.JavascriptInterface
         public String deviceCredential() {
             return credentials == null ? "" : credentials.deviceCredential();
+        }
+
+        /**
+         * 检查更新（2026-11-11）：**走原生 Net，不走网页 fetch**。
+         *
+         * 网页 fetch 用页面自己的源和 cookie，切到中继后 cookie 失效、源也可能和桥不一致，
+         * 于是"对话正常、更新却查询失败"。这里和桥用同一个 baseUrl、同一个设备凭据，
+         * 鉴权和线路天然一致；响应体原样返回，页面能看到真实的错误。
+         */
+        @android.webkit.JavascriptInterface
+        public String checkUpdate() {
+            final String base = loadedBase;
+            final String cred = credentials == null ? null : credentials.deviceCredential();
+            if (base == null) {
+                return "{\"ok\":false,\"error\":\"还没连上电脑\"}";
+            }
+            try {
+                Net.Response r = Net.get(base + "/mini/api/app-update?flavor=" + BuildConfig.FLAVOR, cred);
+                return r.body == null ? "{\"ok\":false,\"error\":\"空回应\"}" : r.body;
+            } catch (Exception err) {
+                String msg = String.valueOf(err.getMessage()).replace("\"", "'");
+                return "{\"ok\":false,\"error\":\"查询失败：" + msg + "\"}";
+            }
         }
         /** 页面告诉我们的总字节数（用来算百分比）；0 表示不知道。 */
         private volatile long expectedBytes;
