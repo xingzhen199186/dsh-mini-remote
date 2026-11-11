@@ -619,6 +619,16 @@ final class BridgePoller {
      */
     private String statusJson() {
         org.json.JSONObject out = new org.json.JSONObject();
+        /* 确认链路的现场读数（2026-11-11）：把手机端最近几次"读到的档位 / 算出的模式 /
+         * 授权是否还在"一起带回去。只读、只放最近几行，用于排查"每步都问"。 */
+        try {
+            java.io.File f = new java.io.File(context.getFilesDir(), "confirm-debug.log");
+            if (f.exists()) {
+                java.util.List<String> lines = java.nio.file.Files.readAllLines(f.toPath());
+                int from = Math.max(0, lines.size() - 6);
+                out.put("confirmDebug", new org.json.JSONArray(lines.subList(from, lines.size())));
+            }
+        } catch (Exception ignored) { }
         try {
             android.content.Context ctx = context;
             android.os.BatteryManager battery = (android.os.BatteryManager)
