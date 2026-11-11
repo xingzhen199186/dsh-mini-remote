@@ -322,7 +322,9 @@ final class BridgePoller {
             // 默认档 request() 直接放行，不建卡、不挂起、不起计时器；剪贴板保留自己的逐次确认。
             if (!"phone_status".equals(tool) && !"phone_set_clipboard".equals(tool)) {
                 ConfirmationControl.Decision decision = ConfirmationControl.request(context, id,
-                        call.optString("taskId", ""), tool, confirmationTarget(tool, args));
+                        call.optString("taskId", ""), tool, confirmationTarget(tool, args),
+                        // 等待期间一旦桥被停掉或这一代作废，就立刻收尾，不吊满 90 秒。
+                        () -> !running || generation != token);
                 if (!decision.allowed) {
                     reportRaw(id, false, confirmationFailure(decision));
                     return;

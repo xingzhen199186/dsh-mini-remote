@@ -34,6 +34,11 @@ final class ConfirmationControl {
         void onCardClosed();
     }
 
+    /** 等待期间的外部叫停条件（例如手机桥被关掉、这一代轮询已经作废）。 */
+    interface Abort {
+        boolean aborted();
+    }
+
     static final class Card {
         final String id;
         final String taskId;
@@ -142,6 +147,11 @@ final class ConfirmationControl {
 
     /** 同一时刻只让一张卡占住执行口；另一动作等自己的原期限，不叠卡也不加长时间。 */
     static Decision request(Context context, String id, String taskId, String tool, String target) {
+        return request(context, id, taskId, tool, target, () -> false);
+    }
+
+    static Decision request(Context context, String id, String taskId, String tool, String target,
+                            Abort abort) {
         final Context app = context.getApplicationContext();
         final String selected = selectedMode(app);
         // 默认档的快路径：不读任务状态、不建卡、不起计时，直接和今天完全一样。
@@ -179,7 +189,7 @@ final class ConfirmationControl {
                             if (listener != null) listener.onCard(card);
                         });
                     }
-                    return awaitDecision(created);
+                    return awaitDecision(created, abort);
                 }
             }
             if (!awaitSlot(occupied, deadline)) {
@@ -218,15 +228,28 @@ final class ConfirmationControl {
         }
     }
 
-    private static Decision awaitDecision(Pending created) {
+    /**
+     * 分段等：每 200 毫秒醒一次，让“桥被关掉”能立刻收尾。
+     * 一口气等 90 秒的话，停止之后这条线程还要吊到超时才退出。
+     */
+    private static Decision awaitDecision(Pending created, Abort abort) {
         try {
-            long remaining = Math.max(0, created.card.deadline - System.currentTimeMillis());
-            if (!created.done.await(remaining, TimeUnit.MILLISECONDS)) {
+            while (System.currentTimeMillis() < created.card.deadline) {
+                long left = created.card.deadline - System.currentTimeMillis();
+                if (created.done.await(Math.min(200L, Math.max(1L, left)), TimeUnit.MILLISECONDS)) {
+                    break;
+                }
+                if (abort != null && abort.aborted()) {
+                    settle(created, stopped());
+                    break;
+                }
+            }
+            if (created.decision == null && System.currentTimeMillis() >= created.card.deadline) {
                 settle(created, failure("confirm_timeout", "90 秒内未确认，动作未执行"));
             }
         } catch (InterruptedException err) {
             Thread.currentThread().interrupt();
-            settle(created, failure("confirm_interrupted", "确认等待被中断，动作未执行"));
+            settle(created, stopped());
         }
         return created.decision == null
                 ? failure("confirm_timeout", "90 秒内未确认，动作未执行") : created.decision;

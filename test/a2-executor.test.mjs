@@ -41,3 +41,12 @@ test('结果由动作线程自己发，不依赖轮询线程还活着', () => {
   assert.match(report, /new Thread\(/)
   assert.match(report, /\/mini\/api\/bridge\/result/)
 })
+
+test('确认等待能被随时叫停，不必等满 90 秒', () => {
+  const control = read('android/app/src/main/java/com/dsh/miniremote/ConfirmationControl.java')
+  assert.match(control, /interface Abort/)
+  assert.match(control, /abort\.aborted\(\)/)
+  assert.match(control, /created\.done\.await\(Math\.min\(200L/)
+  // 动作线程把“这一代还在不在”作为叫停条件传进去。
+  assert.match(poller, /\(\) -> !running \|\| generation != token/)
+})
