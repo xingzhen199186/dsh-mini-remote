@@ -188,7 +188,7 @@ final class ConfirmationControl {
         final long deadline = System.currentTimeMillis() + CONFIRM_MS;
         final long requestedEpoch = epoch;
         while (true) {
-            Pending occupied = null;
+            Pending created = null;
             synchronized (LOCK) {
                 if (requestedEpoch != epoch) return stopped();
                 if (!BridgeControl.isArmed(app)) {
@@ -199,14 +199,27 @@ final class ConfirmationControl {
                 if (mode == ConfirmationState.TASK && state.taskGranted(taskId)) return allow();
                 if (pending == null) {
                     Card card = new Card(id, taskId, tool, target, mode, deadline);
-                    Pending created = new Pending(app, card);
+                    created = new Pending(app, card);
                     pending = created;
-                    occupied = created;
-                    // **发通知要在锁外做**（2026-11-11 卡死事故）：发通知会走系统调用，
-                    // 而广播接收器在主线程上也要拿这把锁；锁里再等系统，界面就会停住。
-                    startPrompt(app, created);
-                    return awaitDecision(created, abort);
                 }
+            }
+            /* **锁外**做这两件事（2026-11-11 第二次卡死 / ANR）：
+             *   1) startPrompt 发通知——系统调用；
+             *   2) awaitDecision 等人**最长 90 秒**。
+             * 上一版把这两步留在 synchronized 里，于是主线程上的广播接收器
+             * 来拿同一把锁时被挡满 5 秒，系统直接判「应用无响应」。
+             * 锁里只允许做内存判断，任何会等、会碰系统的事情都必须出去做。
+             */
+            if (created != null) {
+                startPrompt(app, created);
+                return awaitDecision(created, abort);
+            }
+            Pending occupied;
+            synchronized (LOCK) {
+                occupied = pending;
+            }
+            if (occupied == null) {
+                continue;
             }
             if (!awaitSlot(occupied, deadline)) {
                 if (requestedEpoch != epoch) return stopped();

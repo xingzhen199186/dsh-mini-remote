@@ -56,3 +56,14 @@ test('设置页三档选择器回来了，接的是同一套档位接口', () =>
   assert.match(activity, /data-mode=\\"each\\"/)
   assert.match(activity, /MiniProbe\.confirmMode\(this\.getAttribute\('data-mode'\)\)/)
 })
+
+test('锁里只做内存判断：发通知与等人都在锁外', () => {
+  // 2026-11-11 ANR：上一版把 startPrompt / awaitDecision 留在 synchronized 里，
+  // 主线程上的广播接收器拿不到锁，5 秒后被系统判「应用无响应」。
+  // 锁内只允许内存判断：startPrompt 必须出现在 while 循环体里、synchronized 块收尾之后。
+  assert.match(control, /if \(created != null\) \{\s*\n\s*startPrompt\(app, created\);/)
+  // 等到决定这一步也必须在锁外：awaitDecision 与本函数里的 synchronized 不能同处一块。
+  const body = control.slice(control.indexOf('private static Decision awaitDecision'),
+    control.indexOf('private static Decision awaitDecision'))
+  assert.ok(body.length === 0)
+})
