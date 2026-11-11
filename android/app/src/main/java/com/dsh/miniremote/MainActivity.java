@@ -1000,7 +1000,8 @@ public final class MainActivity extends Activity {
             + "btn.addEventListener('click',function(){"
             + "if(!window.MiniUpdate){say('这个版本还不支持自动更新。');return;}"
             + "btn.disabled=true;say('正在查询…');"
-            + "fetch('/mini/api/app-update?flavor=" + com.dsh.miniremote.BuildConfig.FLAVOR + "',{credentials:'same-origin'})"
+            + "var cred=(window.MiniUpdate&&window.MiniUpdate.deviceCredential)?window.MiniUpdate.deviceCredential():'';"
+            + "fetch('/mini/api/app-update?flavor=" + com.dsh.miniremote.BuildConfig.FLAVOR + "',{credentials:'same-origin',headers:cred?{'X-Mini-Device':cred}:{}})"
             + ".then(function(r){return r.json();})"
             + ".then(function(o){"
             + "if(!o||!o.ok){say((o&&o.error)||'电脑端暂时没有可发的安装包。');btn.disabled=false;return;}"
@@ -2419,6 +2420,18 @@ public final class MainActivity extends Activity {
     private final class AppUpdateBridge {
         /** 本机安装包的指纹（算一次就记住：几十兆，没必要每次摸）。 */
         private String selfHash;
+
+        /**
+         * 设备凭据（2026-11-11）：页面请求更新时带上它，和手机桥同一身份。
+         *
+         * 为什么必须带：cookie 只认域名——切到自建中继/换地址后，配对时那个域名下的
+         * cookie 根本不会被带上，于是更新请求被 401。设备凭据存在本机、不随地址变，
+         * 所以走哪条线路都认（isAuthorized 同时接受 cookie 与 X-Mini-Device）。
+         */
+        @android.webkit.JavascriptInterface
+        public String deviceCredential() {
+            return credentials == null ? "" : credentials.deviceCredential();
+        }
         /** 页面告诉我们的总字节数（用来算百分比）；0 表示不知道。 */
         private volatile long expectedBytes;
         /** 上一次报过的百分比，避免同一个数字刷屏。 */
