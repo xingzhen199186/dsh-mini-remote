@@ -335,7 +335,7 @@ final class BridgePoller {
             // C1 任务级空闲超时：这个 taskId 已经 10 分钟没动作了，就结束它。
             // **只停这个任务**，不撤桥——phone_status 仍可用，下一个任务（新 taskId）照常能开始。
             final String taskId = call.optString("taskId", "");
-            if (!"phone_status".equals(tool)) {
+            if (!taskId.isEmpty() && !"phone_status".equals(tool)) {
                 Long last = TASK_LAST_ACTION.get(taskId);
                 if (last != null && System.currentTimeMillis() - last > IDLE_TIMEOUT_MS) {
                     lastIdleStopAt = System.currentTimeMillis();
@@ -354,7 +354,11 @@ final class BridgePoller {
                     return;
                 }
                 // 确认放行、马上要做动作了：给这个任务续命（C1）。
-                TASK_LAST_ACTION.put(taskId, System.currentTimeMillis());
+                // **空 taskId 不写**：它表示"不知道属于哪一轮"，写进 '' 这个 key 会让
+                // 所有认不出轮次的动作共享一条旧计时，于是新会话也被误判 idle_timeout。
+                if (!taskId.isEmpty()) {
+                    TASK_LAST_ACTION.put(taskId, System.currentTimeMillis());
+                }
                 // 等待可能持续了 30 秒；放行后必须重新确认代次与到期时刻。
                 if (!running || generation != token) return;
                 if (expiresAt <= System.currentTimeMillis()) {
