@@ -55,7 +55,10 @@ public class TermuxResultService extends IntentService {
             out.put("stdout", stdout);
             out.put("stderr", stderr);
             if (exitCode != null) out.put("exitCode", exitCode);
-            if (!lastErr.isEmpty()) out.put("termuxError", lastErr);
+            // Termux 正常时会把 errmsg 传成字符串 "null"，别当真错误显示出去。
+            if (!lastErr.isEmpty() && !"null".equalsIgnoreCase(lastErr.trim())) {
+                out.put("termuxError", lastErr);
+            }
             // 第一次联调要看的原始键值；解析稳定之后这一行可以不留。
             out.put("raw", raw.toString());
             TermuxRun.deliver(id, out.toString());
