@@ -27,7 +27,7 @@ test('执行线程是单线程，保证动作串行与最多一张卡', () => {
 
 test('停止会打断等确认的动作并收掉执行线程', () => {
   const stop = between(poller, 'private void stopLocked()', 'boolean isOnline()')
-  assert.match(stop, /ConfirmationControl\.cancelAll\(\)/)
+  assert.match(stop, /ConfirmationControl\.cancelPending\(\)/)
   assert.match(stop, /pool\.shutdownNow\(\)/)
 })
 

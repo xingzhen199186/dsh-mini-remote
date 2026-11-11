@@ -31,6 +31,14 @@ final class ConfirmationControl {
     private static final String PREFS = "mini_ui_prefs";
     private static final String MODE = "phone_confirm_mode";
     /**
+     * 已经放行的任务编号（2026-11-11）。
+     *
+     * 为什么不只放内存：荣耀会把后台 App 连进程一起收掉，内存里的“这一轮已允许”
+     * 跟着消失，下一个动作又弹卡。落到盘上就抗得住——任务编号里带着轮次，
+     * 换一轮自然对不上，所以不会变成“永久免问”。
+     */
+    private static final String GRANT_TASK = "phone_confirm_grant_task";
+    /**
      * 30 秒对人太短（2026-11-11 用户反馈：人在外面，看到卡点开就过去了）。
      * 90 秒给足掏手机、看清文字、按下去的时间；电脑侧相应放宽到 130 秒。
      */
@@ -193,6 +201,12 @@ final class ConfirmationControl {
         }
         final long deadline = System.currentTimeMillis() + CONFIRM_MS;
         final long requestedEpoch = epoch;
+        // 盘上记着的那一轮：锁外先读好，锁里只做内存比较。
+        final String storedGrant = storedGrant(app);
+        if (!storedGrant.isEmpty() && !storedGrant.equals(taskId) && !taskId.isEmpty()) {
+            // 换了一轮：上一条授权作废，别让旧编号一直躺在盘上。
+            forgetGrant(app);
+        }
         while (true) {
             Pending created = null;
             synchronized (LOCK) {
@@ -202,6 +216,10 @@ final class ConfirmationControl {
                 }
                 String mode = state.modeForTask(taskId, selected);
                 if (mode == ConfirmationState.OFF) return allow();
+                // 同一轮、盘上记过：把内存状态补回来再判断（进程可能被杀过）。
+                if (mode == ConfirmationState.TASK && taskId != null && taskId.equals(storedGrant)) {
+                    state.grantCurrentTask(taskId);
+                }
                 if (mode == ConfirmationState.TASK && state.taskGranted(taskId)) return allow();
                 if (pending == null) {
                     Card card = new Card(id, taskId, tool, target, mode, deadline);
@@ -256,30 +274,69 @@ final class ConfirmationControl {
         if (!SUPPORTED) return false;
         Pending target;
         Decision outcome;
+        boolean granted = false;
         synchronized (LOCK) {
             Pending current = pending;
             if (current == null) return false;
             if (cardId == null || !cardId.equals(current.card.id)) return false;
             if (allow && grantTask && current.card.mode == ConfirmationState.TASK) {
                 state.grantCurrentTask(current.card.taskId);
+                granted = true;
             }
             target = current;
             outcome = allow ? allow() : failure("user_rejected", "用户拒绝了这次操作，动作未执行");
         }
+        // 记住这一轮要落到盘上，且**在锁外**写（写盘是系统调用）。
+        if (granted) rememberGrant(target.app, target.card.taskId);
         // **结算放在锁外**（2026-11-11 卡死事故）：结算里要撤通知、要 post 主线程，
         // 这些都是系统调用；拿着锁做，等于让主线程排队等系统。
         settle(target, outcome);
         return true;
     }
 
-    /** B1 停止复用这里：当前卡与正在等卡的线程一起结束，之后的回执不能再执行。 */
-    static void cancelAll() {
+    private static String storedGrant(Context app) {
+        String value = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .getString(GRANT_TASK, "");
+        return value == null ? "" : value;
+    }
+
+    /** 只记编号，不记时间：编号里已经有轮次，换一轮自然失效，不需要另设过期。 */
+    private static void rememberGrant(Context app, String taskId) {
+        if (taskId == null || taskId.isEmpty()) return;
+        app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .edit().putString(GRANT_TASK, taskId).apply();
+    }
+
+    private static void forgetGrant(Context app) {
+        app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .edit().remove(GRANT_TASK).apply();
+    }
+
+    /**
+     * 只终止“正在等的那张卡”，**不动已经记住的任务授权**（2026-11-11）。
+     *
+     * 轮询因为换线路或重连而换代时调用它。原来这里调的是 cancelAll，
+     * 于是每次重连都会把“用户刚点过允许、本轮别再问”抹掉——真机上表现成
+     * “明明写着『本轮不再询问』，下一个动作又弹一张卡”。
+     */
+    static void cancelPending() {
+        Pending current;
+        synchronized (LOCK) {
+            epoch++;
+            current = pending;
+        }
+        if (current != null) settle(current, stopped());
+    }
+
+    /** 整个手机桥被关掉时才用它：连任务授权一起清，下次打开重新问。 */
+    static void cancelAll(Context context) {
         Pending current;
         synchronized (LOCK) {
             epoch++;
             state.clear();
             current = pending;
         }
+        if (context != null) forgetGrant(context.getApplicationContext());
         if (current != null) settle(current, stopped());
     }
 

@@ -99,7 +99,7 @@ test('A2：任务档只记住当前 taskId，下一轮重新问', () => {
 test('A2：同一时刻一张卡，撤权唤醒并终止等待', () => {
   const control = read('android/app/src/main/java/com/dsh/miniremote/ConfirmationControl.java')
   assert.match(control, /awaitSlot\(occupied, deadline\)/)
-  assert.match(control, /static void cancelAll\(\)/)
+  assert.match(control, /static void cancelPending\(\)/)
   assert.match(control, /epoch\+\+/)
   assert.match(control, /state\.clear\(\)/)
 })

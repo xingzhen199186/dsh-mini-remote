@@ -149,9 +149,9 @@ final class BridgePoller {
     private void stopLocked() {
         generation++;
         running = false;
-        // 停止要能打断正在等确认的动作，否则这条线程会吊到 90 秒才收尾。
-        // 先让状态机把待确认判为失败，再掐执行线程。
-        ConfirmationControl.cancelAll();
+        // 停止要能打断正在等确认的动作，但**不能连"这一轮已允许"一起忘掉**：
+        // 换线路、断线重连都会走到这里，忘了就等于又让用户点一遍。
+        ConfirmationControl.cancelPending();
         java.util.concurrent.ExecutorService pool = actions;
         actions = null;
         if (pool != null) {
