@@ -16,7 +16,11 @@ import java.util.concurrent.TimeUnit;
 final class ConfirmationControl {
     private static final String PREFS = "mini_ui_prefs";
     private static final String MODE = "phone_confirm_mode";
-    private static final long CONFIRM_MS = 30_000L;
+    /**
+     * 30 秒对人太短（2026-11-11 用户反馈：人在外面，看到卡点开就过去了）。
+     * 90 秒给足掏手机、看清文字、按下去的时间；电脑侧相应放宽到 130 秒。
+     */
+    private static final long CONFIRM_MS = 90_000L;
     private static final Object LOCK = new Object();
     private static final Handler MAIN = new Handler(Looper.getMainLooper());
     private static final ConfirmationState state = new ConfirmationState();
@@ -151,7 +155,7 @@ final class ConfirmationControl {
             }
             if (!awaitSlot(occupied, deadline)) {
                 if (requestedEpoch != epoch) return stopped();
-                return failure("confirm_timeout", "30 秒内未确认，动作未执行");
+                return failure("confirm_timeout", "90 秒内未确认，动作未执行");
             }
         }
     }
@@ -184,14 +188,14 @@ final class ConfirmationControl {
         try {
             long remaining = Math.max(0, created.card.deadline - System.currentTimeMillis());
             if (!created.done.await(remaining, TimeUnit.MILLISECONDS)) {
-                settle(created, failure("confirm_timeout", "30 秒内未确认，动作未执行"));
+                settle(created, failure("confirm_timeout", "90 秒内未确认，动作未执行"));
             }
         } catch (InterruptedException err) {
             Thread.currentThread().interrupt();
             settle(created, failure("confirm_interrupted", "确认等待被中断，动作未执行"));
         }
         return created.decision == null
-                ? failure("confirm_timeout", "30 秒内未确认，动作未执行") : created.decision;
+                ? failure("confirm_timeout", "90 秒内未确认，动作未执行") : created.decision;
     }
 
     private static boolean awaitSlot(Pending occupied, long deadline) {

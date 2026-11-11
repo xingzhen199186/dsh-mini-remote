@@ -26,7 +26,7 @@ test('A2：非默认档才延长到 45 秒，状态工具不受影响', async ()
   bridge.setArmed(DEVICE, true)
   const tap = bridge.call(DEVICE, 'phone_tap', {}, 15_000, { taskId: 'proc:root:4' })
   const taken = await bridge.poll(DEVICE, { waitMs: 0 })
-  assert.equal(taken.calls[0].expiresAt, 45_000)
+  assert.equal(taken.calls[0].expiresAt, 130_000)
   bridge.settle(DEVICE, taken.calls[0].id, { ok: true, result: 'ok' })
   await tap
 
@@ -50,16 +50,16 @@ test('A2：确认超时保留 confirm_timeout 与 executed=false', async () => {
   const bridge = createBridge({ now: () => 0 })
   bridge.hello(DEVICE, { protocol: 1 })
   bridge.setArmed(DEVICE, true)
-  const waiting = bridge.call(DEVICE, 'phone_open', {}, 45_000, { taskId: 'proc:root:5' })
+  const waiting = bridge.call(DEVICE, 'phone_open', {}, 130_000, { taskId: 'proc:root:5' })
   const taken = await bridge.poll(DEVICE, { waitMs: 0 })
   bridge.settle(DEVICE, taken.calls[0].id, {
     ok: false,
-    result: { ok: false, executed: false, reason: 'confirm_timeout', error: '30 秒内未确认，动作未执行' },
+    result: { ok: false, executed: false, reason: 'confirm_timeout', error: '90 秒内未确认，动作未执行' },
   })
   await assert.rejects(waiting, (err) => {
     assert.equal(err.reason, 'confirm_timeout')
     assert.equal(err.executed, false)
-    assert.match(err.message, /30 秒内未确认/)
+    assert.match(err.message, /90 秒内未确认/)
     return true
   })
   bridge.close()
@@ -72,8 +72,8 @@ test('A2：非默认档的等待计时器与过期时间同一个上限', async 
   const waiting = bridge.call(DEVICE, 'phone_open', {}, 15_000)
   const taken = await bridge.poll(DEVICE, { waitMs: 0 })
   const call = taken.calls[0]
-  // 45 秒到期的调用，承诺必须也等到 45 秒；否则第 16 秒的结果送不回来。
-  assert.equal(call.expiresAt, 45_000)
+  // 130 秒到期的调用，承诺必须也等到 130 秒；否则第 91 秒的结果送不回来。
+  assert.equal(call.expiresAt, 130_000)
   bridge.settle(DEVICE, call.id, { ok: true, result: 'ok' })
   assert.equal(await waiting, 'ok')
   bridge.close()
@@ -84,7 +84,7 @@ test('A2：默认档不建待确认卡，不起计时器', () => {
   assert.match(control, /if \(ConfirmationState\.OFF\.equals\(selected\) && !state\.needsExtendedDeadline\(selected\)\)/)
   assert.match(control, /if \(mode == ConfirmationState\.OFF\) return allow\(\)/)
   assert.match(control, /if \(pending == null\)/)
-  assert.match(control, /CONFIRM_MS = 30_000L/)
+  assert.match(control, /CONFIRM_MS = 90_000L/)
   assert.match(control, /private static final ConfirmationState state/)
 })
 
