@@ -302,6 +302,11 @@ final class ConfirmationControl {
             Pending current = pending;
             if (current == null) return false;
             if (cardId == null || !cardId.equals(current.card.id)) return false;
+            // 记录"允许"这一步到底看到了什么：参数、卡上的档位、比较结果。
+            // 三条信息合起来，就能判断是没进分支、还是档位不对。
+            debugLog(current.app, "answer allow=" + allow + " grant=" + grantTask
+                    + " mode=" + current.card.mode
+                    + " isTask=" + ConfirmationState.TASK.equals(current.card.mode));
             if (allow && grantTask && ConfirmationState.TASK.equals(current.card.mode)) {
                 state.grantCurrentTask(current.card.taskId);
                 granted = true;
@@ -409,6 +414,16 @@ final class ConfirmationControl {
     }
 
     /** 第一个终局生效；撤通知、清卡与唤醒只发生一次。 */
+    /** 把一行诊断追加到应用私有目录；只为排查用，不参与任何判断。 */
+    static void debugLog(Context context, String line) {
+        try {
+            java.io.File f = new java.io.File(context.getFilesDir(), "answer-debug.log");
+            java.nio.file.Files.write(f.toPath(),
+                    (line + "\n").getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                    java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.APPEND);
+        } catch (Exception ignored) { }
+    }
+
     /** 任务编号形如 `进程:会话:轮次`，取出其中的会话部分。 */
     private static String sessionOfTask(String taskId) {
         if (taskId == null) return "";

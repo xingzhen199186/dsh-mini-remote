@@ -617,17 +617,45 @@ final class BridgePoller {
      * 只读，不在手机上留下任何痕迹——这是四个工具里最安全的一个。
      * **不读**短信、通知、相册、剪贴板：要那些内容只能由用户自己分享过来。
      */
+    /** 当前装着的这个包的指纹前 8 位；用来确认"测的是不是刚打的那一版"。 */
+    private static String cachedHash;
+    private String installedHash() {
+        if (cachedHash != null) return cachedHash;
+        try {
+            String dir = context.getPackageManager()
+                    .getApplicationInfo(context.getPackageName(), 0).sourceDir;
+            java.security.MessageDigest md = java.security.MessageDigest.getInstance("SHA-256");
+            try (java.io.InputStream in = new java.io.FileInputStream(dir)) {
+                byte[] buf = new byte[64 * 1024];
+                int n;
+                while ((n = in.read(buf)) > 0) md.update(buf, 0, n);
+            }
+            StringBuilder sb = new StringBuilder();
+            for (byte b : md.digest()) sb.append(String.format("%02x", b));
+            cachedHash = sb.substring(0, 8);
+            return cachedHash;
+        } catch (Exception err) {
+            return "";
+        }
+    }
+
     private String statusJson() {
         org.json.JSONObject out = new org.json.JSONObject();
         /* 确认链路的现场读数（2026-11-11）：把手机端最近几次"读到的档位 / 算出的模式 /
          * 授权是否还在"一起带回去。只读、只放最近几行，用于排查"每步都问"。 */
         try {
-            java.io.File f = new java.io.File(context.getFilesDir(), "confirm-debug.log");
-            if (f.exists()) {
+            org.json.JSONArray dbg = new org.json.JSONArray();
+            for (String name : new String[]{"answer-debug.log", "confirm-debug.log"}) {
+                java.io.File f = new java.io.File(context.getFilesDir(), name);
+                if (!f.exists()) continue;
                 java.util.List<String> lines = java.nio.file.Files.readAllLines(f.toPath());
-                int from = Math.max(0, lines.size() - 6);
-                out.put("confirmDebug", new org.json.JSONArray(lines.subList(from, lines.size())));
+                int from = Math.max(0, lines.size() - 5);
+                for (String line : lines.subList(from, lines.size())) {
+                    dbg.put(name.startsWith("answer") ? "A " + line : line);
+                }
             }
+            out.put("confirmDebug", dbg);
+            out.put("installedHash", installedHash());
         } catch (Exception ignored) { }
         try {
             android.content.Context ctx = context;
