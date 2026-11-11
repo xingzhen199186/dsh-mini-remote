@@ -183,7 +183,7 @@ final class ConfirmationControl {
         }
         // 通知被系统关掉时，确认根本没法问出口：立刻如实失败，不能挂着空等 90 秒。
         if (!Notifier.canPostConfirm(app)) {
-            return failure("confirm_unavailable", "手机没允许发通知，确认卡显示不出来，动作未执行");
+            return failure("confirm_unavailable", Notifier.confirmUnavailableReason(app));
         }
         final long deadline = System.currentTimeMillis() + CONFIRM_MS;
         final long requestedEpoch = epoch;

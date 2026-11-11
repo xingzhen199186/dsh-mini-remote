@@ -123,7 +123,7 @@ public final class Notifier {
     }
 
     /** 确认通知的渠道：要能横幅弹出，否则用户根本不知道有东西在等他。 */
-    private static final String CONFIRM_CHANNEL_ID = "mini_confirm";
+    private static final String CONFIRM_CHANNEL_ID = "mini_confirm_v2";
     static final String ACTION_CONFIRM = "com.dsh.miniremote.CONFIRM";
     static final String EXTRA_CONFIRM_CARD = "confirmCardId";
     static final String EXTRA_CONFIRM_DECISION = "confirmDecision";
@@ -140,11 +140,9 @@ public final class Notifier {
             if (mgr == null) return false;
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) return true;
             if (!mgr.areNotificationsEnabled()) return false;
-            // 渠道还没建时不算失败（第一次发之前会建）；建了但重要性被调低就算失败——
-            // 那种情况下通知不会横幅弹出，用户很容易错过（DSH Go 也检查这一项）。
-            if (Build.VERSION.SDK_INT < 26) return true;
-            NotificationChannel channel = mgr.getNotificationChannel(CONFIRM_CHANNEL_ID);
-            return channel == null || channel.getImportance() >= NotificationManager.IMPORTANCE_HIGH;
+            // 渠道级别只影响"是否横幅"，不影响"能不能发"。这里不再拿它当失败条件
+            //（2026-11-11 真机：用户明明开着通知，却因为旧渠道被系统降级而误判成"发不出去"）。
+            return true;
         } catch (Exception err) {
             return false;
         }
@@ -285,6 +283,20 @@ public final class Notifier {
 
     private static int confirmNotificationId(String cardId) {
         return 0x4d530000 ^ (cardId == null ? 0 : cardId.hashCode());
+    }
+
+    /** 说清是哪一项挡住了确认通知——一句笼统的"没允许发通知"会让人查错方向。 */
+    static String confirmUnavailableReason(Context context) {
+        try {
+            NotificationManager mgr = manager(context);
+            if (mgr == null) return "系统通知服务不可用，确认卡显示不出来，动作未执行";
+            if (!mgr.areNotificationsEnabled()) {
+                return "这台手机把本应用的通知关掉了，确认卡显示不出来，动作未执行（设置 → 应用 → DSH Everywhere → 通知）";
+            }
+            return "确认通知发送失败（系统限制），动作未执行";
+        } catch (Exception err) {
+            return "确认通知发送失败：" + err.getMessage() + "，动作未执行";
+        }
     }
 
     private static void createConfirmChannel(Context context) {
