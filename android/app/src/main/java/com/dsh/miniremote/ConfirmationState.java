@@ -41,7 +41,9 @@ final class ConfirmationState {
 
     /** 当前任务和下一轮都免确认时，电脑侧才保持原来的调用时限。 */
     synchronized boolean needsExtendedDeadline(String selectedMode) {
-        return normalize(selectedMode) != OFF || activeMode != OFF;
+        // 用 equals 而不是 ==：档位是字符串，== 比的是对象。
+        // 这里原来凑巧对（normalize 返回的就是常量本身），但那是巧合，不是保证。
+        return !OFF.equals(normalize(selectedMode)) || !OFF.equals(activeMode);
     }
 
     synchronized void clear() {
