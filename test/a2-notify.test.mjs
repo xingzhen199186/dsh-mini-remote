@@ -41,11 +41,10 @@ test('A2：通知发不出去时立刻失败，不空等 90 秒', () => {
   assert.match(notifier, /areNotificationsEnabled/)
 })
 
-test('A2：浮层降级为纯展示，不放按钮也不收点击', () => {
-  assert.match(overlay, /FLAG_NOT_TOUCHABLE/)
-  assert.match(overlay, /FLAG_NOT_FOCUSABLE/)
-  assert.doesNotMatch(overlay, /setOnClickListener|Button/)
-  assert.match(overlay, /请在通知栏点/)
+test('A2：浮层可点，按钮自己收触摸事件', () => {
+  assert.match(overlay, /setOnTouchListener/)
+  assert.match(overlay, /ACTION_UP/)
+  assert.doesNotMatch(overlay.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, ''), /new Button|setOnClickListener/)
   assert.match(overlay, /还剩 /)
 })
 

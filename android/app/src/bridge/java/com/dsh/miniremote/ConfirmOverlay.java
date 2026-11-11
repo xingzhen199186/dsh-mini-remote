@@ -30,9 +30,15 @@ final class ConfirmOverlay {
         this.windowManager = (WindowManager) service.getSystemService(Context.WINDOW_SERVICE);
     }
 
-    /** 只写动作和打码后的目标；不摆输入正文、不摆截图，也不放按钮。 */
-    void show(ConfirmationControl.Card card) {
-        // 这台机型上确认功能已停用：不再画确认浮层（画了也点不动，只会挡内容）。
+    /**
+     * 确认卡（2026-11-11 重新恢复可点）。
+     *
+     * 之前"点不动"被我们误判成"系统禁止浮层触摸"。真正的差别在**接法**：
+     * 停止胶囊用 TextView + onTouch 自己收 MotionEvent，能点；这里曾用 Button +
+     * setOnClickListener 等系统派发，点不动。**改成和停止胶囊同一套**：按钮是
+     * TextView，自己 onTouch，抬起时直接 answerCard，不走标准点击派发。
+     */
+    void show(final ConfirmationControl.Card card) {
         if (!ConfirmationControl.SUPPORTED) return;
         dismiss();
         if (windowManager == null) return;
@@ -58,27 +64,30 @@ final class ConfirmOverlay {
         detail.setPadding(0, dp(8), 0, dp(8));
         box.addView(detail);
 
-        TextView how = new TextView(service);
-        how.setText("请在通知栏点「允许」或「拒绝」。");
-        how.setTextSize(13);
-        how.setTextColor(0xff1f6feb);
-        box.addView(how);
-
-        // 倒计时让人看得见还剩多久；到点自己消失，不会一直挂在屏幕上。
         countdown = new TextView(service);
         countdown.setTextSize(13);
         countdown.setTextColor(0xff8a9099);
-        countdown.setPadding(0, dp(6), 0, 0);
+        countdown.setPadding(0, dp(6), 0, dp(6));
         box.addView(countdown);
         startCountdown(card.deadline);
+
+        LinearLayout row = new LinearLayout(service);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        if (ConfirmationState.TASK.equals(card.mode)) {
+            row.addView(tapButton("允许本任务", () ->
+                    ConfirmationControl.answerCard(card.id, true, true)));
+        }
+        row.addView(tapButton("拒绝", () ->
+                ConfirmationControl.answerCard(card.id, false, false)));
+        row.addView(tapButton("允许", () ->
+                ConfirmationControl.answerCard(card.id, true, false)));
+        box.addView(row);
 
         WindowManager.LayoutParams next = new WindowManager.LayoutParams(
                 Math.min(dp(340), service.getResources().getDisplayMetrics().widthPixels - dp(32)),
                 WindowManager.LayoutParams.WRAP_CONTENT,
                 WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
-                // 只展示：既不抢焦点，也不吞触摸，底下的界面照常能用。
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
-                        | WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
                         | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
                 PixelFormat.TRANSLUCENT);
         next.gravity = Gravity.TOP | Gravity.CENTER_HORIZONTAL;
@@ -88,11 +97,50 @@ final class ConfirmOverlay {
             view = box;
             params = next;
         } catch (Exception err) {
-            // 展示不出来不影响确认：真正要决策的那条通知还在。
             android.util.Log.w("MiniBridge", "确认浮层显示失败：" + err.getMessage());
             view = null;
             params = null;
         }
+    }
+
+    /** 和停止胶囊同一套：TextView + onTouch，抬起即答，不依赖 Button 的点击派发。 */
+    private android.view.View tapButton(String label, final Runnable answer) {
+        TextView b = new TextView(service);
+        b.setText(label);
+        b.setTextSize(14);
+        b.setTextColor(0xff1f2328);
+        b.setGravity(Gravity.CENTER);
+        b.setMinHeight(dp(48));
+        b.setMinWidth(dp(88));
+        b.setPadding(dp(12), 0, dp(12), 0);
+        b.setClickable(true);
+        b.setFocusable(true);
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(0xffe8ebef);
+        bg.setCornerRadius(dp(10));
+        b.setBackground(bg);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+        lp.setMargins(dp(4), dp(4), dp(4), dp(4));
+        b.setLayoutParams(lp);
+        b.setOnTouchListener((v, event) -> {
+            switch (event.getActionMasked()) {
+                case android.view.MotionEvent.ACTION_DOWN:
+                    v.setAlpha(0.7f);
+                    return true;
+                case android.view.MotionEvent.ACTION_UP:
+                    v.setAlpha(1f);
+                    // 直接在这里答，不调 performClick、不等系统派发。
+                    answer.run();
+                    return true;
+                case android.view.MotionEvent.ACTION_CANCEL:
+                    v.setAlpha(1f);
+                    return true;
+                default:
+                    return true;
+            }
+        });
+        return b;
     }
 
     private TextView countdown;

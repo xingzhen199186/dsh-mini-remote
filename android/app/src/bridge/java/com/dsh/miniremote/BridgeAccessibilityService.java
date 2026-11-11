@@ -37,9 +37,7 @@ public final class BridgeAccessibilityService extends AccessibilityService {
     private final ConfirmationControl.CardListener confirmListener = new ConfirmationControl.CardListener() {
         @Override
         public void onCard(ConfirmationControl.Card card) {
-            // 浮层已经停用（2026-11-11 用户反馈）：它抢走屏幕上方那块地方，
-            // 正好挡住通知横幅，用户"看不清该点哪儿"。确认只走通知。
-            // 这里保留回调是为了以后想恢复时有落点，不再真的画。
+            if (confirmOverlay != null) confirmOverlay.show(card);
         }
 
         @Override
@@ -68,7 +66,6 @@ public final class BridgeAccessibilityService extends AccessibilityService {
     /** 锁屏期间攒下的那张卡，在解锁后补摆出来；没有在等卡就什么都不做。 */
     private void showPendingCardIfAny() {
         ConfirmationControl.Card waiting = ConfirmationControl.currentCard();
-        if (true) return; // 浮层停用（2026-11-11）：确认入口只有通知
         if (waiting == null || confirmOverlay == null || confirmOverlay.isShowing()) return;
         boolean locked;
         try {
@@ -79,7 +76,7 @@ public final class BridgeAccessibilityService extends AccessibilityService {
             locked = false;
         }
         if (locked) return;
-        // confirmOverlay.show(waiting);  // 停用，见上
+        confirmOverlay.show(waiting);
     }
 
     /** 解锁/锁屏与武装状态共用这一个判据；本方法不尝试亮屏或解锁。 */
