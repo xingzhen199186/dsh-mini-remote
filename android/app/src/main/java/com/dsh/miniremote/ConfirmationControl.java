@@ -233,12 +233,12 @@ final class ConfirmationControl {
                     return failure("not_armed", "手机桥已关闭，动作未执行");
                 }
                 String mode = state.modeForTask(taskId, selected);
-                if (mode == ConfirmationState.OFF) return allow();
+                if (ConfirmationState.OFF.equals(mode)) return allow();
                 // 同一轮、盘上记过：把内存状态补回来再判断（进程可能被杀过）。
-                if (mode == ConfirmationState.TASK && taskId != null && taskId.equals(storedGrant)) {
+                if (ConfirmationState.TASK.equals(mode) && taskId != null && taskId.equals(storedGrant)) {
                     state.grantCurrentTask(taskId);
                 }
-                if (mode == ConfirmationState.TASK && state.taskGranted(taskId)) return allow();
+                if (ConfirmationState.TASK.equals(mode) && state.taskGranted(taskId)) return allow();
                 if (pending == null) {
                     Card card = new Card(id, taskId, tool, target, mode, deadline);
                     created = new Pending(app, card);
@@ -286,6 +286,11 @@ final class ConfirmationControl {
      * 用户点了通知上的按钮。**只认当前这一张卡**：旧通知、连点第二次都不作数，
      * 所以同一个动作不可能被执行两遍。
      */
+    /* 注意（2026-11-11 真机）：档位是**字符串**，必须用 equals 比较。
+     * 曾经写成 `card.mode == ConfirmationState.TASK`，比的是"是不是同一个对象"，
+     * 而档位是从设置里读出来的新对象——条件永远为假，于是"允许"只放行那一次，
+     * 既不记授权也不切免确认，表现为每步都弹卡。别再改回 ==。
+     */
     static boolean answerCard(String cardId, boolean allow, boolean grantTask) {
         // 关掉期间按钮点了也不做事：这条路径从主线程（广播接收器）进来，
         // 必须第一时间返回，绝不在这里等锁或等任何东西。
@@ -297,7 +302,7 @@ final class ConfirmationControl {
             Pending current = pending;
             if (current == null) return false;
             if (cardId == null || !cardId.equals(current.card.id)) return false;
-            if (allow && grantTask && current.card.mode == ConfirmationState.TASK) {
+            if (allow && grantTask && ConfirmationState.TASK.equals(current.card.mode)) {
                 state.grantCurrentTask(current.card.taskId);
                 granted = true;
                 /* 用户定的方式（2026-11-11）：第一次允许后直接免确认，

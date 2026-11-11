@@ -29,3 +29,12 @@ test('手机按会话切回，不按轮次（轮次每步都变）', () => {
   assert.match(control, /autoOff\.equals\(sessionId\)/)
   assert.match(control, /setSelectedMode\(app, ConfirmationState\.TASK\)/)
 })
+
+test('档位是字符串，必须用 equals 比较（== 只会比对象）', () => {
+  const control = read('android/app/src/main/java/com/dsh/miniremote/ConfirmationControl.java')
+  // 2026-11-11 根因：`card.mode == ConfirmationState.TASK` 永远为假，
+  // 于是"允许"只放行一次，每步都弹卡。
+  assert.doesNotMatch(control, /\bmode == ConfirmationState\./)
+  assert.doesNotMatch(control, /card\.mode == ConfirmationState\./)
+  assert.match(control, /ConfirmationState\.TASK\.equals\(current\.card\.mode\)/)
+})
