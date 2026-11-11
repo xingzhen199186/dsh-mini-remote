@@ -800,6 +800,12 @@ public final class MainActivity extends Activity {
             + "<button class=\"btn\" id=\"miniA11yGo\">开无障碍</button>"
             + "<div id=\"miniIdleNote\" class=\"hint\" style=\"margin-top:6px\" hidden></div>"
             + "<div id=\"miniActionLog\" style=\"margin-top:8px\"></div>"
+            // 手机终端（Termux）：只有这一个能力需要额外授权，所以单独列一行。
+            + "<div id=\"miniTermuxRow\" style=\"margin-top:10px\">"
+            + "<div class=\"hint\">手机终端</div>"
+            + "<div id=\"miniTermuxState\" class=\"hint\" style=\"font-size:12px\"></div>"
+            + "<button class=\"btn\" id=\"miniTermuxGo\" style=\"margin-top:6px\" hidden>去授权</button>"
+            + "</div>"
             + "</div></div>';"
             + "function place(){"
             + "var conn=document.getElementById('miniConnBlock');"
@@ -893,6 +899,24 @@ public final class MainActivity extends Activity {
             + "}"
             + "paintLog();"
             + "setInterval(paintLog,4000);"
+            // 手机终端：没装 / 已授权 / 去授权（授权必须由 App 发起，设置里的说明弹窗不会授予）
+            + "function paintTermux(){"
+            + "var go=document.getElementById('miniTermuxGo');"
+            + "var txt=document.getElementById('miniTermuxState');"
+            + "if(!go||!txt||!window.MiniProbe.termuxState)return;"
+            + "try{"
+            + "var st=JSON.parse(window.MiniProbe.termuxState()||'{}');"
+            + "if(!st.installed){txt.textContent='没有检测到 Termux。要用手机终端，先在手机装 Termux。';go.hidden=true;return;}"
+            + "if(st.permitted){txt.textContent='已授权，可以在手机上执行命令。';go.hidden=true;return;}"
+            + "txt.textContent='还没授权。点下面按钮，系统会弹一个「允许 / 拒绝」的框。';"
+            + "if(!go.__wired){go.__wired=1;go.addEventListener('click',function(){"
+            + "try{window.MiniProbe.requestTermuxPermission();}catch(e){}"
+            + "setTimeout(paintTermux,1200);});}"
+            + "go.hidden=false;"
+            + "}catch(e){}"
+            + "}"
+            + "paintTermux();"
+            + "setInterval(paintTermux,3000);"
             // 三档切换：点一下存一次，文案跟着变；**从下一轮任务生效**（跑到一半不换规则）。
             + "function paintConfirm(){"
             + "var hint=document.getElementById('miniConfirmHint');"
@@ -2241,6 +2265,43 @@ public final class MainActivity extends Activity {
             } catch (ClassNotFoundException err) {
                 return null;
             }
+        }
+
+        /** 手机终端（Termux）这条路的状态：装没装、授权没有。 */
+        @android.webkit.JavascriptInterface
+        public String termuxState() {
+            JSONObject out = new JSONObject();
+            try {
+                boolean installed = true;
+                try {
+                    getPackageManager().getPackageInfo("com.termux", 0);
+                } catch (Exception err) {
+                    installed = false;
+                }
+                out.put("installed", installed);
+                out.put("permitted", checkSelfPermission("com.termux.permission.RUN_COMMAND")
+                        == android.content.pm.PackageManager.PERMISSION_GRANTED);
+            } catch (Exception err) {
+                return "{}";
+            }
+            return out.toString();
+        }
+
+        /**
+         * 主动发起一次 Termux 命令权限的请求（2026-11-12）。
+         *
+         * 为什么必须由 App 发起：设置页里那个权限只有一句说明，点「知道了」不会授予。
+         * 只有应用自己 requestPermissions，系统才会弹出真正带「允许 / 拒绝」的框。
+         */
+        @android.webkit.JavascriptInterface
+        public void requestTermuxPermission() {
+            runOnUiThread(() -> {
+                try {
+                    requestPermissions(new String[]{"com.termux.permission.RUN_COMMAND"}, 4041);
+                } catch (Exception err) {
+                    // 拿不到就算了：界面上会显示仍是未授权。
+                }
+            });
         }
 
         /** 最近几条操作记录（D1），给设置页回看用。 */
