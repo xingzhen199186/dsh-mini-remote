@@ -214,6 +214,19 @@ public final class Net {
         return download(url, credential, out, total, progress, start, SEGMENT_RETRIES);
     }
 
+    /** 从 Content-Range 里取"整份文件共多少字节"；拿不到返回 0。 */
+    private static long contentRangeTotal(java.net.HttpURLConnection connection) {
+        try {
+            String header = connection.getHeaderField("Content-Range");
+            if (header == null) return 0;
+            int slash = header.lastIndexOf('/');
+            if (slash < 0 || slash == header.length() - 1) return 0;
+            return Long.parseLong(header.substring(slash + 1).trim());
+        } catch (Exception err) {
+            return 0;
+        }
+    }
+
     /** 整块传：一个请求，从 0 到 total。45 秒没有新数据才算断。 */
     static DownloadOutcome downloadWhole(String url, String deviceCredential, java.io.File out, long total,
                                          Progress progress) throws IOException {
@@ -296,9 +309,22 @@ public final class Net {
                             connection.setRequestProperty("Range", "bytes=" + offset + "-" + end);
                         }
                         int status = connection.getResponseCode();
+                        // **以服务器为准**（2026-11-11 真机：每次都在 99% 断）：
+                        // 查询更新时拿到的大小，和真正下载时服务端的文件可能已经不是一个
+                        //（电脑端重新打包、或响应之间隔了一会儿）。继续按旧大小算，
+                        // 最后几段就会"要过头"，表现为 99% 处失败。
+                        long authoritative = contentRangeTotal(connection);
+                        if (authoritative > 0) {
+                            total = authoritative;
+                        }
                         if (status == 416) {
-                            // 要过了头：说明已经收全了。
-                            finished = true;
+                            // 要过头：服务端明确告诉我们"文件只有 N 字节"。
+                            // 如果已经收够了，就算成功；否则从这里重新对齐。
+                            if (total > 0 && offset >= total) {
+                                finished = true;
+                                break;
+                            }
+                            last = new IOException("请求超出文件范围（已收 " + offset + " / " + total + " 字节）");
                             break;
                         }
                         if (status == 200 && offset > 0) {

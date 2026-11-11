@@ -1009,6 +1009,7 @@ public final class MainActivity extends Activity {
             + "say('发现新版本：本机 '+selfTag+' → 电脑 '+String(o.sha256||'').slice(0,8)+'，开始下载（'+(Math.round((o.size||0)/1048576))+' MB）…');"
             + "window.__miniUpdateProgress=function(p,mb){say('正在下载 '+p+'%'+(mb?'（'+mb+'）':'')+'…');};"
             + "window.__miniUpdateSwitch=function(){say('这条线路整块传不动，改成分段下载…');};"
+            + "window.__miniUpdateFail=function(detail){say(detail);};"
             + "window.MiniUpdate.install(o.url, o.size||0);"
             // 原来这里会再写一句"下载完成后会弹出安装界面"（2026-11-10 用户要求去掉）：
             // 进度百分比本身已经说明在下载，安装器弹出来是自然的事，多一句只是噪音。
@@ -2460,6 +2461,26 @@ public final class MainActivity extends Activity {
             if (base == null || path == null || path.isEmpty()) {
                 return;
             }
+            // 下载期间**别让屏幕熄**（2026-11-11 真机）：26MB 要下好几分钟，
+            // 中途熄屏后系统会收走这台 App 的网络，于是每次都断在 99%。
+            // 这不是"网不稳"，是我们自己没撑住。
+            runOnUiThread(() -> {
+                if (getWindow() != null) {
+                    getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+                }
+            });
+            android.os.PowerManager.WakeLock updateLock = null;
+            try {
+                android.os.PowerManager pm = (android.os.PowerManager) getSystemService(POWER_SERVICE);
+                if (pm != null) {
+                    updateLock = pm.newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK, "mini:update");
+                    updateLock.setReferenceCounted(false);
+                    updateLock.acquire(10 * 60 * 1000L);
+                }
+            } catch (Exception ignored) {
+                // 拿不到锁也照常下：这只是保险，不是前提。
+            }
+            final android.os.PowerManager.WakeLock heldLock = updateLock;
             new Thread(new Runnable() {
                 @Override
                 public void run() {
@@ -2500,6 +2521,16 @@ public final class MainActivity extends Activity {
                         launchInstaller(out);
                     } catch (Exception err) {
                         toastOnUi("安装包下载失败：" + err.getMessage());
+                    } finally {
+                        if (heldLock != null && heldLock.isHeld()) {
+                            heldLock.release();
+                        }
+                        runOnUiThread(() -> {
+                            if (getWindow() != null) {
+                                getWindow().clearFlags(
+                                        android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+                            }
+                        });
                     }
                 }
             }, "mini-update").start();
