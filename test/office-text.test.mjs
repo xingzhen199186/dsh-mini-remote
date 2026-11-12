@@ -100,3 +100,10 @@ test('PDF 三条路都要能渲染，不许再被拦下', () => {
   // 不许再出现“手机上不能看”的旧说法。
   assert.doesNotMatch(files, /PDF 手机上不能直接看/)
 })
+
+test('PDF 按设备像素密度画，否则在手机上一定糊', () => {
+  const files = readFileSync(new URL('../lib/page-files.js', import.meta.url), 'utf8')
+  // 2026-11-12 用户反馈：第一版只按 CSS 宽度画，2~3 倍屏上看着糊。
+  assert.match(files, /devicePixelRatio/)
+  assert.match(files, /Math\.min\(3, window\.devicePixelRatio/)
+})
