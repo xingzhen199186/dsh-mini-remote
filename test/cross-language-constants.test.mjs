@@ -100,6 +100,9 @@ test('子页面能滑动返回，主页面不抢网页的横滑', () => {
   // 只在左边缘、并且先横着走才算返回手势。
   assert.match(swipe, /EDGE_DP/)
   assert.match(swipe, /Math\.abs\(dy\) > Math\.abs\(dx\)/)
+  // 阈值不能按"屏宽四分之一"算（那段划起来像没反应，2026-11-12 反馈过）。
+  assert.doesNotMatch(swipe, /widthPixels \/ 4/)
+  assert.match(swipe, /80 \* getResources\(\)\.getDisplayMetrics\(\)\.density/)
   // 三个子页面都要装上。
   for (const page of ['PairActivity', 'LineConfigActivity', 'CaptureActivity']) {
     assert.match(read(`android/app/src/main/java/com/dsh/miniremote/${page}.java`), new RegExp(`SwipeBack\\.install\\(this\\)`), `${page} 没装滑动返回`)

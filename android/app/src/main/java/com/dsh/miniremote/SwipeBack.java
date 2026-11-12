@@ -23,6 +23,9 @@ final class SwipeBack extends FrameLayout {
     private final int edgePx;
     private final int touchSlop;
     private final int minDistance;
+    private final int velocityThreshold;
+    private long downTime;
+    private float lastX;
     private float downX;
     private float downY;
     private boolean tracking;
@@ -32,7 +35,10 @@ final class SwipeBack extends FrameLayout {
         super(context);
         edgePx = Math.round(EDGE_DP * getResources().getDisplayMetrics().density);
         touchSlop = ViewConfiguration.get(context).getScaledTouchSlop();
-        minDistance = getResources().getDisplayMetrics().widthPixels / 4;
+        // 原来按"屏宽四分之一"（约 320px）算，划一点点就弹回去，手感像没反应（2026-11-12 反馈）。
+        // 改成：划够 80dp 就返回；划得短但够快也算。
+        minDistance = Math.round(80 * getResources().getDisplayMetrics().density);
+        velocityThreshold = ViewConfiguration.get(context).getScaledMinimumFlingVelocity();
     }
 
     /** 把当前 Activity 的内容套进一层，之后就能边缘滑动返回。 */
@@ -61,6 +67,8 @@ final class SwipeBack extends FrameLayout {
             case MotionEvent.ACTION_DOWN:
                 downX = event.getX();
                 downY = event.getY();
+                downTime = event.getEventTime();
+                lastX = downX;
                 tracking = downX <= edgePx;
                 dragging = false;
                 return false;
@@ -75,6 +83,7 @@ final class SwipeBack extends FrameLayout {
                 }
                 if (dx > touchSlop) {
                     dragging = true;
+                    lastX = event.getX();
                     return true;
                 }
                 return false;
@@ -89,13 +98,17 @@ final class SwipeBack extends FrameLayout {
         switch (event.getActionMasked()) {
             case MotionEvent.ACTION_MOVE: {
                 float dx = Math.max(0f, event.getX() - downX);
+                lastX = event.getX();
                 if (getChildCount() > 0) getChildAt(0).setTranslationX(dx);
                 return true;
             }
             case MotionEvent.ACTION_UP:
             case MotionEvent.ACTION_CANCEL: {
                 float dx = Math.max(0f, event.getX() - downX);
-                boolean finish = event.getActionMasked() == MotionEvent.ACTION_UP && dx > minDistance;
+                long elapsed = Math.max(1L, event.getEventTime() - downTime);
+                float velocity = dx / elapsed * 1000f;
+                boolean finish = event.getActionMasked() == MotionEvent.ACTION_UP
+                        && (dx > minDistance || (dx > touchSlop * 2 && velocity > velocityThreshold));
                 View child = getChildCount() > 0 ? getChildAt(0) : null;
                 if (child == null) return true;
                 if (finish) {
