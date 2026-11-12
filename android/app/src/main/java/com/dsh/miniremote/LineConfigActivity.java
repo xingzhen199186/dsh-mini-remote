@@ -365,6 +365,8 @@ public final class LineConfigActivity extends Activity {
         card.addView(statusView);
 
         setContentView(scroll);
+        // 左边缘滑动返回（2026-11-12）：这一页能退回会话主页面。
+        SwipeBack.install(this);
 
         saveButton.setOnClickListener(new View.OnClickListener() {
             @Override

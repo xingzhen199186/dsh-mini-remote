@@ -94,3 +94,17 @@ test('终端只保留后台能力，界面上不出现', () => {
   const shell = read('android/app/src/main/java/com/dsh/miniremote/NativeShell.java')
   assert.match(shell, /new ProcessBuilder\("\/system\/bin\/sh", "-c", command\)/)
 })
+
+test('子页面能滑动返回，主页面不抢网页的横滑', () => {
+  const swipe = read('android/app/src/main/java/com/dsh/miniremote/SwipeBack.java')
+  // 只在左边缘、并且先横着走才算返回手势。
+  assert.match(swipe, /EDGE_DP/)
+  assert.match(swipe, /Math\.abs\(dy\) > Math\.abs\(dx\)/)
+  // 三个子页面都要装上。
+  for (const page of ['PairActivity', 'LineConfigActivity', 'CaptureActivity']) {
+    assert.match(read(`android/app/src/main/java/com/dsh/miniremote/${page}.java`), new RegExp(`SwipeBack\\.install\\(this\\)`), `${page} 没装滑动返回`)
+  }
+  // 主页面是网页壳，不能装（会跟网页的横向手势打架）。
+  const main = read('android/app/src/main/java/com/dsh/miniremote/MainActivity.java')
+  assert.doesNotMatch(main, /SwipeBack\.install/)
+})
