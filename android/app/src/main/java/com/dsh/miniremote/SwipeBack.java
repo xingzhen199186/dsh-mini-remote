@@ -1,6 +1,7 @@
 package com.dsh.miniremote;
 
 import android.app.Activity;
+import android.graphics.Rect;
 import android.content.Context;
 import android.view.MotionEvent;
 import android.view.View;
@@ -30,6 +31,25 @@ final class SwipeBack extends FrameLayout {
     private float downY;
     private boolean tracking;
     private boolean dragging;
+
+    /**
+     * 把左边缘那一窄条从**系统手势**里排除掉（2026-11-12）。
+     *
+     * 安卓 10 以后，手势导航会把屏幕左边缘的横滑当成"返回"，直接吃掉——
+     * 不排除，这一层的触摸监听永远收不到事件，手势等于没做。
+     */
+    @Override
+    protected void onSizeChanged(int w, int h, int oldw, int oldh) {
+        super.onSizeChanged(w, h, oldw, oldh);
+        if (android.os.Build.VERSION.SDK_INT < 29) return;
+        try {
+            java.util.List<Rect> rects = new java.util.ArrayList<>();
+            rects.add(new Rect(0, 0, edgePx, h));
+            setSystemGestureExclusionRects(rects);
+        } catch (Exception ignored) {
+            // 太老的系统没有这个接口，忽略。
+        }
+    }
 
     private SwipeBack(Context context) {
         super(context);

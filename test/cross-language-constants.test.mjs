@@ -151,3 +151,12 @@ test('装好 Termux 之后就不再讲怎么装', () => {
   // 只在"没装"时显示：装了（不管有没有授权）都收起。
   assert.match(activity, /how\.hidden=st\.installed===true/)
 })
+
+test('左边缘要先从系统手势里排除，否则滑动永远收不到触摸', () => {
+  const swipe = read('android/app/src/main/java/com/dsh/miniremote/SwipeBack.java')
+  assert.match(swipe, /setSystemGestureExclusionRects/)
+  const main = read('android/app/src/main/java/com/dsh/miniremote/MainActivity.java')
+  // 2026-11-12 真机：网页里的边缘滑动一次都没触发，就是缺这一句。
+  assert.match(main, /excludeEdgeFromSystemGestures/)
+  assert.match(main, /setSystemGestureExclusionRects/)
+})

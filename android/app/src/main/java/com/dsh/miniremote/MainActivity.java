@@ -98,6 +98,9 @@ public final class MainActivity extends Activity {
         addressPool = new AddressPool(credentials.addresses);
         webView = new WebView(this);
         setContentView(webView);
+        // 把左边缘那一窄条从系统手势里排除：不排除，网页里的边缘滑动永远收不到触摸，
+        // 会被系统当成"返回"吃掉（2026-11-12 真机确认这条缺失）。
+        excludeEdgeFromSystemGestures();
         // 调试版才开远程调试（chrome://inspect / adb forward），发布版不留这个口子。
         // 2026-11-06 加：页面连不上推送流时要能在电脑上看到 WebView 的控制台与网络。
         boolean debuggable = (getApplicationInfo().flags
@@ -759,6 +762,21 @@ public final class MainActivity extends Activity {
      * 只有一个开关和一句话状态。**这不是装饰**：桥关着的时候，电脑那边根本看不到
      * 这台手机，后面所有 `phone_*` 工具都不会出现——所以这个开关就是授权的意思。
      */
+    /** 让左边缘 24dp 归我们自己用：这一条不再算作系统返回手势区（2026-11-12）。 */
+    private void excludeEdgeFromSystemGestures() {
+        if (android.os.Build.VERSION.SDK_INT < 29) return;
+        final int edge = Math.round(24 * getResources().getDisplayMetrics().density);
+        webView.post(() -> {
+            try {
+                java.util.List<android.graphics.Rect> rects = new java.util.ArrayList<>();
+                rects.add(new android.graphics.Rect(0, 0, edge, Math.max(1, webView.getHeight())));
+                webView.setSystemGestureExclusionRects(rects);
+            } catch (Exception ignored) {
+                // 系统不支持就退回去，不影响别的功能。
+            }
+        });
+    }
+
     private static final String BRIDGE_UI_JS = "(function(){"
             + "if(window.__miniBridgeUi)return;"
             + "var host=document.querySelector('#settings .sheet-body');"
