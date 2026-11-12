@@ -71,12 +71,10 @@ test('注入到网页里的脚本必须是合法的 JS', () => {
   }
 })
 
-test('注入脚本里的单引号不能截断字符串', () => {
-  // 2026-11-12 真机：Termux 指引里写了 echo 'allow-external-apps = true'，
-  // 单引号落在单引号包裹的字符串里，把整段 JS 截断，手机桥与屏幕操作整块消失。
+test('注入脚本里不许出现能截断字符串的裸单引号', () => {
+  // 2026-11-12 真机：指引里写了 echo 'allow-external-apps = true'，
+  // 单引号落在单引号包裹的字符串里，把整段探测脚本截断，手机桥与屏幕操作整块消失。
+  // 现在那段指引挪去了别处，但这条规矩要留着：命令里的单引号必须写成 &#39; 或转义。
   const code = extract(source, 'BRIDGE_UI_JS')
-  const guide = code.indexOf('allow-external-apps')
-  assert.ok(guide > 0, '终端指引不见了')
-  const around = code.slice(Math.max(0, guide - 60), guide + 60)
-  assert.doesNotMatch(around, /(?<!\\)'allow-external-apps/, '单引号必须转义或写成实体')
+  assert.doesNotMatch(code, /echo '[^']*'/, '命令里的单引号要转义或写成实体')
 })
