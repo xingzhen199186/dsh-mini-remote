@@ -66,8 +66,6 @@ public final class PairActivity extends Activity {
         layout.addView(statusView);
 
         setContentView(layout);
-        // 左边缘滑动返回（2026-11-12）：这一页能退回会话主页面。
-        SwipeBack.install(this);
         submitButton.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View view) {

@@ -150,8 +150,6 @@ public class CaptureActivity extends Activity {
         barParams.gravity = Gravity.BOTTOM;
         root.addView(bar, barParams);
         setContentView(root);
-        // 左边缘滑动返回（2026-11-12）：这一页能退回会话主页面。
-        SwipeBack.install(this);
     }
 
     @Override

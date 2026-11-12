@@ -95,39 +95,20 @@ test('终端只保留后台能力，界面上不出现', () => {
   assert.match(shell, /new ProcessBuilder\("\/system\/bin\/sh", "-c", command\)/)
 })
 
-test('子页面能滑动返回，主页面不抢网页的横滑', () => {
-  const swipe = read('android/app/src/main/java/com/dsh/miniremote/SwipeBack.java')
-  // 只在左边缘、并且先横着走才算返回手势。
-  assert.match(swipe, /EDGE_DP/)
-  assert.match(swipe, /Math\.abs\(dy\) > Math\.abs\(dx\)/)
-  // 阈值不能按"屏宽四分之一"算（那段划起来像没反应，2026-11-12 反馈过）。
-  assert.doesNotMatch(swipe, /widthPixels \/ 4/)
-  assert.match(swipe, /80 \* getResources\(\)\.getDisplayMetrics\(\)\.density/)
-  // 三个子页面都要装上。
-  for (const page of ['PairActivity', 'LineConfigActivity', 'CaptureActivity']) {
-    assert.match(read(`android/app/src/main/java/com/dsh/miniremote/${page}.java`), new RegExp(`SwipeBack\\.install\\(this\\)`), `${page} 没装滑动返回`)
-  }
-  // 主页面是网页壳，不能装（会跟网页的横向手势打架）。
-  const main = read('android/app/src/main/java/com/dsh/miniremote/MainActivity.java')
-  assert.doesNotMatch(main, /SwipeBack\.install/)
-})
-
-test('手机页有自己的边缘滑动返回，且不动网页端', () => {
+test('这些面板跟设置页一样，由系统返回手势关掉', () => {
+  const activity = read('android/app/src/main/java/com/dsh/miniremote/MainActivity.java')
+  // 返回入口里必须登记页面里的各层，否则划返回/按返回关不掉它们（2026-11-12）。
+  const back = activity.slice(activity.indexOf('window.miniCloseTop=function()'), activity.indexOf('window.miniCloseTop=function()') + 2600)
+  assert.match(back, /subagentsBack/)
+  assert.match(back, /'subagents'/)
+  assert.match(back, /'ops'/)
+  assert.match(back, /'fileView'/)
+  // 不许再自己画动画：页面里那套跟手平移已经撤了。
   const page = read('lib/page-app.js')
-  // 只在我们这份手机页里；网页端不加载它。
-  assert.match(page, /边缘滑动返回/)
-  assert.match(page, /function backLayer\(\)/)
-  // 四类页面都要能返回：子代理会话页、子代理列表、文件/指令面板、代码建的面板。
-  assert.match(page, /subagentsBack/)
-  assert.match(page, /subagentsClose/)
-  assert.match(page, /opsClose/)
-  // 没有可关的东西时什么都不做（不许把浏览器后退带出来）。
-  assert.doesNotMatch(page, /history\.back\(\)/)
-  // 要跟手：拖动时页面平移，松手滑出去（跟设置页返回一个观感），不是"一划就没"。
-  assert.match(page, /translateX\(' \+ dx \+ 'px\)'/)
-  assert.match(page, /transform 150ms ease-out/)
-  // 只在左边缘起手。
-  assert.match(page, /clientX <= 24/)
+  assert.doesNotMatch(page, /边缘滑动返回/)
+  // 系统手势要还回去：不许再把左边缘从系统手势区里挖掉。
+  assert.doesNotMatch(activity, /setSystemGestureExclusionRects/)
+  assert.doesNotMatch(activity, /excludeEdgeFromSystemGestures/)
 })
 
 test('「手机终端」「工作文件夹」与「屏幕操作」平级', () => {
@@ -155,11 +136,3 @@ test('装好 Termux 之后就不再讲怎么装', () => {
   assert.match(activity, /how\.hidden=st\.installed===true/)
 })
 
-test('左边缘要先从系统手势里排除，否则滑动永远收不到触摸', () => {
-  const swipe = read('android/app/src/main/java/com/dsh/miniremote/SwipeBack.java')
-  assert.match(swipe, /setSystemGestureExclusionRects/)
-  const main = read('android/app/src/main/java/com/dsh/miniremote/MainActivity.java')
-  // 2026-11-12 真机：网页里的边缘滑动一次都没触发，就是缺这一句。
-  assert.match(main, /excludeEdgeFromSystemGestures/)
-  assert.match(main, /setSystemGestureExclusionRects/)
-})
