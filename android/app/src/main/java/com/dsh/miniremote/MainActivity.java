@@ -207,6 +207,8 @@ public final class MainActivity extends Activity {
 
     /** 从 LineConfigActivity 回来：刷新清单；如果改的是当前在用的地址，重新探测加载。 */
     private static final int REQUEST_LINE_CONFIG = 0x4d56;
+    /** 让用户选一个工作文件夹（系统原生选择器，商店认可的方式）。 */
+    private static final int REQUEST_WORK_TREE = 0x4d57;
 
     /**
      * 设置页里的「连接」区块，只有 App 里才有（2026-11-07）。
@@ -806,6 +808,12 @@ public final class MainActivity extends Activity {
             + "<div id=\"miniTermuxState\" class=\"hint\" style=\"font-size:12px\"></div>"
             + "<button class=\"btn\" id=\"miniTermuxGo\" style=\"margin-top:6px\" hidden>去授权</button>"
             + "</div>"
+            // 工作文件夹：用系统选择器挑一次，之后 App 就能在这个文件夹里读写（商店认可的方式）。
+            + "<div id=\"miniWorkRow\" style=\"margin-top:10px\">"
+            + "<div class=\"hint\">工作文件夹</div>"
+            + "<div id=\"miniWorkState\" class=\"hint\" style=\"font-size:12px\"></div>"
+            + "<button class=\"btn\" id=\"miniWorkPick\" style=\"margin-top:6px\">选择文件夹</button>"
+            + "</div>"
             + "</div></div>';"
             + "function place(){"
             + "var conn=document.getElementById('miniConnBlock');"
@@ -917,6 +925,19 @@ public final class MainActivity extends Activity {
             + "}"
             + "paintTermux();"
             + "setInterval(paintTermux,3000);"
+            + "function paintWork(){"
+            + "var pick=document.getElementById('miniWorkPick');"
+            + "var txt=document.getElementById('miniWorkState');"
+            + "if(!pick||!txt||!window.MiniProbe.fsState)return;"
+            + "try{"
+            + "var st=JSON.parse(window.MiniProbe.fsState()||'{}');"
+            + "txt.textContent=st.work?('当前：'+st.work):'还没有选。选了之后，电脑只能在这个文件夹里读写你的文件。';"
+            + "if(!pick.__wired){pick.__wired=1;pick.addEventListener('click',function(){"
+            + "try{window.MiniProbe.pickWorkFolder();}catch(e){}"
+            + "setTimeout(paintWork,2000);});}"
+            + "}catch(e){}"
+            + "}"
+            + "paintWork();"
             // 三档切换：点一下存一次，文案跟着变；**从下一轮任务生效**（跑到一半不换规则）。
             + "function paintConfirm(){"
             + "var hint=document.getElementById('miniConfirmHint');"
@@ -2267,6 +2288,34 @@ public final class MainActivity extends Activity {
             }
         }
 
+        /** 工作文件夹的状态：选了没有、叫什么。 */
+        @android.webkit.JavascriptInterface
+        public String fsState() {
+            JSONObject out = new JSONObject();
+            try {
+                out.put("work", NativeFiles.describe(MainActivity.this));
+            } catch (Exception ignored) {
+                return "{}";
+            }
+            return out.toString();
+        }
+
+        /** 拉起系统选择器让用户挑一个工作文件夹。 */
+        @android.webkit.JavascriptInterface
+        public void pickWorkFolder() {
+            runOnUiThread(() -> {
+                try {
+                    Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
+                    intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION
+                            | Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                            | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+                    startActivityForResult(intent, REQUEST_WORK_TREE);
+                } catch (Exception ignored) {
+                    // 没有文件管理器之类的系统组件时静默失败，界面上会显示仍未选择。
+                }
+            });
+        }
+
         /** 手机终端（Termux）这条路的状态：装没装、授权没有。 */
         @android.webkit.JavascriptInterface
         public String termuxState() {
@@ -2929,6 +2978,21 @@ public final class MainActivity extends Activity {
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == REQUEST_WORK_TREE) {
+            if (resultCode == RESULT_OK && data != null && data.getData() != null) {
+                Uri uri = data.getData();
+                try {
+                    // 取持久授权：重启 App、重启手机之后仍然有效，不然每次都要重选。
+                    getContentResolver().takePersistableUriPermission(
+                            uri, Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+                    String name = uri.getLastPathSegment();
+                    NativeFiles.setWork(this, uri, name == null ? "" : name);
+                } catch (Exception err) {
+                    NativeFiles.setWork(this, null, "");
+                }
+            }
+            return;
+        }
         if (requestCode == REQUEST_LINE_CONFIG) {
             if (resultCode == RESULT_OK && data != null
                     && data.getBooleanExtra(LineConfigActivity.EXTRA_TAILNET_SIGNED_OUT, false)) {

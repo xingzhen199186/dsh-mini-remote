@@ -64,3 +64,18 @@ test('有 Termux 才优先走终端，没有就回落点屏幕（两条都保留
   // 不给终端单独编"永远确认"的规则：确认档位仍是那三档。
   assert.doesNotMatch(host, /phone_shell[\s\S]{0,200}alwaysConfirm/)
 })
+
+test('手机文件能力走系统选择器，不碰"所有文件访问"', () => {
+  // 商店只允许核心功能是文件管理的应用申请 MANAGE_EXTERNAL_STORAGE；
+  // 我们不是文件管理器，硬报会被驳回——所以必须完全不声明它。
+  const manifest = read('android/app/src/main/AndroidManifest.xml')
+  assert.doesNotMatch(manifest, /MANAGE_EXTERNAL_STORAGE/)
+  const activity = read('android/app/src/main/java/com/dsh/miniremote/MainActivity.java')
+  assert.match(activity, /Intent\.ACTION_OPEN_DOCUMENT_TREE/)
+  // 取持久授权，否则重启后又要用户重选。
+  assert.match(activity, /takePersistableUriPermission/)
+  // 只用 app: 与 work: 两种位置。
+  const files = read('android/app/src/main/java/com/dsh/miniremote/NativeFiles.java')
+  assert.match(files, /app:/)
+  assert.match(files, /work:/)
+})

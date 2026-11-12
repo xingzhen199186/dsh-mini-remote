@@ -381,6 +381,32 @@ final class BridgePoller {
                     return;
                 }
             }
+            /* 本机文件：**不经过 Termux、不经过 shell**，直接读写（2026-11-12）。
+             * 只用两种位置：app:（App 私有目录）与 work:（用户亲手选的工作文件夹）。 */
+            if ("phone_fs_list".equals(tool)) {
+                reportRaw(id, true, NativeFiles.list(context, args == null ? "" : args.optString("path", "")));
+                return;
+            }
+            if ("phone_fs_read".equals(tool)) {
+                int offset = args == null ? 1 : Math.max(1, args.optInt("offset", 1));
+                int limit = args == null ? 400 : Math.max(1, Math.min(2000, args.optInt("limit", 400)));
+                reportRaw(id, true, NativeFiles.read(context,
+                        args == null ? "" : args.optString("path", ""), offset, limit));
+                return;
+            }
+            if ("phone_fs_write".equals(tool)) {
+                reportRaw(id, true, NativeFiles.write(context,
+                        args == null ? "" : args.optString("path", ""),
+                        args == null ? "" : args.optString("content", "")));
+                return;
+            }
+            if ("phone_fs_edit".equals(tool)) {
+                reportRaw(id, true, NativeFiles.edit(context,
+                        args == null ? "" : args.optString("path", ""),
+                        args == null ? "" : args.optString("old", ""),
+                        args == null ? "" : args.optString("new", "")));
+                return;
+            }
             if ("phone_shell".equals(tool)) {
                 // 在手机上的 Termux 里执行命令（2026-11-12）。这是**任意命令执行**，
                 // 所以它和点屏幕一样走确认档位，不另开旁路。

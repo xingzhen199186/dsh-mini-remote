@@ -66,4 +66,6 @@ dependencies {
     implementation(files("libs/appctr.aar"))
     // WebView 的代理只能通过 androidx.webkit 的 ProxyController 设置。
     implementation("androidx.webkit:webkit:1.11.0")
+    // 选工作文件夹要用 SAF 的 DocumentFile（系统原生选择器，商店认可的做法）。
+    implementation("androidx.documentfile:documentfile:1.0.1")
 }
