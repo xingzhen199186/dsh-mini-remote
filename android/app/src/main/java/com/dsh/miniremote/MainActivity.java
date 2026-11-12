@@ -627,9 +627,10 @@ public final class MainActivity extends Activity {
                 // 2026-11-12：这一块现在管三件事（无障碍、手机终端、工作文件夹），
                 // 与「手机桥」平级，不再是桥的从属行，所以去掉那道缩进。
                 + "#miniA11yRow{margin:2px 0 0 0 !important;align-items:flex-start !important;gap:12px !important;}"
+                // 字号与字重交给页面自己的 .label，跟「手机桥」那些分类完全一致
+                // （2026-11-12 用户反馈：这里被写死成 13px，比别的分类小一号）。
                 + "#miniA11yHead{display:flex !important;align-items:center !important;gap:8px !important;"
-                + "font-size:13px !important;font-weight:500 !important;cursor:pointer !important;"
-                + "user-select:none !important;}"
+                + "cursor:pointer !important;user-select:none !important;}"
                 + "#miniA11yState{margin-left:auto !important;margin-right:8px !important;font-size:12px !important;"
                 + "font-weight:400 !important;color:var(--muted,#8a8a8a) !important;white-space:nowrap !important;}"
                 // 箭头单独占一格固定宽度并居中：之前它紧跟在状态文字后面，字数一变位置就漂（2026-11-12 用户反馈）。
@@ -638,7 +639,6 @@ public final class MainActivity extends Activity {
                 + "#miniA11yBody{margin-top:6px !important;}"
                 + "#miniA11yPath{margin-top:4px !important;}"
                 + "#miniA11yBody .btn{margin-top:8px !important;}"
-                + "#miniA11yRow .label{font-size:13px !important;font-weight:500 !important;}"
                 + "#miniA11yRow .hint{line-height:1.5 !important;}"
                 + "#miniA11yRow [hidden]{display:none !important;}"
                 + "#miniBridgeBlock{align-items:flex-start !important;gap:12px !important;}"

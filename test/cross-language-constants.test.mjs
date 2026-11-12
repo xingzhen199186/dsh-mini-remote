@@ -140,6 +140,8 @@ test('「手机终端」「工作文件夹」与「屏幕操作」平级', () =>
   assert.match(activity, />最近操作</)
   // 箭头固定格宽并居中，不跟着状态文字漂。
   assert.match(activity, /#miniA11yChev\{flex:0 0 18px/)
+  // 标题字号要跟别的分类一致：不许在这里写死 font-size（2026-11-12 用户反馈过小一号）。
+  assert.doesNotMatch(activity, /#miniA11yHead\{[^}]*font-size/)
 })
 
 test('装好 Termux 之后就不再讲怎么装', () => {
