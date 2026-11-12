@@ -407,6 +407,18 @@ final class BridgePoller {
                         args == null ? "" : args.optString("new", "")));
                 return;
             }
+            if ("phone_fs_glob".equals(tool)) {
+                reportRaw(id, true, NativeFiles.glob(context,
+                        args == null ? "work:" : args.optString("path", "work:"),
+                        args == null ? "*" : args.optString("pattern", "*")));
+                return;
+            }
+            if ("phone_fs_grep".equals(tool)) {
+                reportRaw(id, true, NativeFiles.grep(context,
+                        args == null ? "work:" : args.optString("path", "work:"),
+                        args == null ? "" : args.optString("pattern", "")));
+                return;
+            }
             if ("phone_shell".equals(tool)) {
                 // 在手机上的 Termux 里执行命令（2026-11-12）。这是**任意命令执行**，
                 // 所以它和点屏幕一样走确认档位，不另开旁路。

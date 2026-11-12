@@ -258,7 +258,178 @@ final class NativeFiles {
         }
     }
 
+
+    // ── 找文件 / 搜内容 ────────────────────────────────────────
+
+    /** 目录最多往下走几层，避免在超大目录里跑很久。 */
+    private static final int MAX_DEPTH = 8;
+    /** 一次最多返回多少条命中。 */
+    private static final int MAX_HITS = 300;
+    /** 搜内容时最多翻多少个文件、单文件多大。 */
+    private static final int MAX_SCAN_FILES = 500;
+    private static final long MAX_SCAN_BYTES = 256 * 1024;
+
+    /** 把 *.txt 这种通配符翻成正则；只支持 * 和 ?。 */
+    private static java.util.regex.Pattern globToRegex(String glob) {
+        StringBuilder sb = new StringBuilder("^");
+        for (char c : glob.toCharArray()) {
+            if (c == '*') sb.append(".*");
+            else if (c == '?') sb.append('.');
+            else sb.append(java.util.regex.Pattern.quote(String.valueOf(c)));
+        }
+        return java.util.regex.Pattern.compile(sb.append('$').toString());
+    }
+
+    static String glob(Context context, String path, String pattern) {
+        try {
+            JSONObject target = resolve(context, path);
+            java.util.regex.Pattern rx = globToRegex(pattern == null || pattern.isEmpty() ? "*" : pattern);
+            JSONArray hits = new JSONArray();
+            if ("app".equals(target.getString("kind"))) {
+                walkApp(new File(context.getFilesDir(), target.getString("rel")), "", 0, rx, hits);
+            } else {
+                androidx.documentfile.provider.DocumentFile dir =
+                        walk(context, target.getString("rel"), false);
+                if (dir == null || !dir.isDirectory()) return err("这个目录不存在或不是目录：" + path);
+                walkTree(dir, "", 0, rx, hits);
+            }
+            return new JSONObject().put("ok", true).put("count", hits.length()).put("files", hits).toString();
+        } catch (Exception e) {
+            return err(reason(e));
+        }
+    }
+
+    private static void walkApp(File dir, String prefix, int depth,
+                                java.util.regex.Pattern rx, JSONArray hits) {
+        if (dir == null || depth > MAX_DEPTH || hits.length() >= MAX_HITS) return;
+        File[] children = dir.listFiles();
+        if (children == null) return;
+        for (File child : children) {
+            if (hits.length() >= MAX_HITS) return;
+            String rel = prefix.isEmpty() ? child.getName() : prefix + "/" + child.getName();
+            if (child.isDirectory()) {
+                walkApp(child, rel, depth + 1, rx, hits);
+            } else if (rx.matcher(child.getName()).matches()) {
+                hits.put(rel + "\t" + child.length());
+            }
+        }
+    }
+
+    private static void walkTree(androidx.documentfile.provider.DocumentFile dir, String prefix,
+                                 int depth, java.util.regex.Pattern rx, JSONArray hits) {
+        if (dir == null || depth > MAX_DEPTH || hits.length() >= MAX_HITS) return;
+        for (androidx.documentfile.provider.DocumentFile child : dir.listFiles()) {
+            if (hits.length() >= MAX_HITS) return;
+            String name = child.getName() == null ? "" : child.getName();
+            String rel = prefix.isEmpty() ? name : prefix + "/" + name;
+            if (child.isDirectory()) {
+                walkTree(child, rel, depth + 1, rx, hits);
+            } else if (rx.matcher(name).matches()) {
+                hits.put(rel + "\t" + child.length());
+            }
+        }
+    }
+
+    static String grep(Context context, String path, String pattern) {
+        try {
+            if (pattern == null || pattern.isEmpty()) return err("要指定 pattern");
+            JSONObject target = resolve(context, path);
+            JSONArray hits = new JSONArray();
+            int[] budget = {MAX_SCAN_FILES};
+            if ("app".equals(target.getString("kind"))) {
+                grepApp(new File(context.getFilesDir(), target.getString("rel")), "", 0, pattern, hits, budget);
+            } else {
+                androidx.documentfile.provider.DocumentFile dir =
+                        walk(context, target.getString("rel"), false);
+                if (dir == null) return err("这个位置不存在：" + path);
+                grepTree(context, dir, "", 0, pattern, hits, budget);
+            }
+            return new JSONObject().put("ok", true).put("count", hits.length()).put("matches", hits).toString();
+        } catch (Exception e) {
+            return err(reason(e));
+        }
+    }
+
+    private static void grepApp(File dir, String prefix, int depth, String pattern,
+                                JSONArray hits, int[] budget) {
+        if (dir == null || depth > MAX_DEPTH || hits.length() >= MAX_HITS || budget[0] <= 0) return;
+        File[] children = dir.listFiles();
+        if (children == null) return;
+        for (File child : children) {
+            if (hits.length() >= MAX_HITS || budget[0] <= 0) return;
+            String rel = prefix.isEmpty() ? child.getName() : prefix + "/" + child.getName();
+            if (child.isDirectory()) {
+                grepApp(child, rel, depth + 1, pattern, hits, budget);
+            } else if (child.length() <= MAX_SCAN_BYTES) {
+                budget[0]--;
+                scanFile(child.getName(), rel, readLinesApp(child), pattern, hits);
+            }
+        }
+    }
+
+    private static void grepTree(Context context, androidx.documentfile.provider.DocumentFile dir,
+                                 String prefix, int depth, String pattern, JSONArray hits, int[] budget) {
+        if (dir == null || depth > MAX_DEPTH || hits.length() >= MAX_HITS || budget[0] <= 0) return;
+        for (androidx.documentfile.provider.DocumentFile child : dir.listFiles()) {
+            if (hits.length() >= MAX_HITS || budget[0] <= 0) return;
+            String name = child.getName() == null ? "" : child.getName();
+            String rel = prefix.isEmpty() ? name : prefix + "/" + name;
+            if (child.isDirectory()) {
+                grepTree(context, child, rel, depth + 1, pattern, hits, budget);
+            } else if (child.length() <= MAX_SCAN_BYTES) {
+                budget[0]--;
+                scanFile(name, rel, readLinesUri(context, child.getUri()), pattern, hits);
+            }
+        }
+    }
+
+    private static void scanFile(String name, String rel, List<String> lines, String pattern, JSONArray hits) {
+        if (lines == null) return;
+        java.util.regex.Pattern rx = null;
+        try {
+            rx = java.util.regex.Pattern.compile(pattern, java.util.regex.Pattern.CASE_INSENSITIVE);
+        } catch (Exception ignored) {
+            // 不是合法正则就按普通文字找。
+        }
+        for (int i = 0; i < lines.size() && hits.length() < MAX_HITS; i++) {
+            String line = lines.get(i);
+            boolean match = rx != null ? rx.matcher(line).find() : line.contains(pattern);
+            if (!match) continue;
+            try {
+                hits.put(new JSONObject().put("file", rel).put("line", i + 1).put("text", line));
+            } catch (Exception ignored) {
+                // 单条拼不进 JSON 就跳过，不影响别的命中。
+            }
+        }
+    }
+
+    private static List<String> readLinesApp(File file) {
+        List<String> lines = new ArrayList<>();
+        try (BufferedReader reader = new BufferedReader(
+                new InputStreamReader(new FileInputStream(file), StandardCharsets.UTF_8))) {
+            String line;
+            while ((line = reader.readLine()) != null) lines.add(line);
+        } catch (Exception e) {
+            return null;
+        }
+        return lines;
+    }
+
+    private static List<String> readLinesUri(Context context, Uri uri) {
+        List<String> lines = new ArrayList<>();
+        try (InputStream in = context.getContentResolver().openInputStream(uri)) {
+            if (in == null) return null;
+            BufferedReader reader = new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8));
+            String line;
+            while ((line = reader.readLine()) != null) lines.add(line);
+        } catch (Exception e) {
+            return null;
+        }
+        return lines;
+    }
+
     // ── 小工具 ─────────────────────────────────────────────────
+
 
     private static String err(String message) {
         try {

@@ -60,7 +60,8 @@ test('有 Termux 才优先走终端，没有就回落点屏幕（两条都保留
   // 指引必须分两种情形，且都保留无障碍那条路。
   assert.match(host, /if \(!armed\.termux\)/)
   assert.match(host, /do not call phone_shell/)
-  assert.match(host, /Both routes stay available/)
+  // 现在有三条路：本机文件（不依赖 Termux）、终端（有 Termux 时）、无障碍（界面）。
+  assert.match(host, /All routes stay available/)
   // 不给终端单独编"永远确认"的规则：确认档位仍是那三档。
   assert.doesNotMatch(host, /phone_shell[\s\S]{0,200}alwaysConfirm/)
 })
