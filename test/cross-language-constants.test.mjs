@@ -123,3 +123,15 @@ test('终端用真 PTY（Termux 的 Apache 模块），不是"发一条命令等
   assert.match(notices, /Apache License 2\.0/)
   assert.match(notices, /GPLv3/)
 })
+
+test('终端的能力边界必须写在设置页上', () => {
+  const activity = read('android/app/src/main/java/com/dsh/miniremote/MainActivity.java')
+  const row = activity.indexOf('miniTerminalGo')
+  assert.ok(row > 0, '设置页里没有终端那一行')
+  const around = activity.slice(Math.max(0, row - 1200), row)
+  // 三条边界，缺一条都会让人误判能力。
+  assert.match(around, /装不了新命令/, '没写"装不了新命令"')
+  assert.match(around, /App 自己的目录/, '没写只能碰 App 自己的目录')
+  assert.match(around, /工作文件夹要用下面的文件工具/, '没写工作文件夹要走文件工具')
+  assert.match(around, /碰不到别的 App 的数据/, '没写不是 root')
+})
