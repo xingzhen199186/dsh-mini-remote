@@ -88,3 +88,15 @@ test('聊天里点开的文件认得 docx/xlsx/pdf', () => {
   // 直接当文本读会得到乱码，必须走取字。
   assert.match(page, /officeText\(readFileSync\(file\)/)
 })
+
+test('PDF 三条路都要能渲染，不许再被拦下', () => {
+  const files = readFileSync(new URL('../lib/page-files.js', import.meta.url), 'utf8')
+  // 发送前预览：本地 PDF 直接交给 PDF.js（2026-11-12 真机报"这个格式手机上不能预览"）。
+  assert.match(files, /previewPdf\(f\)/)
+  assert.match(files, /renderPdfInto\(body, \{ data: buf \}/)
+  // 聊天里点开的文件、发送后的附件：都走同一个渲染器。
+  assert.match(files, /renderPdfInto\(body, \{ url: '\/mini\/file\?raw=1/)
+  assert.match(files, /renderPdfInto\(body, \{ url: attachmentUrl\(id\)/)
+  // 不许再出现“手机上不能看”的旧说法。
+  assert.doesNotMatch(files, /PDF 手机上不能直接看/)
+})
