@@ -42,11 +42,14 @@ public class TerminalActivity extends Activity implements TerminalSessionClient,
     private TerminalView terminalView;
     private TerminalSession session;
     private boolean ctrlDown;
+    /** 字号以 dp 计（这个控件的 setTextSize 用的就是 dp）。 */
+    private int textSizeDp = 18;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
+        getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
+                | WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE);
 
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
@@ -56,7 +59,12 @@ public class TerminalActivity extends Activity implements TerminalSessionClient,
 
         terminalView = new TerminalView(this, null);
         terminalView.setTerminalViewClient(this);
-        terminalView.setTextSize(12);
+        // 这个控件默认不参与焦点管理，不给它焦点就永远弹不出输入法（2026-11-12 真机）。
+        terminalView.setFocusable(true);
+        terminalView.setFocusableInTouchMode(true);
+        textSizeDp = getSharedPreferences(NativeFiles.PREFS, MODE_PRIVATE)
+                .getInt("term_font_dp", 18);
+        terminalView.setTextSize(textSizeDp);
         terminalView.setBackgroundColor(Color.parseColor("#0f1115"));
         root.addView(terminalView, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
@@ -80,17 +88,34 @@ public class TerminalActivity extends Activity implements TerminalSessionClient,
         };
         session = new TerminalSession(shell, home, new String[]{"-"}, env, 2000, this);
         terminalView.attachSession(session);
-        terminalView.requestFocus();
-        showKeyboard();
+        // 等布局完成再要焦点与键盘，早了会被系统丢掉。
+        terminalView.post(() -> {
+            terminalView.requestFocus();
+            showKeyboard();
+        });
     }
 
     private void showKeyboard() {
         try {
             InputMethodManager imm =
                     (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
-            if (imm != null) imm.showSoftInput(terminalView, InputMethodManager.SHOW_IMPLICIT);
+            if (imm == null) return;
+            imm.showSoftInput(terminalView, 0);
         } catch (Exception ignored) {
             // 键盘弹不出来也能用外接键盘，不值得为此报错。
+        }
+    }
+
+    /** 键盘被手动收起后，点一下屏幕就能再叫出来。 */
+    private void toggleKeyboard() {
+        try {
+            InputMethodManager imm =
+                    (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
+            if (imm == null) return;
+            if (imm.isActive(terminalView)) imm.hideSoftInputFromWindow(terminalView.getWindowToken(), 0);
+            else { terminalView.requestFocus(); imm.showSoftInput(terminalView, 0); }
+        } catch (Exception ignored) {
+            // 同上。
         }
     }
 
@@ -114,6 +139,21 @@ public class TerminalActivity extends Activity implements TerminalSessionClient,
                 ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
         params.setMarginStart(dp(8));
         bar.addView(title, params);
+
+        Button bigger = new Button(this);
+        bigger.setText("A+");
+        bigger.setOnClickListener(v -> changeTextSize(2));
+        bar.addView(bigger);
+
+        Button smaller = new Button(this);
+        smaller.setText("A-");
+        smaller.setOnClickListener(v -> changeTextSize(-2));
+        bar.addView(smaller);
+
+        Button keyboard = new Button(this);
+        keyboard.setText("键盘");
+        keyboard.setOnClickListener(v -> toggleKeyboard());
+        bar.addView(keyboard);
 
         Button paste = new Button(this);
         paste.setText("粘贴");
@@ -176,6 +216,16 @@ public class TerminalActivity extends Activity implements TerminalSessionClient,
         } catch (Exception err) {
             Toast.makeText(this, "粘贴失败：" + err.getMessage(), Toast.LENGTH_SHORT).show();
         }
+    }
+
+    private void changeTextSize(int delta) {
+        int next = Math.max(8, Math.min(32, textSizeDp + delta));
+        if (next == textSizeDp) return;
+        textSizeDp = next;
+        getSharedPreferences(NativeFiles.PREFS, MODE_PRIVATE)
+                .edit().putInt("term_font_dp", next).apply();
+        terminalView.setTextSize(next);
+        terminalView.requestFocus();
     }
 
     private int dp(int value) {
@@ -264,6 +314,7 @@ public class TerminalActivity extends Activity implements TerminalSessionClient,
 
     @Override
     public void onSingleTapUp(MotionEvent e) {
+        terminalView.requestFocus();
         showKeyboard();
     }
 
