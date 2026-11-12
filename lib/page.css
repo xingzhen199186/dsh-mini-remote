@@ -1731,3 +1731,5 @@
   /* 箭头等比缩：10.3 × 31/27 = 11.8。占圆的比例和 27、38 那两轮一样，不空也不挤。 */
   .to-bottom svg { width: 11.8px; height: 11.8px; }
 
+  /* PDF 在电脑浏览器里直接画（2026-11-12）；手机上不用它，见 page-ui 的说明。 */
+  .file-pdf { width: 100%; height: 70vh; border: 0; background: #fff; }

@@ -65,7 +65,8 @@ function makeZip(files) {
 }
 
 function loadParser() {
-  const factory = new Function('inflateRaw', sliceFunctions() + '\nreturn { docxToText, xmlToText }')
+  // xmlToText 已经并进 docxToText（2026-11-12 压行数），这里只导出前者。
+  const factory = new Function('inflateRaw', sliceFunctions() + '\nreturn { docxToText }')
   return factory(async (data) => new Uint8Array(inflateRawSync(Buffer.from(data))))
 }
 
