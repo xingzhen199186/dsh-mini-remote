@@ -106,19 +106,6 @@ public class TerminalActivity extends Activity implements TerminalSessionClient,
         }
     }
 
-    /** 键盘被手动收起后，点一下屏幕就能再叫出来。 */
-    private void toggleKeyboard() {
-        try {
-            InputMethodManager imm =
-                    (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
-            if (imm == null) return;
-            if (imm.isActive(terminalView)) imm.hideSoftInputFromWindow(terminalView.getWindowToken(), 0);
-            else { terminalView.requestFocus(); imm.showSoftInput(terminalView, 0); }
-        } catch (Exception ignored) {
-            // 同上。
-        }
-    }
-
     private LinearLayout buildTopBar() {
         LinearLayout bar = new LinearLayout(this);
         bar.setOrientation(LinearLayout.HORIZONTAL);
@@ -150,15 +137,6 @@ public class TerminalActivity extends Activity implements TerminalSessionClient,
         smaller.setOnClickListener(v -> changeTextSize(-2));
         bar.addView(smaller);
 
-        Button keyboard = new Button(this);
-        keyboard.setText("键盘");
-        keyboard.setOnClickListener(v -> toggleKeyboard());
-        bar.addView(keyboard);
-
-        Button paste = new Button(this);
-        paste.setText("粘贴");
-        paste.setOnClickListener(v -> pasteIntoTerminal());
-        bar.addView(paste);
         return bar;
     }
 
@@ -186,6 +164,12 @@ public class TerminalActivity extends Activity implements TerminalSessionClient,
         bar.addView(key("→", "\u001b[C"));
         bar.addView(key("Ctrl-C", "\u0003"));
         bar.addView(key("清屏", "clear\r"));
+
+        Button paste = new Button(this);
+        paste.setText("粘贴");
+        paste.setTextSize(12f);
+        paste.setOnClickListener(v -> pasteIntoTerminal());
+        bar.addView(paste);
 
         scroller.addView(bar);
         return scroller;
