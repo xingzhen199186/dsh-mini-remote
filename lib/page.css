@@ -1732,7 +1732,8 @@
   .to-bottom svg { width: 11.8px; height: 11.8px; }
 
   /* PDF：用 PDF.js 画成图片再显示，手机和电脑同一个样子（2026-11-12）。 */
-  /* 放大后要能左右滚动看，否则右侧被裁掉（2026-11-12）。 */
-  .pdf-pages { display: flex; flex-direction: column; gap: 10px; align-items: center; overflow-x: auto; }
-  .pdf-page { width: 100%; height: auto; background: #fff; }
+  /* 每页一个可横向滚动的窗口：放大后靠它左右拖，而不是靠外层（2026-11-12）。 */
+  .pdf-pages { display: flex; flex-direction: column; gap: 10px; }
+  .pdf-frame { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .pdf-page { display: block; width: 100%; height: auto; background: #fff; }
   .pdf-zoom { width: auto; max-width: none; cursor: zoom-out; }
