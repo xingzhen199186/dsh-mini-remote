@@ -105,5 +105,7 @@ test('PDF 按设备像素密度画，否则在手机上一定糊', () => {
   const files = readFileSync(new URL('../lib/page-files.js', import.meta.url), 'utf8')
   // 2026-11-12 用户反馈：第一版只按 CSS 宽度画，2~3 倍屏上看着糊。
   assert.match(files, /devicePixelRatio/)
-  assert.match(files, /Math\.min\(3, window\.devicePixelRatio/)
+  // 而且要点一下能放大重画：整页压到屏幕宽时字必然小到看不清。
+  assert.match(files, /pdf-zoom/)
+  assert.match(files, /scrollIntoView/)
 })
