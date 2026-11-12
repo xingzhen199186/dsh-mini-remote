@@ -15,15 +15,21 @@ import { readFileSync } from 'node:fs'
 // 样式 2026-11-03 拆到 lib/page.css：拼回整份，下面按选择器切 CSS 的用例照旧能用。
 const html = pageSource()
 
+// 2026-11-12 Markdown 渲染从 page-core 拆到了 page-markdown.js：
+// 取法是「page-core 里 escapeHtml 到 Markdown 那一段」+「整份 page-markdown.js」。
+const coreSrc = readFileSync(new URL('../lib/page-core.js', import.meta.url), 'utf8')
+const mdSrc = readFileSync(new URL('../lib/page-markdown.js', import.meta.url), 'utf8')
+const renderSrc = readFileSync(new URL('../lib/page-render.js', import.meta.url), 'utf8')
+const trajSrc = readFileSync(new URL('../lib/page-trajectory.js', import.meta.url), 'utf8')
 const START = 'function escapeHtml'
-const END = '// 复制。navigator.clipboard'
-const start = html.indexOf(START)
-const end = html.indexOf(END)
-assert.ok(start > 0, `在 page.html 里找不到锚点「${START}」，渲染器可能被改名了`)
-assert.ok(end > start, `在 page.html 里找不到锚点「${END}」，渲染器可能被改名了`)
+const END = 'function copyText'
+const start = coreSrc.indexOf(START)
+const end = coreSrc.indexOf(END)
+assert.ok(start > 0, `在 page-core.js 里找不到锚点「${START}」，渲染器可能被改名了`)
+assert.ok(end > start, `在 page-core.js 里找不到锚点「${END}」，Markdown 段后面那段可能又挪地方了`)
 
 // eslint-disable-next-line no-new-func
-const md = new Function(html.slice(start, end)
+const md = new Function(coreSrc.slice(start, end) + '\n' + mdSrc
   // 渲染器拼图片地址要用 artUrl，它定义在切片范围之外（页面里在立绘那一段），
   // 所以这里补一个桩。测试关心的是「名字 → /mini/art/<名字>.webp」这个形状，
   // 不关心指纹的实际取值。若哪天 artUrl 被挪进切片，重复声明也是合法的。
@@ -96,16 +102,30 @@ function minimalRunner(state) {
  * 用户报的现象是「聊天模式下自己发的指令没有复制按钮」——那是渲染时按角色分了叉，
  * 光看源码容易漏，所以这里把两种气泡都渲染出来数一数。
  */
+
+/** renderChat / renderMinimal 那一套的源码（2026-11-12 拆文件后的统一取法）。 */
+function renderChatCode() {
+  const lb = renderSrc.indexOf('function liveBlock')
+  const rr = renderSrc.indexOf('function renderChat')
+  const rb = renderSrc.indexOf('var scrolledReplyAt')
+  assert.ok(lb > 0 && rr > lb && rb > 0, '在 page-render.js 里找不到渲染相关的锚点')
+  return `${coreSrc.slice(start, end)}\n${mdSrc}\n${renderSrc.slice(rb, rr)}\n`
+    + `${renderSrc.slice(lb, renderSrc.length)}\nreturn renderChat;`
+}
+
 function renderChatWith(state) {
   const replyEl = { innerHTML: '' }
   const mainEl = { classList: { remove() {} }, scrollTop: 0, scrollHeight: 0 }
-  // 从 liveBlock 开始切：它排在 renderMinimal 和 renderChat 中间，两边都要用它。
-  const lb = html.indexOf('function liveBlock')
-  assert.ok(lb > 0, '在 page.html 里找不到 liveBlock')
+  // 2026-11-12：Markdown 与轨迹都拆成独立文件了，这里改成"按文件切"，不再切整页。
+  const lb = renderSrc.indexOf('function liveBlock')
+  const rr = renderSrc.indexOf('function renderChat')
+  const rb = renderSrc.indexOf('var scrolledReplyAt')
+  const rn = renderSrc.length   // 轨迹搬走以后，renderChat 之后就是这个文件的末尾
+  assert.ok(lb > 0 && rr > lb && rb > 0 && rn > rr, '在 page-render.js 里找不到渲染相关的锚点')
   // eslint-disable-next-line no-new-func
   const build = new Function(
     'state', 'replyEl', 'mainEl', 'timeLabel',
-    `${html.slice(start, end)}\n${html.slice(lb, html.indexOf('function render()'))}\nreturn renderChat;`,
+    renderChatCode(),
   )
   build(state, replyEl, mainEl, () => '12:00')()
   return replyEl.innerHTML
@@ -1055,10 +1075,12 @@ const we = html.indexOf(WE)
 // 这里把**真货**原样编译一份丢进鲸鱼娘测试的沙箱，不写替身——替身会跟真货慢慢分家，
 // 测试就成了自我安慰（这一条是 `tasks/lessons.md` 里「假 DOM 没有排版」的同一个道理）。
 const MD = (() => {
-  const s = html.indexOf('function escapeHtml')
-  const e = html.indexOf('function codeBlock')
+  // 2026-11-12：Markdown 拆到了 page-markdown.js，这里不再从整页里切。
+  const s = coreSrc.indexOf('function escapeHtml')
+  const e = coreSrc.indexOf('function copyText')
+  assert.ok(s > 0 && e > s, '在 page-core.js 里找不到 Markdown 相关锚点')
   // eslint-disable-next-line no-new-func
-  return new Function(`${html.slice(s, e)}\nreturn { mdInline };`)()
+  return new Function(`${coreSrc.slice(s, e)}\n${mdSrc}\nreturn { mdInline };`)()
 })()
 assert.ok(ws > 0, `在 page.html 里找不到锚点「${WS}」`)
 assert.ok(we > ws, `在 page.html 里找不到锚点「${WE}」`)
@@ -1902,7 +1924,7 @@ function scrollAfterRender(state, { scrollTop, scrollHeight, clientHeight }) {
   // eslint-disable-next-line no-new-func
   const build = new Function(
     'state', 'replyEl', 'mainEl', 'timeLabel',
-    `${html.slice(start, end)}\n${html.slice(lb, html.indexOf('function render()'))}\nreturn renderChat;`,
+    renderChatCode(),
   )
   build(state, replyEl, mainEl, () => '12:00')()
   return mainEl.scrollTop
@@ -2814,7 +2836,7 @@ function chatRunner({
   // eslint-disable-next-line no-new-func
   const build = new Function(
     'state', 'replyEl', 'mainEl', 'timeLabel',
-    `${html.slice(start, end)}\n${html.slice(lb, html.indexOf('function render()'))}\nreturn renderChat;`,
+    renderChatCode(),
   )
   return { render: build(state, replyEl, mainEl, () => '12:00'), state, mainEl, replyEl }
 }
@@ -2862,7 +2884,7 @@ function chatSequenceRunner(layout) {
   // eslint-disable-next-line no-new-func
   const build = new Function(
     'state', 'replyEl', 'mainEl', 'timeLabel',
-    `${html.slice(start, end)}\n${html.slice(lb, html.indexOf('function render()'))}\nreturn renderChat;`,
+    renderChatCode(),
   )
   const render = build(state, replyEl, mainEl, () => '12:00')
   syncLayout()
@@ -2924,9 +2946,9 @@ function sendChatRunner() {
     api: () => Promise.resolve({ ok: true }),
     setRunning(value) { state.running = value; syncLayout() },
   }
-  const lb = html.indexOf('function liveBlock')
+  // 2026-11-12：Markdown 与轨迹拆成独立文件后，渲染那一段要按文件取。
   const build = new Function(...Object.keys(sandbox),
-    `${html.slice(start, end)}\n${html.slice(lb, html.indexOf('function render()'))}`
+    renderChatCode().replace('return renderChat;', '')
     + `\n${html.slice(s2, e2)}\nfunction render() { renderChat(); }`
     + '\nreturn { send, render: renderChat };')
   const runner = build(...Object.values(sandbox))
@@ -3200,7 +3222,7 @@ function fullPinRunner({ classes, tops, mode = 'full', scrollTop = 1990, scrollH
   // eslint-disable-next-line no-new-func
   const build = new Function(
     'state', 'replyEl', 'mainEl', 'timeLabel',
-    `${html.slice(start, end)}\n${html.slice(lb, html.indexOf('function render()'))}\nreturn renderChat;`,
+    renderChatCode(),
   )
   return { render: build(state, replyEl, mainEl, () => '12:00'), state, mainEl, replyEl }
 }
@@ -3303,8 +3325,8 @@ function chatPager({
   // eslint-disable-next-line no-new-func
   const build = new Function(
     'state', 'replyEl', 'mainEl', 'timeLabel',
-    `${html.slice(start, end)}\n${html.slice(lb, html.indexOf('function render()'))}
-     return { renderChat, maybeGrowChat, onMainScroll };`,
+    renderChatCode().replace('return renderChat;', '')
+    + ' return { renderChat, maybeGrowChat, onMainScroll };',
   )
   const api = build(state, replyEl, mainEl, () => '12:00')
   // 真 DOM 里 class 是重画 innerHTML 时建出来的，替身不会自己长——渲染完补这一步。
@@ -5348,17 +5370,14 @@ function fullPager({ history, trajectory = [] } = {}) {
     mode: 'full', boundSessionId: 's1', history, queued: [], live: '', latest: null,
     trajectory, trajectoryLoading: false, historyTruncated: false,
   }
-  const RS = 'var scrolledReplyAt'
-  const RE = 'function applySnapshot'
-  const a = html.indexOf(RS)
-  const b = html.indexOf(RE)
-  assert.ok(a > 0, `在 page.html 里找不到锚点「${RS}」`)
-  assert.ok(b > a, `在 page.html 里找不到锚点「${RE}」`)
+  // 2026-11-12：render() 与快照那套随轨迹一起拆进了 page-trajectory.js，这里按文件取。
+  assert.ok(trajSrc.indexOf('function render()') > 0, '在 page-trajectory.js 里找不到 render()')
   // eslint-disable-next-line no-new-func
   const build = new Function(
     'state', 'replyEl', 'mainEl', 'timeLabel', '$', 'hintEl',
-    `${html.slice(start, end)}\n${html.slice(a, b)}
-     return { render, maybeGrowChat, state, mainEl, replyEl, hintEl };`,
+    renderChatCode().replace('return renderChat;', '')
+    + `\n${trajSrc}`
+    + '\nreturn { render, maybeGrowChat, state, mainEl, replyEl, hintEl };',
   )
   const api = build(state, replyEl, mainEl, () => '12:00', $, hintEl)
   return Object.assign(api, {
