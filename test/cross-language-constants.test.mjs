@@ -102,3 +102,24 @@ test('自研终端：走系统 sh，不依赖 Termux，并说清边界', () => {
   // 2026-11-12 用户否决了"内置系统"那条路，界面上不该再出现它的入口。
   assert.doesNotMatch(activity, /阿尔卑斯/)
 })
+
+test('终端用真 PTY（Termux 的 Apache 模块），不是"发一条命令等结果"', () => {
+  const terminal = read('android/app/src/main/java/com/dsh/miniremote/TerminalActivity.java')
+  // 真的会话对象 + 真的终端控件。
+  assert.match(terminal, /new TerminalSession\(/)
+  assert.match(terminal, /new TerminalView\(/)
+  assert.match(terminal, /attachSession\(/)
+  // 常用控制键要能发出去（手机键盘上没有 Esc/Ctrl）。
+  assert.match(terminal, /\\u001b\[A/)   // 上箭头
+  assert.match(terminal, /\\u0003/)      // Ctrl-C
+  // 预编译的本地库必须随模块带上，否则会话起不来。
+  const exists = (() => {
+    try { read('android/terminal-emulator/src/main/jniLibs/arm64-v8a/libtermux.so'); return true }
+    catch { return false }
+  })()
+  assert.ok(exists, 'libtermux.so 不在 jniLibs 里')
+  // 许可声明必须留档。
+  const notices = read('android/THIRD-PARTY-NOTICES.md')
+  assert.match(notices, /Apache License 2\.0/)
+  assert.match(notices, /GPLv3/)
+})

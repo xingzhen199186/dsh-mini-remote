@@ -68,4 +68,6 @@ dependencies {
     implementation("androidx.webkit:webkit:1.11.0")
     // 选工作文件夹要用 SAF 的 DocumentFile（系统原生选择器，商店认可的做法）。
     implementation("androidx.documentfile:documentfile:1.0.1")
+    // 真正的终端：Termux 的 Apache-2.0 模块（终端仿真 + 渲染 + PTY），来源与义务见 THIRD-PARTY-NOTICES.md。
+    implementation(project(":terminal-view"))
 }

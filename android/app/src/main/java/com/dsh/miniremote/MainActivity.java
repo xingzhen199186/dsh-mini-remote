@@ -97,15 +97,7 @@ public final class MainActivity extends Activity {
 
         addressPool = new AddressPool(credentials.addresses);
         webView = new WebView(this);
-        // 终端入口浮在网页上面：点位可拖动、会记住，免得压住网页上的按钮（2026-11-12）。
-        android.widget.FrameLayout shell = new android.widget.FrameLayout(this);
-        shell.addView(webView, new android.widget.FrameLayout.LayoutParams(
-                android.view.ViewGroup.LayoutParams.MATCH_PARENT,
-                android.view.ViewGroup.LayoutParams.MATCH_PARENT));
-        int entrySize = Math.round(44 * getResources().getDisplayMetrics().density);
-        shell.addView(buildTerminalEntry(), new android.widget.FrameLayout.LayoutParams(
-                entrySize, entrySize, android.view.Gravity.END | android.view.Gravity.CENTER_VERTICAL));
-        setContentView(shell);
+        setContentView(webView);
         // 调试版才开远程调试（chrome://inspect / adb forward），发布版不留这个口子。
         // 2026-11-06 加：页面连不上推送流时要能在电脑上看到 WebView 的控制台与网络。
         boolean debuggable = (getApplicationInfo().flags
@@ -763,79 +755,6 @@ public final class MainActivity extends Activity {
      * 只有一个开关和一句话状态。**这不是装饰**：桥关着的时候，电脑那边根本看不到
      * 这台手机，后面所有 `phone_*` 工具都不会出现——所以这个开关就是授权的意思。
      */
-    /**
-     * 主界面右边缘那个小按钮：点开全屏终端（2026-11-12）。
-     *
-     * 做成可拖动并记住位置——网页上的按钮位置会变，固定一处早晚会压住东西。
-     */
-    private android.view.View buildTerminalEntry() {
-        final android.widget.TextView entry = new android.widget.TextView(this);
-        entry.setText(">_");
-        entry.setTextSize(13f);
-        entry.setGravity(android.view.Gravity.CENTER);
-        entry.setTextColor(0xFFFFFFFF);
-        entry.setTypeface(android.graphics.Typeface.MONOSPACE);
-        android.graphics.drawable.GradientDrawable bg = new android.graphics.drawable.GradientDrawable();
-        bg.setColor(0xCC1F2430);
-        bg.setCornerRadius(999f);
-        entry.setBackground(bg);
-
-        final android.content.SharedPreferences prefs =
-                getSharedPreferences(NativeFiles.PREFS, MODE_PRIVATE);
-        final float savedY = prefs.getFloat("term_entry_y", -1f);
-        entry.post(() -> {
-            if (savedY >= 0 && entry.getParent() instanceof android.view.View) {
-                android.view.View parent = (android.view.View) entry.getParent();
-                float max = Math.max(1f, parent.getHeight() - entry.getHeight());
-                entry.setY(Math.min(savedY, max));
-            }
-        });
-
-        entry.setOnTouchListener(new android.view.View.OnTouchListener() {
-            private float downRawY;
-            private float downY;
-            private boolean moved;
-
-            @Override
-            public boolean onTouch(android.view.View view, android.view.MotionEvent event) {
-                switch (event.getActionMasked()) {
-                    case android.view.MotionEvent.ACTION_DOWN:
-                        downRawY = event.getRawY();
-                        downY = view.getY();
-                        moved = false;
-                        return true;
-                    case android.view.MotionEvent.ACTION_MOVE:
-                        float dy = event.getRawY() - downRawY;
-                        if (Math.abs(dy) > 12) moved = true;
-                        if (moved) {
-                            float target = downY + dy;
-                            float max = view.getParent() == null ? target
-                                    : ((android.view.View) view.getParent()).getHeight() - view.getHeight();
-                            view.setY(Math.max(0f, Math.min(target, Math.max(0f, max))));
-                        }
-                        return true;
-                    case android.view.MotionEvent.ACTION_UP:
-                        if (moved) {
-                            prefs.edit().putFloat("term_entry_y", view.getY()).apply();
-                        } else {
-                            view.performClick();
-                        }
-                        return true;
-                    default:
-                        return false;
-                }
-            }
-        });
-        entry.setOnClickListener(v -> {
-            try {
-                startActivity(new android.content.Intent(this, TerminalActivity.class));
-            } catch (Exception ignored) {
-                // 打不开就算了，别让主界面崩掉。
-            }
-        });
-        return entry;
-    }
-
     private static final String BRIDGE_UI_JS = "(function(){"
             + "if(window.__miniBridgeUi)return;"
             + "var host=document.querySelector('#settings .sheet-body');"
@@ -908,6 +827,14 @@ public final class MainActivity extends Activity {
 
             + "</div>"
             + "</div></div>';"
+            // 终端：与「手机桥」「屏幕操作」同一套行样式，点「打开」进全屏终端页（2026-11-12）。
+            + "var termRow=document.createElement('div');"
+            + "termRow.id='miniTerminalRow';termRow.className='row';"
+            + "termRow.innerHTML='<div style=\"flex:1;min-width:0\">"
+            + "<div class=\"label\">终端</div>"
+            + "<div class=\"hint\">在手机上执行命令，不需要安装任何东西</div>"
+            + "</div><div style=\"flex:0 0 auto\">"
+            + "<button class=\"btn\" id=\"miniTerminalGo\">打开</button></div>';"
             + "function place(){"
             + "var conn=document.getElementById('miniConnBlock');"
             + "if(!conn){setTimeout(place,500);return;}"
@@ -915,7 +842,10 @@ public final class MainActivity extends Activity {
             + "conn.insertAdjacentElement('afterend',block);"
             + "block.insertAdjacentElement('afterend',err);"
             + "err.insertAdjacentElement('afterend',a11y);"
+            + "a11y.insertAdjacentElement('afterend',termRow);"
             + "}"
+            + "var tg=document.getElementById('miniTerminalGo');"
+            + "if(tg&&!tg.__wired){tg.__wired=1;tg.addEventListener('click',function(){try{window.MiniProbe.openTerminal();}catch(e){}});}"
             + "}"
             + "place();"
             // 这一行整块去掉了（2026-11-10）：不同手机的入口不一样，常驻提示等于让人自己猜；
@@ -2380,6 +2310,18 @@ public final class MainActivity extends Activity {
             } catch (ClassNotFoundException err) {
                 return null;
             }
+        }
+
+        /** 打开全屏终端（设置页里那一行「终端」调的）。 */
+        @android.webkit.JavascriptInterface
+        public void openTerminal() {
+            runOnUiThread(() -> {
+                try {
+                    startActivity(new Intent(MainActivity.this, TerminalActivity.class));
+                } catch (Exception ignored) {
+                    // 打不开就算了，别让设置页崩掉。
+                }
+            });
         }
 
         /** 工作文件夹的状态：选了没有、叫什么。 */
