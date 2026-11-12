@@ -827,19 +827,7 @@ public final class MainActivity extends Activity {
 
             + "</div>"
             + "</div></div>';"
-            // 终端：与「手机桥」「屏幕操作」同一套行样式，点「打开」进全屏终端页（2026-11-12）。
-            + "var termRow=document.createElement('div');"
-            + "termRow.id='miniTerminalRow';termRow.className='row';"
-            + "termRow.innerHTML='<div style=\"flex:1;min-width:0\">"
-            + "<div class=\"label\">终端</div>"
-            + "<div class=\"hint\">在手机上执行命令，不需要安装任何东西</div>"
-            + "<div class=\"hint\" style=\"font-size:12px;line-height:1.5;margin-top:4px\">"
-            + "用的是手机自带的命令，<b>装不了新命令</b>（要装包只能装 Termux）。<br>"
-            + "只能读写 <b>App 自己的目录</b>；你选的工作文件夹要用下面的文件工具访问。<br>"
-            + "不是 root：<b>碰不到别的 App 的数据</b>。"
-            + "</div>"
-            + "</div><div style=\"flex:0 0 auto\">"
-            + "<button class=\"btn\" id=\"miniTerminalGo\">打开</button></div>';"
+
             + "function place(){"
             + "var conn=document.getElementById('miniConnBlock');"
             + "if(!conn){setTimeout(place,500);return;}"
@@ -847,10 +835,7 @@ public final class MainActivity extends Activity {
             + "conn.insertAdjacentElement('afterend',block);"
             + "block.insertAdjacentElement('afterend',err);"
             + "err.insertAdjacentElement('afterend',a11y);"
-            + "a11y.insertAdjacentElement('afterend',termRow);"
             + "}"
-            + "var tg=document.getElementById('miniTerminalGo');"
-            + "if(tg&&!tg.__wired){tg.__wired=1;tg.addEventListener('click',function(){try{window.MiniProbe.openTerminal();}catch(e){}});}"
             + "}"
             + "place();"
             // 这一行整块去掉了（2026-11-10）：不同手机的入口不一样，常驻提示等于让人自己猜；
@@ -2315,18 +2300,6 @@ public final class MainActivity extends Activity {
             } catch (ClassNotFoundException err) {
                 return null;
             }
-        }
-
-        /** 打开全屏终端（设置页里那一行「终端」调的）。 */
-        @android.webkit.JavascriptInterface
-        public void openTerminal() {
-            runOnUiThread(() -> {
-                try {
-                    startActivity(new Intent(MainActivity.this, TerminalActivity.class));
-                } catch (Exception ignored) {
-                    // 打不开就算了，别让设置页崩掉。
-                }
-            });
         }
 
         /** 工作文件夹的状态：选了没有、叫什么。 */

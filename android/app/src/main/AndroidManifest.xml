@@ -82,13 +82,6 @@
             android:exported="false" />
 
         <!-- 单条线路的配置页：从「连接」区块点进来，能改地址、扫码、重新配对。 -->
-        <!-- 全屏终端：用系统自带的 sh，不需要安装任何东西（2026-11-12）。 -->
-
-        <activity
-
-            android:name=".TerminalActivity"
-
-            android:exported="false" />
 
         <activity
             android:name=".LineConfigActivity"

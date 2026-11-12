@@ -81,57 +81,16 @@ test('手机文件能力走系统选择器，不碰"所有文件访问"', () => 
   assert.match(files, /work:/)
 })
 
-test('自研终端：走系统 sh，不依赖 Termux，并说清边界', () => {
+test('终端只保留后台能力，界面上不出现', () => {
+  const activity = read('android/app/src/main/java/com/dsh/miniremote/MainActivity.java')
+  // 2026-11-12 用户决定：删掉全屏终端页，只留后台 phone_sh。
+  assert.doesNotMatch(activity, /TerminalActivity/)
+  assert.doesNotMatch(activity, /miniTerminalGo/)
+  // 后台能力本身必须还在。
+  const host = read('lib/index.js')
+  assert.match(host, /name: 'phone_sh'/)
+  const poller = read('android/app/src/main/java/com/dsh/miniremote/BridgePoller.java')
+  assert.match(poller, /"phone_sh"\.equals\(tool\)/)
   const shell = read('android/app/src/main/java/com/dsh/miniremote/NativeShell.java')
-  // 必须用 ProcessBuilder 传参数，不能用 Runtime.exec 拼字符串（引号会被错误拆分）。
   assert.match(shell, /new ProcessBuilder\("\/system\/bin\/sh", "-c", command\)/)
-  assert.doesNotMatch(shell, /Runtime\.getRuntime\(\)\.exec\(/)
-  // 要有超时兜底，否则挂住的命令会一直占着。
-  assert.match(shell, /process\.waitFor/)
-  assert.match(shell, /process\.destroy\(\)/)
-  // 边界要写在代码里：本 App 身份、看不到 SAF 工作文件夹。
-  assert.match(shell, /看不到用户在系统选择器里选的那个工作文件夹/)
-  // 界面里要有三块：终端、Termux 指引、阿尔卑斯说明。
-  const activity = read('android/app/src/main/java/com/dsh/miniremote/MainActivity.java')
-  // 2026-11-12 用户要求：终端独立成页，不塞在设置里。
-  const terminal = read('android/app/src/main/java/com/dsh/miniremote/TerminalActivity.java')
-  assert.match(terminal, /class TerminalActivity/)
-  assert.match(activity, /TerminalActivity\.class/)
-  assert.doesNotMatch(activity, /miniTermOut/)
-  assert.match(activity, /allow-external-apps = true/)
-  // 2026-11-12 用户否决了"内置系统"那条路，界面上不该再出现它的入口。
-  assert.doesNotMatch(activity, /阿尔卑斯/)
-})
-
-test('终端用真 PTY（Termux 的 Apache 模块），不是"发一条命令等结果"', () => {
-  const terminal = read('android/app/src/main/java/com/dsh/miniremote/TerminalActivity.java')
-  // 真的会话对象 + 真的终端控件。
-  assert.match(terminal, /new TerminalSession\(/)
-  assert.match(terminal, /new TerminalView\(/)
-  assert.match(terminal, /attachSession\(/)
-  // 常用控制键要能发出去（手机键盘上没有 Esc/Ctrl）。
-  assert.match(terminal, /\\u001b\[A/)   // 上箭头
-  assert.match(terminal, /\\u0003/)      // Ctrl-C
-  // 预编译的本地库必须随模块带上，否则会话起不来。
-  const exists = (() => {
-    try { read('android/terminal-emulator/src/main/jniLibs/arm64-v8a/libtermux.so'); return true }
-    catch { return false }
-  })()
-  assert.ok(exists, 'libtermux.so 不在 jniLibs 里')
-  // 许可声明必须留档。
-  const notices = read('android/THIRD-PARTY-NOTICES.md')
-  assert.match(notices, /Apache License 2\.0/)
-  assert.match(notices, /GPLv3/)
-})
-
-test('终端的能力边界必须写在设置页上', () => {
-  const activity = read('android/app/src/main/java/com/dsh/miniremote/MainActivity.java')
-  const row = activity.indexOf('miniTerminalGo')
-  assert.ok(row > 0, '设置页里没有终端那一行')
-  const around = activity.slice(Math.max(0, row - 1200), row)
-  // 三条边界，缺一条都会让人误判能力。
-  assert.match(around, /装不了新命令/, '没写"装不了新命令"')
-  assert.match(around, /App 自己的目录/, '没写只能碰 App 自己的目录')
-  assert.match(around, /工作文件夹要用下面的文件工具/, '没写工作文件夹要走文件工具')
-  assert.match(around, /碰不到别的 App 的数据/, '没写不是 root')
 })
