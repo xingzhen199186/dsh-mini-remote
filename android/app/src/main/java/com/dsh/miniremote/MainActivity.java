@@ -802,18 +802,6 @@ public final class MainActivity extends Activity {
             + "<button class=\"btn\" id=\"miniA11yGo\">开无障碍</button>"
             + "<div id=\"miniIdleNote\" class=\"hint\" style=\"margin-top:6px\" hidden></div>"
             + "<div id=\"miniActionLog\" style=\"margin-top:8px\"></div>"
-            // 手机终端（Termux）：只有这一个能力需要额外授权，所以单独列一行。
-            + "<div id=\"miniTermuxRow\" style=\"margin-top:10px\">"
-            + "<div class=\"hint\">手机终端</div>"
-            + "<div id=\"miniTermuxState\" class=\"hint\" style=\"font-size:12px\"></div>"
-            + "<button class=\"btn\" id=\"miniTermuxGo\" style=\"margin-top:6px\" hidden>去授权</button>"
-            + "</div>"
-            // 工作文件夹：用系统选择器挑一次，之后 App 就能在这个文件夹里读写（商店认可的方式）。
-            + "<div id=\"miniWorkRow\" style=\"margin-top:10px\">"
-            + "<div class=\"hint\">工作文件夹</div>"
-            + "<div id=\"miniWorkState\" class=\"hint\" style=\"font-size:12px\"></div>"
-            + "<button class=\"btn\" id=\"miniWorkPick\" style=\"margin-top:6px\">选择文件夹</button>"
-            + "</div>"
             // Termux：可选增强，给下载安装指引。
             + "<div id=\"miniTermuxGuide\" style=\"margin-top:14px\">"
             + "<div class=\"hint\">想要完整 Linux（能装包）？</div>"
@@ -827,6 +815,21 @@ public final class MainActivity extends Activity {
 
             + "</div>"
             + "</div></div>';"
+            // 「手机终端」「工作文件夹」和「屏幕操作」平级：三件事各管一摊，不该藏在谁里面（2026-11-12）。
+            + "var termuxRow=document.createElement('div');"
+            + "termuxRow.id='miniTermuxRow';termuxRow.className='row';"
+            + "termuxRow.innerHTML='<div style=\"flex:1;min-width:0\">"
+            + "<div class=\"label\">手机终端</div>"
+            + "<div id=\"miniTermuxState\" class=\"hint\">正在读状态…</div>"
+            + "</div><div style=\"flex:0 0 auto\">"
+            + "<button class=\"btn\" id=\"miniTermuxGo\" hidden>去授权</button></div>';"
+            + "var workRow=document.createElement('div');"
+            + "workRow.id='miniWorkRow';workRow.className='row';"
+            + "workRow.innerHTML='<div style=\"flex:1;min-width:0\">"
+            + "<div class=\"label\">工作文件夹</div>"
+            + "<div id=\"miniWorkState\" class=\"hint\">还没有选</div>"
+            + "</div><div style=\"flex:0 0 auto\">"
+            + "<button class=\"btn\" id=\"miniWorkPick\">选择</button></div>';"
 
             + "function place(){"
             + "var conn=document.getElementById('miniConnBlock');"
@@ -835,7 +838,11 @@ public final class MainActivity extends Activity {
             + "conn.insertAdjacentElement('afterend',block);"
             + "block.insertAdjacentElement('afterend',err);"
             + "err.insertAdjacentElement('afterend',a11y);"
+            + "a11y.insertAdjacentElement('afterend',termuxRow);"
+            + "termuxRow.insertAdjacentElement('afterend',workRow);"
             + "}"
+            + "if(typeof paintTermux==='function')paintTermux();"
+            + "if(typeof paintWork==='function')paintWork();"
             + "}"
             + "place();"
             // 这一行整块去掉了（2026-11-10）：不同手机的入口不一样，常驻提示等于让人自己猜；
