@@ -820,7 +820,7 @@ public final class MainActivity extends Activity {
             + "<div class=\"label\">手机终端</div>"
             + "<div id=\"miniTermuxState\" class=\"hint\">正在读状态…</div>"
             + "<div class=\"hint\" style=\"font-size:12px;margin-top:4px\">"
-            + "要装：F-Droid 或 GitHub Releases（应用商店那个已停更）；装好后回来点右边按钮授权。"
+            + "通过 F-Droid 或 GitHub Releases 安装 Termux，装好后回来点右边按钮授权。"
             + "</div>"
             + "</div><div style=\"flex:0 0 auto\">"
             + "<button class=\"btn\" id=\"miniTermuxGo\" hidden>去授权</button></div>';"
