@@ -13,11 +13,12 @@ import { inflateRawSync } from 'node:zlib'
  * 这里用真的（最小的）zip 验一遍，不是只 grep 代码。
  */
 
-const SRC = readFileSync(new URL('../lib/page-ui.js', import.meta.url), 'utf8')
+const SRC = readFileSync(new URL('../lib/page-files.js', import.meta.url), 'utf8')
 
 function sliceFunctions() {
   const start = SRC.indexOf('  async function docxToText(')
-  const end = SRC.indexOf('  function dropUpload(btn) {')
+  // 拆出 page-files.js 之后，docx 解析后面接的是附件助手，不再是 dropUpload。
+  const end = SRC.indexOf('  function openOfficeAttachment(')
   assert.ok(start > 0 && end > start, '找不到 docx 解析那一段')
   return SRC.slice(start, end)
 }
