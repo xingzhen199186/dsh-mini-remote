@@ -624,13 +624,17 @@ public final class MainActivity extends Activity {
                 + "@media (prefers-color-scheme: dark){#miniBackBtn{color:var(--fg,#eee) !important;}}"
                 /* 「屏幕操作（无障碍）」做成手机桥的从属行：缩进 + 左侧一道细线，
                  * 读起来是"桥的能力之一"，而不是另一件不相干的事（2026-11-10 李四定的版式）。 */
-                + "#miniA11yRow{margin:2px 0 0 12px !important;align-items:flex-start !important;gap:12px !important;}"
+                // 2026-11-12：这一块现在管三件事（无障碍、手机终端、工作文件夹），
+                // 与「手机桥」平级，不再是桥的从属行，所以去掉那道缩进。
+                + "#miniA11yRow{margin:2px 0 0 0 !important;align-items:flex-start !important;gap:12px !important;}"
                 + "#miniA11yHead{display:flex !important;align-items:center !important;gap:8px !important;"
                 + "font-size:13px !important;font-weight:500 !important;cursor:pointer !important;"
                 + "user-select:none !important;}"
-                + "#miniA11yState{margin-left:auto !important;font-size:12px !important;"
+                + "#miniA11yState{margin-left:auto !important;margin-right:8px !important;font-size:12px !important;"
                 + "font-weight:400 !important;color:var(--muted,#8a8a8a) !important;white-space:nowrap !important;}"
-                + "#miniA11yChev{color:var(--muted,#8b93a1) !important;font-size:14px !important;}"
+                // 箭头单独占一格固定宽度并居中：之前它紧跟在状态文字后面，字数一变位置就漂（2026-11-12 用户反馈）。
+                + "#miniA11yChev{flex:0 0 18px !important;width:18px !important;text-align:center !important;"
+                + "line-height:1 !important;color:var(--muted,#8b93a1) !important;font-size:14px !important;}"
                 + "#miniA11yBody{margin-top:6px !important;}"
                 + "#miniA11yPath{margin-top:4px !important;}"
                 + "#miniA11yBody .btn{margin-top:8px !important;}"
@@ -817,14 +821,14 @@ public final class MainActivity extends Activity {
             + "</div></div>';"
             // 「手机终端」「工作文件夹」和「屏幕操作」平级：三件事各管一摊，不该藏在谁里面（2026-11-12）。
             + "var termuxRow=document.createElement('div');"
-            + "termuxRow.id='miniTermuxRow';termuxRow.className='row';"
+            + "termuxRow.id='miniTermuxRow';termuxRow.className='row';termuxRow.style.marginTop='10px';"
             + "termuxRow.innerHTML='<div style=\"flex:1;min-width:0\">"
             + "<div class=\"label\">手机终端</div>"
             + "<div id=\"miniTermuxState\" class=\"hint\">正在读状态…</div>"
             + "</div><div style=\"flex:0 0 auto\">"
             + "<button class=\"btn\" id=\"miniTermuxGo\" hidden>去授权</button></div>';"
             + "var workRow=document.createElement('div');"
-            + "workRow.id='miniWorkRow';workRow.className='row';"
+            + "workRow.id='miniWorkRow';workRow.className='row';workRow.style.marginTop='10px';"
             + "workRow.innerHTML='<div style=\"flex:1;min-width:0\">"
             + "<div class=\"label\">工作文件夹</div>"
             + "<div id=\"miniWorkState\" class=\"hint\">还没有选</div>"
@@ -838,8 +842,8 @@ public final class MainActivity extends Activity {
             + "conn.insertAdjacentElement('afterend',block);"
             + "block.insertAdjacentElement('afterend',err);"
             + "err.insertAdjacentElement('afterend',a11y);"
-            + "a11y.insertAdjacentElement('afterend',termuxRow);"
-            + "termuxRow.insertAdjacentElement('afterend',workRow);"
+            + "var a11yBody=document.getElementById('miniA11yBody');"
+            + "if(a11yBody){a11yBody.appendChild(termuxRow);a11yBody.appendChild(workRow);}"
             + "}"
             + "if(typeof paintTermux==='function')paintTermux();"
             + "if(typeof paintWork==='function')paintWork();"

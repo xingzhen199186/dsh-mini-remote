@@ -129,6 +129,9 @@ test('「手机终端」「工作文件夹」与「屏幕操作」平级', () =>
   // 三件事各管一摊，谁也不该藏在谁的展开体里（2026-11-12 用户要求）。
   assert.match(activity, /termuxRow\.className='row'/)
   assert.match(activity, /workRow\.className='row'/)
-  assert.match(activity, /a11y\.insertAdjacentElement\('afterend',termuxRow\)/)
-  assert.match(activity, /termuxRow\.insertAdjacentElement\('afterend',workRow\)/)
+  // 三块一起收起：两行放进「屏幕操作」的展开体里，默认收起。
+  assert.match(activity, /a11yBody\.appendChild\(termuxRow\)/)
+  assert.match(activity, /a11yBody\.appendChild\(workRow\)/)
+  // 箭头固定格宽并居中，不跟着状态文字漂。
+  assert.match(activity, /#miniA11yChev\{flex:0 0 18px/)
 })
