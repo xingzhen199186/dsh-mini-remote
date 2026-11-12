@@ -835,14 +835,7 @@ public final class MainActivity extends Activity {
             + "</div>"
             + "<div class=\"hint\" style=\"font-size:12px\">下载：f-droid.org/packages/com.termux 或 github.com/termux/termux-app/releases</div>"
             + "</div>"
-            // 阿尔卑斯：明确说清现状，不假装已经能用。
-            + "<div id=\"miniAlpine\" style=\"margin-top:14px\">"
-            + "<div class=\"hint\">阿尔卑斯小系统（约 15MB）</div>"
-            + "<div class=\"hint\" style=\"font-size:12px;line-height:1.6\">"
-            + "想在手机上装包、又没有 Termux，可以用它。但它要带两样东西进 App：一套 Alpine、一个兼容层（PRoot），"
-            + "两者都是 GPL 许可证——我们得附源码、做声明，而且商店版不允许运行时下载可执行文件。"
-            + "所以这一层还没内置，等分发渠道和合规方案定下来再做。"
-            + "</div>"
+
             + "</div>"
             + "</div></div>';"
             + "function place(){"

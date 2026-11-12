@@ -95,5 +95,6 @@ test('自研终端：走系统 sh，不依赖 Termux，并说清边界', () => {
   const activity = read('android/app/src/main/java/com/dsh/miniremote/MainActivity.java')
   assert.match(activity, /miniTermOut/)
   assert.match(activity, /allow-external-apps = true/)
-  assert.match(activity, /阿尔卑斯小系统/)
+  // 2026-11-12 用户否决了"内置系统"那条路，界面上不该再出现它的入口。
+  assert.doesNotMatch(activity, /阿尔卑斯/)
 })
