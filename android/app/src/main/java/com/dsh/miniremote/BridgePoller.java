@@ -407,6 +407,13 @@ final class BridgePoller {
                         args == null ? "" : args.optString("new", "")));
                 return;
             }
+            if ("phone_sh".equals(tool)) {
+                // 自研终端：系统自带的 sh，不需要 Termux（2026-11-12）。
+                String cmd = args == null ? "" : args.optString("command", "");
+                int wait = args == null ? 30 : Math.max(3, Math.min(300, args.optInt("timeoutSeconds", 30)));
+                reportRaw(id, true, NativeShell.run(context, cmd, wait));
+                return;
+            }
             if ("phone_fs_glob".equals(tool)) {
                 reportRaw(id, true, NativeFiles.glob(context,
                         args == null ? "work:" : args.optString("path", "work:"),

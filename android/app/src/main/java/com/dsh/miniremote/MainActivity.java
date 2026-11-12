@@ -814,6 +814,36 @@ public final class MainActivity extends Activity {
             + "<div id=\"miniWorkState\" class=\"hint\" style=\"font-size:12px\"></div>"
             + "<button class=\"btn\" id=\"miniWorkPick\" style=\"margin-top:6px\">选择文件夹</button>"
             + "</div>"
+            // 终端（自研）：用系统自带的 sh，不需要装任何东西。
+            + "<div id=\"miniTermBox\" style=\"margin-top:14px\">"
+            + "<div class=\"hint\">终端（不需要安装任何东西）</div>"
+            + "<pre id=\"miniTermOut\" style=\"margin-top:6px;padding:8px;background:#0f1115;color:#d7e0ea;"
+            + "border-radius:8px;font-size:12px;line-height:1.45;max-height:220px;overflow:auto;white-space:pre-wrap\"></pre>"
+            + "<div style=\"display:flex;gap:6px;margin-top:6px\">"
+            + "<input id=\"miniTermIn\" class=\"btn\" style=\"flex:1;min-width:0;text-align:left\" placeholder=\"输入命令，例如 ls\">"
+            + "<button class=\"btn\" id=\"miniTermRun\">运行</button>"
+            + "</div>"
+            + "<div class=\"hint\" style=\"font-size:12px\">只能碰 App 自己的目录；你在上面选的工作文件夹要靠文件工具访问。</div>"
+            + "</div>"
+            // Termux：可选增强，给下载安装指引。
+            + "<div id=\"miniTermuxGuide\" style=\"margin-top:14px\">"
+            + "<div class=\"hint\">想要完整 Linux（能装包）？</div>"
+            + "<div class=\"hint\" style=\"font-size:12px;line-height:1.6\">"
+            + "装 Termux 之后，电脑就能用完整命令行。步骤：① 从 F-Droid 或 GitHub 装 Termux（应用商店那个已停止更新）；"
+            + "② 在 Termux 里执行 echo 'allow-external-apps = true' &gt;&gt; ~/.termux/termux.properties，然后彻底关掉再打开；"
+            + "③ 回到本页「手机终端」点「去授权」。"
+            + "</div>"
+            + "<div class=\"hint\" style=\"font-size:12px\">下载：f-droid.org/packages/com.termux 或 github.com/termux/termux-app/releases</div>"
+            + "</div>"
+            // 阿尔卑斯：明确说清现状，不假装已经能用。
+            + "<div id=\"miniAlpine\" style=\"margin-top:14px\">"
+            + "<div class=\"hint\">阿尔卑斯小系统（约 15MB）</div>"
+            + "<div class=\"hint\" style=\"font-size:12px;line-height:1.6\">"
+            + "想在手机上装包、又没有 Termux，可以用它。但它要带两样东西进 App：一套 Alpine、一个兼容层（PRoot），"
+            + "两者都是 GPL 许可证——我们得附源码、做声明，而且商店版不允许运行时下载可执行文件。"
+            + "所以这一层还没内置，等分发渠道和合规方案定下来再做。"
+            + "</div>"
+            + "</div>"
             + "</div></div>';"
             + "function place(){"
             + "var conn=document.getElementById('miniConnBlock');"
@@ -938,6 +968,31 @@ public final class MainActivity extends Activity {
             + "}catch(e){}"
             + "}"
             + "paintWork();"
+            + "var termOut=document.getElementById('miniTermOut');"
+            + "var termIn=document.getElementById('miniTermIn');"
+            + "var termRun=document.getElementById('miniTermRun');"
+            + "var termBusy=false;"
+            + "function termAppend(text){if(termOut){termOut.textContent+=text;termOut.scrollTop=termOut.scrollHeight;}}"
+            + "window.__termDone=function(raw){"
+            + "termBusy=false;if(termRun){termRun.disabled=false;termRun.textContent='运行';}"
+            + "try{var r=JSON.parse(raw||'{}');"
+            + "if(r.stdout)termAppend(r.stdout);"
+            + "if(r.error)termAppend('【错误】'+r.error+'\\n');"
+            + "else if(typeof r.exitCode==='number'&&r.exitCode!==0)termAppend('【退出码 '+r.exitCode+'】\\n');"
+            + "if(r.truncated)termAppend('【输出太长，只显示了一部分】\\n');"
+            + "}catch(e){termAppend(String(raw)+'\\n');}"
+            + "};"
+            + "if(termRun&&!termRun.__wired){termRun.__wired=1;termRun.addEventListener('click',function(){"
+            + "if(termBusy)return;"
+            + "var cmd=termIn?termIn.value:'';"
+            + "if(!cmd||!cmd.trim())return;"
+            + "termAppend('$ '+cmd+'\\n');"
+            + "if(termIn)termIn.value='';"
+            + "termBusy=true;termRun.disabled=true;termRun.textContent='运行中';"
+            + "try{window.MiniProbe.runShell(cmd,60);}catch(e){termBusy=false;termRun.disabled=false;termRun.textContent='运行';}"
+            + "});}"
+            + "if(termIn&&!termIn.__wired){termIn.__wired=1;termIn.addEventListener('keydown',function(e){"
+            + "if(e.key==='Enter'&&termRun)termRun.click();});}"
             // 三档切换：点一下存一次，文案跟着变；**从下一轮任务生效**（跑到一半不换规则）。
             + "function paintConfirm(){"
             + "var hint=document.getElementById('miniConfirmHint');"
@@ -2286,6 +2341,27 @@ public final class MainActivity extends Activity {
             } catch (ClassNotFoundException err) {
                 return null;
             }
+        }
+
+        /**
+         * 用系统自带的 sh 执行一条命令（自研终端，不需要 Termux）。
+         * 异步：结果通过 window.__termDone(json) 回给页面，别把 WebView 的 JS 线程堵住。
+         */
+        @android.webkit.JavascriptInterface
+        public void runShell(String command, int timeoutSeconds) {
+            new Thread(() -> {
+                String result = NativeShell.run(MainActivity.this, command, timeoutSeconds);
+                final String quoted = JSONObject.quote(result);
+                runOnUiThread(() -> {
+                    try {
+                        if (webView != null) {
+                            webView.evaluateJavascript("window.__termDone && window.__termDone(" + quoted + ")", null);
+                        }
+                    } catch (Exception ignored) {
+                        // 页面不在了就算了。
+                    }
+                });
+            }, "mini-shell").start();
         }
 
         /** 工作文件夹的状态：选了没有、叫什么。 */

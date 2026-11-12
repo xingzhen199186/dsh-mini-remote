@@ -80,3 +80,20 @@ test('手机文件能力走系统选择器，不碰"所有文件访问"', () => 
   assert.match(files, /app:/)
   assert.match(files, /work:/)
 })
+
+test('自研终端：走系统 sh，不依赖 Termux，并说清边界', () => {
+  const shell = read('android/app/src/main/java/com/dsh/miniremote/NativeShell.java')
+  // 必须用 ProcessBuilder 传参数，不能用 Runtime.exec 拼字符串（引号会被错误拆分）。
+  assert.match(shell, /new ProcessBuilder\("\/system\/bin\/sh", "-c", command\)/)
+  assert.doesNotMatch(shell, /Runtime\.getRuntime\(\)\.exec\(/)
+  // 要有超时兜底，否则挂住的命令会一直占着。
+  assert.match(shell, /process\.waitFor/)
+  assert.match(shell, /process\.destroy\(\)/)
+  // 边界要写在代码里：本 App 身份、看不到 SAF 工作文件夹。
+  assert.match(shell, /看不到用户在系统选择器里选的那个工作文件夹/)
+  // 界面里要有三块：终端、Termux 指引、阿尔卑斯说明。
+  const activity = read('android/app/src/main/java/com/dsh/miniremote/MainActivity.java')
+  assert.match(activity, /miniTermOut/)
+  assert.match(activity, /allow-external-apps = true/)
+  assert.match(activity, /阿尔卑斯小系统/)
+})
