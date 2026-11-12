@@ -97,7 +97,15 @@ public final class MainActivity extends Activity {
 
         addressPool = new AddressPool(credentials.addresses);
         webView = new WebView(this);
-        setContentView(webView);
+        // 终端入口浮在网页上面：点位可拖动、会记住，免得压住网页上的按钮（2026-11-12）。
+        android.widget.FrameLayout shell = new android.widget.FrameLayout(this);
+        shell.addView(webView, new android.widget.FrameLayout.LayoutParams(
+                android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                android.view.ViewGroup.LayoutParams.MATCH_PARENT));
+        int entrySize = Math.round(44 * getResources().getDisplayMetrics().density);
+        shell.addView(buildTerminalEntry(), new android.widget.FrameLayout.LayoutParams(
+                entrySize, entrySize, android.view.Gravity.END | android.view.Gravity.CENTER_VERTICAL));
+        setContentView(shell);
         // 调试版才开远程调试（chrome://inspect / adb forward），发布版不留这个口子。
         // 2026-11-06 加：页面连不上推送流时要能在电脑上看到 WebView 的控制台与网络。
         boolean debuggable = (getApplicationInfo().flags
@@ -755,6 +763,79 @@ public final class MainActivity extends Activity {
      * 只有一个开关和一句话状态。**这不是装饰**：桥关着的时候，电脑那边根本看不到
      * 这台手机，后面所有 `phone_*` 工具都不会出现——所以这个开关就是授权的意思。
      */
+    /**
+     * 主界面右边缘那个小按钮：点开全屏终端（2026-11-12）。
+     *
+     * 做成可拖动并记住位置——网页上的按钮位置会变，固定一处早晚会压住东西。
+     */
+    private android.view.View buildTerminalEntry() {
+        final android.widget.TextView entry = new android.widget.TextView(this);
+        entry.setText(">_");
+        entry.setTextSize(13f);
+        entry.setGravity(android.view.Gravity.CENTER);
+        entry.setTextColor(0xFFFFFFFF);
+        entry.setTypeface(android.graphics.Typeface.MONOSPACE);
+        android.graphics.drawable.GradientDrawable bg = new android.graphics.drawable.GradientDrawable();
+        bg.setColor(0xCC1F2430);
+        bg.setCornerRadius(999f);
+        entry.setBackground(bg);
+
+        final android.content.SharedPreferences prefs =
+                getSharedPreferences(NativeFiles.PREFS, MODE_PRIVATE);
+        final float savedY = prefs.getFloat("term_entry_y", -1f);
+        entry.post(() -> {
+            if (savedY >= 0 && entry.getParent() instanceof android.view.View) {
+                android.view.View parent = (android.view.View) entry.getParent();
+                float max = Math.max(1f, parent.getHeight() - entry.getHeight());
+                entry.setY(Math.min(savedY, max));
+            }
+        });
+
+        entry.setOnTouchListener(new android.view.View.OnTouchListener() {
+            private float downRawY;
+            private float downY;
+            private boolean moved;
+
+            @Override
+            public boolean onTouch(android.view.View view, android.view.MotionEvent event) {
+                switch (event.getActionMasked()) {
+                    case android.view.MotionEvent.ACTION_DOWN:
+                        downRawY = event.getRawY();
+                        downY = view.getY();
+                        moved = false;
+                        return true;
+                    case android.view.MotionEvent.ACTION_MOVE:
+                        float dy = event.getRawY() - downRawY;
+                        if (Math.abs(dy) > 12) moved = true;
+                        if (moved) {
+                            float target = downY + dy;
+                            float max = view.getParent() == null ? target
+                                    : ((android.view.View) view.getParent()).getHeight() - view.getHeight();
+                            view.setY(Math.max(0f, Math.min(target, Math.max(0f, max))));
+                        }
+                        return true;
+                    case android.view.MotionEvent.ACTION_UP:
+                        if (moved) {
+                            prefs.edit().putFloat("term_entry_y", view.getY()).apply();
+                        } else {
+                            view.performClick();
+                        }
+                        return true;
+                    default:
+                        return false;
+                }
+            }
+        });
+        entry.setOnClickListener(v -> {
+            try {
+                startActivity(new android.content.Intent(this, TerminalActivity.class));
+            } catch (Exception ignored) {
+                // 打不开就算了，别让主界面崩掉。
+            }
+        });
+        return entry;
+    }
+
     private static final String BRIDGE_UI_JS = "(function(){"
             + "if(window.__miniBridgeUi)return;"
             + "var host=document.querySelector('#settings .sheet-body');"
@@ -813,17 +894,6 @@ public final class MainActivity extends Activity {
             + "<div class=\"hint\">工作文件夹</div>"
             + "<div id=\"miniWorkState\" class=\"hint\" style=\"font-size:12px\"></div>"
             + "<button class=\"btn\" id=\"miniWorkPick\" style=\"margin-top:6px\">选择文件夹</button>"
-            + "</div>"
-            // 终端（自研）：用系统自带的 sh，不需要装任何东西。
-            + "<div id=\"miniTermBox\" style=\"margin-top:14px\">"
-            + "<div class=\"hint\">终端（不需要安装任何东西）</div>"
-            + "<pre id=\"miniTermOut\" style=\"margin-top:6px;padding:8px;background:#0f1115;color:#d7e0ea;"
-            + "border-radius:8px;font-size:12px;line-height:1.45;max-height:220px;overflow:auto;white-space:pre-wrap\"></pre>"
-            + "<div style=\"display:flex;gap:6px;margin-top:6px\">"
-            + "<input id=\"miniTermIn\" class=\"btn\" style=\"flex:1;min-width:0;text-align:left\" placeholder=\"输入命令，例如 ls\">"
-            + "<button class=\"btn\" id=\"miniTermRun\">运行</button>"
-            + "</div>"
-            + "<div class=\"hint\" style=\"font-size:12px\">只能碰 App 自己的目录；你在上面选的工作文件夹要靠文件工具访问。</div>"
             + "</div>"
             // Termux：可选增强，给下载安装指引。
             + "<div id=\"miniTermuxGuide\" style=\"margin-top:14px\">"
@@ -961,31 +1031,7 @@ public final class MainActivity extends Activity {
             + "}catch(e){}"
             + "}"
             + "paintWork();"
-            + "var termOut=document.getElementById('miniTermOut');"
-            + "var termIn=document.getElementById('miniTermIn');"
-            + "var termRun=document.getElementById('miniTermRun');"
-            + "var termBusy=false;"
-            + "function termAppend(text){if(termOut){termOut.textContent+=text;termOut.scrollTop=termOut.scrollHeight;}}"
-            + "window.__termDone=function(raw){"
-            + "termBusy=false;if(termRun){termRun.disabled=false;termRun.textContent='运行';}"
-            + "try{var r=JSON.parse(raw||'{}');"
-            + "if(r.stdout)termAppend(r.stdout);"
-            + "if(r.error)termAppend('【错误】'+r.error+'\\n');"
-            + "else if(typeof r.exitCode==='number'&&r.exitCode!==0)termAppend('【退出码 '+r.exitCode+'】\\n');"
-            + "if(r.truncated)termAppend('【输出太长，只显示了一部分】\\n');"
-            + "}catch(e){termAppend(String(raw)+'\\n');}"
-            + "};"
-            + "if(termRun&&!termRun.__wired){termRun.__wired=1;termRun.addEventListener('click',function(){"
-            + "if(termBusy)return;"
-            + "var cmd=termIn?termIn.value:'';"
-            + "if(!cmd||!cmd.trim())return;"
-            + "termAppend('$ '+cmd+'\\n');"
-            + "if(termIn)termIn.value='';"
-            + "termBusy=true;termRun.disabled=true;termRun.textContent='运行中';"
-            + "try{window.MiniProbe.runShell(cmd,60);}catch(e){termBusy=false;termRun.disabled=false;termRun.textContent='运行';}"
-            + "});}"
-            + "if(termIn&&!termIn.__wired){termIn.__wired=1;termIn.addEventListener('keydown',function(e){"
-            + "if(e.key==='Enter'&&termRun)termRun.click();});}"
+
             // 三档切换：点一下存一次，文案跟着变；**从下一轮任务生效**（跑到一半不换规则）。
             + "function paintConfirm(){"
             + "var hint=document.getElementById('miniConfirmHint');"
@@ -2334,27 +2380,6 @@ public final class MainActivity extends Activity {
             } catch (ClassNotFoundException err) {
                 return null;
             }
-        }
-
-        /**
-         * 用系统自带的 sh 执行一条命令（自研终端，不需要 Termux）。
-         * 异步：结果通过 window.__termDone(json) 回给页面，别把 WebView 的 JS 线程堵住。
-         */
-        @android.webkit.JavascriptInterface
-        public void runShell(String command, int timeoutSeconds) {
-            new Thread(() -> {
-                String result = NativeShell.run(MainActivity.this, command, timeoutSeconds);
-                final String quoted = JSONObject.quote(result);
-                runOnUiThread(() -> {
-                    try {
-                        if (webView != null) {
-                            webView.evaluateJavascript("window.__termDone && window.__termDone(" + quoted + ")", null);
-                        }
-                    } catch (Exception ignored) {
-                        // 页面不在了就算了。
-                    }
-                });
-            }, "mini-shell").start();
         }
 
         /** 工作文件夹的状态：选了没有、叫什么。 */

@@ -93,7 +93,11 @@ test('自研终端：走系统 sh，不依赖 Termux，并说清边界', () => {
   assert.match(shell, /看不到用户在系统选择器里选的那个工作文件夹/)
   // 界面里要有三块：终端、Termux 指引、阿尔卑斯说明。
   const activity = read('android/app/src/main/java/com/dsh/miniremote/MainActivity.java')
-  assert.match(activity, /miniTermOut/)
+  // 2026-11-12 用户要求：终端独立成页，不塞在设置里。
+  const terminal = read('android/app/src/main/java/com/dsh/miniremote/TerminalActivity.java')
+  assert.match(terminal, /class TerminalActivity/)
+  assert.match(activity, /TerminalActivity\.class/)
+  assert.doesNotMatch(activity, /miniTermOut/)
   assert.match(activity, /allow-external-apps = true/)
   // 2026-11-12 用户否决了"内置系统"那条路，界面上不该再出现它的入口。
   assert.doesNotMatch(activity, /阿尔卑斯/)
