@@ -830,7 +830,7 @@ public final class MainActivity extends Activity {
             + "<div class=\"hint\">想要完整 Linux（能装包）？</div>"
             + "<div class=\"hint\" style=\"font-size:12px;line-height:1.6\">"
             + "装 Termux 之后，电脑就能用完整命令行。步骤：① 从 F-Droid 或 GitHub 装 Termux（应用商店那个已停止更新）；"
-            + "② 在 Termux 里执行 echo 'allow-external-apps = true' &gt;&gt; ~/.termux/termux.properties，然后彻底关掉再打开；"
+            + "② 在 Termux 里执行 echo &#39;allow-external-apps = true&#39; &gt;&gt; ~/.termux/termux.properties，然后彻底关掉再打开；"
             + "③ 回到本页「手机终端」点「去授权」。"
             + "</div>"
             + "<div class=\"hint\" style=\"font-size:12px\">下载：f-droid.org/packages/com.termux 或 github.com/termux/termux-app/releases</div>"
