@@ -43,7 +43,7 @@ public class TerminalActivity extends Activity implements TerminalSessionClient,
     private TerminalSession session;
     private boolean ctrlDown;
     /** 字号以 dp 计（这个控件的 setTextSize 用的就是 dp）。 */
-    private int textSizeDp = 18;
+    private int textSizeDp = 20;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -63,7 +63,7 @@ public class TerminalActivity extends Activity implements TerminalSessionClient,
         terminalView.setFocusable(true);
         terminalView.setFocusableInTouchMode(true);
         textSizeDp = getSharedPreferences(NativeFiles.PREFS, MODE_PRIVATE)
-                .getInt("term_font_dp", 18);
+                .getInt("term_font_dp", 20);
         terminalView.setTextSize(textSizeDp);
         terminalView.setBackgroundColor(Color.parseColor("#0f1115"));
         root.addView(terminalView, new LinearLayout.LayoutParams(
