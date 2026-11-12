@@ -109,3 +109,11 @@ test('PDF 按设备像素密度画，否则在手机上一定糊', () => {
   assert.match(files, /pdf-zoom/)
   assert.match(files, /scrollIntoView/)
 })
+
+test('页面脚本的缓存要跟着文件变，否则改了页面必须重启才生效', () => {
+  const page = readFileSync(new URL('../lib/page.js', import.meta.url), 'utf8')
+  // 2026-11-12 踩过：jsText/cssText 只读一次，改完页面刷新一百次还是旧的。
+  assert.match(page, /function filesStamp\(\)/)
+  assert.match(page, /if \(stamp !== cacheStamp\)/)
+  assert.match(page, /cacheStamp = stamp/)
+})
