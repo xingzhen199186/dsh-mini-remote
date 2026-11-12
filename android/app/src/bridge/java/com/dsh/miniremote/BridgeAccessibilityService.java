@@ -138,6 +138,9 @@ public final class BridgeAccessibilityService extends AccessibilityService {
 
     /** 上一次 observe 收集到的可点区域，顺序与返回给模型的序号一致。 */
     private static final java.util.List<android.graphics.Rect> lastTargets = new java.util.ArrayList<>();
+    /** 与 lastTargets 同序的节点：坐标不可信时直接让控件自己响应点击（2026-11-12 浙政钉）。 */
+    private static final java.util.List<android.view.accessibility.AccessibilityNodeInfo> lastNodes =
+            new java.util.ArrayList<>();
     /** 与 lastTargets 同序的标签，用来在界面变了之后核对"还是不是同一个控件"。 */
     private static final java.util.List<String> lastLabels = new java.util.ArrayList<>();
     private static long lastObserveAt;
@@ -496,6 +499,7 @@ public final class BridgeAccessibilityService extends AccessibilityService {
             org.json.JSONArray texts = new org.json.JSONArray();
             lastTargets.clear();
             lastLabels.clear();
+            lastNodes.clear();
             java.util.ArrayList<android.view.accessibility.AccessibilityNodeInfo> queue = new java.util.ArrayList<>();
             queue.add(root);
             int index = 0;
@@ -538,6 +542,7 @@ public final class BridgeAccessibilityService extends AccessibilityService {
                     android.graphics.Rect rect = new android.graphics.Rect();
                     node.getBoundsInScreen(rect);
                     lastTargets.add(new android.graphics.Rect(rect.left, rect.top, rect.right, rect.bottom));
+                    lastNodes.add(node);
                     lastLabels.add(label);
                     item.put("b", rect.left + "," + rect.top + "," + rect.right + "," + rect.bottom);
                     if (editable) item.put("edit", true);
@@ -663,6 +668,17 @@ public final class BridgeAccessibilityService extends AccessibilityService {
             return "{\"ok\":false,\"error\":\"没有第 " + index + " 个控件，先重新观察\"}";
         }
         android.graphics.Rect rect = lastTargets.get(index);
+        /* 坐标不可信时直接让控件自己响应（2026-11-12 真机）：
+         * 浙政钉底部标签报的 y 是 3034，而屏幕只有 2800 高——按坐标点会落到屏幕外，
+         * "点了等于没点"，界面上什么都没发生。这类页面的 bounds 不可用，但节点动作通常有效。 */
+        if (!usable(rect)) {
+            String byNode = clickNode(index);
+            if (!byNode.startsWith("错误")) {
+                try { observe(); } catch (Exception ignored) { }
+                return "{\"ok\":true,\"result\":\"" + byNode + "\"}";
+            }
+            return "{\"ok\":false,\"error\":\"" + byNode.replace("\"", "'") + "\"}";
+        }
         String result = tap(rect.centerX(), rect.centerY());
         if (!result.startsWith("错误")) {
             // 自己点的这一下会改变界面；刷新快照，让后续序号基于新画面重新算，
@@ -677,6 +693,38 @@ public final class BridgeAccessibilityService extends AccessibilityService {
             return "{\"ok\":false,\"error\":\"" + result.replace("\"", "'") + "\"}";
         }
         return "{\"ok\":true,\"result\":\"" + result + "\"}";
+    }
+
+    /** 这个矩形能不能拿来点：要在屏幕范围内，且上下左右不颠倒。 */
+    private static boolean usable(android.graphics.Rect rect) {
+        if (rect == null) return false;
+        if (rect.right <= rect.left || rect.bottom <= rect.top) return false;
+        android.util.DisplayMetrics dm = instance == null ? null : instance.getResources().getDisplayMetrics();
+        if (dm == null) return true;
+        int w = dm.widthPixels;
+        int h = dm.heightPixels;
+        int cx = rect.centerX();
+        int cy = rect.centerY();
+        return cx >= 0 && cx < w && cy >= 0 && cy < h;
+    }
+
+    /** 不走坐标，直接让第 index 个控件执行点击动作。 */
+    private static String clickNode(int index) {
+        if (index < 0 || index >= lastNodes.size()) return "错误：没有第 " + index + " 个控件";
+        android.view.accessibility.AccessibilityNodeInfo node = lastNodes.get(index);
+        if (node == null) return "错误：这个控件已经失效，重新观察一次";
+        if (node.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK)) {
+            return "已点击第 " + index + " 个控件（节点动作）";
+        }
+        // 有的控件自己不接受点击，但父容器接受——这是 App 里很常见的写法。
+        android.view.accessibility.AccessibilityNodeInfo parent = node.getParent();
+        for (int guard = 0; parent != null && guard < 4; guard++) {
+            if (parent.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK)) {
+                return "已点击第 " + index + " 个控件的上级（节点动作）";
+            }
+            parent = parent.getParent();
+        }
+        return "错误：这个控件不接受点击动作，只能按坐标点";
     }
 
     /**
