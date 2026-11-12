@@ -141,3 +141,11 @@ test('「手机终端」「工作文件夹」与「屏幕操作」平级', () =>
   // 箭头固定格宽并居中，不跟着状态文字漂。
   assert.match(activity, /#miniA11yChev\{flex:0 0 18px/)
 })
+
+test('装好 Termux 之后就不再讲怎么装', () => {
+  const activity = read('android/app/src/main/java/com/dsh/miniremote/MainActivity.java')
+  // 说明要有 id，才能按状态显示/隐藏。
+  assert.match(activity, /id=\\"miniTermuxHow\\"/)
+  // 只在"没装"时显示：装了（不管有没有授权）都收起。
+  assert.match(activity, /how\.hidden=st\.installed===true/)
+})
