@@ -18,7 +18,13 @@ const hostNames = (text) => new Set([...text.matchAll(/name: '(phone_[a-z_]+)'/g
 const phoneNames = (text) => new Set([...text.matchAll(/"(phone_[a-z_]+)"/g)].map((m) => m[1]))
 
 test('电脑与手机认识同一批手机动作', () => {
-  const onHost = hostNames(host)
+  // 只比**真的发给手机**的那些：read/write/edit/glob/grep 是在电脑这侧翻译成命令再发出的，
+  // 手机上并不需要认识它们。
+  const forwarded = new Set([
+    ...[...host.matchAll(/callPhone\('(phone_[a-z_]+)'/g)].map((m) => m[1]),
+    ...[...host.matchAll(/phoneBridge\.call\([^,]+,\s*'(phone_[a-z_]+)'/g)].map((m) => m[1]),
+  ])
+  const onHost = forwarded
   const onPhone = phoneNames(poller)
   assert.ok(onHost.size >= 10, `电脑侧动作太少：${onHost.size}`)
   assert.deepEqual(
