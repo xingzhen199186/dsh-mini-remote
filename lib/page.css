@@ -1778,3 +1778,13 @@
   .tree-size { margin-left: auto; font-size: 12px; color: var(--muted); }
   .ws-files-row { display: block; width: 100%; text-align: left; padding: 8px 10px;
     background: none; border: 0; border-bottom: 1px dashed var(--line); color: var(--muted); font-size: 13px; }
+  /* 待办条（2026-11-14）：贴着输入框上沿，一行摘要，点开看全部。 */
+  #todoBar { flex: none; border-top: 1px solid var(--line); background: var(--bg); }
+  #todoBar[hidden] { display: none; }
+  #todoSummary { display: block; width: 100%; text-align: left; padding: 7px 16px;
+    background: none; border: 0; color: var(--muted); font-size: 13px; }
+  #todoList { padding: 0 16px 8px; }
+  .todo-row { display: flex; gap: 6px; font-size: 13px; padding: 3px 0; color: var(--fg); }
+  .todo-mark { width: 1em; color: var(--muted); }
+  .todo-completed { color: var(--muted); text-decoration: line-through; }
+  .todo-in_progress { font-weight: 600; }

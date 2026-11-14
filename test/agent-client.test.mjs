@@ -12,7 +12,20 @@ function fixture() {
   writeFileSync(join(root, 'a.txt'), '第一行\n第二行\n第三行')
   writeFileSync(join(root, 'sub', 'b.txt'), '乙')
   writeFileSync(join(base, 'outside.txt'), '外面')
-  return { base, root, cleanup: () => rmSync(base, { recursive: true, force: true }) }
+  // Windows 上刚被别的进程碰过的临时目录会 EPERM 一下，隔一会儿就没了。
+  // 清理失败不该算测试失败——这跟被测的东西无关（2026-11-14 全量跑的时候偶发）。
+  const cleanup = () => {
+    for (let i = 0; i < 5; i++) {
+      try {
+        rmSync(base, { recursive: true, force: true })
+        return
+      } catch (err) {
+        if (i === 4) return
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50)
+      }
+    }
+  }
+  return { base, root, cleanup }
 }
 
 test('B 端路径只许落在授权文件夹里：相对、绝对、越界', () => {

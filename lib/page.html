@@ -130,6 +130,12 @@ __PAGE_CSS__
      盖住输入框的话，用户就看不清自己正在打什么了。 -->
 <div class="cmd-menu" id="cmdMenu" hidden></div>
 
+<!-- 待办条（2026-11-14）：常驻在输入框上方，一行摘要；点开看全部。没有待办时整条不出现。 -->
+<div id="todoBar" hidden>
+  <button id="todoSummary" type="button"></button>
+  <div id="todoList" hidden></div>
+</div>
+
 <footer>
   <!-- 统一入口。位置和尺寸一个像素都没动（还是原来回形针那个 42×42），改的只是点了之后
        干什么：原来直接开文件选择器，现在开下面那张统一操作面板（文件 + 指令都在里面）。
