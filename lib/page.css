@@ -1790,3 +1790,6 @@
   .todo-mark { width: 1em; color: var(--muted); }
   .todo-completed { color: var(--muted); text-decoration: line-through; }
   .todo-in_progress { font-weight: 600; }
+
+  /* 关掉滚动锚定（2026-11-14，理由见上） */
+  #main, #reply { overflow-anchor: none; }
