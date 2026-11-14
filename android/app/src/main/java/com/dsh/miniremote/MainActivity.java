@@ -842,6 +842,14 @@ public final class MainActivity extends Activity {
             + "var a11yBody=document.getElementById('miniA11yBody');"
             + "a11y.insertAdjacentElement('afterend',termuxRow);"
             + "termuxRow.insertAdjacentElement('afterend',workRow);"
+            + "var checkRow=document.createElement('div');"
+            + "checkRow.id='miniCheckRow';checkRow.className='row';checkRow.style.marginTop='10px';"
+            + "checkRow.innerHTML='<div style=\"flex:1;min-width:0\">"
+            + "<div class=\"label\">手机操控自检</div>"
+            + "<div id=\"miniCheckState\" class=\"hint\">正在读状态…</div>"
+            + "</div><div style=\"flex:0 0 auto\">"
+            + "<button class=\"btn\" id=\"miniCheckGo\">检查</button></div>';"
+            + "workRow.insertAdjacentElement('afterend',checkRow);"
             + "}"
             + "if(typeof paintTermux==='function')paintTermux();"
             + "if(typeof paintWork==='function')paintWork();"
@@ -955,6 +963,19 @@ public final class MainActivity extends Activity {
             + "var txt=document.getElementById('miniWorkState');"
             + "if(!pick||!txt||!window.MiniProbe.fsState)return;"
             + "try{"
+            + "function paintCheck(){"
+            + "try{var c=JSON.parse(window.MiniProbe.selfCheck()||'{}');"
+            + "var parts=[];"
+            + "parts.push(c.accessibility?'无障碍 ✓':'无障碍 ✗');"
+            + "parts.push(c.notifications?'通知 ✓':'通知 ✗');"
+            + "parts.push(c.batteryOk?'后台 ✓':'后台 ✗');"
+            + "parts.push(c.screenshot?'截图 ✓':'截图 ✗');"
+            + "var el=document.getElementById('miniCheckState');"
+            + "if(el) el.textContent=parts.join(' · ');"
+            + "}catch(e){}"
+            + "}"
+            + "try{paintCheck();}catch(e){}"
+            + "try{document.getElementById('miniCheckGo').onclick=function(){window.MiniProbe.openSelfCheck();setTimeout(paintCheck,600);};}catch(e){}"
             + "var st=JSON.parse(window.MiniProbe.fsState()||'{}');"
             + "txt.textContent=st.work?('当前：'+st.work):'还没有选。选了之后，电脑只能在这个文件夹里读写你的文件。';"
             + "if(!pick.__wired){pick.__wired=1;pick.addEventListener('click',function(){"
@@ -2330,6 +2351,18 @@ public final class MainActivity extends Activity {
             } catch (ClassNotFoundException err) {
                 return null;
             }
+        }
+
+        /** 手机操控自检的状态摘要：无障碍、通知、电池、截图各自能不能用。 */
+        @android.webkit.JavascriptInterface
+        public String selfCheck() {
+            return SelfCheck.state(MainActivity.this).toString();
+        }
+
+        /** 打开自检对话框：一页看全，三个按钮跳到系统里能改它的地方。 */
+        @android.webkit.JavascriptInterface
+        public void openSelfCheck() {
+            runOnUiThread(() -> SelfCheck.show(MainActivity.this));
         }
 
         /** 工作文件夹的状态：选了没有、叫什么。 */
