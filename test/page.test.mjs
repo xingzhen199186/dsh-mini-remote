@@ -4752,7 +4752,7 @@ function trajHarness(chat) {
   // eslint-disable-next-line no-new-func
   const build = new Function(
     'state', 'replyEl', 'escapeHtml', 'mdInline', 'mdToHtml', 'renderChat', 'renderMinimal', 'modeHint', '$',
-    'buildChat', 'mainEl', 'atBottom', 'scrollChat',
+    'buildChat', 'mainEl', 'atBottom', 'scrollChat', 'restoreScrollTop',
     `${diffSrc}\n${html.slice(a, b)}
      return { render, renderFull, toggleTrajGroup, toggleTrajEntry, state, replyEl, getEl: $ };`,
   )
@@ -4765,6 +4765,7 @@ function trajHarness(chat) {
     buildChat,
     { classList: { remove() {} } },
     () => false,
+    () => {},
     () => {},
   )
 }
