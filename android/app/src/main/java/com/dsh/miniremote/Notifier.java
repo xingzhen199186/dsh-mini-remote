@@ -38,7 +38,7 @@ public final class Notifier {
                 .setContentText("电脑端有一项操作等待你处理。")
                 .addAction(0, "批准", actionIntent(appContext, baseUrl, approvalId, ACTION_APPROVE))
                 .addAction(0, "拒绝", actionIntent(appContext, baseUrl, approvalId, ACTION_REJECT));
-        manager(appContext).notify(notificationId(approvalId), builder.build());
+        post(appContext, notificationId(approvalId), builder, approvalId);
     }
 
     /** 前台服务那条常驻通知（不可滑动清除，随服务结束消失）。 */
@@ -68,7 +68,7 @@ public final class Notifier {
         Notification.Builder builder = baseBuilder(appContext, tag == null ? "info" : tag)
                 .setContentTitle(title)
                 .setContentText(text);
-        manager(appContext).notify(notificationId(tag == null ? "info" : tag), builder.build());
+        post(appContext, notificationId(tag == null ? "info" : tag), builder, tag == null ? "info" : tag);
     }
 
     static void showResult(Context context, String approvalId, String message) {
@@ -77,7 +77,7 @@ public final class Notifier {
                 .setContentTitle("DSH 审批结果")
                 .setContentText(message)
                 .setStyle(new Notification.BigTextStyle().bigText(message));
-        manager(appContext).notify(notificationId(approvalId), builder.build());
+        post(appContext, notificationId(approvalId), builder, approvalId);
     }
 
     /**
@@ -93,7 +93,7 @@ public final class Notifier {
                 .setContentTitle("DSH 后台连接被系统挂起")
                 .setContentText("锁屏提醒可能收不到，点这里检查电池设置。")
                 .setContentIntent(contentIntent);
-        manager(appContext).notify(notificationId("background-hint"), builder.build());
+        post(appContext, notificationId("background-hint"), builder, "background-hint");
     }
 
     /** 一次任务跑完了（只在前台服务里发，也就是应用在后台或锁屏时）。 */
@@ -105,7 +105,7 @@ public final class Notifier {
                 .setContentText(text.isEmpty() ? "可以回到会话里看结果了。" : text)
                 .setStyle(new Notification.BigTextStyle()
                         .bigText(text.isEmpty() ? "可以回到会话里看结果了。" : text));
-        manager(appContext).notify(notificationId("done"), builder.build());
+        post(appContext, notificationId("done"), builder, "done");
     }
 
     /**
@@ -249,6 +249,10 @@ public final class Notifier {
                 // 到点由系统撤掉：进程被冻住也不影响它按时消失。
                 builder.setTimeoutAfter(left);
             }
+            // 确认卡里写的是"要做什么"，锁屏上不能露（2026-11-14）。
+            builder.setVisibility(Notification.VISIBILITY_PRIVATE)
+                    .setGroup("dsh:confirm")
+                    .setPublicVersion(publicCopy(appContext, "dsh:confirm"));
             mgr.notify(confirmNotificationId(card.id), builder.build());
             return true;
         } catch (Exception err) {
@@ -435,8 +439,60 @@ public final class Notifier {
                 .setContentIntent(pending)
                 .setFullScreenIntent(pending, true)
                 .setAutoCancel(true)
-                .setCategory(Notification.CATEGORY_ALARM);
+                .setCategory(Notification.CATEGORY_ALARM)
+                .setVisibility(Notification.VISIBILITY_PRIVATE);
         mgr.notify(notificationId("wake"), builder.build());
+    }
+
+    /**
+     * 通知分组（2026-11-14）：同一件事的几条提醒收成一组，不再一条一条堆满通知栏。
+     *
+     * 组的划分按 tag 的前半段：`approval:xxx`、`done`、`info:yyy` 各自成组。
+     */
+    private static String groupOf(String tag) {
+        String one = tag == null ? "" : tag.trim();
+        if (one.isEmpty()) return "dsh:all";
+        int cut = one.indexOf(':');
+        return "dsh:" + (cut > 0 ? one.substring(0, cut) : one);
+    }
+
+    /**
+     * 锁屏上露出来的那一份（2026-11-14）。
+     *
+     * **只有公共标题，没有任何正文**：锁屏通知谁站在旁边都能看见，
+     * 而正文里常常是模型回答、文件名、审批内容。要看内容请解锁。
+     */
+    private static Notification publicCopy(Context context, String group) {
+        Notification.Builder builder = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+                ? new Notification.Builder(context, CHANNEL_ID) : new Notification.Builder(context);
+        return builder.setSmallIcon(R.drawable.ic_notify)
+                .setContentTitle("DSH Everywhere")
+                .setContentText("有新进展，解锁查看")
+                .setShowWhen(false)
+                .setGroup(group)
+                .build();
+    }
+
+    /** 统一投递：私密可见性 + 锁屏副本 + 分组 + 一条分组摘要。 */
+    private static void post(Context context, int id, Notification.Builder builder, String tag) {
+        String group = groupOf(tag);
+        Notification one = builder
+                .setVisibility(Notification.VISIBILITY_PRIVATE)
+                .setGroup(group)
+                .setPublicVersion(publicCopy(context, group))
+                .build();
+        NotificationManager mgr = manager(context);
+        mgr.notify(id, one);
+        // 分组摘要：没有它，几条同组提醒在通知栏里会散着排，收不起来。
+        Notification.Builder summary = baseBuilder(context, group)
+                .setContentTitle("DSH 有 " + group.substring("dsh:".length()) + " 提醒")
+                .setContentText("点开看这一组")
+                .setGroup(group)
+                .setGroupSummary(true)
+                .setOnlyAlertOnce(true)
+                .setVisibility(Notification.VISIBILITY_PRIVATE)
+                .setPublicVersion(publicCopy(context, group));
+        mgr.notify(group.hashCode(), summary.build());
     }
 
     private static Notification.Builder baseBuilder(Context context, String approvalId) {
