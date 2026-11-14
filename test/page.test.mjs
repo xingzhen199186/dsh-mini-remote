@@ -20,6 +20,8 @@ const html = pageSource()
 const coreSrc = readFileSync(new URL('../lib/page-core.js', import.meta.url), 'utf8')
 const mdSrc = readFileSync(new URL('../lib/page-markdown.js', import.meta.url), 'utf8')
 const renderSrc = readFileSync(new URL('../lib/page-render.js', import.meta.url), 'utf8')
+// 2026-11-14：回答和气泡的渲染走 renderMasked（凭据遮挡），切片也得带上它。
+const maskSrc = readFileSync(new URL('../lib/page-mask.js', import.meta.url), 'utf8')
 const trajSrc = readFileSync(new URL('../lib/page-trajectory.js', import.meta.url), 'utf8')
 const START = 'function escapeHtml'
 const END = 'function copyText'
@@ -60,7 +62,7 @@ function renderMinimalWith(state) {
   // eslint-disable-next-line no-new-func
   const build = new Function(
     'state', 'replyEl', 'mainEl', 'escapeHtml', 'mdToHtml', 'ICON_COPY', 'timeLabel',
-    `${html.slice(rs, re)}\nreturn renderMinimal;`,
+    `${maskSrc}\n${html.slice(rs, re)}\nreturn renderMinimal;`,
   )
   // build(...) 返回的是 renderMinimal 本身，还得**调用一次**才真的渲染。
   // ICON_COPY 要从真实源码里取（见上面 md 那段）——切片是从 renderMinimal 开始的，
@@ -85,7 +87,7 @@ function minimalRunner(state) {
   // eslint-disable-next-line no-new-func
   const build = new Function(
     'state', 'replyEl', 'mainEl', 'escapeHtml', 'mdToHtml', 'ICON_COPY', 'timeLabel',
-    `${html.slice(rs, re)}\nreturn renderMinimal;`,
+    `${maskSrc}\n${html.slice(rs, re)}\nreturn renderMinimal;`,
   )
   const renderMinimal = build(state, replyEl, mainEl, md.escapeHtml, md.mdToHtml, md.ICON_COPY, () => '12:00')
   return {
@@ -109,7 +111,7 @@ function renderChatCode() {
   const rr = renderSrc.indexOf('function renderChat')
   const rb = renderSrc.indexOf('var scrolledReplyAt')
   assert.ok(lb > 0 && rr > lb && rb > 0, '在 page-render.js 里找不到渲染相关的锚点')
-  return `${coreSrc.slice(start, end)}\n${mdSrc}\n${renderSrc.slice(rb, rr)}\n`
+  return `${coreSrc.slice(start, end)}\n${maskSrc}\n${mdSrc}\n${renderSrc.slice(rb, rr)}\n`
     + `${renderSrc.slice(lb, renderSrc.length)}\nreturn renderChat;`
 }
 

@@ -35,7 +35,7 @@ import { fileURLToPath } from 'node:url'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
 
-test('手机页体量：十份合计不超过 12000 行、700 KB，且任何一份不超过 3000 行', () => {
+test('手机页体量：十一份合计不超过 12000 行、700 KB，且任何一份不超过 3000 行', () => {
   // 结构 page.html、样式 page.css、脚本五份 page-core/render/nav/ui/app.js（2026-11-05 从三份拆成五份）。
   // 守的是**七份之和**——拆开是为了好改，不是为了把数字挪到别的文件里；
   // 另外每一份单独不许超过 3000 行，防止又长回一个巨型文件。
@@ -46,7 +46,7 @@ test('手机页体量：十份合计不超过 12000 行、700 KB，且任何一�
   // 十几个请求。**守的是"别长成一个巨型文件"，不是"每一行都要审批"。**
   // 单份 3000 行那条线保留：它才是真正防"又长回一个巨型文件"的那一道。
   // 单份 3000 行那条线没动——结构问题由它兜，总量只是提醒。
-  const files = ['page.html', 'page.css', 'page-core.js', 'page-markdown.js', 'page-render.js',
+  const files = ['page.html', 'page.css', 'page-core.js', 'page-mask.js', 'page-markdown.js', 'page-render.js',
     'page-trajectory.js', 'page-nav.js', 'page-ui.js', 'page-files.js', 'page-app.js']
   let lines = 0
   let bytes = 0
