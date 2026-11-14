@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { summarizeTodos, latestTodos, todoLine } from '../lib/todo-summary.js'
+import { summarizeTodos, latestTodos, todoLine, mergeTodoState } from '../lib/todo-summary.js'
 
 /**
  * 待办条（2026-11-14）。
@@ -67,4 +67,27 @@ test('接口与页面都接上了：路由、条子、限频刷新', () => {
   assert.match(html, /id="todoBar"/)
   const nav = readFileSync(new URL('../lib/page-nav.js', import.meta.url), 'utf8')
   assert.match(nav, /loadTodos\(\)/)
+})
+
+test('跑着的时候空清单不许把条子清掉（页面抖动的根因）', () => {
+  const prev = { items: [{ text: '改设置页', status: 'in_progress' }], line: '0/1 · 正在：改设置页' }
+  const kept = mergeTodoState(prev, { items: [], line: '' }, { running: true, sessionChanged: false })
+  assert.equal(kept.items.length, 1, '跑着的时候空清单要保留上一条')
+  assert.equal(kept.changed, false, '没变化就不要重画——重画就是一次重排')
+
+  const cleared = mergeTodoState(prev, { items: [], line: '' }, { running: false, sessionChanged: false })
+  assert.equal(cleared.items.length, 0, '这一轮结束了才允许清空')
+  assert.equal(cleared.changed, true)
+})
+
+test('内容一样就不许重画', () => {
+  const items = [{ text: '甲', status: 'completed' }]
+  const same = mergeTodoState({ items, line: '1/1 · 全部完成' }, { items, line: '1/1 · 全部完成' }, { running: true, sessionChanged: false })
+  assert.equal(same.changed, false)
+})
+
+test('换会话就重来：上一轮的清单不能带到这一轮', () => {
+  const got = mergeTodoState({ items: [{ text: '旧', status: 'pending' }], line: '0/1' }, null, { running: true, sessionChanged: true })
+  assert.equal(got.items.length, 0)
+  assert.equal(got.changed, true)
 })
