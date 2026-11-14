@@ -24,6 +24,8 @@ const renderSrc = readFileSync(new URL('../lib/page-render.js', import.meta.url)
 const maskSrc = readFileSync(new URL('../lib/page-mask.js', import.meta.url), 'utf8')
 // 2026-11-14：Markdown 渲染会先抠公式（extractMath），切片也要带上它。
 const mathSrc = readFileSync(new URL('../lib/page-math.js', import.meta.url), 'utf8')
+// 2026-11-14：工具行里的改动对照（diffHtml）住在 page-diff.js，轨迹切片要带上。
+const diffSrc = readFileSync(new URL('../lib/page-diff.js', import.meta.url), 'utf8')
 const trajSrc = readFileSync(new URL('../lib/page-trajectory.js', import.meta.url), 'utf8')
 const START = 'function escapeHtml'
 const END = 'function copyText'
@@ -4742,7 +4744,7 @@ function trajHarness(chat) {
   const build = new Function(
     'state', 'replyEl', 'escapeHtml', 'mdInline', 'mdToHtml', 'renderChat', 'renderMinimal', 'modeHint', '$',
     'buildChat', 'mainEl', 'atBottom', 'scrollChat',
-    `${html.slice(a, b)}
+    `${diffSrc}\n${html.slice(a, b)}
      return { render, renderFull, toggleTrajGroup, toggleTrajEntry, state, replyEl, getEl: $ };`,
   )
   return build(
