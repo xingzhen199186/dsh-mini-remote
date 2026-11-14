@@ -53,3 +53,15 @@ test('做不到的两个动作不要画假按钮', () => {
   assert.doesNotMatch(render, /重新回答/)
   assert.doesNotMatch(render, /从这条分叉/)
 })
+
+test('"离底一屏内"也不许把人按到页尾（2026-11-14 跳动的直接原因）', () => {
+  const render = readFileSync(new URL('../lib/page-render.js', import.meta.url), 'utf8')
+  // 原来这里只有 !stick && !canPin 两个条件；现在必须带 atBottom()。
+  assert.match(render, /if \(!stick && !canPin && atBottom\(\)\) mainEl\.scrollTop = mainEl\.scrollHeight/)
+})
+
+test('记录器不许自己调自己（会抛栈溢出、整页白屏）', () => {
+  const probe = readFileSync(new URL('../lib/page-scrollprobe.js', import.meta.url), 'utf8')
+  assert.doesNotMatch(probe, /function send\(body\)\s*\{\s*send\(body\)\s*\}/)
+  assert.match(probe, /fetch\(LOG, \{/)
+})
