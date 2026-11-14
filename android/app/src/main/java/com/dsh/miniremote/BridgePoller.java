@@ -512,6 +512,17 @@ final class BridgePoller {
                 } catch (Exception err) {
                     report(id, false, "截图失败：" + err.getMessage());
                 }
+            } else if ("phone_screen_meta".equals(tool)) {
+                // 只回包名和几行可见文字，给电脑那侧判断"这能不能替你点"。
+                try {
+                    Class<?> cls = Class.forName("com.dsh.miniremote.BridgeAccessibilityService");
+                    String json = (String) cls.getDeclaredMethod("screenMeta").invoke(null);
+                    reportRaw(id, json.contains("\"ok\":true"), json);
+                } catch (ClassNotFoundException err) {
+                    report(id, false, "这个版本不支持界面识别（需要实验版）");
+                } catch (Exception err) {
+                    report(id, false, "读界面失败：" + err.getMessage());
+                }
             } else if ("phone_tap_at".equals(tool) || "phone_long_press_at".equals(tool)
                     || "phone_swipe_at".equals(tool)) {
                 // 按坐标动手（2026-11-14）：坐标是截图坐标，屏幕像素由手机这侧换算；

@@ -884,6 +884,62 @@ public final class BridgeAccessibilityService extends AccessibilityService {
         return sent ? "{\"ok\":true,\"result\":\"已滑动\"}" : "{\"ok\":false,\"error\":\"系统拒绝了这个手势\"}";
     }
 
+    /**
+     * 只看这一屏"是什么"：包名 + 可见文字（2026-11-14）。
+     *
+     * 给电脑那侧判断"这能不能替你点"用。**故意不收控件、坐标、输入框内容**——
+     * 判断敏感只需要包名和几行字，多收一分就多一分泄露面。
+     */
+    static String screenMeta() {
+        BridgeAccessibilityService service = instance;
+        if (service == null) return "{\"ok\":false,\"error\":\"无障碍还没开启\"}";
+        try {
+            android.view.accessibility.AccessibilityNodeInfo root = service.getRootInActiveWindow();
+            String pkg = root == null || root.getPackageName() == null ? "" : root.getPackageName().toString();
+            org.json.JSONArray texts = new org.json.JSONArray();
+            int[] budget = {40};
+            collectVisibleTexts(root, texts, budget, 0);
+            org.json.JSONObject result = new org.json.JSONObject();
+            result.put("ok", true);
+            result.put("pkg", pkg);
+            result.put("texts", texts);
+            result.put("locked", isKeyguardLocked());
+            return result.toString();
+        } catch (Exception err) {
+            return "{\"ok\":false,\"error\":\"读不到当前界面\"}";
+        }
+    }
+
+    private static boolean isKeyguardLocked() {
+        BridgeAccessibilityService service = instance;
+        if (service == null) return false;
+        android.app.KeyguardManager keyguard = (android.app.KeyguardManager)
+                service.getSystemService(android.content.Context.KEYGUARD_SERVICE);
+        return keyguard != null && keyguard.isKeyguardLocked();
+    }
+
+    /** 收可见文字，最多 budget[0] 条；输入框里的内容一条都不收。 */
+    private static void collectVisibleTexts(android.view.accessibility.AccessibilityNodeInfo node,
+                                           org.json.JSONArray out, int[] budget, int depth) {
+        if (node == null || budget[0] <= 0 || depth > 24) return;
+        try {
+            if (!node.isEditable()) {
+                CharSequence text = node.getText();
+                if (text == null) text = node.getContentDescription();
+                String clean = text == null ? "" : text.toString().trim();
+                if (!clean.isEmpty() && clean.length() <= 40) {
+                    out.put(clean);
+                    budget[0]--;
+                }
+            }
+            for (int i = 0; i < node.getChildCount() && budget[0] > 0; i++) {
+                collectVisibleTexts(node.getChild(i), out, budget, depth + 1);
+            }
+        } catch (Exception ignored) {
+            // 节点可能在遍历途中失效，跳过。
+        }
+    }
+
     /** 返回键。**不提供**主页与最近任务：那样会脱离授权范围（RFC 8.3）。 */
     static String back() {
         if (instance == null) {

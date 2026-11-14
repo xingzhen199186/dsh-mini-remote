@@ -54,3 +54,54 @@ test('比例不对时也不许放大到屏幕外', () => {
 test('长按时长是个明确的值，别让调用方自己编', () => {
   assert.ok(LONG_PRESS_MS >= 500 && LONG_PRESS_MS <= 1000, `长按时长 ${LONG_PRESS_MS} 不在合理区间`)
 })
+
+// ---------------------------------------------------------------------------
+// 敏感界面与「本次放行」（2026-11-14）
+// ---------------------------------------------------------------------------
+
+import { classifyScreen, allowOnceCheck, parseList } from '../lib/phone-aim.js'
+
+test('微信里聊天放行，付款码那一层拦住', () => {
+  const chat = classifyScreen({ pkg: 'com.tencent.mm', texts: ['张三', '晚上吃啥'] })
+  assert.equal(chat, null)
+  const pay = classifyScreen({ pkg: 'com.tencent.mm', texts: ['付款码', '向商家付款'] })
+  assert.equal(pay.tier, 'privacy')
+  assert.match(pay.why, /付款/)
+})
+
+test('银行 App 按包名前缀认，认不出来也算命中的前缀', () => {
+  const r = classifyScreen({ pkg: 'com.icbc.mobile', texts: ['余额'] })
+  assert.equal(r.tier, 'privacy')
+  assert.match(r.why, /隐私/)
+})
+
+test('安装、卸载这类只拦"点"，不是隐私', () => {
+  const r = classifyScreen({ pkg: 'com.android.packageinstaller', texts: ['要安装此应用吗？', '安装'] })
+  assert.equal(r.tier, 'irreversible')
+  assert.match(r.why, /不能替你点/)
+})
+
+test('清单清空时不误伤普通界面', () => {
+  const r = classifyScreen({ pkg: 'com.sina.weibo', texts: ['首页', '推荐'], privacy: [], noTap: [], privacyWords: [], noTapWords: [] })
+  assert.equal(r, null)
+})
+
+test('放行只有人说才算数，模型自己说不算', () => {
+  const denied = allowOnceCheck({ userText: '帮我把它点掉', userMessageId: 'm1', consumedId: '', requested: true })
+  assert.equal(denied.ok, false)
+  assert.match(denied.error, /让用户回一句/)
+  const ok = allowOnceCheck({ userText: '放行，点吧', userMessageId: 'm1', consumedId: '', requested: true })
+  assert.equal(ok.ok, true)
+})
+
+test('一次指令只放行一次，第二次要重新说', () => {
+  const used = allowOnceCheck({ userText: '放行', userMessageId: 'm1', consumedId: 'm1', requested: true })
+  assert.equal(used.ok, false)
+  assert.match(used.error, /已经放行过一次/)
+  const next = allowOnceCheck({ userText: '放行', userMessageId: 'm2', consumedId: 'm1', requested: true })
+  assert.equal(next.ok, true)
+})
+
+test('清单解析：按行和逗号都认，包名统一小写', () => {
+  assert.deepEqual(parseList('Com.ICBC\n\n com.cmb,com.abc'), ['com.icbc', 'com.cmb', 'com.abc'])
+})
