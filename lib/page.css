@@ -1762,3 +1762,19 @@
   .diff-same { color: var(--muted); }
   .diff-sign { display: inline-block; width: 1.2em; opacity: 0.7; }
   .diff-cut { color: var(--muted); font-family: inherit; }
+  /* 工作区文件树（2026-11-14）：整屏盖住，只读。 */
+  #fileTree { position: fixed; inset: 0; z-index: 65; display: flex; flex-direction: column;
+    background: var(--bg); }
+  #fileTree[hidden] { display: none; }
+  .tree-head { flex: none; display: flex; align-items: center; gap: 10px;
+    padding: calc(env(safe-area-inset-top) + 10px) 16px 10px; border-bottom: 1px solid var(--line); }
+  .tree-head span { flex: 1; font-weight: 600; }
+  #treeBody { flex: 1; overflow: auto; -webkit-overflow-scrolling: touch;
+    padding: 8px 12px calc(env(safe-area-inset-bottom) + 18px); }
+  .tree-now { font-size: 12px; color: var(--muted); padding: 6px 4px; word-break: break-all; }
+  .tree-row { display: flex; align-items: center; gap: 6px; width: 100%; text-align: left;
+    padding: 10px 6px; background: none; border: 0; border-bottom: 1px solid var(--line);
+    color: var(--fg); font-size: 14px; }
+  .tree-size { margin-left: auto; font-size: 12px; color: var(--muted); }
+  .ws-files-row { display: block; width: 100%; text-align: left; padding: 8px 10px;
+    background: none; border: 0; border-bottom: 1px dashed var(--line); color: var(--muted); font-size: 13px; }
