@@ -4745,7 +4745,20 @@ function trajHarness(chat) {
   // 要看到值的改动——每次返回新对象就什么都看不见了。
   const els = {}
   const $ = (id) => {
-    if (!els[id]) els[id] = { textContent: '', innerHTML: '', hidden: false, value: '' }
+    if (!els[id]) {
+      // 元素桩也要有 classList：2026-11-14 起 #work 的类名是用 classList 切的
+      // （整体赋值会抹掉吐字时藏起来的 .dim）。
+      const set = new Set()
+      els[id] = {
+        textContent: '', innerHTML: '', hidden: false, value: '', className: '',
+        classList: {
+          toggle(c, on) { if (on) set.add(c); else set.delete(c); els[id].className = [...set].join(' ') },
+          add(c) { set.add(c); els[id].className = [...set].join(' ') },
+          remove(c) { set.delete(c); els[id].className = [...set].join(' ') },
+          contains: (c) => set.has(c),
+        },
+      }
+    }
     return els[id]
   }
 
@@ -5156,7 +5169,7 @@ function wiringHarness(apiImpl) {
   let connects = 0
   // eslint-disable-next-line no-new-func
   const build = new Function(
-    'state', 'api', 'render', 'connect', 'clientId',
+    'state', 'api', 'render', 'connect', 'clientId', 'renderSoon',
     `var subscribedClientId = '';
      ${html.slice(a, b)}
      return {
@@ -5165,7 +5178,7 @@ function wiringHarness(apiImpl) {
        subscribed() { return subscribedClientId },
      };`,
   )
-  const h = build(state, api, () => {}, () => { connects += 1 }, 'c1')
+  const h = build(state, api, () => {}, () => { connects += 1 }, 'c1', () => {})
   return { state, log, h, connects: () => connects }
 }
 
@@ -5561,11 +5574,14 @@ test('完整模式：条目行用 PC 的工具显示名与摘要，思考行是�
 test('完整模式：鲸鱼娘、气泡、光流条收起来；页面上没有轨迹搜索框', () => {
   const h = trajHarness()
   h.render()
-  assert.match(String(h.getEl('work').className), /\bbare\b/,
+  // 类名用 classList 切（2026-11-14 改的：整体赋值会把 .dim 一起抹掉），
+  // 所以这里也按 classList 断言——两种都兼容，免得桩的细节绑死行为。
+  const hasBare = (el) => (el.classList ? el.classList.contains('bare') : /\bbare\b/.test(String(el.className)))
+  assert.ok(hasBare(h.getEl('work')),
     '完整模式给「正在执行」块挂 bare：立绘 / 气泡 / 光流进度条由 CSS 藏掉')
   h.state.mode = 'chat'
   h.render()
-  assert.ok(!/\bbare\b/.test(String(h.getEl('work').className)), '别的模式照旧，一个字不动')
+  assert.ok(!hasBare(h.getEl('work')), '别的模式照旧，一个字不动')
   assert.match(html, /\.work\.bare \.work-top[^}]*display:\s*none/,
     'CSS 里要真有这条：bare 下 work-top（立绘+气泡）不画')
   assert.match(html, /\.work\.bare \.work-progress[^}]*display:\s*none/,
@@ -7131,4 +7147,12 @@ test('轨迹：请求边界行、轮次竖线、子工具缩进', () => {
   assert.match(html, /\.tj-req::after[^}]*border-radius:\s*50%/, '请求边界是圆点')
   assert.match(html, /\.traj-item\.tj-in-turn::before[^}]*width:\s*2px/, '轮次竖线是 2px')
   assert.match(html, /\.traj-item\.tj-sub[^}]*padding-left:\s*46px/, '子工具缩进 20+26')
+})
+
+test('重画不许抹掉吐字时藏起来的那一行（.dim）', () => {
+  // 2026-11-14 用户报的抖动：render() 里整体写 className，把 paintWork 加的 .dim 抹掉，
+  // 于是每次重画（每秒 4~8 次）底部那行就闪出来一下，页面高度跟着变。
+  const traj = readFileSync(new URL('../lib/page-trajectory.js', import.meta.url), 'utf8')
+  assert.doesNotMatch(traj, /\$\('work'\)\.className\s*=/, '不许整体赋值 className')
+  assert.match(traj, /\.classList\.toggle\('bare'/, '应该只切 bare 这一个类')
 })
