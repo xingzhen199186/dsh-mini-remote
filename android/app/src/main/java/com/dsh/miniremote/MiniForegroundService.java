@@ -99,11 +99,28 @@ public final class MiniForegroundService extends Service {
         baseUrl = intent == null ? null : intent.getStringExtra(EXTRA_BASE_URL);
         credential = intent == null ? null : intent.getStringExtra(EXTRA_CREDENTIAL);
         if (baseUrl == null || credential == null) {
+            // **必须先把前台通知挂上再退出**（2026-11-14 真机抓到的崩溃）：
+            // 这条服务是被 startForegroundService() 叫起来的，系统给五秒宽限；
+            // 这里不挂通知就 stopSelf，系统会判"没按时转前台"，直接把整个进程杀掉
+            // （logcat 里的 ForegroundServiceDidNotStartInTimeException）。
+            // 服务被系统重启时这种空 Intent 很常见，所以这条不是理论上的分支。
+            try {
+                startForeground(NOTIFICATION_ID,
+                        Notifier.serviceNotification(this, "正在整理连接", "等一下就好"));
+            } catch (RuntimeException ignored) {
+                // 挂不上也只能退出，别硬撑。
+            }
             stopSelf();
             return START_NOT_STICKY;
         }
         try {
-            startForeground(NOTIFICATION_ID, Notifier.serviceNotification(this, "正在盯着任务", "锁屏后也能收到审批提醒"));
+            // 先挂最小那条（不加载图标位图），抢在系统那五秒之内把"已在前台"这件事做掉，
+            // 起来之后再换成正式那条（2026-11-14）。
+            Notifier.createServiceChannel(this);
+            startForeground(NOTIFICATION_ID, Notifier.minimalServiceNotification(this));
+            ((android.app.NotificationManager) getSystemService(android.content.Context.NOTIFICATION_SERVICE))
+                    .notify(NOTIFICATION_ID,
+                            Notifier.serviceNotification(this, "正在盯着任务", "锁屏后也能收到审批提醒"));
         } catch (RuntimeException e) {
             // 挂不上前台通知就别硬撑，否则系统五秒后会判我们超时并把进程杀掉。
             stopSelf();

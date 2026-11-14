@@ -62,6 +62,28 @@ public final class Notifier {
                 .build();
     }
 
+    /**
+     * 前台服务**起步用的最小通知**（2026-11-14）。
+     *
+     * 系统只给五秒把服务转到前台；原来那条要解一张应用图标位图，冷启动时这点活儿
+     * 也可能撞上窗口（logcat 里 ForegroundServiceDidNotStartInTimeException 反复出现）。
+     * 这里先挂一条**什么都不做**的通知，起来之后再换成正式那条。
+     */
+    static Notification minimalServiceNotification(Context context) {
+        Notification.Builder builder = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+                ? new Notification.Builder(context, SERVICE_CHANNEL_ID) : new Notification.Builder(context);
+        return builder.setSmallIcon(R.drawable.ic_notify)
+                .setContentTitle("DSH 正在连电脑")
+                .setContentText("马上就好")
+                .setOngoing(true)
+                .setOnlyAlertOnce(true)
+                .setShowWhen(false)
+                .setCategory(Notification.CATEGORY_SERVICE)
+                .setVisibility(Notification.VISIBILITY_PRIVATE)
+                .setPriority(Notification.PRIORITY_MIN)
+                .build();
+    }
+
     /** 一条普通提醒（没带操作按钮）：比如「有一道题等你回答」。 */
     static void showInfo(Context context, String title, String text, String tag) {
         Context appContext = context.getApplicationContext();
@@ -572,7 +594,7 @@ public final class Notifier {
         return (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
     }
 
-    private static void createServiceChannel(Context context) {
+    static void createServiceChannel(Context context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
             return;
         }
