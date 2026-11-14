@@ -1737,3 +1737,14 @@
   .pdf-frame { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
   .pdf-page { display: block; width: 100%; height: auto; background: #fff; }
   .pdf-zoom { width: auto; max-width: none; cursor: zoom-out; }
+
+  /* 会话搜索（2026-11-14）：框常驻在列表最上面，结果一条一行。 */
+  .nav-search { width: 100%; box-sizing: border-box; margin: 0 0 8px; padding: 9px 12px; font-size: 14px;
+    color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 999px; }
+  .nav-search::placeholder { color: var(--muted); }
+  .search-list { display: flex; flex-direction: column; }
+  .search-row { display: flex; flex-direction: column; gap: 2px; width: 100%; text-align: left;
+    padding: 10px 12px; background: none; border: 0; border-bottom: 1px solid var(--line); color: var(--fg); }
+  .search-row .s-title { font-size: 14px; }
+  .search-ws { font-size: 12px; color: var(--muted); }
+  .search-row.dim { color: var(--muted); font-size: 13px; }
