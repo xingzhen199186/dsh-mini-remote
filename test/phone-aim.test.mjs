@@ -105,3 +105,16 @@ test('一次指令只放行一次，第二次要重新说', () => {
 test('清单解析：按行和逗号都认，包名统一小写', () => {
   assert.deepEqual(parseList('Com.ICBC\n\n com.cmb,com.abc'), ['com.icbc', 'com.cmb', 'com.abc'])
 })
+
+test('计算器的退格键叫「删除」，不许因此拦住点数字', () => {
+  // 2026-11-14 真机：点计算器上的数字被拒，理由是屏幕上有「删除」。
+  const r = classifyScreen({ pkg: 'com.hihonor.calculator', texts: ['C', '删除', '7', '8', '9', '+', '='] })
+  assert.equal(r, null, '计算器的退格键不该算不可逆操作')
+})
+
+test('真不可逆的说法仍然拦住', () => {
+  for (const word of ['卸载', '格式化', '恢复出厂', '清除数据', '退出登录', '安装应用', '无线调试']) {
+    const r = classifyScreen({ pkg: 'com.example.any', texts: [word] })
+    assert.ok(r && r.tier === 'irreversible', `「${word}」应该被拦住`)
+  }
+})
