@@ -119,7 +119,7 @@ public final class Notifier {
         Notification.Builder builder = baseBuilder(appContext, "confirm-hint")
                 .setContentTitle("电脑想操作手机，需要你确认")
                 .setContentText("解锁后打开这个提醒即可看到。");
-        manager(appContext).notify(notificationId("confirm-hint"), builder.build());
+        post(appContext, notificationId("confirm-hint"), builder, "confirm-hint");
     }
 
     /** 确认通知的渠道：要能横幅弹出，否则用户根本不知道有东西在等他。 */
@@ -346,7 +346,7 @@ public final class Notifier {
                 .setContentTitle(heading.isEmpty() ? "来自电脑的消息" : heading)
                 .setContentText(text.isEmpty() ? heading : text)
                 .setStyle(new Notification.BigTextStyle().bigText(text.isEmpty() ? heading : text));
-        manager(appContext).notify(notificationId("done"), builder.build());
+        post(appContext, notificationId("done"), builder, "done");
     }
 
     static final String ACTION_CLIPBOARD = "com.dsh.miniremote.action.CLIPBOARD";
@@ -377,7 +377,7 @@ public final class Notifier {
                 .setContentText(text)
                 .setStyle(new Notification.BigTextStyle().bigText(text))
                 .addAction(new Notification.Action.Builder(null, "核对全文后复制", pending).build());
-        manager(appContext).notify(notificationId("clip:" + callId), builder.build());
+        post(appContext, notificationId("clip:" + callId), builder, "clip");
     }
 
     /** 点过就撤掉这条确认，免得同一张通知再被点第二次。 */
