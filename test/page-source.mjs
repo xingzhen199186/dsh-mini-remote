@@ -11,7 +11,7 @@ import { readFileSync } from 'node:fs'
 const read = (f) => readFileSync(new URL(`../lib/${f}`, import.meta.url), 'utf8')
 
 // 拼接顺序是硬约束：这五份本来是同一个 IIFE，顺序错了就是这个页面坏了。
-const JS_PARTS = ['page-core.js', 'page-mask.js', 'page-search.js', 'page-markdown.js', 'page-render.js', 'page-trajectory.js', 'page-nav.js', 'page-ui.js', 'page-files.js', 'page-app.js']
+const JS_PARTS = ['page-core.js', 'page-mask.js', 'page-search.js', 'page-math.js', 'page-markdown.js', 'page-render.js', 'page-trajectory.js', 'page-nav.js', 'page-ui.js', 'page-files.js', 'page-app.js']
 
 /** 只要脚本那五份拼好的整段 JS（不含 HTML/CSS），给结构检查用。 */
 export function pageScript() {

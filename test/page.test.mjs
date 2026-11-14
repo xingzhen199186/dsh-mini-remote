@@ -22,6 +22,8 @@ const mdSrc = readFileSync(new URL('../lib/page-markdown.js', import.meta.url), 
 const renderSrc = readFileSync(new URL('../lib/page-render.js', import.meta.url), 'utf8')
 // 2026-11-14：回答和气泡的渲染走 renderMasked（凭据遮挡），切片也得带上它。
 const maskSrc = readFileSync(new URL('../lib/page-mask.js', import.meta.url), 'utf8')
+// 2026-11-14：Markdown 渲染会先抠公式（extractMath），切片也要带上它。
+const mathSrc = readFileSync(new URL('../lib/page-math.js', import.meta.url), 'utf8')
 const trajSrc = readFileSync(new URL('../lib/page-trajectory.js', import.meta.url), 'utf8')
 const START = 'function escapeHtml'
 const END = 'function copyText'
@@ -31,7 +33,7 @@ assert.ok(start > 0, `在 page-core.js 里找不到锚点「${START}」，渲染
 assert.ok(end > start, `在 page-core.js 里找不到锚点「${END}」，Markdown 段后面那段可能又挪地方了`)
 
 // eslint-disable-next-line no-new-func
-const md = new Function(coreSrc.slice(start, end) + '\n' + mdSrc
+const md = new Function(coreSrc.slice(start, end) + '\n' + mathSrc + '\n' + mdSrc
   // 渲染器拼图片地址要用 artUrl，它定义在切片范围之外（页面里在立绘那一段），
   // 所以这里补一个桩。测试关心的是「名字 → /mini/art/<名字>.webp」这个形状，
   // 不关心指纹的实际取值。若哪天 artUrl 被挪进切片，重复声明也是合法的。
@@ -111,7 +113,7 @@ function renderChatCode() {
   const rr = renderSrc.indexOf('function renderChat')
   const rb = renderSrc.indexOf('var scrolledReplyAt')
   assert.ok(lb > 0 && rr > lb && rb > 0, '在 page-render.js 里找不到渲染相关的锚点')
-  return `${coreSrc.slice(start, end)}\n${maskSrc}\n${mdSrc}\n${renderSrc.slice(rb, rr)}\n`
+  return `${coreSrc.slice(start, end)}\n${maskSrc}\n${mathSrc}\n${mdSrc}\n${renderSrc.slice(rb, rr)}\n`
     + `${renderSrc.slice(lb, renderSrc.length)}\nreturn renderChat;`
 }
 
@@ -1082,7 +1084,7 @@ const MD = (() => {
   const e = coreSrc.indexOf('function copyText')
   assert.ok(s > 0 && e > s, '在 page-core.js 里找不到 Markdown 相关锚点')
   // eslint-disable-next-line no-new-func
-  return new Function(`${coreSrc.slice(s, e)}\n${mdSrc}\nreturn { mdInline };`)()
+  return new Function(`${coreSrc.slice(s, e)}\n${mathSrc}\n${mdSrc}\nreturn { mdInline };`)()
 })()
 assert.ok(ws > 0, `在 page.html 里找不到锚点「${WS}」`)
 assert.ok(we > ws, `在 page.html 里找不到锚点「${WE}」`)
