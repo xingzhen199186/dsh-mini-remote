@@ -92,3 +92,24 @@ test('接线不许漏：三个动手入口都过闸，人发新指令会放锁',
   // 人发新指令 = 上一个任务结束。
   assert.match(src, /source\?\.kind === 'user'\) phoneLock\.onHumanMessage\(\)/)
 })
+
+test('会话 id 要从 agent.session 里认（认错锁就等于没有）', async () => {
+  const { sessionKeyOf } = await import('../lib/phone-lock.js')
+  // 宿主真实形状：exec.agent.session.id（2026-11-14 真机抓到的）
+  assert.equal(sessionKeyOf({ agent: { session: { id: 'A' } } }), 'A')
+  assert.equal(sessionKeyOf({ session: { id: 'B' } }), 'B')
+  assert.equal(sessionKeyOf({ sessionId: 'C' }), 'C')
+  assert.equal(sessionKeyOf(null), '')
+  assert.equal(sessionKeyOf({}), '')
+})
+
+test('两个不同会话不允许同时在手机上动手', async () => {
+  const { createPhoneLock, sessionKeyOf } = await import('../lib/phone-lock.js')
+  const lock = createPhoneLock()
+  const a = { agent: { session: { id: 'A' } } }
+  const b = { agent: { session: { id: 'B' } } }
+  assert.equal(lock.acquire(sessionKeyOf(a)).ok, true, 'A 先到，拿到')
+  const deny = lock.acquire(sessionKeyOf(b))
+  assert.equal(deny.ok, false, 'B 后到，必须被挡')
+  assert.ok(deny.error && deny.error.length > 0, '要告诉用户为什么')
+})
