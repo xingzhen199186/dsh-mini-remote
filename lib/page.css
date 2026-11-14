@@ -462,6 +462,8 @@
       立绘永远站同一处；用 max-content 让以后的长词条自己撑开，min() 是窄屏退路。
       max-width 那一行是补丁（2026-09-27）：光有 max-content + min-width 只有下限，
       而气泡的 max-width 又拿这一行算 100%，两头互指，长话会把整行撑出屏幕。 */
+  /* 吐字期间只把内容藏起来，**高度留着**——抽走会让整页变高变矮（2026-11-14）。 */
+  .work.dim { visibility: hidden; }
   .work-top {
     display: flex; align-items: flex-start; gap: 6px;
     width: max-content; min-width: min(299px, 100%); max-width: 100%;

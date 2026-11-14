@@ -1334,23 +1334,32 @@ test('队列非空时那块东西不收起（停掉这轮、队列还没接上�
   assert.equal(w.els.work.hidden, true, '队列空了才收')
 })
 
-test('流式一开始吐字，鲸鱼娘就让位——别在回答底下再挂一只', () => {
-  // 用户 2026-09-22 实机提的：「当内容开始流式生成的时候，鲸鱼娘的动画就可以消失了，
-  // 现在流式生成的时候，鲸鱼娘依然会在内容的下方出现。」
+test('吐字时那块只藏内容、不抽走高度（2026-11-14 修抖动）', () => {
+  // 2026-09-22 用户要「流式开始就让位」；2026-11-14 他又报「页面一直在上下跳」——
+  // 原因正是这里：这一轮工具密集，吐字/调工具来回切，那行一会儿收一会儿放，
+  // 聊天区跟着变高变矮，滚动就在正文底部和轨迹底部之间打转。
+  // 现在的口径：**跑着就一直占着那块高度，吐字时只把内容藏起来**。
   const w = buildWhale()
   w.state.running = true
 
   w.state.live = ''
   w.paintWork()
   assert.equal(w.els.work.hidden, false, '还在跑、还没吐字——这时候鲸鱼娘该在')
+  assert.equal(w.els.work.classList.contains('dim'), false)
 
   w.state.live = '正在写的这一句'
   w.paintWork()
-  assert.equal(w.els.work.hidden, true, '字都开始往上冒了，那块就该让位')
+  assert.equal(w.els.work.hidden, false, '高度必须留着，不许抽走——抽走就是页面跳')
+  assert.equal(w.els.work.classList.contains('dim'), true, '内容要藏起来，别在回答底下再挂一只')
 
   w.state.live = ''
   w.paintWork()
-  assert.equal(w.els.work.hidden, false, '流式那段收工了（比如转去调工具），它还得回来')
+  assert.equal(w.els.work.classList.contains('dim'), false, '流式那段收工了（比如转去调工具），它得回来')
+  assert.equal(w.els.work.hidden, false)
+
+  w.state.running = false
+  w.paintWork()
+  assert.equal(w.els.work.hidden, true, '这一轮结束了才整块收掉')
 })
 
 test('指令气泡和回答之间的间距，比同一条消息内部更大', () => {
