@@ -90,7 +90,7 @@ test('接线不许漏：三个动手入口都过闸，人发新指令会放锁',
   assert.match(src, /const tapBusy = lockGate\(exec\)/)
   assert.match(src, /const lockBusy = lockGate\(exec\)/)
   // 人发新指令 = 上一个任务结束。
-  assert.match(src, /source\?\.kind === 'user'\) phoneLock\.onHumanMessage\(\)/)
+  assert.match(src, /source\?\.kind === 'user'\) phoneLock\.onHumanMessage\(Date\.now\(\), sessionId\)/)
 })
 
 test('会话 id 要从 agent.session 里认（认错锁就等于没有）', async () => {
@@ -112,4 +112,27 @@ test('两个不同会话不允许同时在手机上动手', async () => {
   const deny = lock.acquire(sessionKeyOf(b))
   assert.equal(deny.ok, false, 'B 后到，必须被挡')
   assert.ok(deny.error && deny.error.length > 0, '要告诉用户为什么')
+})
+
+test('别的会话来了新指令，不许把当前这把锁放掉（真机抓到过的漏洞）', async () => {
+  const { createPhoneLock } = await import('../lib/phone-lock.js')
+  const lock = createPhoneLock()
+  assert.equal(lock.acquire('A').ok, true)
+  // B 被叫醒去做事——这条消息也算"人发的"，第一版就在这里把锁放掉了。
+  lock.onHumanMessage(Date.now(), 'B')
+  assert.equal(lock.snapshot().holder?.sessionId, 'A', '锁还应该在 A 手里')
+  const deny = lock.acquire('B')
+  assert.equal(deny.ok, false, 'B 必须被挡')
+
+  // 人在 A 里发新指令：这才算 A 的活结束了。等在后面的 B 会被顺位接手（这是排队设计的本意）。
+  lock.onHumanMessage(Date.now(), 'A')
+  assert.notEqual(lock.snapshot().holder?.sessionId, 'A', 'A 的锁要放掉')
+})
+
+test('不传会话号时行为照旧：全都放（老调用不倒退）', async () => {
+  const { createPhoneLock } = await import('../lib/phone-lock.js')
+  const lock = createPhoneLock()
+  lock.acquire('A')
+  lock.onHumanMessage()
+  assert.equal(lock.snapshot().holder, null)
 })
