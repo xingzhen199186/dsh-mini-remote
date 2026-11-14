@@ -833,8 +833,10 @@ public final class BridgeAccessibilityService extends AccessibilityService {
         if (changed != null) return "{\"ok\":false,\"error\":\"" + changed.replace("错误：", "").replace("\"", "'") + "\"}";
         android.util.DisplayMetrics metrics = service.getResources().getDisplayMetrics();
         float[] p = toScreen(metrics, x, y, shotW, shotH);
+        // tap() 成功时返回的是**一句中文**（"已点击 (x, y)"），失败才以"错误："开头。
+        // 2026-11-14 真机：原来拿它去比 JSON，于是点成功了也被当成失败报回去。
         String raw = tap(p[0], p[1]);
-        if (!raw.startsWith("{\"ok\"")) {
+        if (raw != null && raw.startsWith("错误")) {
             return "{\"ok\":false,\"error\":\"" + raw.replace("错误：", "").replace("\"", "'") + "\"}";
         }
         return "{\"ok\":true,\"result\":\"已按坐标点 (" + (int) p[0] + ", " + (int) p[1] + ")\"}";
