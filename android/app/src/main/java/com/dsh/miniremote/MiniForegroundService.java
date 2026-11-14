@@ -313,7 +313,19 @@ public final class MiniForegroundService extends Service {
                 JSONObject item = questions.optJSONObject(i);
                 String id = item == null ? null : item.optString("id", "");
                 if (id != null && !id.isEmpty() && shown.add(id)) {
-                    Notifier.showInfo(this, "DSH 有一道题等你回答", "打开应用作答。", id);
+                    // 带选项的单题：选项直接做成通知按钮（2026-11-14）。
+                    JSONArray opts = item.optJSONArray("options");
+                    String questionId = item.optString("questionId", "");
+                    if (opts != null && opts.length() > 0 && !questionId.isEmpty()) {
+                        java.util.List<String> labels = new java.util.ArrayList<>();
+                        for (int k = 0; k < opts.length(); k++) {
+                            String one = opts.optString(k, "");
+                            if (!one.isEmpty()) labels.add(one);
+                        }
+                        Notifier.showQuestion(this, baseUrl, id, questionId, labels);
+                    } else {
+                        Notifier.showInfo(this, "DSH 有一道题等你回答", "打开应用作答。", id);
+                    }
                 }
             }
         }
@@ -398,7 +410,34 @@ public final class MiniForegroundService extends Service {
         } else if ("question".equals(event)) {
             String id = idOf(raw);
             if (id != null && shown.add(id)) {
-                Notifier.showInfo(this, "DSH 有一道题等你回答", "打开应用作答。", id);
+                // 这条路上 raw 里带着完整题目，单题且有选项时同样把选项画成按钮（2026-11-14）。
+                boolean drawn = false;
+                try {
+                    org.json.JSONObject payload = new org.json.JSONObject(raw == null ? "{}" : raw);
+                    org.json.JSONArray qs = payload.optJSONArray("questions");
+                    if (qs != null && qs.length() == 1) {
+                        org.json.JSONObject one = qs.optJSONObject(0);
+                        org.json.JSONArray opts = one == null ? null : one.optJSONArray("options");
+                        String questionId = one == null ? "" : one.optString("id", "");
+                        if (opts != null && opts.length() > 0 && !questionId.isEmpty()) {
+                            java.util.List<String> labels = new java.util.ArrayList<>();
+                            for (int k = 0; k < opts.length() && k < 3; k++) {
+                                org.json.JSONObject opt = opts.optJSONObject(k);
+                                String label = opt == null ? "" : opt.optString("label", "");
+                                if (!label.isEmpty()) labels.add(label);
+                            }
+                            if (!labels.isEmpty()) {
+                                Notifier.showQuestion(this, baseUrl, id, questionId, labels);
+                                drawn = true;
+                            }
+                        }
+                    }
+                } catch (Exception ignored) {
+                    // 读不出来就退回原来那句提示。
+                }
+                if (!drawn) {
+                    Notifier.showInfo(this, "DSH 有一道题等你回答", "打开应用作答。", id);
+                }
             }
         }
     }

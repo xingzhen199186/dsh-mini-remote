@@ -105,6 +105,11 @@
             android:name=".ApprovalReceiver"
             android:exported="false" />
 
+        <!-- 从通知直接回答提问（2026-11-14）：和审批同一个套路，显式 Intent、不导出。 -->
+        <receiver
+            android:name=".QuestionReceiver"
+            android:exported="false" />
+
         <!-- 只有这把前台服务在跑的时候才保持长连接；回前台立刻停，不双开。 -->
         <service
             android:name=".MiniForegroundService"

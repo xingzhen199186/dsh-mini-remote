@@ -514,6 +514,42 @@ public final class Notifier {
                 .setPriority(Notification.PRIORITY_HIGH);
     }
 
+    /** 「从通知回答提问」用的动作与额外字段（2026-11-14）。 */
+    static final String ACTION_ANSWER = "com.dsh.miniremote.action.ANSWER";
+    static final String EXTRA_ASK_ID = "askId";
+    static final String EXTRA_QUESTION_ID = "questionId";
+    static final String EXTRA_LABEL = "optionLabel";
+
+    /**
+     * 有一道题等你回答，而且**有选项**：把选项做成通知上的按钮（2026-11-14）。
+     *
+     * 只画得下三个——再多就不是通知上能点清的东西了。多于三个时照旧只提示"打开应用作答"。
+     * 锁屏上不露题目内容：公共副本里只有「有新进展」那一句。
+     */
+    static void showQuestion(Context context, String baseUrl, String askId, String questionId,
+                             java.util.List<String> labels) {
+        Context appContext = context.getApplicationContext();
+        Notification.Builder builder = baseBuilder(appContext, askId)
+                .setContentTitle("DSH 有一道题等你回答")
+                .setContentText("选一个就行，不用打开应用。");
+        for (String label : labels) {
+            builder.addAction(0, label, answerIntent(appContext, baseUrl, askId, questionId, label));
+        }
+        post(appContext, notificationId(askId), builder, askId);
+    }
+
+    private static PendingIntent answerIntent(Context context, String baseUrl,
+                                              String askId, String questionId, String label) {
+        Intent intent = new Intent(context, QuestionReceiver.class);
+        intent.setAction(ACTION_ANSWER);
+        intent.putExtra(EXTRA_ASK_ID, askId);
+        intent.putExtra(EXTRA_QUESTION_ID, questionId);
+        intent.putExtra(EXTRA_LABEL, label);
+        intent.putExtra(EXTRA_BASE_URL, baseUrl);
+        return PendingIntent.getBroadcast(context, ("ans" + askId + questionId + label).hashCode(),
+                intent, pendingIntentFlags());
+    }
+
     private static PendingIntent actionIntent(Context context, String baseUrl,
                                                String approvalId, String action) {
         Intent intent = new Intent(context, ApprovalReceiver.class);
