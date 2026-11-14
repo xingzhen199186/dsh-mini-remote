@@ -512,6 +512,40 @@ final class BridgePoller {
                 } catch (Exception err) {
                     report(id, false, "截图失败：" + err.getMessage());
                 }
+            } else if ("phone_tap_at".equals(tool) || "phone_long_press_at".equals(tool)
+                    || "phone_swipe_at".equals(tool)) {
+                // 按坐标动手（2026-11-14）：坐标是截图坐标，屏幕像素由手机这侧换算；
+                // "还是不是那一屏"也在手机这侧核，因为它才读得到当前前台。
+                try {
+                    Class<?> cls = Class.forName("com.dsh.miniremote.BridgeAccessibilityService");
+                    String expectPkg = args == null ? "" : args.optString("expectPkg", "");
+                    double shotW = args == null ? 0 : args.optDouble("shotW", 0);
+                    double shotH = args == null ? 0 : args.optDouble("shotH", 0);
+                    String json;
+                    if ("phone_tap_at".equals(tool)) {
+                        json = (String) cls.getDeclaredMethod("tapAt", double.class, double.class,
+                                        double.class, double.class, String.class)
+                                .invoke(null, args.optDouble("x", -1), args.optDouble("y", -1),
+                                        shotW, shotH, expectPkg);
+                    } else if ("phone_long_press_at".equals(tool)) {
+                        json = (String) cls.getDeclaredMethod("longPressAt", double.class, double.class,
+                                        double.class, double.class, String.class, int.class)
+                                .invoke(null, args.optDouble("x", -1), args.optDouble("y", -1),
+                                        shotW, shotH, expectPkg, args.optInt("ms", 700));
+                    } else {
+                        json = (String) cls.getDeclaredMethod("swipeAt", double.class, double.class,
+                                        double.class, double.class, double.class, double.class,
+                                        String.class, int.class)
+                                .invoke(null, args.optDouble("fromX", -1), args.optDouble("fromY", -1),
+                                        args.optDouble("toX", -1), args.optDouble("toY", -1),
+                                        shotW, shotH, expectPkg, args.optInt("ms", 400));
+                    }
+                    reportRaw(id, json.contains("\"ok\":true"), json);
+                } catch (ClassNotFoundException err) {
+                    report(id, false, "这个版本不支持按坐标操作（需要实验版）");
+                } catch (Exception err) {
+                    report(id, false, "按坐标操作失败：" + err.getMessage());
+                }
             } else if ("phone_back".equals(tool) || "phone_swipe".equals(tool) || "phone_input".equals(tool)) {
                 try {
                     Class<?> cls = Class.forName("com.dsh.miniremote.BridgeAccessibilityService");

@@ -781,12 +781,107 @@ public final class BridgeAccessibilityService extends AccessibilityService {
             result.put("ok", true);
             result.put("width", width);
             result.put("height", height);
+            // 顺手带上前台包名：按坐标点之前要核对"还是不是这一屏"（2026-11-14）。
+            // 只取包名，不读任何内容。
+            try {
+                android.view.accessibility.AccessibilityNodeInfo root = service.getRootInActiveWindow();
+                result.put("pkg", root == null || root.getPackageName() == null ? "" : root.getPackageName().toString());
+            } catch (Exception ignored) {
+                result.put("pkg", "");
+            }
             result.put("jpeg", base64);
             return result.toString();
         } catch (Exception err) {
             String message = String.valueOf(err.getMessage()).replace("\"", "'");
             return "{\"ok\":false,\"error\":\"压图失败：" + message + "\"}";
         }
+    }
+
+    /**
+     * 把截图坐标换成屏幕像素（2026-11-14）。
+     * 截图被压到 480 宽，模型给的是那张图的坐标；这里按真实屏幕现算比例，
+     * **不写死倍数**——换了手机、换了分辨率都不用改。
+     */
+    private static float[] toScreen(android.util.DisplayMetrics metrics, double x, double y,
+                                    double shotW, double shotH) {
+        double kx = metrics.widthPixels / Math.max(1d, shotW);
+        double ky = metrics.heightPixels / Math.max(1d, shotH);
+        float fx = (float) Math.max(0, Math.min(metrics.widthPixels, x * kx));
+        float fy = (float) Math.max(0, Math.min(metrics.heightPixels, y * ky));
+        return new float[]{fx, fy};
+    }
+
+    /** 这一屏还是截图那一屏吗。换了就拒，避免"看一眼、点另一屏"。 */
+    private static String changedScreen(String expectPkg) {
+        BridgeAccessibilityService service = instance;
+        if (service == null) return "错误：无障碍还没开启";
+        if (expectPkg == null || expectPkg.isEmpty()) return null;
+        android.view.accessibility.AccessibilityNodeInfo root = service.getRootInActiveWindow();
+        String now = root == null || root.getPackageName() == null ? "" : root.getPackageName().toString();
+        if (!expectPkg.equals(now)) {
+            return "错误：界面已经换了（截图时是 " + expectPkg + "，现在是 " + (now.isEmpty() ? "未知" : now)
+                    + "），重新截图再点";
+        }
+        return null;
+    }
+
+    /** 按截图坐标点一下。 */
+    static String tapAt(double x, double y, double shotW, double shotH, String expectPkg) {
+        BridgeAccessibilityService service = instance;
+        if (service == null) return "{\"ok\":false,\"error\":\"无障碍还没开启\"}";
+        String changed = changedScreen(expectPkg);
+        if (changed != null) return "{\"ok\":false,\"error\":\"" + changed.replace("错误：", "").replace("\"", "'") + "\"}";
+        android.util.DisplayMetrics metrics = service.getResources().getDisplayMetrics();
+        float[] p = toScreen(metrics, x, y, shotW, shotH);
+        String raw = tap(p[0], p[1]);
+        if (!raw.startsWith("{\"ok\"")) {
+            return "{\"ok\":false,\"error\":\"" + raw.replace("错误：", "").replace("\"", "'") + "\"}";
+        }
+        return "{\"ok\":true,\"result\":\"已按坐标点 (" + (int) p[0] + ", " + (int) p[1] + ")\"}";
+    }
+
+    /** 按截图坐标长按。 */
+    static String longPressAt(double x, double y, double shotW, double shotH, String expectPkg, int ms) {
+        BridgeAccessibilityService service = instance;
+        if (service == null) return "{\"ok\":false,\"error\":\"无障碍还没开启\"}";
+        String changed = changedScreen(expectPkg);
+        if (changed != null) return "{\"ok\":false,\"error\":\"" + changed.replace("错误：", "").replace("\"", "'") + "\"}";
+        String blocked = blockReason(service, service.getRootInActiveWindow());
+        if (blocked != null) return "{\"ok\":false,\"error\":\"" + blocked.replace("\"", "'") + "\"}";
+        android.util.DisplayMetrics metrics = service.getResources().getDisplayMetrics();
+        float[] p = toScreen(metrics, x, y, shotW, shotH);
+        Path path = new Path();
+        path.moveTo(p[0], p[1]);
+        long hold = Math.max(300, Math.min(3000, ms));
+        GestureDescription gesture = new GestureDescription.Builder()
+                .addStroke(new GestureDescription.StrokeDescription(path, 0, hold))
+                .build();
+        boolean sent = service.dispatchGesture(gesture, null, null);
+        return sent ? "{\"ok\":true,\"result\":\"已长按 (" + (int) p[0] + ", " + (int) p[1] + ")\"}"
+                : "{\"ok\":false,\"error\":\"系统拒绝了这个手势\"}";
+    }
+
+    /** 按截图坐标从一点滑到另一点。 */
+    static String swipeAt(double fromX, double fromY, double toX, double toY,
+                          double shotW, double shotH, String expectPkg, int ms) {
+        BridgeAccessibilityService service = instance;
+        if (service == null) return "{\"ok\":false,\"error\":\"无障碍还没开启\"}";
+        String changed = changedScreen(expectPkg);
+        if (changed != null) return "{\"ok\":false,\"error\":\"" + changed.replace("错误：", "").replace("\"", "'") + "\"}";
+        String blocked = blockReason(service, service.getRootInActiveWindow());
+        if (blocked != null) return "{\"ok\":false,\"error\":\"" + blocked.replace("\"", "'") + "\"}";
+        android.util.DisplayMetrics metrics = service.getResources().getDisplayMetrics();
+        float[] a = toScreen(metrics, fromX, fromY, shotW, shotH);
+        float[] b = toScreen(metrics, toX, toY, shotW, shotH);
+        Path path = new Path();
+        path.moveTo(a[0], a[1]);
+        path.lineTo(b[0], b[1]);
+        long dur = Math.max(100, Math.min(3000, ms));
+        GestureDescription gesture = new GestureDescription.Builder()
+                .addStroke(new GestureDescription.StrokeDescription(path, 0, dur))
+                .build();
+        boolean sent = service.dispatchGesture(gesture, null, null);
+        return sent ? "{\"ok\":true,\"result\":\"已滑动\"}" : "{\"ok\":false,\"error\":\"系统拒绝了这个手势\"}";
     }
 
     /** 返回键。**不提供**主页与最近任务：那样会脱离授权范围（RFC 8.3）。 */

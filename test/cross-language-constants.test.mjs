@@ -23,6 +23,8 @@ test('电脑与手机认识同一批手机动作', () => {
   const forwarded = new Set([
     ...[...host.matchAll(/callPhone\('(phone_[a-z_]+)'/g)].map((m) => m[1]),
     ...[...host.matchAll(/phoneBridge\.call\([^,]+,\s*'(phone_[a-z_]+)'/g)].map((m) => m[1]),
+    // 坐标动作走同一个转发函数 aimCall('phone_xxx', …)，名字同样是字面量。
+    ...[...host.matchAll(/aimCall\('(phone_[a-z_]+)'/g)].map((m) => m[1]),
   ])
   const onHost = forwarded
   const onPhone = phoneNames(poller)
