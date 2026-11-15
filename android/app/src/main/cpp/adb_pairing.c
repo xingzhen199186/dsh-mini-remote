@@ -14,6 +14,7 @@
 //   nonce = 小端 64 位序号 + 4 个 0，收发各自从 0 开始；客户端先发。
 
 #include <jni.h>
+#include <android/log.h>
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -37,6 +38,8 @@
 #include <openssl/rsa.h>
 #include <openssl/bn.h>
 
+#define LOG_TAG "MiniAdb"
+#define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
 #define PEER_INFO_SIZE 8192
 #define ADB_RSA_PUB_KEY 0
 #define HEADER_SIZE 6
@@ -567,7 +570,7 @@ Java_com_dsh_miniremote_AdbPairing_nativePair(JNIEnv *env, jclass clazz,
 #define AUTH_TOKEN 1u
 #define AUTH_SIGNATURE 2u
 #define PKT_HEADER 24
-#define ADB_MAXDATA (256 * 1024)
+#define ADB_MAXDATA 4096  // 官方客户端首包用 MAX_PAYLOAD_V1，见 adb.cpp 的 send_connect
 
 static uint32_t crc32_of(const uint8_t *data, size_t len) {
     uint32_t crc = 0xFFFFFFFFu;
@@ -601,6 +604,7 @@ static int packet_write(SSL *ssl, int fd, uint32_t command, uint32_t arg0, uint3
     put_le32(header + 12, len);
     put_le32(header + 16, data == NULL ? 0 : crc32_of((const uint8_t *) data, len));
     put_le32(header + 20, command ^ 0xFFFFFFFFu);
+    LOGI("写包 %08x 长度 %u", command, len);
     if (ssl != NULL) {
         if (write_all(ssl, header, sizeof(header)) != 0) return -1;
         if (len > 0 && write_all(ssl, (const uint8_t *) data, len) != 0) return -1;
@@ -636,6 +640,7 @@ static int packet_read(SSL *ssl, int fd, uint32_t *command, uint32_t *arg0, uint
         done += (size_t) n;
     }
     *command = get_le32(header + 0);
+    LOGI("读到包 %08x", *command);
     *arg0 = get_le32(header + 4);
     *arg1 = get_le32(header + 8);
     *len = get_le32(header + 12);
@@ -737,7 +742,8 @@ static int do_shell(const char *host, int port, const char *command,
         }
 
         if (packet_write(ssl, fd, A_CNXN, A_VERSION, ADB_MAXDATA, banner, sizeof(banner)) != 0) {
-            set_error(err, errlen, "TLS 里再发 CNXN 失败");
+            set_error(err, errlen, "TLS 里再发 CNXN 失败（ssl=%d errno=%d）",
+                      SSL_get_error(ssl, -1), errno);
             break;
         }
 
@@ -745,7 +751,8 @@ static int do_shell(const char *host, int port, const char *command,
         int authed = 0;
         for (int round = 0; round < 4 && !authed; round++) {
             if (packet_read(ssl, fd, &cmd, &a0, &a1, &payload, &len) != 0) {
-                set_error(err, errlen, "等认证消息失败");
+                int ssl_err = SSL_get_error(ssl, -1);
+                set_error(err, errlen, "等认证消息失败（ssl=%d errno=%d）", ssl_err, errno);
                 break;
             }
             if (cmd == A_AUTH && a0 == AUTH_TOKEN) {
