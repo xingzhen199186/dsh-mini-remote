@@ -14,6 +14,8 @@
 //   nonce = 小端 64 位序号 + 4 个 0，收发各自从 0 开始；客户端先发。
 
 #include <jni.h>
+#include <stdint.h>
+#include <stdbool.h>
 #include <android/log.h>
 #include <string.h>
 #include <stdlib.h>
@@ -905,4 +907,269 @@ Java_com_dsh_miniremote_AdbShell_nativeShell(JNIEnv *env, jclass clazz,
     free(json);
     free(out);
     return result;
+}
+
+// ======================================================================
+// 连接复用（2026-11-15）：一条 TLS+ADB 会话跑多条命令
+//
+// 之前每条命令都要重做一遍 TCP→CNXN→STLS→TLS→CNXN，连续调用有明显开销。
+// 这里把连接留住，用 ADB 的"流"机制在同一条连接上反复开 shell：
+//   每次执行：A_OPEN(新的 local-id, "shell:<cmd>") → 收 OKAY/WRTE → 收 CLSE。
+// 同一条会话**同一时刻只跑一条命令**（Java 侧加锁），协议本身支持多流，这里不需要。
+// 老的一次性路径（do_shell）保留不动：新路出问题可以退回去。
+// ======================================================================
+
+typedef struct {
+    int fd;
+    SSL *ssl;
+    SSL_CTX *ctx;
+    EVP_PKEY *pkey;
+    X509 *cert;
+    uint32_t next_id;
+} AdbSession;
+
+static AdbSession *g_session = NULL;   // 只支持一条会话（单用户场景够用）
+
+static void session_release(AdbSession *session) {
+    if (session == NULL) return;
+    if (session->ssl != NULL) {
+        SSL_shutdown(session->ssl);
+        SSL_free(session->ssl);
+    }
+    if (session->fd >= 0) close(session->fd);
+    if (session->ctx != NULL) SSL_CTX_free(session->ctx);
+    if (session->cert != NULL) X509_free(session->cert);
+    if (session->pkey != NULL) EVP_PKEY_free(session->pkey);
+    free(session);
+}
+
+/** 建一条会话；成功返回指针，失败返回 NULL 并写 err。 */
+static AdbSession *session_open(const char *host, int port,
+                                const uint8_t *cert_der, size_t cert_len,
+                                const uint8_t *key_pkcs8, size_t key_len,
+                                char *err, size_t errlen) {
+    AdbSession *session = (AdbSession *) calloc(1, sizeof(AdbSession));
+    if (session == NULL) {
+        set_error(err, errlen, "内存不足");
+        return NULL;
+    }
+    session->fd = -1;
+    session->next_id = 1;
+
+    session->ctx = SSL_CTX_new(TLS_method());
+    if (session->ctx == NULL) {
+        set_error(err, errlen, "创建 TLS 上下文失败");
+        session_release(session);
+        return NULL;
+    }
+    SSL_CTX_set_min_proto_version(session->ctx, TLS1_3_VERSION);
+    SSL_CTX_set_verify(session->ctx, SSL_VERIFY_NONE, NULL);
+
+    const uint8_t *p = key_pkcs8;
+    session->pkey = d2i_AutoPrivateKey(NULL, &p, (long) key_len);
+    const uint8_t *c = cert_der;
+    session->cert = d2i_X509(NULL, &c, (long) cert_len);
+    if (session->pkey == NULL || session->cert == NULL) {
+        set_error(err, errlen, "钥匙或证书解析失败");
+        session_release(session);
+        return NULL;
+    }
+    SSL_CTX_use_certificate(session->ctx, session->cert);
+    SSL_CTX_use_PrivateKey(session->ctx, session->pkey);
+
+    session->fd = tcp_connect(host, port, 6000, err, errlen);
+    if (session->fd < 0) {
+        session_release(session);
+        return NULL;
+    }
+    struct timeval tv;
+    tv.tv_sec = 10;
+    tv.tv_usec = 0;
+    setsockopt(session->fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+
+    const char banner[] = "host::";
+    if (packet_write(NULL, session->fd, A_CNXN, A_VERSION, ADB_MAXDATA, banner, sizeof(banner)) != 0) {
+        set_error(err, errlen, "发送 CNXN 失败");
+        session_release(session);
+        return NULL;
+    }
+    uint32_t cmd = 0, a0 = 0, a1 = 0, len = 0;
+    uint8_t *payload = NULL;
+    if (packet_read(NULL, session->fd, &cmd, &a0, &a1, &payload, &len) != 0 || cmd != A_STLS) {
+        free(payload);
+        set_error(err, errlen, "没收到 STLS");
+        session_release(session);
+        return NULL;
+    }
+    free(payload);
+    if (packet_write(NULL, session->fd, A_STLS, A_VERSION, 0, NULL, 0) != 0) {
+        set_error(err, errlen, "回应 STLS 失败");
+        session_release(session);
+        return NULL;
+    }
+
+    session->ssl = SSL_new(session->ctx);
+    SSL_set_fd(session->ssl, session->fd);
+    if (SSL_connect(session->ssl) != 1) {
+        set_error(err, errlen, "TLS 握手失败");
+        session_release(session);
+        return NULL;
+    }
+    // 握手之后**只读对方的 CNXN，不回**（回一个会把自己打回离线，见 do_shell 的注释）。
+    payload = NULL;
+    if (packet_read(session->ssl, session->fd, &cmd, &a0, &a1, &payload, &len) != 0
+        || cmd != A_CNXN) {
+        free(payload);
+        set_error(err, errlen, "没等到对方的 CNXN");
+        session_release(session);
+        return NULL;
+    }
+    free(payload);
+    return session;
+}
+
+/** 在会话上跑一条命令；0 成功。 */
+static int session_exec(AdbSession *session, const char *command,
+                        char *out, size_t out_len, char *err, size_t errlen) {
+    if (session == NULL || session->ssl == NULL) {
+        set_error(err, errlen, "会话不可用");
+        return -1;
+    }
+    uint32_t local_id = session->next_id++;
+    if (session->next_id == 0) session->next_id = 1;
+
+    char destination[512];
+    snprintf(destination, sizeof(destination), "shell:%s", command);
+    if (packet_write(session->ssl, session->fd, A_OPEN, local_id, 0, destination,
+                     (uint32_t) strlen(destination) + 1) != 0) {
+        set_error(err, errlen, "发送 OPEN 失败");
+        return -1;
+    }
+
+    size_t written = 0;
+    out[0] = '\0';
+    uint32_t remote_id = 0;
+    for (;;) {
+        uint32_t cmd = 0, a0 = 0, a1 = 0, len = 0;
+        uint8_t *payload = NULL;
+        if (packet_read(session->ssl, session->fd, &cmd, &a0, &a1, &payload, &len) != 0) {
+            free(payload);
+            set_error(err, errlen, "读输出失败（ssl=%d errno=%d）", g_read_ssl_error, g_read_errno);
+            return -1;
+        }
+        if (cmd == A_OKAY) {
+            remote_id = a0;
+            free(payload);
+            continue;
+        }
+        if (cmd == A_WRTE) {
+            if (a1 == local_id) {
+                for (uint32_t i = 0; i < len && written + 1 < out_len; i++) {
+                    out[written++] = (char) payload[i];
+                }
+                out[written] = '\0';
+                packet_write(session->ssl, session->fd, A_OKAY, local_id, a0, NULL, 0);
+            }
+            free(payload);
+            continue;
+        }
+        if (cmd == A_CLSE) {
+            bool mine = (a1 == local_id) || (a0 == local_id) || (remote_id != 0 && a0 == remote_id);
+            free(payload);
+            if (mine) return 0;
+            continue;
+        }
+        free(payload);
+    }
+}
+
+JNIEXPORT jlong JNICALL
+Java_com_dsh_miniremote_AdbShell_nativeSessionOpen(JNIEnv *env, jclass clazz,
+                                                   jstring host, jint port,
+                                                   jbyteArray cert, jbyteArray key) {
+    if (g_session != NULL) {
+        session_release(g_session);
+        g_session = NULL;
+    }
+    char err[256];
+    err[0] = '\0';
+    const char *host_text = (*env)->GetStringUTFChars(env, host, NULL);
+    jsize cert_len = (*env)->GetArrayLength(env, cert);
+    jsize key_len = (*env)->GetArrayLength(env, key);
+    jbyte *cert_bytes = (*env)->GetByteArrayElements(env, cert, NULL);
+    jbyte *key_bytes = (*env)->GetByteArrayElements(env, key, NULL);
+    g_session = session_open(host_text, (int) port,
+                             (const uint8_t *) cert_bytes, (size_t) cert_len,
+                             (const uint8_t *) key_bytes, (size_t) key_len,
+                             err, sizeof(err));
+    (*env)->ReleaseByteArrayElements(env, cert, cert_bytes, JNI_ABORT);
+    (*env)->ReleaseByteArrayElements(env, key, key_bytes, JNI_ABORT);
+    (*env)->ReleaseStringUTFChars(env, host, host_text);
+    if (g_session == NULL) {
+        LOGI("会话建立失败：%s", err);
+        return 0;
+    }
+    return (jlong) (intptr_t) g_session;
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_dsh_miniremote_AdbShell_nativeSessionExec(JNIEnv *env, jclass clazz,
+                                                   jlong handle, jstring command) {
+    char err[256];
+    err[0] = '\0';
+    char *out = (char *) calloc(1, 64 * 1024);
+    if (out == NULL) return (*env)->NewStringUTF(env, "{\"ok\":false,\"error\":\"内存不足\"}");
+    AdbSession *session = (AdbSession *) (intptr_t) handle;
+    const char *command_text = (*env)->GetStringUTFChars(env, command, NULL);
+    int rc = session_exec(session, command_text, out, 64 * 1024, err, sizeof(err));
+    (*env)->ReleaseStringUTFChars(env, command, command_text);
+
+    size_t cap = 64 * 1024 * 2 + 512;
+    char *json = (char *) malloc(cap);
+    if (json == NULL) {
+        free(out);
+        return (*env)->NewStringUTF(env, "{\"ok\":false,\"error\":\"内存不足\"}");
+    }
+    size_t at = 0;
+    at += (size_t) snprintf(json + at, cap - at, "{\"ok\":%s,\"output\":\"", rc == 0 ? "true" : "false");
+    if (at >= cap) at = cap - 1;
+    for (size_t i = 0; out[i] != '\0' && at + 8 < cap; i++) {
+        unsigned char ch = (unsigned char) out[i];
+        if (ch == '"' || ch == '\\') {
+            json[at++] = '\\';
+            json[at++] = (char) ch;
+        } else if (ch == '\n') {
+            json[at++] = '\\';
+            json[at++] = 'n';
+        } else if (ch == '\r') {
+            // 丢掉
+        } else if (ch < 0x20) {
+            at += (size_t) snprintf(json + at, cap - at, "\\u%04x", ch);
+            if (at >= cap) at = cap - 1;
+        } else {
+            json[at++] = (char) ch;
+        }
+    }
+    if (rc == 0) {
+        at += (size_t) snprintf(json + at, cap - at, "\"}");
+    } else {
+        at += (size_t) snprintf(json + at, cap - at, "\",\"error\":\"%s\"}", err[0] ? err : "命令没跑成功");
+    }
+    if (at >= cap) at = cap - 1;
+    json[at] = '\0';
+    jstring result = (*env)->NewStringUTF(env, json);
+    free(json);
+    free(out);
+    return result;
+}
+
+JNIEXPORT void JNICALL
+Java_com_dsh_miniremote_AdbShell_nativeSessionClose(JNIEnv *env, jclass clazz, jlong handle) {
+    (void) env;
+    (void) clazz;
+    (void) handle;
+    if (g_session != NULL) {
+        session_release(g_session);
+        g_session = NULL;
+    }
 }

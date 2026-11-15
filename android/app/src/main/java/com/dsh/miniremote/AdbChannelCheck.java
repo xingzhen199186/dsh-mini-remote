@@ -30,6 +30,7 @@ final class AdbChannelCheck {
             checks.put(checkUnicode(app));
             checks.put(checkPipe(app));
             checks.put(checkBackground(app));
+            checks.put(checkReuse(app));
             checks.put(checkFallback(app));
         } catch (Exception err) {
             try {
@@ -89,6 +90,22 @@ final class AdbChannelCheck {
         boolean didStop = stopped != null && stopped.contains("\"stopped\":true");
         one.put("pass", sawLine && didStop);
         one.put("detail", "jobId=" + jobId + " 有输出=" + sawLine + " 已停止=" + didStop);
+        return one;
+    }
+
+    /** 连接复用：连续几条命令应当明显快于每条都重新握手。 */
+    private static JSONObject checkReuse(Context context) throws Exception {
+        JSONObject one = new JSONObject();
+        one.put("name", "连接复用：连续 5 条命令");
+        long started = System.currentTimeMillis();
+        boolean allOk = true;
+        for (int i = 0; i < 5; i++) {
+            String raw = ShellBackend.exec(context, "echo r" + i, 20, null, null);
+            if (raw == null || !raw.contains("r" + i)) allOk = false;
+        }
+        long elapsed = System.currentTimeMillis() - started;
+        one.put("pass", allOk && elapsed < 4000);
+        one.put("detail", "5 条共 " + elapsed + "ms（每条重建连接时通常在 1500ms 以上）");
         return one;
     }
 

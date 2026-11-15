@@ -99,7 +99,7 @@ final class ShellBackend {
         AdbDiscover.Endpoint endpoint = rememberPort(context);
         AdbShell.Result result = null;
         if (endpoint != null) {
-            result = AdbShell.run(context, endpoint.host, endpoint.port, effective);
+            result = AdbShell.execReusing(context, endpoint.host, endpoint.port, effective);
             if (result.ok) {
                 rememberSuccess(context, endpoint);
             }
@@ -108,7 +108,7 @@ final class ShellBackend {
             // 端口每次都可能变：缓存那次失败就现扫一次。
             AdbDiscover.Endpoint fresh = AdbShell.connectEndpoint(context);
             if (fresh == null) return null;
-            result = AdbShell.run(context, fresh.host, fresh.port, effective);
+            result = AdbShell.execReusing(context, fresh.host, fresh.port, effective);
             if (!result.ok) return null;
             rememberSuccess(context, fresh);
         }
@@ -320,6 +320,7 @@ final class ShellBackend {
         boolean paired = paired(context);
         // 真能力靠后台探活判断：这台机器的 mDNS 在连接建立后就不一定还能搜到，
         // 只看 snapshot 会把"其实能用"报成"用不了"（2026-11-15 真机）。
+        AdbShell.closeIdle();
         probeInBackground(context);
         boolean adbReady = paired && adbAlive;
         boolean termuxInstalled = true;
