@@ -82,7 +82,9 @@ final class AdbPairingWatcher {
                         }
                         phase = "pairing";
                         message = "正在配对（端口 " + port + "）……";
+                        android.util.Log.i("MiniBridge", "开始配对 端口=" + port + " 码位数=" + code.length());
                         AdbPairing.Result result = AdbPairing.pair(app, host, port, code);
+                        android.util.Log.i("MiniBridge", "配对结果 ok=" + result.ok + " " + result.error + result.peer);
                         if (result.ok) {
                             phase = "ok";
                             message = "配对成功" + (result.peer.isEmpty() ? "" : "：" + result.peer);

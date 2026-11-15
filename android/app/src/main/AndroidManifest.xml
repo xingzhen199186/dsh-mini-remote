@@ -147,8 +147,11 @@
 
         <!-- 无障碍服务只存在于 src/bridge，standard 不合并该声明。 -->
             <!-- 配对码从通知的输入框里来（2026-11-15）：只给本 App 用，不导出。 -->
+        <!-- 导出给 adb 身份调用，只为让开发时能把整条流程跑通；
+             android.permission.DUMP 只有 shell/调试身份持有，普通 App 调不动。 -->
         <receiver
             android:name=".AdbPairingReceiver"
-            android:exported="false" />
+            android:exported="true"
+            android:permission="android.permission.DUMP" />
     </application>
 </manifest>

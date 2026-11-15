@@ -20,6 +20,10 @@ public final class AdbPairingReceiver extends BroadcastReceiver {
         Bundle results = RemoteInput.getResultsFromIntent(intent);
         CharSequence text = results == null ? null : results.getCharSequence(AdbPairingNotify.EXTRA_TEXT);
         if (text == null) {
+            // 调试用：adb 身份可以直接把码塞进广播（普通 App 没有 DUMP 权限，调不动这个接收器）。
+            text = intent.getStringExtra(AdbPairingNotify.EXTRA_TEXT);
+        }
+        if (text == null) {
             AdbPairingNotify.done(context, "没读到配对码，再点一次「填写配对码」");
             return;
         }

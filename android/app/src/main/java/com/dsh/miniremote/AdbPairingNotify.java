@@ -26,15 +26,29 @@ final class AdbPairingNotify {
     }
 
     private static void ensureChannel(Context context) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return;
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+            android.util.Log.i("MiniBridge", "跳过建通道：系统太老");
+            return;
+        }
         NotificationManager manager =
                 (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
-        if (manager == null) return;
-        if (manager.getNotificationChannel(CHANNEL) != null) return;
-        NotificationChannel channel = new NotificationChannel(
-                CHANNEL, "配对码输入", NotificationManager.IMPORTANCE_HIGH);
-        channel.setDescription("自连调试口时在这里填 6 位码，不用离开系统对话框");
-        manager.createNotificationChannel(channel);
+        if (manager == null) {
+            android.util.Log.w("MiniBridge", "拿不到通知管理器");
+            return;
+        }
+        if (manager.getNotificationChannel(CHANNEL) != null) {
+            android.util.Log.i("MiniBridge", "通道已存在");
+            return;
+        }
+        try {
+            NotificationChannel channel = new NotificationChannel(
+                    CHANNEL, "配对码输入", NotificationManager.IMPORTANCE_HIGH);
+            channel.setDescription("自连调试口时在这里填 6 位码，不用离开系统对话框");
+            manager.createNotificationChannel(channel);
+            android.util.Log.i("MiniBridge", "通道已建立");
+        } catch (Exception err) {
+            android.util.Log.w("MiniBridge", "建通道失败：" + err);
+        }
     }
 
     static void show(Context context) {
@@ -68,6 +82,7 @@ final class AdbPairingNotify {
     }
 
     static void done(Context context, String text) {
+        ensureChannel(context);
         NotificationManager manager =
                 (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
         if (manager == null) return;
