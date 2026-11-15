@@ -867,7 +867,7 @@ public final class MainActivity extends Activity {
             + "<div class=\"label\">免 Termux 通道（实验）</div>"
             + "<div id=\"miniAdbState\" class=\"hint\">点右边，然后去开「使用配对码配对设备」；App 会在后台等</div>"
             + "</div><div style=\"flex:0 0 auto\">"
-            + "<button class=\"btn\" id=\"miniAdbGo\">试连接</button></div>';"
+            + "<button class=\"btn\" id=\"miniAdbGo\">准备配对</button></div>';"
             + "checkRow.insertAdjacentElement('afterend',adbRow);"
             + "var adbGo=document.getElementById('miniAdbGo');"
             // **顺序**：先让 App 在后台等，用户再去开配对对话框（对话框一离开就关）。
