@@ -741,17 +741,42 @@ static int do_shell(const char *host, int port, const char *command,
             break;
         }
 
+        // **TLS 之后是 adbd 先发它的 CNXN**（见 daemon/adb_wifi.cpp 的
+        // adbd_wifi_secure_connect：它调 send_connect 主动发）。
+        // 上一版我们抢着先发，结果被对面直接重置（ssl=5 errno=32）。
+        if (packet_read(ssl, fd, &cmd, &a0, &a1, &payload, &len) != 0) {
+            set_error(err, errlen, "TLS 之后没等到对方的 CNXN（ssl=%d errno=%d）",
+                      SSL_get_error(ssl, -1), errno);
+            break;
+        }
+        free(payload);
+        payload = NULL;
+        if (cmd != A_CNXN) {
+            set_error(err, errlen, "期待对方的 CNXN，收到 0x%08x", cmd);
+            break;
+        }
         if (packet_write(ssl, fd, A_CNXN, A_VERSION, ADB_MAXDATA, banner, sizeof(banner)) != 0) {
-            set_error(err, errlen, "TLS 里再发 CNXN 失败（ssl=%d errno=%d）",
+            set_error(err, errlen, "回发 CNXN 失败（ssl=%d errno=%d）",
                       SSL_get_error(ssl, -1), errno);
             break;
         }
 
-        // 认证：对方给 token，我们用钥匙签
+        // 用证书认证过的连接，adbd 通常**不会再发 AUTH**：
+        // 所以这里只等一小会儿，没消息就直接往下走；真给了 token 就签。
+        struct timeval short_wait;
+        short_wait.tv_sec = 2;
+        short_wait.tv_usec = 0;
+        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &short_wait, sizeof(short_wait));
+
         int authed = 0;
         for (int round = 0; round < 4 && !authed; round++) {
             if (packet_read(ssl, fd, &cmd, &a0, &a1, &payload, &len) != 0) {
                 int ssl_err = SSL_get_error(ssl, -1);
+                if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                    // 没有 AUTH，说明证书认证已经够了，直接往下走。
+                    authed = 1;
+                    break;
+                }
                 set_error(err, errlen, "等认证消息失败（ssl=%d errno=%d）", ssl_err, errno);
                 break;
             }
@@ -792,6 +817,10 @@ static int do_shell(const char *host, int port, const char *command,
             if (err[0] == '\0') set_error(err, errlen, "认证没有通过");
             break;
         }
+        struct timeval long_wait;
+        long_wait.tv_sec = 10;
+        long_wait.tv_usec = 0;
+        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &long_wait, sizeof(long_wait));
 
         // 打开一个 shell 流
         char destination[512];
