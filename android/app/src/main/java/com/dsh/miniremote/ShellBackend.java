@@ -39,6 +39,13 @@ final class ShellBackend {
                 .getBoolean(KEY_PAIRED, false);
     }
 
+    // 「现在到底走不走得通」只能靠真的连一次——但这件不能放在界面线程。
+    // 所以：后台探活 + 结果缓存 20 秒，界面只读缓存（2026-11-15）。
+    private static volatile boolean adbAlive = false;
+    private static volatile long adbCheckedAt = 0;
+    private static volatile boolean probing = false;
+    private static final long PROBE_TTL_MS = 20_000;
+
     /** 上一次用过的连接口（端口每次开无线调试都可能变，所以只是"先试一下"）。 */
     private static AdbDiscover.Endpoint rememberPort(Context context) {
         android.content.SharedPreferences prefs =
@@ -275,18 +282,46 @@ final class ShellBackend {
      *   adbReady: 现在能不能走自连（paired 且 snapshot 里有 CONNECT 类型）；
      *   termuxInstalled / termuxPermitted: Termux 装没装、授权没有。
      */
+    /** 后台探一次活（不阻塞调用方）。 */
+    private static void probeInBackground(Context context) {
+        long now = System.currentTimeMillis();
+        if (probing || now - adbCheckedAt < PROBE_TTL_MS) return;
+        if (!paired(context)) {
+            adbAlive = false;
+            adbCheckedAt = now;
+            return;
+        }
+        probing = true;
+        final Context app = context.getApplicationContext();
+        new Thread(() -> {
+            boolean alive = false;
+            try {
+                AdbDiscover.Endpoint endpoint = rememberPort(app);
+                if (endpoint != null) {
+                    alive = AdbShell.run(app, endpoint.host, endpoint.port, "true").ok;
+                }
+                if (!alive) {
+                    AdbDiscover.Endpoint fresh = AdbShell.connectEndpoint(app);
+                    if (fresh != null) {
+                        alive = AdbShell.run(app, fresh.host, fresh.port, "true").ok;
+                        if (alive) rememberSuccess(app, fresh);
+                    }
+                }
+            } catch (Exception ignored) {
+            } finally {
+                adbAlive = alive;
+                adbCheckedAt = System.currentTimeMillis();
+                probing = false;
+            }
+        }, "mini-adb-probe").start();
+    }
+
     static String backendState(Context context) {
         boolean paired = paired(context);
-        boolean adbReady = false;
-        if (paired) {
-            // 只读现成结果：snapshot() 是内存里的缓存，不触发扫描。
-            for (AdbDiscover.Endpoint one : AdbDiscover.snapshot()) {
-                if (AdbDiscover.CONNECT.equals(one.type)) {
-                    adbReady = true;
-                    break;
-                }
-            }
-        }
+        // 真能力靠后台探活判断：这台机器的 mDNS 在连接建立后就不一定还能搜到，
+        // 只看 snapshot 会把"其实能用"报成"用不了"（2026-11-15 真机）。
+        probeInBackground(context);
+        boolean adbReady = paired && adbAlive;
         boolean termuxInstalled = true;
         try {
             context.getPackageManager().getPackageInfo("com.termux", 0);
