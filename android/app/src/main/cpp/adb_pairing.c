@@ -145,9 +145,11 @@ static int send_frame(int fd, int type, const uint8_t *payload, size_t len) {
     return 0;
 }
 
-static int read_frame(int fd, int *type, uint8_t *payload, size_t cap, size_t *len) {
+static int read_frame(int fd, int *type, uint8_t *payload, size_t cap, size_t *len,
+                      uint8_t *first_byte) {
     uint8_t header[HEADER_SIZE];
     if (read_all(fd, header, sizeof(header)) != 0) return -1;
+    if (first_byte != NULL) *first_byte = header[0];
     if (header[0] != PAIRING_VERSION) return -2;
     *type = header[1];
     uint32_t size = get_be32(header + 2);
@@ -392,11 +394,15 @@ static int do_pair(const char *host, int port, const char *code,
         }
         int type = -1;
         size_t peer_len = 0;
-        int rf = read_frame(fd, &type, peer_msg, PEER_INFO_SIZE, &peer_len);
+        uint8_t first_byte = 0;
+        int rf = read_frame(fd, &type, peer_msg, PEER_INFO_SIZE, &peer_len, &first_byte);
         if (rf != 0) {
-            // 把"读到第几个字节就断了"写出来：是对方直接关闭，还是帧头不对，一眼能分。
-            set_error(err, errlen, "读认证回包失败（%d，%s）", rf,
-                      rf == -1 ? "连接被关闭" : (rf == -2 ? "版本号不符" : "包太长"));
+            // 首字节也是证据：0x43（'C'）说明对面在说 adb 的 CNXN——
+            // 也就是我们连到的是**连接口**，不是配对口。
+            set_error(err, errlen, "读认证回包失败（%d，%s，首字节 0x%02x%s）", rf,
+                      rf == -1 ? "连接被关闭" : (rf == -2 ? "版本号不符" : "包太长"),
+                      first_byte,
+                      first_byte == 0x43 ? "——这是 adb 连接口，端口选错了" : "");
             break;
         }
         if (type != TYPE_SPAKE2) {
@@ -465,7 +471,7 @@ static int do_pair(const char *host, int port, const char *code,
         }
         int peer_type = -1;
         size_t incoming_len = 0;
-        rf = read_frame(fd, &peer_type, incoming, PEER_INFO_SIZE + 64, &incoming_len);
+        rf = read_frame(fd, &peer_type, incoming, PEER_INFO_SIZE + 64, &incoming_len, NULL);
         if (rf != 0 || peer_type != TYPE_PEER_INFO) {
             free(incoming);
             set_error(err, errlen, "对方没有回公钥（配对未完成）");

@@ -58,14 +58,24 @@ final class AdbPairingWatcher {
                                 AdbDiscover.refresh(app);
                                 lastScan = now;
                             }
+                            // **只认配对服务**，并且要和"连接服务"的端口区分开：
+                            // 两者都开着时，连错就会得到 CNXN（首字节 0x43）而不是配对的帧。
+                            int pairingPort = 0;
+                            int connectPort = 0;
+                            String pairingHost = "";
                             for (AdbDiscover.Endpoint one : AdbDiscover.snapshot()) {
                                 if (AdbDiscover.PAIRING.equals(one.type)) {
-                                    host = one.host;
-                                    port = one.port;
-                                    phase = "waiting-code";
-                                    message = "看到端口 " + port + " 了：在通知里填 6 位配对码";
-                                    break;
+                                    pairingPort = one.port;
+                                    pairingHost = one.host;
+                                } else if (AdbDiscover.CONNECT.equals(one.type)) {
+                                    connectPort = one.port;
                                 }
+                            }
+                            if (pairingPort != 0 && pairingPort != connectPort) {
+                                host = pairingHost;
+                                port = pairingPort;
+                                phase = "waiting-code";
+                                message = "看到配对口 " + port + " 了：在通知里填 6 位配对码";
                             }
                             Thread.sleep(600);
                             continue;
