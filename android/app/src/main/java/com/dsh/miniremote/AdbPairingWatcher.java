@@ -96,6 +96,8 @@ final class AdbPairingWatcher {
                         AdbPairing.Result result = AdbPairing.pair(app, host, port, code);
                         android.util.Log.i("MiniBridge", "配对结果 ok=" + result.ok + " " + result.error + result.peer);
                         if (result.ok) {
+                            // 记住"配过了"，以后 phone_shell 会优先走这条通道。
+                            ShellBackend.markPaired(app, host, port);
                             phase = "ok";
                             message = "配对成功" + (result.peer.isEmpty() ? "" : "：" + result.peer);
                         } else {

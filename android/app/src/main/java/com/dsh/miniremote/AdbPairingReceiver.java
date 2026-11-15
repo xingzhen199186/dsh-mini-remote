@@ -30,6 +30,10 @@ public final class AdbPairingReceiver extends BroadcastReceiver {
                     text = "{\"ok\":false,\"error\":\"没有连接口\"}";
                 } else {
                     AdbShell.Result result = AdbShell.run(app, endpoint.host, endpoint.port, command);
+                    if (result.ok) {
+                        // 跑通一次就记住：以后 phone_shell 会优先走这条通道。
+                        ShellBackend.markPaired(app, endpoint.host, endpoint.port);
+                    }
                     text = "{\"ok\":" + result.ok + ",\"port\":" + endpoint.port
                             + ",\"output\":\"" + result.output.replace("\\", "\\\\").replace("\"", "\\\"")
                             .replace("\n", "\\n").replace("\r", "") + "\",\"error\":\"" + result.error + "\"}";

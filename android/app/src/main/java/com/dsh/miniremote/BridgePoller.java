@@ -444,7 +444,8 @@ final class BridgePoller {
                 } else {
                     int waitSeconds = args == null ? 30
                             : Math.max(5, Math.min(120, args.optInt("timeoutSeconds", 30)));
-                    result = TermuxRun.exec(context, command, waitSeconds, workdir, stdin);
+                    // 换后端不换约定：能走自连 ADB 就走，否则照旧用 Termux（2026-11-15）。
+                    result = ShellBackend.exec(context, command, waitSeconds, workdir, stdin);
                 }
                 boolean ok = result.contains("\"ok\":true");
                 reportRaw(id, ok, result);
