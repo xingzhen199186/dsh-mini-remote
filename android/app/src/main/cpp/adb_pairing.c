@@ -625,6 +625,10 @@ static int packet_write(SSL *ssl, int fd, uint32_t command, uint32_t arg0, uint3
     return 0;
 }
 
+static int g_read_ssl_error = 0;
+static int g_read_errno = 0;
+static char g_read_reason[160] = "";
+
 static int packet_read(SSL *ssl, int fd, uint32_t *command, uint32_t *arg0, uint32_t *arg1,
                        uint8_t **payload, uint32_t *len) {
     uint8_t header[PKT_HEADER];
@@ -636,7 +640,14 @@ static int packet_read(SSL *ssl, int fd, uint32_t *command, uint32_t *arg0, uint
         } else {
             n = (int) recv(fd, header + done, sizeof(header) - done, 0);
         }
-        if (n <= 0) return -1;
+        if (n <= 0) {
+            g_read_errno = errno;
+            g_read_ssl_error = ssl != NULL ? SSL_get_error(ssl, n) : 0;
+            g_read_reason[0] = '\0';
+            unsigned long e = ERR_get_error();
+            if (e != 0) ERR_error_string_n(e, g_read_reason, sizeof(g_read_reason));
+            return -1;
+        }
         done += (size_t) n;
     }
     *command = get_le32(header + 0);
@@ -745,8 +756,10 @@ static int do_shell(const char *host, int port, const char *command,
         // adbd_wifi_secure_connect：它调 send_connect 主动发）。
         // 上一版我们抢着先发，结果被对面直接重置（ssl=5 errno=32）。
         if (packet_read(ssl, fd, &cmd, &a0, &a1, &payload, &len) != 0) {
-            set_error(err, errlen, "TLS 之后没等到对方的 CNXN（ssl=%d errno=%d）",
-                      SSL_get_error(ssl, -1), errno);
+            // TLS 1.3 里服务端是在客户端收工之后才验证书；被拒时客户端只收到一条告警。
+            set_error(err, errlen, "握手后立刻被断开（ssl=%d errno=%d%s%s）",
+                      g_read_ssl_error, g_read_errno,
+                      g_read_reason[0] != '\0' ? "：" : "", g_read_reason);
             break;
         }
         free(payload);
