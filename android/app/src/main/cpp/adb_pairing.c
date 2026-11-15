@@ -546,3 +546,355 @@ Java_com_dsh_miniremote_AdbPairing_nativePair(JNIEnv *env, jclass clazz,
     }
     return (*env)->NewStringUTF(env, out);
 }
+
+// ======================================================================
+// 第三步：连上去，跑一条命令（2026-11-15）
+//
+// 顺序（对照 AOSP packages/modules/adb）：
+//   明文 CNXN → 收 STLS → 回 STLS → TLS 握手（同一把钥匙）→ 再发 CNXN
+//   → 收 AUTH(token) → 用钥匙签（SHA1）→ 回 AUTH(signature) → 收 CNXN（认证通过）
+//   → OPEN "shell:<命令>" → 收 WRTE 拼输出 → 收 CLSE 结束
+// ======================================================================
+
+#define A_CNXN 0x4e584e43u
+#define A_AUTH 0x48545541u
+#define A_STLS 0x534c5453u
+#define A_OPEN 0x4e45504fu
+#define A_OKAY 0x59414b4fu
+#define A_WRTE 0x45545257u
+#define A_CLSE 0x45534c43u
+#define A_VERSION 0x01000000u
+#define AUTH_TOKEN 1u
+#define AUTH_SIGNATURE 2u
+#define PKT_HEADER 24
+#define ADB_MAXDATA (256 * 1024)
+
+static uint32_t crc32_of(const uint8_t *data, size_t len) {
+    uint32_t crc = 0xFFFFFFFFu;
+    for (size_t i = 0; i < len; i++) {
+        crc ^= data[i];
+        for (int bit = 0; bit < 8; bit++) {
+            crc = (crc >> 1) ^ (0xEDB88320u & (uint32_t) (-(int32_t) (crc & 1)));
+        }
+    }
+    return ~crc;
+}
+
+static void put_le32(uint8_t *out, uint32_t value) {
+    out[0] = (uint8_t) value;
+    out[1] = (uint8_t) (value >> 8);
+    out[2] = (uint8_t) (value >> 16);
+    out[3] = (uint8_t) (value >> 24);
+}
+
+static uint32_t get_le32(const uint8_t *in) {
+    return (uint32_t) in[0] | ((uint32_t) in[1] << 8) | ((uint32_t) in[2] << 16) | ((uint32_t) in[3] << 24);
+}
+
+// files 传 NULL 表示不用 TLS（STLS 之前是明文）。
+static int packet_write(SSL *ssl, int fd, uint32_t command, uint32_t arg0, uint32_t arg1,
+                        const void *data, uint32_t len) {
+    uint8_t header[PKT_HEADER];
+    put_le32(header + 0, command);
+    put_le32(header + 4, arg0);
+    put_le32(header + 8, arg1);
+    put_le32(header + 12, len);
+    put_le32(header + 16, data == NULL ? 0 : crc32_of((const uint8_t *) data, len));
+    put_le32(header + 20, command ^ 0xFFFFFFFFu);
+    if (ssl != NULL) {
+        if (write_all(ssl, header, sizeof(header)) != 0) return -1;
+        if (len > 0 && write_all(ssl, (const uint8_t *) data, len) != 0) return -1;
+    } else {
+        size_t done = 0;
+        while (done < sizeof(header)) {
+            ssize_t n = send(fd, header + done, sizeof(header) - done, 0);
+            if (n <= 0) return -1;
+            done += (size_t) n;
+        }
+        done = 0;
+        while (done < len) {
+            ssize_t n = send(fd, (const uint8_t *) data + done, len - done, 0);
+            if (n <= 0) return -1;
+            done += (size_t) n;
+        }
+    }
+    return 0;
+}
+
+static int packet_read(SSL *ssl, int fd, uint32_t *command, uint32_t *arg0, uint32_t *arg1,
+                       uint8_t **payload, uint32_t *len) {
+    uint8_t header[PKT_HEADER];
+    size_t done = 0;
+    while (done < sizeof(header)) {
+        int n;
+        if (ssl != NULL) {
+            n = SSL_read(ssl, header + done, (int) (sizeof(header) - done));
+        } else {
+            n = (int) recv(fd, header + done, sizeof(header) - done, 0);
+        }
+        if (n <= 0) return -1;
+        done += (size_t) n;
+    }
+    *command = get_le32(header + 0);
+    *arg0 = get_le32(header + 4);
+    *arg1 = get_le32(header + 8);
+    *len = get_le32(header + 12);
+    if ((*command ^ 0xFFFFFFFFu) != get_le32(header + 20)) return -1;
+    if (*len > ADB_MAXDATA * 2) return -1;
+    *payload = NULL;
+    if (*len > 0) {
+        uint8_t *buffer = (uint8_t *) malloc(*len);
+        if (buffer == NULL) return -1;
+        size_t got = 0;
+        while (got < *len) {
+            int n;
+            if (ssl != NULL) {
+                n = SSL_read(ssl, buffer + got, (int) (*len - got));
+            } else {
+                n = (int) recv(fd, buffer + got, *len - got, 0);
+            }
+            if (n <= 0) {
+                free(buffer);
+                return -1;
+            }
+            got += (size_t) n;
+        }
+        *payload = buffer;
+    }
+    return 0;
+}
+
+/** 跑一条命令，输出写进 out（截断），返回 0 成功。 */
+static int do_shell(const char *host, int port, const char *command,
+                    const uint8_t *cert_der, size_t cert_len,
+                    const uint8_t *key_pkcs8, size_t key_len,
+                    char *out, size_t out_len, char *err, size_t errlen) {
+    int result = -1;
+    int fd = -1;
+    SSL_CTX *ctx = NULL;
+    SSL *ssl = NULL;
+    EVP_PKEY *pkey = NULL;
+    X509 *cert = NULL;
+    uint8_t *payload = NULL;
+    size_t written = 0;
+
+    do {
+        ctx = SSL_CTX_new(TLS_method());
+        if (ctx == NULL) {
+            set_error(err, errlen, "创建 TLS 上下文失败");
+            break;
+        }
+        SSL_CTX_set_min_proto_version(ctx, TLS1_3_VERSION);
+        SSL_CTX_set_verify(ctx, SSL_VERIFY_NONE, NULL);
+        const uint8_t *p = key_pkcs8;
+        pkey = d2i_AutoPrivateKey(NULL, &p, (long) key_len);
+        const uint8_t *c = cert_der;
+        cert = d2i_X509(NULL, &c, (long) cert_len);
+        if (pkey == NULL || cert == NULL) {
+            set_error(err, errlen, "钥匙或证书解析失败");
+            break;
+        }
+        SSL_CTX_use_certificate(ctx, cert);
+        SSL_CTX_use_PrivateKey(ctx, pkey);
+
+        fd = tcp_connect(host, port, 6000, err, errlen);
+        if (fd < 0) break;
+        struct timeval tv;
+        tv.tv_sec = 10;
+        tv.tv_usec = 0;
+        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+
+        const char banner[] = "host::";
+        if (packet_write(NULL, fd, A_CNXN, A_VERSION, ADB_MAXDATA, banner, sizeof(banner)) != 0) {
+            set_error(err, errlen, "发送 CNXN 失败");
+            break;
+        }
+
+        uint32_t cmd = 0, a0 = 0, a1 = 0, len = 0;
+        if (packet_read(NULL, fd, &cmd, &a0, &a1, &payload, &len) != 0) {
+            set_error(err, errlen, "连上后没收到 STLS（对方不像是无线调试的连接口）");
+            break;
+        }
+        free(payload);
+        payload = NULL;
+        if (cmd != A_STLS) {
+            set_error(err, errlen, "期待 STLS，收到命令 0x%08x", cmd);
+            break;
+        }
+        if (packet_write(NULL, fd, A_STLS, A_VERSION, 0, NULL, 0) != 0) {
+            set_error(err, errlen, "回应 STLS 失败");
+            break;
+        }
+
+        ssl = SSL_new(ctx);
+        SSL_set_fd(ssl, fd);
+        if (SSL_connect(ssl) != 1) {
+            unsigned long e = ERR_get_error();
+            char reason[128] = "";
+            if (e != 0) ERR_error_string_n(e, reason, sizeof(reason));
+            set_error(err, errlen, "TLS 握手失败%s%s", reason[0] ? "：" : "", reason);
+            break;
+        }
+
+        if (packet_write(ssl, fd, A_CNXN, A_VERSION, ADB_MAXDATA, banner, sizeof(banner)) != 0) {
+            set_error(err, errlen, "TLS 里再发 CNXN 失败");
+            break;
+        }
+
+        // 认证：对方给 token，我们用钥匙签
+        int authed = 0;
+        for (int round = 0; round < 4 && !authed; round++) {
+            if (packet_read(ssl, fd, &cmd, &a0, &a1, &payload, &len) != 0) {
+                set_error(err, errlen, "等认证消息失败");
+                break;
+            }
+            if (cmd == A_AUTH && a0 == AUTH_TOKEN) {
+                if (len != 20) {
+                    free(payload);
+                    payload = NULL;
+                    set_error(err, errlen, "认证 token 长度不对（%u）", len);
+                    break;
+                }
+                const RSA *rsa = EVP_PKEY_get0_RSA(pkey);
+                uint8_t signature[512];
+                unsigned int sig_len = 0;
+                if (rsa == NULL || !RSA_sign(NID_sha1, payload, len, signature, &sig_len, (RSA *) rsa)) {
+                    free(payload);
+                    payload = NULL;
+                    set_error(err, errlen, "签名 token 失败");
+                    break;
+                }
+                free(payload);
+                payload = NULL;
+                if (packet_write(ssl, fd, A_AUTH, AUTH_SIGNATURE, 0, signature, sig_len) != 0) {
+                    set_error(err, errlen, "发送签名失败");
+                    break;
+                }
+                continue;
+            }
+            if (cmd == A_CNXN) {
+                authed = 1;
+                free(payload);
+                payload = NULL;
+                break;
+            }
+            free(payload);
+            payload = NULL;
+        }
+        if (!authed) {
+            if (err[0] == '\0') set_error(err, errlen, "认证没有通过");
+            break;
+        }
+
+        // 打开一个 shell 流
+        char destination[512];
+        snprintf(destination, sizeof(destination), "shell:%s", command);
+        uint32_t local_id = 1;
+        if (packet_write(ssl, fd, A_OPEN, local_id, 0, destination, (uint32_t) strlen(destination) + 1) != 0) {
+            set_error(err, errlen, "打开 shell 失败");
+            break;
+        }
+
+        out[0] = '\0';
+        for (;;) {
+            if (packet_read(ssl, fd, &cmd, &a0, &a1, &payload, &len) != 0) {
+                set_error(err, errlen, "读命令输出失败");
+                break;
+            }
+            if (cmd == A_WRTE) {
+                for (uint32_t i = 0; i < len && written + 1 < out_len; i++) {
+                    out[written++] = (char) payload[i];
+                }
+                out[written] = '\0';
+                free(payload);
+                payload = NULL;
+                packet_write(ssl, fd, A_OKAY, a1, a0, NULL, 0);
+            } else if (cmd == A_CLSE) {
+                free(payload);
+                payload = NULL;
+                result = 0;
+                break;
+            } else {
+                free(payload);
+                payload = NULL;
+            }
+        }
+    } while (0);
+
+    if (payload != NULL) free(payload);
+    if (ssl != NULL) {
+        SSL_shutdown(ssl);
+        SSL_free(ssl);
+    }
+    if (fd >= 0) close(fd);
+    if (ctx != NULL) SSL_CTX_free(ctx);
+    if (cert != NULL) X509_free(cert);
+    if (pkey != NULL) EVP_PKEY_free(pkey);
+    return result;
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_dsh_miniremote_AdbShell_nativeShell(JNIEnv *env, jclass clazz,
+                                             jstring host, jint port, jstring command,
+                                             jbyteArray cert, jbyteArray key) {
+    char err[256];
+    err[0] = '\0';
+    char *out = (char *) calloc(1, 64 * 1024);
+    if (out == NULL) return (*env)->NewStringUTF(env, "{\"ok\":false,\"error\":\"内存不足\"}");
+    const char *host_text = (*env)->GetStringUTFChars(env, host, NULL);
+    const char *command_text = (*env)->GetStringUTFChars(env, command, NULL);
+    jsize cert_len = (*env)->GetArrayLength(env, cert);
+    jsize key_len = (*env)->GetArrayLength(env, key);
+    jbyte *cert_bytes = (*env)->GetByteArrayElements(env, cert, NULL);
+    jbyte *key_bytes = (*env)->GetByteArrayElements(env, key, NULL);
+
+    int rc = do_shell(host_text, (int) port, command_text,
+                      (const uint8_t *) cert_bytes, (size_t) cert_len,
+                      (const uint8_t *) key_bytes, (size_t) key_len,
+                      out, 64 * 1024, err, sizeof(err));
+
+    (*env)->ReleaseByteArrayElements(env, cert, cert_bytes, JNI_ABORT);
+    (*env)->ReleaseByteArrayElements(env, key, key_bytes, JNI_ABORT);
+    (*env)->ReleaseStringUTFChars(env, host, host_text);
+    (*env)->ReleaseStringUTFChars(env, command, command_text);
+
+    // 结果拼成 JSON；输出里的引号、换行要转义，否则前端解不开。
+    size_t cap = 64 * 1024 * 2 + 512;
+    char *json = (char *) malloc(cap);
+    if (json == NULL) {
+        free(out);
+        return (*env)->NewStringUTF(env, "{\"ok\":false,\"error\":\"内存不足\"}");
+    }
+    size_t at = 0;
+    at += (size_t) snprintf(json + at, cap - at, "{\"ok\":%s,\"output\":\"", rc == 0 ? "true" : "false");
+    if (at >= cap) at = cap - 1;
+    for (size_t i = 0; out[i] != '\0' && at + 8 < cap; i++) {
+        unsigned char ch = (unsigned char) out[i];
+        if (ch == '"' || ch == '\\') {
+            json[at++] = '\\';
+            json[at++] = (char) ch;
+        } else if (ch == '\n') {
+            json[at++] = '\\';
+            json[at++] = 'n';
+        } else if (ch == '\r') {
+            json[at++] = '\\';
+            json[at++] = 'r';
+        } else if (ch < 0x20) {
+            at += (size_t) snprintf(json + at, cap - at, "\\u%04x", ch);
+            if (at >= cap) at = cap - 1;
+        } else {
+            json[at++] = (char) ch;
+        }
+    }
+    if (rc == 0) {
+        at += (size_t) snprintf(json + at, cap - at, "\"}");
+    } else {
+        at += (size_t) snprintf(json + at, cap - at, "\",\"error\":\"%s\"}", err[0] ? err : "命令没跑成功");
+    }
+    if (at >= cap) at = cap - 1;
+    json[at < cap ? at : cap - 1] = '\0';
+    jstring result = (*env)->NewStringUTF(env, json);
+    free(json);
+    free(out);
+    return result;
+}

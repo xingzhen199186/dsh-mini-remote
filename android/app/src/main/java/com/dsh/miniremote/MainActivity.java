@@ -867,6 +867,7 @@ public final class MainActivity extends Activity {
             + "<div class=\"label\">免 Termux 通道（实验）</div>"
             + "<div id=\"miniAdbState\" class=\"hint\">点右边，然后去开「使用配对码配对设备」；App 会在后台等</div>"
             + "</div><div style=\"flex:0 0 auto\">"
+            + "<button class=\"btn\" id=\"miniAdbRun\" style=\"margin-left:6px\">试跑 id</button>"
             + "<button class=\"btn\" id=\"miniAdbGo\">准备配对</button></div>';"
             + "checkRow.insertAdjacentElement('afterend',adbRow);"
             + "var adbGo=document.getElementById('miniAdbGo');"
@@ -891,6 +892,24 @@ public final class MainActivity extends Activity {
             + "}"
             + "},1000);"
             + "},30);"
+            + "});"
+            // 第三步：拿配对好的钥匙跑一条命令，输出直接显示在这一行。
+            + "var adbRun=document.getElementById('miniAdbRun');"
+            + "if(adbRun)adbRun.addEventListener('click',function(){"
+            + "var state=document.getElementById('miniAdbState');"
+            + "state.textContent='正在连调试口并跑 id……';"
+            + "try{window.MiniProbe.runShell('id');}catch(e){state.textContent='起不来：'+e;return;}"
+            + "var timer=setInterval(function(){"
+            + "var r={};try{r=JSON.parse(window.MiniProbe.shellState()||'{}');}catch(e){return;}"
+            + "if(r.running)return;"
+            + "clearInterval(timer);"
+            + "if(r.ok){"
+            + "var text=(r.output||'').replace(/\\s+/g,' ').trim();"
+            + "state.textContent='命令跑通了（端口 '+r.port+'）：'+text.slice(0,120);"
+            + "}else{"
+            + "state.textContent='没跑通：'+(r.error||'原因未知');"
+            + "}"
+            + "},1000);"
             + "});"
             + "}"
             + "if(typeof paintTermux==='function')paintTermux();"
@@ -2394,6 +2413,8 @@ public final class MainActivity extends Activity {
      *
      * **没有任何远程入口**：每一次截图/点击都必须是用户在设置页上亲手点的。
      */
+    private static volatile String shellResult = "{\"running\":false}";
+
     private final class ProbeBridge {
         private Class<?> serviceClass() {
             try {
@@ -2458,6 +2479,47 @@ public final class MainActivity extends Activity {
                 }
             }
             return out.toString();
+        }
+
+        /** 第三步的结果（界面每秒来问一次）。 */
+        @android.webkit.JavascriptInterface
+        public String shellState() {
+            return shellResult;
+        }
+
+        /**
+         * 自连 ADB 第三步：用配对好的钥匙跑一条命令（2026-11-15）。
+         * 放后台线程：握手 + 认证可能要几秒，不能卡住页面。
+         */
+        @android.webkit.JavascriptInterface
+        public void runShell(final String command) {
+            shellResult = "{\"running\":true,\"output\":\"\",\"error\":\"连着呢……\"}";
+            new Thread(() -> {
+                org.json.JSONObject out = new org.json.JSONObject();
+                try {
+                    AdbDiscover.Endpoint endpoint = AdbShell.connectEndpoint(MainActivity.this);
+                    if (endpoint == null) {
+                        out.put("running", false);
+                        out.put("ok", false);
+                        out.put("error", "没找到无线调试的连接口：确认无线调试开着");
+                    } else {
+                        AdbShell.Result result = AdbShell.run(MainActivity.this, endpoint.host, endpoint.port, command);
+                        out.put("running", false);
+                        out.put("ok", result.ok);
+                        out.put("port", endpoint.port);
+                        out.put("output", result.output);
+                        out.put("error", result.error);
+                    }
+                } catch (Exception err) {
+                    try {
+                        out.put("running", false);
+                        out.put("ok", false);
+                        out.put("error", err.getMessage() == null ? "内部错误" : err.getMessage());
+                    } catch (Exception ignored) {
+                    }
+                }
+                shellResult = out.toString();
+            }, "mini-adb-shell").start();
         }
 
         /**
