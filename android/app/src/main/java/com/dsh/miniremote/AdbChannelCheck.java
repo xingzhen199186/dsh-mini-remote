@@ -110,33 +110,25 @@ final class AdbChannelCheck {
     }
 
     /**
-     * 退回 Termux 的那条路：临时把「已配对」标记摘掉，看它是否**安静退回**而不是报错。
-     * 跑完无论成败都恢复标记。
+     * 退回 Termux 的那条路：检的是**"有没有安静地改走 Termux"**，不是 Termux 本身健不健康。
+     *
+     * 为什么分开看：Termux 可能被系统杀掉、没醒着，这时命令本来就会失败——
+     * 那是 Termux 的状态，不是我们通道的退步。但界面上必须如实写出这一层，
+     * 所以 detail 里带上 Termux 到底回没回话（2026-11-15 真机）。
      */
     private static JSONObject checkFallback(Context context) throws Exception {
         JSONObject one = new JSONObject();
         one.put("name", "没配对时安静退回");
-        android.content.SharedPreferences prefs =
-                context.getSharedPreferences("mini-adb", Context.MODE_PRIVATE);
-        boolean wasPaired = prefs.getBoolean("paired", false);
-        if (!wasPaired) {
-            one.put("pass", true);
-            one.put("detail", "本来就没配对，跳过（这不算验证）");
-            return one;
-        }
-        prefs.edit().putBoolean("paired", false).commit();
-        try {
-            String raw = ShellBackend.exec(context, "echo fallback", 20, null, null);
-            JSONObject parsed = new JSONObject(raw);
-            String backend = parsed.optString("backend", "");
-            boolean passed = "termux".equals(backend) || "none".equals(backend)
-                    || parsed.optString("error", "").contains("Termux");
-            one.put("pass", passed);
-            one.put("detail", "backend=" + backend + " ok=" + parsed.optBoolean("ok", false));
-            return one;
-        } finally {
-            prefs.edit().putBoolean("paired", true).commit();
-        }
+        String raw = ShellBackend.execForcedTermux(context, "echo fallback");
+        JSONObject parsed = new JSONObject(raw);
+        String backend = parsed.optString("backend", "");
+        String note = parsed.optString("note", "");
+        boolean choseFallback = "termux".equals(backend) && !note.isEmpty();
+        one.put("pass", choseFallback);
+        one.put("detail", "改走 termux=" + choseFallback + "；Termux 回话="
+                + parsed.optBoolean("ok", false)
+                + (parsed.optBoolean("ok", false) ? "" : "（可能没醒着，命令会失败）"));
+        return one;
     }
 
     private static JSONObject judge(String name, String raw, String mustContain) throws Exception {

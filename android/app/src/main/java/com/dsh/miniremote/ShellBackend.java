@@ -25,6 +25,14 @@ final class ShellBackend {
     }
 
     /** 配对成功后调用：记住"配过了"，下次直接试自连。 */
+    /** 自检/诊断要把标记恢复成"已配对"时用（不再靠写偏好文件猜）。 */
+    static void markPairedOnly(Context context) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .edit()
+                .putBoolean(KEY_PAIRED, true)
+                .commit();
+    }
+
     static void markPaired(Context context, String host, int port) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
                 .edit()
@@ -37,6 +45,13 @@ final class ShellBackend {
     static boolean paired(Context context) {
         return context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
                 .getBoolean(KEY_PAIRED, false);
+    }
+
+    /** 最近一次自连失败的原因（给界面翻成"下一步怎么做"用）。 */
+    private static volatile String lastAdbError = "";
+
+    static String lastAdbError() {
+        return lastAdbError;
     }
 
     // 「现在到底走不走得通」只能靠真的连一次——但这件不能放在界面线程。
@@ -65,6 +80,18 @@ final class ShellBackend {
     }
 
     /**
+     * 只给自检用的"强制走 Termux"：不碰配对标记，避免测试把用户状态改坏。
+     *
+     * 为什么不用"临时摘掉 paired 再恢复"：那样一旦中途出异常或进程被杀，
+     * 就把用户真实的配对状态弄丢了（2026-11-15 自检踩到的）。
+     */
+    static String execForcedTermux(Context context, String command) {
+        String termux = TermuxRun.exec(context, command, 20, null, null);
+        return termux.replaceFirst("\\}\s*$",
+                ",\"backend\":\"termux\",\"note\":\"自检：强制走 Termux 以验证兜底\"}");
+    }
+
+    /**
      * 跑一条命令，返回与 TermuxRun 相同的 JSON 形状：{ok, stdout, stderr, exitCode}。
      */
     static String exec(Context context, String command, int timeoutSeconds, String workdir, String stdin) {
@@ -83,7 +110,13 @@ final class ShellBackend {
         }
         // 退回 Termux：如果这就是原来的行为，用户不该察觉差别。
         String termux = TermuxRun.exec(context, command, timeoutSeconds, workdir, stdin);
-        if (reasonToSkip.isEmpty()) return termux;
+        if (reasonToSkip.isEmpty()) {
+            // 自连试过但失败：把原因翻成"下一步怎么做"，别只丢一句英文（2026-11-15）。
+            String hint = ShellErrors.hintFor(lastAdbError);
+            String extra = ShellErrors.needsRepair(lastAdbError) ? ",\"needsRepair\":true" : "";
+            return termux.replaceFirst("\\}\\s*$",
+                    ",\"backend\":\"termux\",\"note\":\"" + hint + "\"" + extra + "}");
+        }
         return termux.replaceFirst("\\}\\s*$",
                 ",\"backend\":\"termux\",\"note\":\"" + reasonToSkip + "，走的是 Termux\"}");
     }
@@ -105,11 +138,18 @@ final class ShellBackend {
             }
         }
         if (result == null || !result.ok) {
+            if (result != null && result.error != null) lastAdbError = result.error;
             // 端口每次都可能变：缓存那次失败就现扫一次。
             AdbDiscover.Endpoint fresh = AdbShell.connectEndpoint(context);
-            if (fresh == null) return null;
+            if (fresh == null) {
+                if (lastAdbError.isEmpty()) lastAdbError = "没找到无线调试的连接口";
+                return null;
+            }
             result = AdbShell.execReusing(context, fresh.host, fresh.port, effective);
-            if (!result.ok) return null;
+            if (!result.ok) {
+                if (result.error != null) lastAdbError = result.error;
+                return null;
+            }
             rememberSuccess(context, fresh);
         }
         StringBuilder json = new StringBuilder();

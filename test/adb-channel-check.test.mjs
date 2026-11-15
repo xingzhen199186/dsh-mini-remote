@@ -35,3 +35,14 @@ test('广播入口带权限保护，普通 App 调不动', () => {
   const manifest = readFileSync(new URL('../android/app/src/main/AndroidManifest.xml', import.meta.url), 'utf8')
   assert.match(manifest, /android:permission="android\.permission\.DUMP"/, '只给 adb 身份用')
 })
+
+test('脚本会先删上一轮结果，避免验到上一次的绿', () => {
+  const text = script()
+  assert.match(text, /rm', '-f', RESULT|rm -f/, '触发前必须清掉旧结果文件')
+})
+
+test('退回 Termux 那一项验的是"选择"而不是 Termux 的健康', () => {
+  const text = check()
+  assert.match(text, /choseFallback|改走 termux/, '要断言是否选择了退回')
+  assert.match(text, /Termux 回话|回话=/, 'Termux 醒没醒要如实写出来，不能含混')
+})

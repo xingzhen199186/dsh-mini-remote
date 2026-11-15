@@ -1011,7 +1011,12 @@ static AdbSession *session_open(const char *host, int port,
     session->ssl = SSL_new(session->ctx);
     SSL_set_fd(session->ssl, session->fd);
     if (SSL_connect(session->ssl) != 1) {
-        set_error(err, errlen, "TLS 握手失败");
+        // 把告警原因带上：手机不认钥匙时会回 CERTIFICATE_UNKNOWN，
+        // 这是一句能指导用户"去重新配对"的关键信息（2026-11-15）。
+        unsigned long e = ERR_get_error();
+        char reason[160] = "";
+        if (e != 0) ERR_error_string_n(e, reason, sizeof(reason));
+        set_error(err, errlen, "TLS 握手失败%s%s", reason[0] != '\0' ? "：" : "", reason);
         session_release(session);
         return NULL;
     }

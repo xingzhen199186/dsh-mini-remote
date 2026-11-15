@@ -38,6 +38,9 @@ if (!existsSync(ADB)) fail(`找不到 adb：${ADB}（可用环境变量 ADB 指�
 const devices = adb('devices').out.split('\n').filter((line) => line.includes('\tdevice'))
 if (devices.length === 0) fail('没有在线的手机：先开无线调试，或插上数据线')
 
+// 先删掉上一轮的结果：否则一看到旧文件就返回，验的是上一次的绿（2026-11-15 踩过）。
+adb('shell', 'run-as', PKG, 'rm', '-f', RESULT)
+
 console.log('① 让手机自己跑一遍检查……')
 const broadcast = adb('shell', 'am', 'broadcast', '-a', ACTION, '-n', COMPONENT)
 if (!broadcast.out.includes('Broadcast completed')) {
