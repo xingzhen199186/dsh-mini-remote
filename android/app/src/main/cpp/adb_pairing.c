@@ -176,8 +176,12 @@ static int build_android_pubkey(EVP_PKEY *key, uint8_t out[524]) {
     if (n == NULL || e == NULL) return -1;
 
     memset(out, 0, 524);
-    uint32_t total = 524;
-    memcpy(out, &total, 4);
+    // **第一个字段是"模数的字数"，不是总字节数**（2026-11-15 真机踩到的）：
+    // AOSP android_pubkey.cpp 里 checks `modulus_size_words != ANDROID_PUBKEY_MODULUS_SIZE_WORDS`，
+    // 也就是 256/4 = 64。写成 524 的话解码直接失败，手机就不会把我们的钥匙存下来，
+    // 配对看起来"成功"，但之后连上来只会收到 CERTIFICATE_UNKNOWN。
+    uint32_t modulus_words = 64;
+    memcpy(out, &modulus_words, 4);
     // n0inv = -1 / n mod 2^32
     BN_CTX *ctx = BN_CTX_new();
     BIGNUM *mod = BN_new();
@@ -201,9 +205,10 @@ static int build_android_pubkey(EVP_PKEY *key, uint8_t out[524]) {
         if (!BN_set_bit(big_r, 4096)) break;
         if (!BN_mod(rr, big_r, n, ctx)) break;
         if (BN_bn2lebinpad(rr, out + 8 + 256, 256) != 256) break;
-        // exponent
-        if (!BN_bn2lebinpad(e, (uint8_t *) &total, 4)) break;
-        memcpy(out + 8 + 512, &total, 4);
+        // exponent（小端 4 字节）
+        uint32_t exponent = 0;
+        if (!BN_bn2lebinpad(e, (uint8_t *) &exponent, 4)) break;
+        memcpy(out + 8 + 512, &exponent, 4);
         ok = 1;
     } while (0);
     BN_clear_free(mod);
