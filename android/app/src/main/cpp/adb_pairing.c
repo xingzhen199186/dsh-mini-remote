@@ -104,20 +104,23 @@ static int tcp_connect(const char *host, int port, int timeout_ms, char *err, si
     return fd;
 }
 
-static int write_all(int fd, const uint8_t *data, size_t len) {
+// **握手之后必须走 TLS**：直接用 send/recv 会写出明文垃圾，
+// 而读回来的前几个字节是 TLS 记录头（0x17 就是"应用数据"），
+// 上一版就是栽在这里（2026-11-15 真机：首字节 0x17）。
+static int write_all(SSL *ssl, const uint8_t *data, size_t len) {
     size_t done = 0;
     while (done < len) {
-        ssize_t n = send(fd, data + done, len - done, 0);
+        int n = SSL_write(ssl, data + done, (int) (len - done));
         if (n <= 0) return -1;
         done += (size_t) n;
     }
     return 0;
 }
 
-static int read_all(int fd, uint8_t *data, size_t len) {
+static int read_all(SSL *ssl, uint8_t *data, size_t len) {
     size_t done = 0;
     while (done < len) {
-        ssize_t n = recv(fd, data + done, len - done, 0);
+        int n = SSL_read(ssl, data + done, (int) (len - done));
         if (n <= 0) return -1;
         done += (size_t) n;
     }
@@ -135,26 +138,26 @@ static uint32_t get_be32(const uint8_t *in) {
     return ((uint32_t) in[0] << 24) | ((uint32_t) in[1] << 16) | ((uint32_t) in[2] << 8) | (uint32_t) in[3];
 }
 
-static int send_frame(int fd, int type, const uint8_t *payload, size_t len) {
+static int send_frame(SSL *ssl, int type, const uint8_t *payload, size_t len) {
     uint8_t header[HEADER_SIZE];
     header[0] = PAIRING_VERSION;
     header[1] = (uint8_t) type;
     put_be32(header + 2, (uint32_t) len);
-    if (write_all(fd, header, sizeof(header)) != 0) return -1;
-    if (len > 0 && write_all(fd, payload, len) != 0) return -1;
+    if (write_all(ssl, header, sizeof(header)) != 0) return -1;
+    if (len > 0 && write_all(ssl, payload, len) != 0) return -1;
     return 0;
 }
 
-static int read_frame(int fd, int *type, uint8_t *payload, size_t cap, size_t *len,
+static int read_frame(SSL *ssl, int *type, uint8_t *payload, size_t cap, size_t *len,
                       uint8_t *first_byte) {
     uint8_t header[HEADER_SIZE];
-    if (read_all(fd, header, sizeof(header)) != 0) return -1;
+    if (read_all(ssl, header, sizeof(header)) != 0) return -1;
     if (first_byte != NULL) *first_byte = header[0];
     if (header[0] != PAIRING_VERSION) return -2;
     *type = header[1];
     uint32_t size = get_be32(header + 2);
     if (size > cap) return -3;
-    if (size > 0 && read_all(fd, payload, size) != 0) return -1;
+    if (size > 0 && read_all(ssl, payload, size) != 0) return -1;
     *len = size;
     return 0;
 }
@@ -299,7 +302,6 @@ static int do_pair(const char *host, int port, const char *code,
     SPAKE2_CTX *spake = NULL;
     EVP_PKEY *pkey = NULL;
     X509 *cert = NULL;
-    uint8_t *spake_msg = NULL;
     uint8_t *peer_msg = NULL;
     uint8_t *peer_info = NULL;
     uint8_t *plain = NULL;
@@ -382,7 +384,7 @@ static int do_pair(const char *host, int port, const char *code,
             set_error(err, errlen, "生成认证消息失败");
             break;
         }
-        if (send_frame(fd, TYPE_SPAKE2, out_msg, out_len) != 0) {
+        if (send_frame(ssl, TYPE_SPAKE2, out_msg, out_len) != 0) {
             set_error(err, errlen, "发送认证消息失败（长度 %zu）", out_len);
             break;
         }
@@ -395,7 +397,7 @@ static int do_pair(const char *host, int port, const char *code,
         int type = -1;
         size_t peer_len = 0;
         uint8_t first_byte = 0;
-        int rf = read_frame(fd, &type, peer_msg, PEER_INFO_SIZE, &peer_len, &first_byte);
+        int rf = read_frame(ssl, &type, peer_msg, PEER_INFO_SIZE, &peer_len, &first_byte);
         if (rf != 0) {
             // 首字节也是证据：0x43（'C'）说明对面在说 adb 的 CNXN——
             // 也就是我们连到的是**连接口**，不是配对口。
@@ -457,7 +459,7 @@ static int do_pair(const char *host, int port, const char *code,
             set_error(err, errlen, "加密公钥失败");
             break;
         }
-        if (send_frame(fd, TYPE_PEER_INFO, plain, sealed_len) != 0) {
+        if (send_frame(ssl, TYPE_PEER_INFO, plain, sealed_len) != 0) {
             set_error(err, errlen, "发送公钥失败");
             break;
         }
@@ -471,7 +473,7 @@ static int do_pair(const char *host, int port, const char *code,
         }
         int peer_type = -1;
         size_t incoming_len = 0;
-        rf = read_frame(fd, &peer_type, incoming, PEER_INFO_SIZE + 64, &incoming_len, NULL);
+        rf = read_frame(ssl, &peer_type, incoming, PEER_INFO_SIZE + 64, &incoming_len, NULL);
         if (rf != 0 || peer_type != TYPE_PEER_INFO) {
             free(incoming);
             set_error(err, errlen, "对方没有回公钥（配对未完成）");
