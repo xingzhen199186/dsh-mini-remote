@@ -145,8 +145,17 @@ final class AdbPairingWatcher {
             // 已配对时告诉界面：现在扫不扫得到连接口（无线调试开没开）。
             if (appContext != null && ShellBackend.paired(appContext)) {
                 out.put("paired", true);
-                AdbDiscover.Endpoint connect = AdbShell.connectEndpoint(appContext);
-                out.put("connectPort", connect == null ? 0 : connect.port);
+                // **只看现有扫描结果，绝不在这里重扫**（2026-11-15）：
+                // 界面在配对过程中每秒问一次，而重扫会停掉 mDNS 再重新开始，
+                // 等于反复掐断我们正要找的那个配对端口。
+                int port = 0;
+                for (AdbDiscover.Endpoint one : AdbDiscover.snapshot()) {
+                    if (AdbDiscover.CONNECT.equals(one.type)) {
+                        port = one.port;
+                        break;
+                    }
+                }
+                out.put("connectPort", port);
             }
         } catch (Exception ignored) {
         }
