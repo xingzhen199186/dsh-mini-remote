@@ -77,3 +77,14 @@ test('展开箭头是画出来的 SVG，不是字体里的字符（字符高低�
   assert.match(src, /#miniA11yChev\{[^}]*display:flex/, '箭头那一格要用 flex 居中')
   assert.match(src, /aria-expanded/, '展开状态挂在 aria-expanded 上，CSS 据此旋转')
 })
+
+test('自连 ADB 第二步：钥匙、证书、TLS 探测都在，而且不引第三方加密库', () => {
+  const key = readFileSync(new URL('../android/app/src/main/java/com/dsh/miniremote/AdbKey.java', import.meta.url), 'utf8')
+  assert.match(key, /SHA256withRSA/, '自签证书要用 SHA256withRSA 签')
+  assert.match(key, /CertificateFactory\.getInstance\("X\.509"\)[\s\S]*checkValidity/, '自己拼的证书必须先被系统解析并通过')
+  const tls = readFileSync(new URL('../android/app/src/main/java/com/dsh/miniremote/AdbPairingTls.java', import.meta.url), 'utf8')
+  assert.match(tls, /startHandshake\(\)/, '要真的握手，不是只建 socket')
+  assert.match(tls, /KeyManagerFactory/, '客户端证书必须带上（配对那条 TLS 是双向的）')
+  const gradle = readFileSync(new URL('../android/app/build.gradle.kts', import.meta.url), 'utf8')
+  assert.ok(!/bouncycastle|bctls|bcprov/i.test(gradle), '不要为了生成证书引第三方加密库')
+})

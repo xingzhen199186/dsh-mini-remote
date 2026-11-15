@@ -859,6 +859,27 @@ public final class MainActivity extends Activity {
             + "</div><div style=\"flex:0 0 auto\">"
             + "<button class=\"btn\" id=\"miniCheckGo\">检查</button></div>';"
             + "workRow.insertAdjacentElement('afterend',checkRow);"
+            // 「免 Termux 通道（实验）」：自连 ADB 的那条路，先只暴露"能不能把 TLS 连上"。
+            // 现在是验证阶段，**不做成正式功能**：连上就断，不取任何数据（2026-11-15）。
+            + "var adbRow=document.createElement('div');"
+            + "adbRow.id='miniAdbRow';adbRow.className='row';adbRow.style.marginTop='10px';"
+            + "adbRow.innerHTML='<div style=\"flex:1;min-width:0\">"
+            + "<div class=\"label\">免 Termux 通道（实验）</div>"
+            + "<div id=\"miniAdbState\" class=\"hint\">还没试过；先在开发者选项里点「使用配对码配对设备」</div>"
+            + "</div><div style=\"flex:0 0 auto\">"
+            + "<button class=\"btn\" id=\"miniAdbGo\">试连接</button></div>';"
+            + "checkRow.insertAdjacentElement('afterend',adbRow);"
+            + "var adbGo=document.getElementById('miniAdbGo');"
+            + "if(adbGo)adbGo.addEventListener('click',function(){"
+            + "var state=document.getElementById('miniAdbState');"
+            + "state.textContent='正在连配对端口…';"
+            + "setTimeout(function(){"
+            + "var r={};try{r=JSON.parse(window.MiniProbe.pairingTls()||'{}');}catch(e){r={ok:false,error:'读不到结果'};}"
+            + "state.textContent=r.ok"
+            + "?('已连上：'+r.protocol+'，端口 '+r.port+'（只握手，未配对）')"
+            + ":('没连上：'+(r.error||'原因未知'));"
+            + "},120);"
+            + "});"
             + "}"
             + "if(typeof paintTermux==='function')paintTermux();"
             + "if(typeof paintWork==='function')paintWork();"
@@ -2374,6 +2395,72 @@ public final class MainActivity extends Activity {
         @android.webkit.JavascriptInterface
         public String selfCheck() {
             return SelfCheck.state(MainActivity.this).toString();
+        }
+
+        /**
+         * 自连 ADB：第二步第一层（只在自检页里试一下，先不接进产品流程）。
+         *
+         * 找到配对端口 → 用它自己的钥匙建一条 TLS 1.3 双向连接 → 立刻断开。
+         * 只握手、不发业务包：配对端口是一次性的，乱发半截数据会把配对服务顶掉。
+         */
+        @android.webkit.JavascriptInterface
+        public String pairingTls() {
+            org.json.JSONObject out = new org.json.JSONObject();
+            try {
+                AdbDiscover.start(MainActivity.this);
+                String host = "";
+                int port = 0;
+                for (AdbDiscover.Endpoint one : AdbDiscover.snapshot()) {
+                    if (AdbDiscover.PAIRING.equals(one.type)) {
+                        host = one.host;
+                        port = one.port;
+                        break;
+                    }
+                }
+                if (port == 0) {
+                    out.put("ok", false);
+                    out.put("error", "没找到配对端口：先在开发者选项里点「使用配对码配对设备」");
+                    return out.toString();
+                }
+                AdbPairingTls.Result result = AdbPairingTls.probe(MainActivity.this, host, port, 6000);
+                out.put("ok", result.ok);
+                out.put("port", port);
+                if (result.ok) {
+                    out.put("protocol", result.protocol);
+                    out.put("cipher", result.cipher);
+                    out.put("peer", result.peer);
+                } else {
+                    out.put("error", result.error);
+                }
+            } catch (Exception err) {
+                try {
+                    out.put("ok", false);
+                    out.put("error", err.getMessage() == null ? "内部错误" : err.getMessage());
+                } catch (Exception ignored) {
+                }
+            }
+            return out.toString();
+        }
+
+        /** 自家那把 adb 钥匙的状态（生成没生成、公钥指纹头几位）。 */
+        @android.webkit.JavascriptInterface
+        public String adbKey() {
+            org.json.JSONObject out = new org.json.JSONObject();
+            try {
+                AdbKey.Keys keys = AdbKey.loadOrCreate(MainActivity.this);
+                out.put("ok", keys != null);
+                if (keys != null) {
+                    out.put("fingerprint", AdbKey.fingerprint(keys.cert));
+                    out.put("subject", keys.cert.getSubjectX500Principal().getName());
+                }
+            } catch (Exception err) {
+                try {
+                    out.put("ok", false);
+                    out.put("error", err.getMessage() == null ? "内部错误" : err.getMessage());
+                } catch (Exception ignored) {
+                }
+            }
+            return out.toString();
         }
 
         /** 打开自检对话框：一页看全，三个按钮跳到系统里能改它的地方。 */
