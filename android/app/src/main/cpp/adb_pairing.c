@@ -767,12 +767,25 @@ static int do_shell(const char *host, int port, const char *command,
                       g_read_reason[0] != '\0' ? "：" : "", g_read_reason);
             break;
         }
-        free(payload);
-        payload = NULL;
         if (cmd != A_CNXN) {
+            free(payload);
+            payload = NULL;
             set_error(err, errlen, "期待对方的 CNXN，收到 0x%08x", cmd);
             break;
         }
+        // 对方在 CNXN 里报自己的能力（`features=...`）：其中 delayed_ack 决定了
+        // OPEN/WRTE 里 arg1 怎么填，填错会被当成非法流直接关掉（2026-11-15 真机）。
+        int delayed_ack = 0;
+        if (payload != NULL && len > 0) {
+            char *text = (char *) calloc(1, len + 1);
+            if (text != NULL) {
+                memcpy(text, payload, len);
+                if (strstr(text, "delayed_ack") != NULL) delayed_ack = 1;
+                free(text);
+            }
+        }
+        free(payload);
+        payload = NULL;
         if (packet_write(ssl, fd, A_CNXN, A_VERSION, ADB_MAXDATA, banner, sizeof(banner)) != 0) {
             set_error(err, errlen, "回发 CNXN 失败（ssl=%d errno=%d）",
                       SSL_get_error(ssl, -1), errno);
@@ -782,20 +795,24 @@ static int do_shell(const char *host, int port, const char *command,
         // 用证书认证过的连接，adbd 通常**不会再发 AUTH**：
         // 所以这里只等一小会儿，没消息就直接往下走；真给了 token 就签。
         struct timeval short_wait;
-        short_wait.tv_sec = 2;
+        short_wait.tv_sec = 8;   // 等 AUTH 的窗口：太短会错过对方刚发来的 token
         short_wait.tv_usec = 0;
         setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &short_wait, sizeof(short_wait));
 
         int authed = 0;
         for (int round = 0; round < 4 && !authed; round++) {
             if (packet_read(ssl, fd, &cmd, &a0, &a1, &payload, &len) != 0) {
-                int ssl_err = SSL_get_error(ssl, -1);
-                if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                    // 没有 AUTH，说明证书认证已经够了，直接往下走。
+                // 读超时就是"对方没有 AUTH 要说"：证书认证已经够了，直接往下走。
+                // ssl=2 是 SSL_ERROR_WANT_READ（阻塞读没数据），errno 可能是
+                // EAGAIN(11)/EWOULDBLOCK/EINTR(4)/ETIMEDOUT(110)。
+                if (g_read_ssl_error == SSL_ERROR_WANT_READ ||
+                    g_read_errno == EAGAIN || g_read_errno == EWOULDBLOCK ||
+                    g_read_errno == EINTR || g_read_errno == ETIMEDOUT) {
                     authed = 1;
                     break;
                 }
-                set_error(err, errlen, "等认证消息失败（ssl=%d errno=%d）", ssl_err, errno);
+                set_error(err, errlen, "等认证消息失败v7（ssl=%d errno=%d）",
+                          g_read_ssl_error, g_read_errno);
                 break;
             }
             if (cmd == A_AUTH && a0 == AUTH_TOKEN) {
@@ -844,7 +861,11 @@ static int do_shell(const char *host, int port, const char *command,
         char destination[512];
         snprintf(destination, sizeof(destination), "shell:%s", command);
         uint32_t local_id = 1;
-        if (packet_write(ssl, fd, A_OPEN, local_id, 0, destination, (uint32_t) strlen(destination) + 1) != 0) {
+        // adbd 是按**我们**的 banner 判断 delayed_ack 的（我们没报能力＝不支持），
+        // 所以这里固定 0；按对方能力算会正好反着来。
+        (void) delayed_ack;
+        if (packet_write(ssl, fd, A_OPEN, local_id, 0, destination,
+                         (uint32_t) strlen(destination) + 1) != 0) {
             set_error(err, errlen, "打开 shell 失败");
             break;
         }
@@ -852,8 +873,16 @@ static int do_shell(const char *host, int port, const char *command,
         out[0] = '\0';
         for (;;) {
             if (packet_read(ssl, fd, &cmd, &a0, &a1, &payload, &len) != 0) {
-                set_error(err, errlen, "读命令输出失败");
+                set_error(err, errlen, "读命令输出失败v7（已收 %zu 字节，ssl=%d errno=%d%s%s）",
+                          written, g_read_ssl_error, g_read_errno,
+                          g_read_reason[0] != '\0' ? "：" : "", g_read_reason);
                 break;
+            }
+            if (cmd == A_OKAY && written == 0) {
+                // 只是流建立确认，继续读输出。
+                free(payload);
+                payload = NULL;
+                continue;
             }
             if (cmd == A_WRTE) {
                 for (uint32_t i = 0; i < len && written + 1 < out_len; i++) {

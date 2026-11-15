@@ -14,9 +14,34 @@ import android.os.Bundle;
  */
 public final class AdbPairingReceiver extends BroadcastReceiver {
 
+    /** 调试用的第二条入口：让 adb 身份直接触发一次 shell 试跑，结果写文件。 */
+    static final String ACTION_RUN_SHELL = "com.dsh.miniremote.RUN_SHELL";
+
     @Override
     public void onReceive(Context context, Intent intent) {
         if (intent == null) return;
+        if (ACTION_RUN_SHELL.equals(intent.getAction())) {
+            final String command = intent.getStringExtra("cmd") == null ? "id" : intent.getStringExtra("cmd");
+            final Context app = context.getApplicationContext();
+            new Thread(() -> {
+                AdbDiscover.Endpoint endpoint = AdbShell.connectEndpoint(app);
+                String text;
+                if (endpoint == null) {
+                    text = "{\"ok\":false,\"error\":\"没有连接口\"}";
+                } else {
+                    AdbShell.Result result = AdbShell.run(app, endpoint.host, endpoint.port, command);
+                    text = "{\"ok\":" + result.ok + ",\"port\":" + endpoint.port
+                            + ",\"output\":\"" + result.output.replace("\\", "\\\\").replace("\"", "\\\"")
+                            .replace("\n", "\\n").replace("\r", "") + "\",\"error\":\"" + result.error + "\"}";
+                }
+                try (java.io.FileOutputStream out = new java.io.FileOutputStream(
+                        new java.io.File(app.getFilesDir(), "adb-shell.log"))) {
+                    out.write(text.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                } catch (Exception ignored) {
+                }
+            }, "mini-adb-shell-broadcast").start();
+            return;
+        }
         Bundle results = RemoteInput.getResultsFromIntent(intent);
         CharSequence text = results == null ? null : results.getCharSequence(AdbPairingNotify.EXTRA_TEXT);
         if (text == null) {
