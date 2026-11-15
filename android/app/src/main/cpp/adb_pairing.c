@@ -757,113 +757,38 @@ static int do_shell(const char *host, int port, const char *command,
             break;
         }
 
-        // **TLS 之后是 adbd 先发它的 CNXN**（见 daemon/adb_wifi.cpp 的
-        // adbd_wifi_secure_connect：它调 send_connect 主动发）。
-        // 上一版我们抢着先发，结果被对面直接重置（ssl=5 errno=32）。
+        // **TLS 之后：只读对方的 CNXN，绝对不要再回一个自己的。**
+        //
+        // 依据 AOSP adb.cpp 的 handle_new_connection：收到 CNXN 的第一件事是
+        // handle_offline(t)（把传输置为离线并关掉所有流），然后因为 use_tls 为真，
+        // 会再回一个 A_STLS 要求重新握手。于是我们后面发的 OPEN 撞上
+        // `if (!t->online || arg0 == 0) break;` —— 静默丢弃，既不回 OKAY 也不回 CLSE。
+        //
+        // 无线的 TLS 连接在握手完成的那一刻就已经 online（adbd_wifi_secure_connect
+        // 里 handle_online + send_connect），它发来的 CNXN 是"开始干活吧"，不是"请回一句"。
+        // 另外：证书认证过的连接**没有 AUTH**。
         if (packet_read(ssl, fd, &cmd, &a0, &a1, &payload, &len) != 0) {
-            // TLS 1.3 里服务端是在客户端收工之后才验证书；被拒时客户端只收到一条告警。
-            set_error(err, errlen, "握手后立刻被断开（ssl=%d errno=%d%s%s）",
+            set_error(err, errlen, "握手后没收到对方的 CNXN（ssl=%d errno=%d%s%s）",
                       g_read_ssl_error, g_read_errno,
                       g_read_reason[0] != '\0' ? "：" : "", g_read_reason);
             break;
         }
+        free(payload);
+        payload = NULL;
+        if (cmd == A_STLS) {
+            set_error(err, errlen, "对方又要求握手一次（说明我们多发了 CNXN）");
+            break;
+        }
         if (cmd != A_CNXN) {
-            free(payload);
-            payload = NULL;
             set_error(err, errlen, "期待对方的 CNXN，收到 0x%08x", cmd);
             break;
         }
-        // 对方在 CNXN 里报自己的能力（`features=...`）：其中 delayed_ack 决定了
-        // OPEN/WRTE 里 arg1 怎么填，填错会被当成非法流直接关掉（2026-11-15 真机）。
-        int delayed_ack = 0;
-        if (payload != NULL && len > 0) {
-            char *text = (char *) calloc(1, len + 1);
-            if (text != NULL) {
-                memcpy(text, payload, len);
-                if (strstr(text, "delayed_ack") != NULL) delayed_ack = 1;
-                free(text);
-            }
-        }
-        free(payload);
-        payload = NULL;
-        if (packet_write(ssl, fd, A_CNXN, A_VERSION, ADB_MAXDATA, banner, sizeof(banner)) != 0) {
-            set_error(err, errlen, "回发 CNXN 失败（ssl=%d errno=%d）",
-                      SSL_get_error(ssl, -1), errno);
-            break;
-        }
-
-        // 用证书认证过的连接，adbd 通常**不会再发 AUTH**：
-        // 所以这里只等一小会儿，没消息就直接往下走；真给了 token 就签。
-        struct timeval short_wait;
-        short_wait.tv_sec = 8;   // 等 AUTH 的窗口：太短会错过对方刚发来的 token
-        short_wait.tv_usec = 0;
-        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &short_wait, sizeof(short_wait));
-
-        int authed = 0;
-        for (int round = 0; round < 4 && !authed; round++) {
-            if (packet_read(ssl, fd, &cmd, &a0, &a1, &payload, &len) != 0) {
-                // 读超时就是"对方没有 AUTH 要说"：证书认证已经够了，直接往下走。
-                // ssl=2 是 SSL_ERROR_WANT_READ（阻塞读没数据），errno 可能是
-                // EAGAIN(11)/EWOULDBLOCK/EINTR(4)/ETIMEDOUT(110)。
-                if (g_read_ssl_error == SSL_ERROR_WANT_READ ||
-                    g_read_errno == EAGAIN || g_read_errno == EWOULDBLOCK ||
-                    g_read_errno == EINTR || g_read_errno == ETIMEDOUT) {
-                    authed = 1;
-                    break;
-                }
-                set_error(err, errlen, "等认证消息失败v7（ssl=%d errno=%d）",
-                          g_read_ssl_error, g_read_errno);
-                break;
-            }
-            if (cmd == A_AUTH && a0 == AUTH_TOKEN) {
-                if (len != 20) {
-                    free(payload);
-                    payload = NULL;
-                    set_error(err, errlen, "认证 token 长度不对（%u）", len);
-                    break;
-                }
-                const RSA *rsa = EVP_PKEY_get0_RSA(pkey);
-                uint8_t signature[512];
-                unsigned int sig_len = 0;
-                if (rsa == NULL || !RSA_sign(NID_sha1, payload, len, signature, &sig_len, (RSA *) rsa)) {
-                    free(payload);
-                    payload = NULL;
-                    set_error(err, errlen, "签名 token 失败");
-                    break;
-                }
-                free(payload);
-                payload = NULL;
-                if (packet_write(ssl, fd, A_AUTH, AUTH_SIGNATURE, 0, signature, sig_len) != 0) {
-                    set_error(err, errlen, "发送签名失败");
-                    break;
-                }
-                continue;
-            }
-            if (cmd == A_CNXN) {
-                authed = 1;
-                free(payload);
-                payload = NULL;
-                break;
-            }
-            free(payload);
-            payload = NULL;
-        }
-        if (!authed) {
-            if (err[0] == '\0') set_error(err, errlen, "认证没有通过");
-            break;
-        }
-        struct timeval long_wait;
-        long_wait.tv_sec = 10;
-        long_wait.tv_usec = 0;
-        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &long_wait, sizeof(long_wait));
 
         // 打开一个 shell 流
         char destination[512];
         snprintf(destination, sizeof(destination), "shell:%s", command);
         uint32_t local_id = 1;
-        // adbd 是按**我们**的 banner 判断 delayed_ack 的（我们没报能力＝不支持），
-        // 所以这里固定 0；按对方能力算会正好反着来。
-        (void) delayed_ack;
+        // adbd 是按**我们**的 banner 判断 delayed_ack 的（我们没报能力＝不支持），arg1 固定 0。
         if (packet_write(ssl, fd, A_OPEN, local_id, 0, destination,
                          (uint32_t) strlen(destination) + 1) != 0) {
             set_error(err, errlen, "打开 shell 失败");
