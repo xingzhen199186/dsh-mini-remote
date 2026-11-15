@@ -149,7 +149,11 @@ final class ShellBackend {
         String script = "mkdir -p " + ADB_JOB_DIR + " ; "
                 + "find " + ADB_JOB_DIR + " -name '*.out' -o -name '*.pid' | xargs -r ls -lt 2>/dev/null | awk '{if (systime() - $6 > 86400) print $NF}' | xargs -r rm -f 2>/dev/null ; "
                 + "setsid sh -c '" + dir + command + "' > " + ADB_JOB_DIR + "/" + effectiveId + ".out 2>&1 & "
-                + "echo $! > " + ADB_JOB_DIR + "/" + effectiveId + ".pid ; echo started";
+                + "echo $! > " + ADB_JOB_DIR + "/" + effectiveId + ".pid ; "
+                // **必须留一点时间让它真的脱离会话**（2026-11-15 真机）：连接一断，
+                // adbd 会把这个 shell 的会话收掉；setsid 还没来得及换会话的孩子会被一起带走，
+                // 表现就是"任务起了、文件 0 字节"。等 2 秒再收工，任务就活下来了。
+                + "sleep 2 ; echo started";
         AdbShell.Result result = runAdb(context, script);
         if (result == null || !result.ok) return null;
         return "{\"ok\":true,\"jobId\":\"" + effectiveId + "\",\"backend\":\"adb\"}";
