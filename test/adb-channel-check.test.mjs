@@ -25,9 +25,9 @@ test('App 侧的自检覆盖了五类：身份、中文、管道、后台任务�
   for (const keyword of ['whoami', '中文测试', 'tr a-z A-Z', 'startJob', 'jobOutput', 'stopJob', 'termux']) {
     assert.ok(text.includes(keyword), `缺少检查项：${keyword}`)
   }
-  // 退回那一项必须**临时摘掉配对标记再恢复**，否则验不到兜底。
-  assert.match(text, /putBoolean\("paired", false\)/, '要临时摘掉配对标记')
-  assert.match(text, /putBoolean\("paired", true\)/, '无论如何都要恢复')
+  // 退回那一项**不许再碰配对标记**：曾经"临时摘掉再恢复"，一次异常就把用户真实状态弄丢了。
+  assert.match(text, /execForcedTermux/, '用不碰标记的强制兜底入口')
+  assert.ok(!/putBoolean\("paired"/.test(text), '自检不许改配对标记')
 })
 
 test('广播入口带权限保护，普通 App 调不动', () => {
