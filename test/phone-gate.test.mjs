@@ -68,3 +68,12 @@ test('自连 ADB 第一步：自检页会报告扫到的无线调试口', () => 
   const selfCheck = readFileSync(new URL('../android/app/src/main/java/com/dsh/miniremote/SelfCheck.java', import.meta.url), 'utf8')
   assert.match(selfCheck, /AdbDiscover\.describe\(\)/, '自检页要把结果说出来')
 })
+
+test('展开箭头是画出来的 SVG，不是字体里的字符（字符高低不可控）', () => {
+  const src = readFileSync(new URL('../android/app/src/main/java/com/dsh/miniremote/MainActivity.java', import.meta.url), 'utf8')
+  const chev = src.slice(src.indexOf('miniA11yChev'), src.indexOf('miniA11yChev') + 900)
+  assert.match(chev, /<svg viewBox="0 0 24 24"/, '箭头要用 SVG 画')
+  assert.ok(!/\\u203a|\\u2304/.test(chev), '不许再用 ‹ › 这种字符当箭头')
+  assert.match(src, /#miniA11yChev\{[^}]*display:flex/, '箭头那一格要用 flex 居中')
+  assert.match(src, /\[aria-expanded=\\"true\\"\] #miniA11yChev\{transform:rotate/, '展开时靠旋转，不换字符')
+})

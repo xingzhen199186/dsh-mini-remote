@@ -637,8 +637,11 @@ public final class MainActivity extends Activity {
                 + "#miniA11yState{margin-left:auto !important;margin-right:8px !important;font-size:12px !important;"
                 + "font-weight:400 !important;color:var(--muted,#8a8a8a) !important;white-space:nowrap !important;}"
                 // 箭头单独占一格固定宽度并居中：之前它紧跟在状态文字后面，字数一变位置就漂（2026-11-12 用户反馈）。
-                + "#miniA11yChev{flex:0 0 18px !important;width:18px !important;text-align:center !important;"
-                + "line-height:1 !important;color:var(--muted,#8b93a1) !important;font-size:14px !important;}"
+                + "#miniA11yChev{flex:0 0 18px !important;width:18px !important;height:18px !important;"
+                + "display:flex !important;align-items:center !important;justify-content:center !important;"
+                + "color:var(--muted,#8b93a1) !important;transition:transform .15s !important;}"
+                // 展开时把同一支箭头转 90°：字形要换一个字符的话，高矮又对不上了。
+                + "#miniA11yHead[aria-expanded=\"true\"] #miniA11yChev{transform:rotate(90deg) !important;}"
                 + "#miniA11yBody{margin-top:6px !important;}"
                 + "#miniA11yPath{margin-top:4px !important;}"
                 + "#miniA11yBody .btn{margin-top:8px !important;}"
@@ -792,7 +795,10 @@ public final class MainActivity extends Activity {
             + " aria-expanded=\"false\" aria-controls=\"miniA11yBody\">"
             + "<span>屏幕操作</span>"
             + "<span id=\"miniA11yState\">未开启</span>"
-            + "<span id=\"miniA11yChev\" aria-hidden=\"true\">\u203a</span></div>"
+            + "<span id=\"miniA11yChev\" aria-hidden=\"true\">"
+            + "<svg viewBox=\"0 0 24 24\" width=\"14\" height=\"14\" fill=\"none\" stroke=\"currentColor\""
+            + " stroke-width=\"2.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\">"
+            + "<path d=\"M9 5l7 7-7 7\"/></svg></span></div>"
             + "<div id=\"miniA11yBody\" hidden>"
             // 展开后三块并列：无障碍 / 确认档位 / 最近操作（2026-11-12 用户定的层次）。
             + "<div class=\"label\" style=\"font-size:12px;margin-top:8px;color:var(--muted,#8a8a8a)\">无障碍</div>"
@@ -897,7 +903,6 @@ public final class MainActivity extends Activity {
             + "if(open){body.removeAttribute('hidden');}"
             + "else{body.setAttribute('hidden','');}"
             + "head.setAttribute('aria-expanded',open?'true':'false');"
-            + "chev.textContent=open?'\u2304':'\u203a';"
             + "}"
             + "var head=document.getElementById('miniA11yHead');"
             + "if(head&&!head.__wired){head.__wired=1;"
