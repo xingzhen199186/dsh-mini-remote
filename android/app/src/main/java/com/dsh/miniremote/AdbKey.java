@@ -39,6 +39,13 @@ final class AdbKey {
     static final String KEY_FILE = "adb_private.der";
     static final String CERT_FILE = "adb_cert.der";
 
+    /** 上次失败的原因（给界面说人话用；成功时为 null）。 */
+    private static volatile String lastError = null;
+
+    static String lastError() {
+        return lastError == null ? "" : lastError;
+    }
+
     private AdbKey() {
     }
 
@@ -55,9 +62,14 @@ final class AdbKey {
             certFile.delete();
         }
         try {
-            return create(context, keyFile, certFile);
+            Keys made = create(keyFile == null ? context : context, keyFile, certFile);
+            lastError = null;
+            return made;
         } catch (Exception err) {
-            android.util.Log.w("MiniBridge", "生成 adb 钥匙失败：" + err.getMessage());
+            // **把真实原因记下来**：昨天那版只说"内部错误"，等于让用户对着黑箱。
+            lastError = err.getClass().getSimpleName()
+                    + (err.getMessage() == null ? "" : "：" + err.getMessage());
+            android.util.Log.w("MiniBridge", "生成 adb 钥匙失败：" + lastError);
             return null;
         }
     }
@@ -117,7 +129,7 @@ final class AdbKey {
         tbs.tagged(0xA0, version.bytes());
         tbs.integer(BigInteger.valueOf(System.currentTimeMillis()));
         // signature: sha256WithRSAEncryption + NULL
-        tbs.sequence(sha256AlgId());
+        tbs.raw(sha256AlgId());
         byte[] name = name();
         tbs.raw(name);                      // issuer
         tbs.raw(validity());                // validity
@@ -134,7 +146,7 @@ final class AdbKey {
 
         Der cert = new Der();
         cert.raw(tbs);
-        cert.sequence(sha256AlgId());
+        cert.raw(sha256AlgId());
         Der bits = new Der();
         bits.bitString(signature);
         cert.raw(bits.bytes());

@@ -45,7 +45,7 @@ final class AdbPairingTls {
         Result out = new Result();
         AdbKey.Keys keys = AdbKey.loadOrCreate(context);
         if (keys == null) {
-            out.error = "生成钥匙失败（内部错误）";
+            out.error = "生成钥匙失败：" + AdbKey.lastError();
             return out;
         }
         SSLSocket socket = null;
