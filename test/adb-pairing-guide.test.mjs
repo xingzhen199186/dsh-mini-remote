@@ -92,3 +92,16 @@ test('ShellBackend.backendState 判定正确', () => {
   assert.match(shellBackend, /backend = "termux"/, 'termux 可用时 backend 要是 termux')
   assert.match(shellBackend, /backend = "none"/, '都没有时 backend 要是 none')
 })
+
+test('引导里说清"为什么要开无线调试"，且已配对后收起', () => {
+  const source = readFileSync(new URL('../android/app/src/main/java/com/dsh/miniremote/MainActivity.java', import.meta.url), 'utf8')
+  assert.match(source, /miniAdbWhy/, '要有那行说明')
+  assert.match(source, /手机自己连自己的唯一通路/, '说明要讲清原因，不是只给指令')
+  assert.match(source, /adbWhy\.hidden=true/, '已配对后不该再唠叨')
+})
+
+test('自检页会报自连通道状态', () => {
+  const source = readFileSync(new URL('../android/app/src/main/java/com/dsh/miniremote/SelfCheck.java', import.meta.url), 'utf8')
+  assert.match(source, /自连通道：/, '自检页要有这一行')
+  assert.match(source, /backendState/, '要读现成的后端状态，不另做一套判断')
+})

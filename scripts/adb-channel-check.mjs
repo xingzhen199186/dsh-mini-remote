@@ -48,7 +48,7 @@ if (!broadcast.out.includes('Broadcast completed')) {
 }
 
 // 后台任务那一项本身要 4 秒多，给它留够时间。
-const waitMs = 12000
+const waitMs = 30000
 const startedAt = Date.now()
 let raw = ''
 while (Date.now() - startedAt < waitMs) {

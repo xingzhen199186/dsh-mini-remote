@@ -117,6 +117,25 @@ final class SelfCheck {
         AdbDiscover.start(activity);
         StringBuilder text = new StringBuilder();
         for (String one : lines(activity)) text.append(one).append("\n\n");
+        // 自连通道现在到底通不通：与设置页「手机终端」那一行同一份判断（2026-11-15）。
+        try {
+            org.json.JSONObject backend = new org.json.JSONObject(
+                    ShellBackend.backendState(activity));
+            String kind = backend.optString("backend", "none");
+            boolean paired = backend.optBoolean("paired", false);
+            boolean ready = backend.optBoolean("adbReady", false);
+            long probed = backend.optLong("lastProbeAt", 0);
+            String when = probed == 0 ? "还没探过"
+                    : ("上次确认：" + Math.max(0, (System.currentTimeMillis() - probed) / 1000) + " 秒前");
+            if ("adb".equals(kind)) {
+                text.append("自连通道：已配对且可用（").append(when).append("）\n\n");
+            } else if (paired) {
+                text.append("自连通道：已配对，但此刻连不上（无线调试没开？），命令会退回 Termux。\n\n");
+            } else {
+                text.append("自连通道：还没配对（设置页可以配，配一次以后不用装 Termux）。\n\n");
+            }
+        } catch (Exception ignored) {
+        }
         text.append(AdbDiscover.describe()).append("\n\n");
         new AlertDialog.Builder(activity)
                 .setTitle("手机操控自检")

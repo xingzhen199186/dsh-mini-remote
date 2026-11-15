@@ -30,6 +30,7 @@ final class AdbChannelCheck {
             checks.put(checkUnicode(app));
             checks.put(checkPipe(app));
             checks.put(checkBackground(app));
+            checks.put(checkStdin(app));
             checks.put(checkReuse(app));
             checks.put(checkFallback(app));
         } catch (Exception err) {
@@ -90,6 +91,17 @@ final class AdbChannelCheck {
         boolean didStop = stopped != null && stopped.contains("\"stopped\":true");
         one.put("pass", sawLine && didStop);
         one.put("detail", "jobId=" + jobId + " 有输出=" + sawLine + " 已停止=" + didStop);
+        return one;
+    }
+
+    /** 喂输入：内容能不能真的送到命令手上。 */
+    private static JSONObject checkStdin(Context context) throws Exception {
+        JSONObject one = new JSONObject();
+        one.put("name", "能喂输入");
+        String raw = ShellBackend.exec(context, "cat", 20, null, "喂进去了 stdin");
+        boolean ok = raw != null && raw.contains("喂进去了 stdin");
+        one.put("pass", ok);
+        one.put("detail", raw == null ? "没有返回" : raw.replaceAll("\\s+", " ").trim());
         return one;
     }
 

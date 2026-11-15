@@ -54,6 +54,11 @@ final class ShellBackend {
         return lastAdbError;
     }
 
+    /** 上一次探活的时间（0 表示还没探过）。自检页要显示"多久前确认过"。 */
+    static long lastProbeAt() {
+        return adbCheckedAt;
+    }
+
     // 「现在到底走不走得通」只能靠真的连一次——但这件不能放在界面线程。
     // 所以：后台探活 + 结果缓存 20 秒，界面只读缓存（2026-11-15）。
     private static volatile boolean adbAlive = false;
@@ -101,11 +106,9 @@ final class ShellBackend {
         String reasonToSkip = "";
         if (!paired(context)) {
             reasonToSkip = "还没配对";
-        } else if (stdin != null && !stdin.isEmpty()) {
-            reasonToSkip = "自连通道还不支持喂输入";
         }
         if (reasonToSkip.isEmpty()) {
-            String viaAdb = tryAdb(context, command, workdir);
+            String viaAdb = tryAdb(context, command, workdir, stdin);
             if (viaAdb != null) return viaAdb;
         }
         // 退回 Termux：如果这就是原来的行为，用户不该察觉差别。
@@ -122,9 +125,17 @@ final class ShellBackend {
     }
 
     /** 走自连通道；成功返回结果 JSON，失败返回 null（交给 Termux）。 */
-    private static String tryAdb(Context context, String command, String workdir) {
+    private static String tryAdb(Context context, String command, String workdir, String stdin) {
         if (!AdbPairing.load()) return null;
         String effective = command;
+        if (stdin != null && !stdin.isEmpty()) {
+            // 我们的通道只能"跑一条命令"，没有单独送 stdin 的信道，
+            // 所以把内容在电脑侧编码，进手机后解出来喂给命令（2026-11-15）。
+            // base64 字符集安全，不会把命令拼坏。
+            String encoded = android.util.Base64.encodeToString(
+                    stdin.getBytes(java.nio.charset.StandardCharsets.UTF_8), android.util.Base64.NO_WRAP);
+            effective = "printf '%s' '" + encoded + "' | base64 -d | (" + command + ")";
+        }
         if (workdir != null && !workdir.trim().isEmpty()) {
             // 我们的通道是"一条命令、一个 shell"，工作目录用 cd 表达最直观。
             effective = "cd " + shellQuote(workdir.trim()) + " && " + command;
@@ -391,6 +402,7 @@ final class ShellBackend {
             // 兼容旧字段：paintTermux 里 how.hidden 还要用 st.installed。
             out.put("installed", termuxInstalled);
             out.put("permitted", termuxPermitted);
+            out.put("lastProbeAt", adbCheckedAt);
         } catch (Exception ignored) {
         }
         return out.toString();
