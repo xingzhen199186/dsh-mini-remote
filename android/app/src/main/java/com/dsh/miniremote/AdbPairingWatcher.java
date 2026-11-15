@@ -142,6 +142,12 @@ final class AdbPairingWatcher {
             out.put("running", running);
             out.put("phase", phase);
             out.put("message", message);
+            // 已配对时告诉界面：现在扫不扫得到连接口（无线调试开没开）。
+            if (appContext != null && ShellBackend.paired(appContext)) {
+                out.put("paired", true);
+                AdbDiscover.Endpoint connect = AdbShell.connectEndpoint(appContext);
+                out.put("connectPort", connect == null ? 0 : connect.port);
+            }
         } catch (Exception ignored) {
         }
         return out.toString();
