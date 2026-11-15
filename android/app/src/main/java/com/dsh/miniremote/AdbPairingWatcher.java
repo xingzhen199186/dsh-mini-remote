@@ -35,9 +35,16 @@ final class AdbPairingWatcher {
             @Override
             public void run() {
                 long deadline = System.currentTimeMillis() + WINDOW_MS;
+                long lastScan = 0;
                 try {
                     while (running && System.currentTimeMillis() < deadline) {
-                        AdbDiscover.refresh(app);
+                        // 别每隔一秒就重启一次 mDNS 搜索：那样解析永远来不及完成。
+                        // 每 8 秒重扫一次，中间只读现有结果（2026-11-15）。
+                        long now = System.currentTimeMillis();
+                        if (now - lastScan > 8000) {
+                            AdbDiscover.refresh(app);
+                            lastScan = now;
+                        }
                         Thread.sleep(STEP_MS);
                         String host = "";
                         int port = 0;
