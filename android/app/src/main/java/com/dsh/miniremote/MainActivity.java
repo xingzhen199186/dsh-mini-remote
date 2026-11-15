@@ -1095,8 +1095,14 @@ public final class MainActivity extends Activity {
             + "var bs=kids[i].querySelectorAll('button');"
             + "for(var k=0;k<bs.length;k++){if((bs[k].textContent||'').trim()==='关闭'&&shown(bs[k])){best=bs[k];top=z;break;}}}"
             + "if(best){best.click();return true;}"
+            // **设置页要认自己的关闭按钮，不能按文字找**（2026-11-15 用户报的）：
+            // 设置页里第一个写着「关闭」的按钮是「手机桥」那个开关（开着时就显示关闭），
+            // 按文字找会把它点了——于是返回手势变成了关桥，而不是退回会话页。
             + "var settings=document.getElementById('settings');"
-            + "if(visible(settings)){ if(closeByText(settings))return true; settings.setAttribute('hidden',''); return true; }"
+            + "if(visible(settings)){"
+            + "var sc=document.getElementById('btnSettingsClose');"
+            + "if(sc){sc.click();return true;}"
+            + "settings.setAttribute('hidden','');return true;}"
             + "var mirror=document.getElementById('mirror');"
             + "if(visible(mirror)){ if(closeByText(mirror))return true; mirror.setAttribute('hidden',''); return true; }"
             + "return false;"

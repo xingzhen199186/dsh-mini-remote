@@ -44,3 +44,13 @@ for (const name of LOCKED) {
     }
   })
 }
+
+test('返回手势关设置页时，不许按文字找「关闭」（会点中手机桥开关）', () => {
+  const src = readFileSync(new URL('../android/app/src/main/java/com/dsh/miniremote/MainActivity.java', import.meta.url), 'utf8')
+  const back = src.slice(src.indexOf('window.miniCloseTop=function()'))
+  const settingsAt = back.indexOf("getElementById('settings')")
+  assert.ok(settingsAt > 0, '返回脚本里应该有设置页那一段')
+  const after = back.slice(settingsAt, settingsAt + 400)
+  assert.match(after, /btnSettingsClose/, '设置页必须先点它自己的关闭按钮')
+  assert.ok(!/closeByText\(settings\)/.test(after), '不许再按文字找「关闭」')
+})
