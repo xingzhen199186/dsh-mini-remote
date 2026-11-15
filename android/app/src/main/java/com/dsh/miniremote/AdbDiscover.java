@@ -126,6 +126,30 @@ final class AdbDiscover {
         }
     }
 
+    /**
+     * 重新扫一遍（2026-11-15）。
+     *
+     * 为什么需要：配对端口是**一次性的**——配对对话框关掉或超时，端口就没了，
+     * 而 mDNS 缓存可能还留着旧记录。连之前重扫一次，避免拿一个死端口去连，
+     * 让人以为"程序坏了"。
+     */
+    static synchronized void refresh(Context context) {
+        Context app = context.getApplicationContext();
+        if (manager != null) {
+            for (NsdManager.DiscoveryListener one : listeners) {
+                try {
+                    manager.stopServiceDiscovery(one);
+                } catch (Exception ignored) {
+                }
+            }
+        }
+        listeners.clear();
+        found.clear();
+        started = false;
+        lastError = "";
+        start(app);
+    }
+
     /** 给界面看的一句话（自检页用）。 */
     static synchronized String describe() {
         if (lastError != null && !lastError.isEmpty()) return "无线调试口：" + lastError;

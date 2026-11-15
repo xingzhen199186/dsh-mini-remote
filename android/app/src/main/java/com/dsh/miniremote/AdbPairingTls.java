@@ -75,7 +75,17 @@ final class AdbPairingTls {
                 out.peer = subject + "（" + shortDigest(peer) + "）";
             }
         } catch (Exception err) {
-            out.error = err.getMessage() == null ? err.getClass().getSimpleName() : err.getMessage();
+            String raw = err.getMessage() == null ? err.getClass().getSimpleName() : err.getMessage();
+            // 把技术错误翻译成一句能照着做的话（2026-11-15）。
+            if (raw.contains("ECONNREFUSED")) {
+                out.error = "配对端口连不上——多半是那个「使用配对码配对设备」对话框已经关了或超时了，重新打开它再点";
+            } else if (raw.contains("timeout") || raw.contains("Timeout")) {
+                out.error = "等太久了：配对端口没回应，重新打开配对对话框再试";
+            } else if (raw.contains("SSL") || raw.contains("certificate") || raw.contains("handshake")) {
+                out.error = "TLS 握手失败：" + raw;
+            } else {
+                out.error = raw;
+            }
         } finally {
             if (socket != null) {
                 try {

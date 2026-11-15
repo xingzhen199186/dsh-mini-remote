@@ -2407,7 +2407,13 @@ public final class MainActivity extends Activity {
         public String pairingTls() {
             org.json.JSONObject out = new org.json.JSONObject();
             try {
-                AdbDiscover.start(MainActivity.this);
+                // **先重扫**：配对端口是一次性的，旧记录连不上就会报 ECONNREFUSED，
+                // 看起来像程序坏了（2026-11-15 真机踩过）。
+                AdbDiscover.refresh(MainActivity.this);
+                try {
+                    Thread.sleep(900);           // 给 mDNS 一点时间解析出新端口
+                } catch (InterruptedException ignored) {
+                }
                 String host = "";
                 int port = 0;
                 for (AdbDiscover.Endpoint one : AdbDiscover.snapshot()) {
@@ -2419,7 +2425,7 @@ public final class MainActivity extends Activity {
                 }
                 if (port == 0) {
                     out.put("ok", false);
-                    out.put("error", "没找到配对端口：先在开发者选项里点「使用配对码配对设备」");
+                    out.put("error", "没找到配对端口：先在开发者选项里点「使用配对码配对设备」，然后马上回来点这里");
                     return out.toString();
                 }
                 AdbPairingTls.Result result = AdbPairingTls.probe(MainActivity.this, host, port, 6000);
