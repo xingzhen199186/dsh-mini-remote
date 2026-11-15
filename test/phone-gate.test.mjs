@@ -53,4 +53,9 @@ test('返回手势关设置页时，不许按文字找「关闭」（会点中�
   const after = back.slice(settingsAt, settingsAt + 400)
   assert.match(after, /btnSettingsClose/, '设置页必须先点它自己的关闭按钮')
   assert.ok(!/closeByText\(settings\)/.test(after), '不许再按文字找「关闭」')
+  // **顺序也算行为**：设置页那段必须排在"在最上层里找关闭按钮"之前，
+  // 否则那段通用逻辑会先点中设置页里的手机桥开关（桥开着时写着「关闭」）。
+  const genericAt = back.indexOf('var best=null')
+  assert.ok(genericAt > 0, '返回脚本里应该有通用层那段')
+  assert.ok(settingsAt < genericAt, '设置页要排在通用循环之前，否则返回会点中手机桥开关')
 })

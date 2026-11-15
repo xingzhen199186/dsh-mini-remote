@@ -1088,6 +1088,16 @@ public final class MainActivity extends Activity {
             + "if(ops&&ops.classList.contains('open')&&closeByText(ops))return true;"
             + "var fv=document.getElementById('fileView');"
             + "if(fv&&fv.classList.contains('open')&&closeByText(fv))return true;"
+            // **先认设置页/镜像页自己的关闭按钮**（2026-11-15 第二次修）：
+            // 下面那段"在最上层里找写着关闭的按钮"会先命中设置页里的**手机桥开关**
+            // （桥开着时它就写着「关闭」），于是返回变成了关桥。顺序错了，改细节没用。
+            + "var settings=document.getElementById('settings');"
+            + "if(visible(settings)){"
+            + "var sc=document.getElementById('btnSettingsClose');"
+            + "if(sc){sc.click();return true;}"
+            + "settings.setAttribute('hidden','');return true;}"
+            + "var mirror=document.getElementById('mirror');"
+            + "if(visible(mirror)){ if(closeByText(mirror))return true; mirror.setAttribute('hidden',''); return true; }"
             // 代码里现建的面板（模型选择那类）：取最上面一层里写着「关闭」的按钮。
             + "var best=null,top=-1,kids=document.body.children;"
             + "for(var i=0;i<kids.length;i++){if(!shown(kids[i]))continue;"
@@ -1098,13 +1108,6 @@ public final class MainActivity extends Activity {
             // **设置页要认自己的关闭按钮，不能按文字找**（2026-11-15 用户报的）：
             // 设置页里第一个写着「关闭」的按钮是「手机桥」那个开关（开着时就显示关闭），
             // 按文字找会把它点了——于是返回手势变成了关桥，而不是退回会话页。
-            + "var settings=document.getElementById('settings');"
-            + "if(visible(settings)){"
-            + "var sc=document.getElementById('btnSettingsClose');"
-            + "if(sc){sc.click();return true;}"
-            + "settings.setAttribute('hidden','');return true;}"
-            + "var mirror=document.getElementById('mirror');"
-            + "if(visible(mirror)){ if(closeByText(mirror))return true; mirror.setAttribute('hidden',''); return true; }"
             + "return false;"
             + "};"
             + "})();";
