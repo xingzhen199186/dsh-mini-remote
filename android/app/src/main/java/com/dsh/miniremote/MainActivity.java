@@ -865,20 +865,21 @@ public final class MainActivity extends Activity {
             + "adbRow.id='miniAdbRow';adbRow.className='row';adbRow.style.marginTop='10px';"
             + "adbRow.innerHTML='<div style=\"flex:1;min-width:0\">"
             + "<div class=\"label\">免 Termux 通道（实验）</div>"
-            + "<div id=\"miniAdbState\" class=\"hint\">还没试过；先在开发者选项里点「使用配对码配对设备」</div>"
+            + "<div id=\"miniAdbState\" class=\"hint\">点右边，然后去开「使用配对码配对设备」；App 会在后台等</div>"
             + "</div><div style=\"flex:0 0 auto\">"
             + "<button class=\"btn\" id=\"miniAdbGo\">试连接</button></div>';"
             + "checkRow.insertAdjacentElement('afterend',adbRow);"
             + "var adbGo=document.getElementById('miniAdbGo');"
+            // **顺序**：先让 App 在后台等，用户再去开配对对话框（对话框一离开就关）。
             + "if(adbGo)adbGo.addEventListener('click',function(){"
             + "var state=document.getElementById('miniAdbState');"
-            + "state.textContent='正在连配对端口…';"
-            + "setTimeout(function(){"
-            + "var r={};try{r=JSON.parse(window.MiniProbe.pairingTls()||'{}');}catch(e){r={ok:false,error:'读不到结果'};}"
-            + "state.textContent=r.ok"
-            + "?('已连上：'+r.protocol+'，端口 '+r.port+'（只握手，未配对）')"
-            + ":('没连上：'+(r.error||'原因未知'));"
-            + "},120);"
+            + "try{window.MiniProbe.startPairingWatch();}catch(e){state.textContent='起不来：'+e;return;}"
+            + "state.textContent='等着配对端口出现……现在去开发者选项里打开「使用配对码配对设备」';"
+            + "var timer=setInterval(function(){"
+            + "var r={};try{r=JSON.parse(window.MiniProbe.pairingWatchState()||'{}');}catch(e){return;}"
+            + "if(r.message)state.textContent=r.message;"
+            + "if(!r.running)clearInterval(timer);"
+            + "},1000);"
             + "});"
             + "}"
             + "if(typeof paintTermux==='function')paintTermux();"
@@ -2446,6 +2447,21 @@ public final class MainActivity extends Activity {
                 }
             }
             return out.toString();
+        }
+
+        /**
+         * 自连 ADB：先让 App 在后台等配对端口（2026-11-15）。
+         * 顺序不能反：配对对话框一离开就关，端口随之消失。
+         */
+        @android.webkit.JavascriptInterface
+        public void startPairingWatch() {
+            AdbPairingWatcher.start(MainActivity.this);
+        }
+
+        /** 等待/握手的状态（界面每秒来问一次）。 */
+        @android.webkit.JavascriptInterface
+        public String pairingWatchState() {
+            return AdbPairingWatcher.stateJson();
         }
 
         /** 自家那把 adb 钥匙的状态（生成没生成、公钥指纹头几位）。 */
