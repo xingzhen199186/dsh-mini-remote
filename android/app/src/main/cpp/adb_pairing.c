@@ -26,6 +26,7 @@
 #include <netinet/tcp.h>
 #include <fcntl.h>
 #include <poll.h>
+#include <sys/time.h>
 
 #include <openssl/ssl.h>
 #include <openssl/err.h>
@@ -333,6 +334,10 @@ static int do_pair(const char *host, int port, const char *code,
 
         fd = tcp_connect(host, port, 6000, err, errlen);
         if (fd < 0) break;
+        struct timeval tv;
+        tv.tv_sec = 8;
+        tv.tv_usec = 0;
+        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 
         ssl = SSL_new(ssl_ctx);
         if (ssl == NULL) {
@@ -376,7 +381,7 @@ static int do_pair(const char *host, int port, const char *code,
             break;
         }
         if (send_frame(fd, TYPE_SPAKE2, out_msg, out_len) != 0) {
-            set_error(err, errlen, "发送认证消息失败");
+            set_error(err, errlen, "发送认证消息失败（长度 %zu）", out_len);
             break;
         }
 
@@ -388,8 +393,14 @@ static int do_pair(const char *host, int port, const char *code,
         int type = -1;
         size_t peer_len = 0;
         int rf = read_frame(fd, &type, peer_msg, PEER_INFO_SIZE, &peer_len);
-        if (rf != 0 || type != TYPE_SPAKE2) {
-            set_error(err, errlen, "对方没有回认证消息");
+        if (rf != 0) {
+            // 把"读到第几个字节就断了"写出来：是对方直接关闭，还是帧头不对，一眼能分。
+            set_error(err, errlen, "读认证回包失败（%d，%s）", rf,
+                      rf == -1 ? "连接被关闭" : (rf == -2 ? "版本号不符" : "包太长"));
+            break;
+        }
+        if (type != TYPE_SPAKE2) {
+            set_error(err, errlen, "对方的包类型不对（收到 %d，期望 %d）", type, TYPE_SPAKE2);
             break;
         }
 
