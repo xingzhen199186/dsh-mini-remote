@@ -113,8 +113,11 @@ final class SelfCheck {
     /** 打开自检对话框。三个按钮分别跳到系统里能改它的地方。 */
     static void show(Activity activity) {
         if (activity == null || activity.isFinishing()) return;
+        // 顺手开一次 mDNS 扫描：自连 ADB 的第一层就是"知道往哪儿连"（2026-11-15）。
+        AdbDiscover.start(activity);
         StringBuilder text = new StringBuilder();
         for (String one : lines(activity)) text.append(one).append("\n\n");
+        text.append(AdbDiscover.describe()).append("\n\n");
         new AlertDialog.Builder(activity)
                 .setTitle("手机操控自检")
                 .setMessage(text.toString().trim())

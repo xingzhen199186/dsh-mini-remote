@@ -96,6 +96,9 @@ public final class MainActivity extends Activity {
         }
 
         addressPool = new AddressPool(credentials.addresses);
+        // 一起床就开始扫"无线调试口"（2026-11-15，自连 ADB 的第一层）。
+        // 它只读 mDNS 广播，不连接、不改设置；没开无线调试时什么也扫不到。
+        AdbDiscover.start(this);
         webView = new WebView(this);
         setContentView(webView);
         // 调试版才开远程调试（chrome://inspect / adb forward），发布版不留这个口子。

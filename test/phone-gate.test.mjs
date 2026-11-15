@@ -59,3 +59,12 @@ test('返回手势关设置页时，不许按文字找「关闭」（会点中�
   assert.ok(genericAt > 0, '返回脚本里应该有通用层那段')
   assert.ok(settingsAt < genericAt, '设置页要排在通用循环之前，否则返回会点中手机桥开关')
 })
+
+test('自连 ADB 第一步：自检页会报告扫到的无线调试口', () => {
+  const discover = readFileSync(new URL('../android/app/src/main/java/com/dsh/miniremote/AdbDiscover.java', import.meta.url), 'utf8')
+  assert.match(discover, /_adb-tls-pairing\._tcp/, '认的是系统广播的那个服务名')
+  assert.match(discover, /_adb-tls-connect\._tcp/)
+  assert.match(discover, /discoverServices\(/, '要真的去扫，不是写死端口')
+  const selfCheck = readFileSync(new URL('../android/app/src/main/java/com/dsh/miniremote/SelfCheck.java', import.meta.url), 'utf8')
+  assert.match(selfCheck, /AdbDiscover\.describe\(\)/, '自检页要把结果说出来')
+})
