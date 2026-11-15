@@ -126,3 +126,4 @@ HANDOFF.md
 # 生成方式见 android/README.md「内置 Tailscale」一节。
 android/app/libs/appctr.aar
 android/app/src/main/jniLibs/arm64-v8a/libtailscale.so
+android/app/.cxx/
