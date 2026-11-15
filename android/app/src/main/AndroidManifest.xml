@@ -146,5 +146,9 @@
             android:exported="false" />
 
         <!-- 无障碍服务只存在于 src/bridge，standard 不合并该声明。 -->
+            <!-- 配对码从通知的输入框里来（2026-11-15）：只给本 App 用，不导出。 -->
+        <receiver
+            android:name=".AdbPairingReceiver"
+            android:exported="false" />
     </application>
 </manifest>

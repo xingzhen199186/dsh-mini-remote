@@ -1,0 +1,1 @@
+I:\极简遥控器\极简遥控器\android\app\src\main\cpp\CMakeLists.txt

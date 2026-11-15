@@ -1,0 +1,3 @@
+I:/极简遥控器/极简遥控器/android/app/.cxx/Debug/2n495k45/arm64-v8a/CMakeFiles/adb_pairing.dir
+I:/极简遥控器/极简遥控器/android/app/.cxx/Debug/2n495k45/arm64-v8a/CMakeFiles/edit_cache.dir
+I:/极简遥控器/极简遥控器/android/app/.cxx/Debug/2n495k45/arm64-v8a/CMakeFiles/rebuild_cache.dir

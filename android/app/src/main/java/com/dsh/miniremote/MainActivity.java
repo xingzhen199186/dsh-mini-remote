@@ -2466,7 +2466,7 @@ public final class MainActivity extends Activity {
          */
         @android.webkit.JavascriptInterface
         public void startPairingWatch() {
-            AdbPairingWatcher.start(MainActivity.this);
+            AdbPairingWatcher.begin(MainActivity.this);
         }
 
         /** 等待/握手的状态（界面每秒来问一次）。 */

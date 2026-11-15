@@ -1,0 +1,60 @@
+{
+	"configurations" : 
+	[
+		{
+			"directories" : 
+			[
+				{
+					"build" : ".",
+					"jsonFile" : "directory-.-Debug-d0094a50bb2071803777.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.6.0"
+					},
+					"projectIndex" : 0,
+					"source" : ".",
+					"targetIndexes" : 
+					[
+						0
+					]
+				}
+			],
+			"name" : "Debug",
+			"projects" : 
+			[
+				{
+					"directoryIndexes" : 
+					[
+						0
+					],
+					"name" : "adb_pairing",
+					"targetIndexes" : 
+					[
+						0
+					]
+				}
+			],
+			"targets" : 
+			[
+				{
+					"directoryIndex" : 0,
+					"id" : "adb_pairing::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-adb_pairing-Debug-f1a6aded704d79cfe274.json",
+					"name" : "adb_pairing",
+					"projectIndex" : 0
+				}
+			]
+		}
+	],
+	"kind" : "codemodel",
+	"paths" : 
+	{
+		"build" : "I:/\u6781\u7b80\u9065\u63a7\u5668/\u6781\u7b80\u9065\u63a7\u5668/android/app/.cxx/Debug/2n495k45/arm64-v8a",
+		"source" : "I:/\u6781\u7b80\u9065\u63a7\u5668/\u6781\u7b80\u9065\u63a7\u5668/android/app/src/main/cpp"
+	},
+	"version" : 
+	{
+		"major" : 2,
+		"minor" : 3
+	}
+}

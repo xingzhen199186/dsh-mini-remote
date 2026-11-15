@@ -28,6 +28,26 @@ android {
         }
     }
 
+    // 自连 ADB 的配对要走原生（2026-11-15）：TLS 通道绑定、SPAKE2、AES 都在 BoringSSL 里，
+    // Java 侧拿不到这些。只编 arm64 —— 目标机器是 arm64，别的 ABI 编了也用不上。
+    ndkVersion = "27.0.12077973"
+    defaultConfig {
+        ndk {
+            abiFilters += "arm64-v8a"
+        }
+        externalNativeBuild {
+            cmake {
+                arguments += "-DANDROID_STL=c++_shared"
+                cppFlags += "-std=c11"
+            }
+        }
+    }
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+        }
+    }
+
     buildFeatures {
         // 更新检查要告诉电脑「我是哪个版本」（standard / bridge），
         // 否则实验版会被标准版覆盖（2026-11-09）。

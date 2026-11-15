@@ -1,0 +1,20 @@
+                        -HI:\极简遥控器\极简遥控器\android\app\src\main\cpp
+-DCMAKE_SYSTEM_NAME=Android
+-DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+-DCMAKE_SYSTEM_VERSION=28
+-DANDROID_PLATFORM=android-28
+-DANDROID_ABI=arm64-v8a
+-DCMAKE_ANDROID_ARCH_ABI=arm64-v8a
+-DANDROID_NDK=D:\Android\Sdk\ndk\27.0.12077973
+-DCMAKE_ANDROID_NDK=D:\Android\Sdk\ndk\27.0.12077973
+-DCMAKE_TOOLCHAIN_FILE=D:\Android\Sdk\ndk\27.0.12077973\build\cmake\android.toolchain.cmake
+-DCMAKE_MAKE_PROGRAM=D:\Android\Sdk\cmake\3.22.1\bin\ninja.exe
+-DCMAKE_CXX_FLAGS=-std=c11
+-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=I:\极简遥控器\极简遥控器\android\app\build\intermediates\cxx\Debug\2n495k45\obj\arm64-v8a
+-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=I:\极简遥控器\极简遥控器\android\app\build\intermediates\cxx\Debug\2n495k45\obj\arm64-v8a
+-DCMAKE_BUILD_TYPE=Debug
+-BI:\极简遥控器\极简遥控器\android\app\.cxx\Debug\2n495k45\arm64-v8a
+-GNinja
+-DANDROID_STL=c++_shared
+                        Build command args: []
+                        Version: 2
