@@ -50,3 +50,16 @@ test('ShellBackend 兜底逻辑没被绕过', () => {
   assert.match(shellBackend, /TermuxRun\.exec/, '最终要退回 TermuxRun')
   assert.match(shellBackend, /reasonToSkip/, '没配对或要喂 stdin 时要跳过自连')
 })
+
+test('后台任务：自连通道与 Termux 退回', () => {
+  // startJob / jobOutput / stopJob 在未配对时必须返回 null，让 BridgePoller 退回 Termux。
+  assert.match(shellBackend, /static String startJob.*if \(!paired\(context\)\) return null/s, 'startJob 未配对要返回 null')
+  assert.match(shellBackend, /static String jobOutput.*if \(!paired\(context\)\) return null/s, 'jobOutput 未配对要返回 null')
+  assert.match(shellBackend, /static String stopJob.*if \(!paired\(context\)\) return null/s, 'stopJob 未配对要返回 null')
+  // 自连通道的后台任务要用 setsid 脱离会话，输出与进程号写进 /data/local/tmp/.dsh_adb_jobs/。
+  assert.match(shellBackend, /setsid sh -c/, '要用 setsid 起后台任务')
+  assert.match(shellBackend, /\/data\/local\/tmp\/\.dsh_adb_jobs/, '输出与进程号要写进 .dsh_adb_jobs')
+  // 停止要按进程组停，停完回读确认。
+  assert.match(shellBackend, /kill -9 -- -\\"\$p\\"/, '停止要杀进程组')
+  assert.match(shellBackend, /kill -0 \\"\$p\\"/, '停完要回读确认')
+})

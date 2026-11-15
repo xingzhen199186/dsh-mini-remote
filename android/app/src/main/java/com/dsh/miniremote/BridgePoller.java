@@ -437,10 +437,16 @@ final class BridgePoller {
                 if (background) {
                     // 长任务：立刻返回编号，之后用 phone_shell_output / phone_shell_stop。
                     String jobId = java.util.UUID.randomUUID().toString().substring(0, 8);
-                    String started = TermuxRun.startJob(context, jobId, command, workdir);
-                    result = started.contains("\"ok\":true")
-                            ? "{\"ok\":true,\"jobId\":\"" + jobId + "\",\"note\":\"已在后台开始，用 phone_shell_output 查看、phone_shell_stop 停止\"}"
-                            : started;
+                    // 已配对且有无线调试时，后台任务也走自连通道（2026-11-15）。
+                    String started = ShellBackend.startJob(context, jobId, command, workdir);
+                    if (started != null) {
+                        result = started;
+                    } else {
+                        started = TermuxRun.startJob(context, jobId, command, workdir);
+                        result = started.contains("\"ok\":true")
+                                ? "{\"ok\":true,\"jobId\":\"" + jobId + "\",\"backend\":\"termux\",\"note\":\"已在后台开始，用 phone_shell_output 查看、phone_shell_stop 停止\"}"
+                                : started;
+                    }
                 } else {
                     int waitSeconds = args == null ? 30
                             : Math.max(5, Math.min(120, args.optInt("timeoutSeconds", 30)));
@@ -457,7 +463,11 @@ final class BridgePoller {
                     report(id, false, "要指定 job（发起后台命令时拿到的编号）");
                     return;
                 }
-                String result = TermuxRun.jobOutput(context, jobId);
+                // 先尝试自连通道；任务不在那边再退回 Termux（2026-11-15）。
+                String result = ShellBackend.jobOutput(context, jobId);
+                if (result == null) {
+                    result = TermuxRun.jobOutput(context, jobId);
+                }
                 boolean ok = result.contains("\"ok\":true");
                 reportRaw(id, ok, result);
                 return;
@@ -468,7 +478,11 @@ final class BridgePoller {
                     report(id, false, "要指定 job（发起后台命令时拿到的编号）");
                     return;
                 }
-                String result = TermuxRun.stopJob(context, jobId);
+                // 先尝试自连通道；任务不在那边再退回 Termux（2026-11-15）。
+                String result = ShellBackend.stopJob(context, jobId);
+                if (result == null) {
+                    result = TermuxRun.stopJob(context, jobId);
+                }
                 boolean ok = result.contains("\"ok\":true");
                 reportRaw(id, ok, result);
                 return;

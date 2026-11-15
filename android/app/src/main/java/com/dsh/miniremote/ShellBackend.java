@@ -115,6 +115,114 @@ final class ShellBackend {
         return "'" + text.replace("'", "'\\''") + "'";
     }
 
+    // ------------------------------------------------------------------
+    // 后台任务（2026-11-15）：自连通道也能跑长任务，不用退回 Termux。
+    //
+    // 思路：用 setsid 把命令放到新会话里跑，输出与进程号都写进
+    // /data/local/tmp/.dsh_adb_jobs/；查看就是读那个文件，停止就是杀进程组。
+    // 实测（2026-11-15）：setsid / nohup / 直接 sh -c '&' 都能让子进程在
+    // adb shell 退出后活下来（PPID 变成 1），但 setsid 最干净。
+    // ------------------------------------------------------------------
+
+    private static final String ADB_JOB_DIR = "/data/local/tmp/.dsh_adb_jobs";
+
+    /**
+     * 发起一条后台命令，立刻返回。
+     *
+     * @return JSON：{ok:true, jobId, backend:"adb"}；失败返回 null（交给 Termux）。
+     */
+    static String startJob(Context context, String jobId, String command, String workdir) {
+        if (!paired(context)) return null;
+        if (!AdbPairing.load()) return null;
+
+        // 同名 jobId 已存在时换一个，不覆盖别人正在跑的任务。
+        String effectiveId = jobId;
+        String check = "if [ -f " + ADB_JOB_DIR + "/" + effectiveId + ".pid ]; then "
+                + "echo exists; else echo free; fi";
+        AdbShell.Result checkResult = runAdb(context, check);
+        if (checkResult != null && checkResult.ok && checkResult.output.contains("exists")) {
+            effectiveId = jobId + "-" + System.currentTimeMillis() % 10000;
+        }
+
+        String dir = workdir == null || workdir.trim().isEmpty() ? "" : "cd " + shellQuote(workdir.trim()) + " ; ";
+        // 超过 24 小时的旧文件顺手清掉，目录不会越堆越多。
+        String script = "mkdir -p " + ADB_JOB_DIR + " ; "
+                + "find " + ADB_JOB_DIR + " -name '*.out' -o -name '*.pid' | xargs -r ls -lt 2>/dev/null | awk '{if (systime() - $6 > 86400) print $NF}' | xargs -r rm -f 2>/dev/null ; "
+                + "setsid sh -c '" + dir + command + "' > " + ADB_JOB_DIR + "/" + effectiveId + ".out 2>&1 & "
+                + "echo $! > " + ADB_JOB_DIR + "/" + effectiveId + ".pid ; echo started";
+        AdbShell.Result result = runAdb(context, script);
+        if (result == null || !result.ok) return null;
+        return "{\"ok\":true,\"jobId\":\"" + effectiveId + "\",\"backend\":\"adb\"}";
+    }
+
+    /** 看一个后台任务：还在跑吗、输出了什么。 */
+    static String jobOutput(Context context, String jobId) {
+        if (!paired(context)) return null;
+        String out = ADB_JOB_DIR + "/" + jobId + ".out";
+        String pid = ADB_JOB_DIR + "/" + jobId + ".pid";
+        // 只回最后两万字节：一次塞太多会被系统截断。
+        String script = "if [ ! -f " + out + " ]; then echo \"__DSH_NOJOB__\" ; exit 0 ; fi ; "
+                + "tail -c 20000 " + out + " ; "
+                + "if [ -f " + pid + " ] && kill -0 \"$(cat " + pid + ")\" 2>/dev/null ; "
+                + "then echo \"__DSH_RUNNING__\" ; fi";
+        AdbShell.Result result = runAdb(context, script);
+        if (result == null || !result.ok) return null;
+        String output = result.output;
+        boolean running = output.contains("__DSH_RUNNING__");
+        boolean noJob = output.contains("__DSH_NOJOB__");
+        output = output.replace("__DSH_RUNNING__", "").replace("__DSH_NOJOB__", "").trim();
+        StringBuilder json = new StringBuilder();
+        json.append("{\"ok\":true,\"backend\":\"adb\",\"running\":").append(running);
+        json.append(",\"output\":\"").append(escape(output)).append("\"");
+        if (noJob) json.append(",\"note\":\"任务不存在\"");
+        json.append("}");
+        return json.toString();
+    }
+
+    /** 停掉一个后台任务（按进程组停，停完回读确认）。 */
+    static String stopJob(Context context, String jobId) {
+        if (!paired(context)) return null;
+        String pid = ADB_JOB_DIR + "/" + jobId + ".pid";
+        String out = ADB_JOB_DIR + "/" + jobId + ".out";
+        // setsid 起的进程组 ID 就是 PID，杀 -PID 停整组；停完回读确认。
+        String script = "if [ ! -f " + pid + " ] ; then echo \"__DSH_NOJOB__\" ; exit 0 ; fi ; "
+                + "p=\"$(cat " + pid + ")\" ; "
+                + "kill -9 -- -\"$p\" 2>/dev/null || kill -9 \"$p\" 2>/dev/null ; sleep 1 ; "
+                + "if kill -0 \"$p\" 2>/dev/null ; then echo \"__DSH_STILL_RUNNING__\" ; else echo \"__DSH_STOPPED__\" ; fi ; "
+                + "rm -f " + pid + " " + out;
+        AdbShell.Result result = runAdb(context, script);
+        if (result == null || !result.ok) return null;
+        String output = result.output;
+        boolean stopped = output.contains("__DSH_STOPPED__");
+        boolean noJob = output.contains("__DSH_NOJOB__");
+        StringBuilder json = new StringBuilder();
+        json.append("{\"ok\":true,\"backend\":\"adb\",\"stopped\":").append(stopped);
+        if (noJob) json.append(",\"note\":\"任务不存在\"");
+        else if (!stopped) json.append(",\"note\":\"没停下来\"");
+        json.append("}");
+        return json.toString();
+    }
+
+    /** 走自连通道跑一条命令；成功返回 Result，失败返回 null。 */
+    private static AdbShell.Result runAdb(Context context, String command) {
+        AdbDiscover.Endpoint endpoint = rememberPort(context);
+        AdbShell.Result result = null;
+        if (endpoint != null) {
+            result = AdbShell.run(context, endpoint.host, endpoint.port, command);
+            if (result.ok) {
+                rememberSuccess(context, endpoint);
+                return result;
+            }
+        }
+        // 端口每次都可能变：缓存那次失败就现扫一次。
+        AdbDiscover.Endpoint fresh = AdbShell.connectEndpoint(context);
+        if (fresh == null) return null;
+        result = AdbShell.run(context, fresh.host, fresh.port, command);
+        if (!result.ok) return null;
+        rememberSuccess(context, fresh);
+        return result;
+    }
+
     private static String escape(String text) {
         StringBuilder out = new StringBuilder();
         for (int i = 0; i < text.length(); i++) {
