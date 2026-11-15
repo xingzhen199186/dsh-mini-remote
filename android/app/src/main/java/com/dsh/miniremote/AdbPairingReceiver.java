@@ -16,6 +16,8 @@ public final class AdbPairingReceiver extends BroadcastReceiver {
 
     /** 调试用的第二条入口：让 adb 身份直接触发一次 shell 试跑，结果写文件。 */
     static final String ACTION_RUN_SHELL = "com.dsh.miniremote.RUN_SHELL";
+    /** 自连通道的自动检查：跑完把结果写 files/adb-channel-check.json，给电脑上的脚本读。 */
+    static final String ACTION_SELF_TEST = "com.dsh.miniremote.SELF_TEST";
 
     /** 调试用的第三条入口：把「手机终端」当前通道状态写进文件，供电脑读。 */
     static final String ACTION_DUMP_STATE = "com.dsh.miniremote.DUMP_STATE";
@@ -33,6 +35,11 @@ public final class AdbPairingReceiver extends BroadcastReceiver {
                 } catch (Exception ignored) {
                 }
             }, "mini-adb-dump-state").start();
+            return;
+        }
+        if (ACTION_SELF_TEST.equals(intent.getAction())) {
+            final Context app = context.getApplicationContext();
+            new Thread(() -> AdbChannelCheck.run(app), "mini-adb-selfcheck").start();
             return;
         }
         if (ACTION_RUN_SHELL.equals(intent.getAction())) {
