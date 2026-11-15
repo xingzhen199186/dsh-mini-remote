@@ -136,7 +136,25 @@ final class AdbPairingWatcher {
         return running;
     }
 
+    /**
+     * 带 context 的状态查询。
+     *
+     * 为什么需要它：`appContext` 只有配对流程跑过一次之后才有值，
+     * App 冷启动时它是空的——于是界面拿不到 `paired`，已配对的机器也会显示「开始配对」
+     * （2026-11-15 真机：明明已就绪，那一行却在催配对）。
+     */
+    static String stateJson(android.content.Context context) {
+        if (appContext == null && context != null) {
+            appContext = context.getApplicationContext();
+        }
+        return buildState();
+    }
+
     static String stateJson() {
+        return buildState();
+    }
+
+    private static String buildState() {
         org.json.JSONObject out = new org.json.JSONObject();
         try {
             out.put("running", running);

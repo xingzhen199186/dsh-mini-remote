@@ -2568,7 +2568,8 @@ public final class MainActivity extends Activity {
         /** 等待/握手的状态（界面每秒来问一次）。 */
         @android.webkit.JavascriptInterface
         public String pairingWatchState() {
-            return AdbPairingWatcher.stateJson();
+            // 把 context 传进去：冷启动时流程还没跑过，不带 context 就取不到"已配对"。
+            return AdbPairingWatcher.stateJson(MainActivity.this);
         }
 
         /** 自家那把 adb 钥匙的状态（生成没生成、公钥指纹头几位）。 */
