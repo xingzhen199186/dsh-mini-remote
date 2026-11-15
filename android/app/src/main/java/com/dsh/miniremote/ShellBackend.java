@@ -256,4 +256,67 @@ final class ShellBackend {
         }
         return out.toString();
     }
+
+    // ------------------------------------------------------------------
+    // 界面状态（2026-11-15）：「手机终端」那一行要显示"现在走的是哪条通道"。
+    //
+    // 硬线：这个接口会被界面每 3 秒调一次，**绝对不能重扫 mDNS、不能 sleep、
+    // 不能调 AdbShell.connectEndpoint()**（它内部会 refresh + sleep 900）。
+    // 只读现成结果：ShellBackend.paired()、AdbDiscover.snapshot()、
+    // PackageManager 与 checkSelfPermission。
+    // ------------------------------------------------------------------
+
+    /**
+     * 当前会走哪条通道，以及为什么。
+     *
+     * @return JSON：{backend, paired, adbReady, termuxInstalled, termuxPermitted}
+     *   backend: "adb"（已配对且能搜到连接口）/ "termux"（已装且已授权）/ "none"（都没有）；
+     *   paired: 有没有配对过自连通道；
+     *   adbReady: 现在能不能走自连（paired 且 snapshot 里有 CONNECT 类型）；
+     *   termuxInstalled / termuxPermitted: Termux 装没装、授权没有。
+     */
+    static String backendState(Context context) {
+        boolean paired = paired(context);
+        boolean adbReady = false;
+        if (paired) {
+            // 只读现成结果：snapshot() 是内存里的缓存，不触发扫描。
+            for (AdbDiscover.Endpoint one : AdbDiscover.snapshot()) {
+                if (AdbDiscover.CONNECT.equals(one.type)) {
+                    adbReady = true;
+                    break;
+                }
+            }
+        }
+        boolean termuxInstalled = true;
+        try {
+            context.getPackageManager().getPackageInfo("com.termux", 0);
+        } catch (Exception err) {
+            termuxInstalled = false;
+        }
+        boolean termuxPermitted = context.checkSelfPermission("com.termux.permission.RUN_COMMAND")
+                == android.content.pm.PackageManager.PERMISSION_GRANTED;
+
+        String backend;
+        if (adbReady) {
+            backend = "adb";
+        } else if (termuxInstalled && termuxPermitted) {
+            backend = "termux";
+        } else {
+            backend = "none";
+        }
+
+        org.json.JSONObject out = new org.json.JSONObject();
+        try {
+            out.put("backend", backend);
+            out.put("paired", paired);
+            out.put("adbReady", adbReady);
+            out.put("termuxInstalled", termuxInstalled);
+            out.put("termuxPermitted", termuxPermitted);
+            // 兼容旧字段：paintTermux 里 how.hidden 还要用 st.installed。
+            out.put("installed", termuxInstalled);
+            out.put("permitted", termuxPermitted);
+        } catch (Exception ignored) {
+        }
+        return out.toString();
+    }
 }

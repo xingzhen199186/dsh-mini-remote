@@ -63,3 +63,32 @@ test('后台任务：自连通道与 Termux 退回', () => {
   assert.match(shellBackend, /kill -9 -- -\\"\$p\\"/, '停止要杀进程组')
   assert.match(shellBackend, /kill -0 \\"\$p\\"/, '停完要回读确认')
 })
+
+test('手机终端：三种通道文案分支都在', () => {
+  assert.match(activity, /走自连通道：电脑执行命令不需要 Termux。/, 'adb 文案')
+  assert.match(activity, /已配对；无线调试没开时暂时用不了，会退回 Termux。/, '已配对但无线调试没开文案')
+  assert.match(activity, /走 Termux 执行命令。/, 'termux 文案')
+  assert.match(activity, /还不能执行命令：既没配对自连通道，也没装 Termux。/, 'none 文案')
+})
+
+test('termuxState 里没有 refresh / sleep / connectEndpoint 这类阻塞调用', () => {
+  const termuxState = activity.match(/public String termuxState\(\)[\s\S]*?\n        \}/)
+  assert.ok(termuxState, 'termuxState 要存在')
+  const body = termuxState[0]
+  assert.doesNotMatch(body, /refresh/, 'termuxState 里不许调 refresh')
+  assert.doesNotMatch(body, /sleep/, 'termuxState 里不许调 sleep')
+  assert.doesNotMatch(body, /connectEndpoint/, 'termuxState 里不许调 connectEndpoint')
+})
+
+test('ShellBackend.backendState 判定正确', () => {
+  // backendState 要用 ShellBackend.paired() 和 AdbDiscover.snapshot()，不许调 connectEndpoint。
+  assert.match(shellBackend, /static String backendState/, 'backendState 要存在')
+  assert.match(shellBackend, /AdbDiscover\.snapshot\(\)/, 'backendState 要用 snapshot()')
+  const backendStateBody = shellBackend.match(/static String backendState[\s\S]*?\n    \}/)
+  assert.ok(backendStateBody, 'backendState 方法体要存在')
+  assert.doesNotMatch(backendStateBody[0], /connectEndpoint/, 'backendState 里不许调 connectEndpoint')
+  // backend 字段要表达"现在实际会走哪条"：adb / termux / none。
+  assert.match(shellBackend, /backend = "adb"/, 'adbReady 时 backend 要是 adb')
+  assert.match(shellBackend, /backend = "termux"/, 'termux 可用时 backend 要是 termux')
+  assert.match(shellBackend, /backend = "none"/, '都没有时 backend 要是 none')
+})

@@ -17,9 +17,24 @@ public final class AdbPairingReceiver extends BroadcastReceiver {
     /** 调试用的第二条入口：让 adb 身份直接触发一次 shell 试跑，结果写文件。 */
     static final String ACTION_RUN_SHELL = "com.dsh.miniremote.RUN_SHELL";
 
+    /** 调试用的第三条入口：把「手机终端」当前通道状态写进文件，供电脑读。 */
+    static final String ACTION_DUMP_STATE = "com.dsh.miniremote.DUMP_STATE";
+
     @Override
     public void onReceive(Context context, Intent intent) {
         if (intent == null) return;
+        if (ACTION_DUMP_STATE.equals(intent.getAction())) {
+            final Context app = context.getApplicationContext();
+            new Thread(() -> {
+                String text = ShellBackend.backendState(app);
+                try (java.io.FileOutputStream out = new java.io.FileOutputStream(
+                        new java.io.File(app.getFilesDir(), "state-dump.json"))) {
+                    out.write(text.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                } catch (Exception ignored) {
+                }
+            }, "mini-adb-dump-state").start();
+            return;
+        }
         if (ACTION_RUN_SHELL.equals(intent.getAction())) {
             final String command = intent.getStringExtra("cmd") == null ? "id" : intent.getStringExtra("cmd");
             final Context app = context.getApplicationContext();

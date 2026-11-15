@@ -1030,8 +1030,19 @@ public final class MainActivity extends Activity {
             + "var st=JSON.parse(window.MiniProbe.termuxState()||'{}');"
             // 装好了就别再讲怎么装——那句只对还没装的人有意义（2026-11-12）。
             + "if(how)how.hidden=st.installed===true;"
-            + "if(!st.installed){txt.textContent='没有检测到 Termux。要用手机终端，先在手机装 Termux。';go.hidden=true;return;}"
-            + "if(st.permitted){txt.textContent='已授权，可以在手机上执行命令。';go.hidden=true;return;}"
+            // 三种情况：自连通道 / Termux / 都没有（2026-11-15）。
+            + "if(st.backend==='adb'){"
+            + "txt.textContent='走自连通道：电脑执行命令不需要 Termux。';"
+            + "go.hidden=true;return;}"
+            + "if(st.paired&&!st.adbReady){"
+            + "txt.textContent='已配对；无线调试没开时暂时用不了，会退回 Termux。';"
+            + "go.hidden=true;return;}"
+            + "if(st.backend==='termux'){"
+            + "txt.textContent='走 Termux 执行命令。';"
+            + "go.hidden=true;return;}"
+            + "txt.textContent='还不能执行命令：既没配对自连通道，也没装 Termux。';"
+            + "if(!st.termuxInstalled){txt.textContent='没有检测到 Termux。要用手机终端，先在手机装 Termux。';go.hidden=true;return;}"
+            + "if(st.termuxPermitted){txt.textContent='已授权，可以在手机上执行命令。';go.hidden=true;return;}"
             + "txt.textContent='还没授权。点下面按钮，系统会弹一个「允许 / 拒绝」的框。';"
             + "if(!go.__wired){go.__wired=1;go.addEventListener('click',function(){"
             + "try{window.MiniProbe.requestTermuxPermission();}catch(e){}"
@@ -2618,21 +2629,9 @@ public final class MainActivity extends Activity {
         /** 手机终端（Termux）这条路的状态：装没装、授权没有。 */
         @android.webkit.JavascriptInterface
         public String termuxState() {
-            JSONObject out = new JSONObject();
-            try {
-                boolean installed = true;
-                try {
-                    getPackageManager().getPackageInfo("com.termux", 0);
-                } catch (Exception err) {
-                    installed = false;
-                }
-                out.put("installed", installed);
-                out.put("permitted", checkSelfPermission("com.termux.permission.RUN_COMMAND")
-                        == android.content.pm.PackageManager.PERMISSION_GRANTED);
-            } catch (Exception err) {
-                return "{}";
-            }
-            return out.toString();
+            // 现在走的是哪条通道（自连 ADB / Termux / 都没有），以及为什么。
+            // 只读现成结果，不触发扫描，界面每 3 秒问一次也安全。
+            return ShellBackend.backendState(MainActivity.this);
         }
 
         /**
