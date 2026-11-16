@@ -1254,8 +1254,19 @@ public final class MainActivity extends Activity {
             + "(function(){"
             + "if(!o||!o.ok){say((o&&o.error)||'电脑端暂时没有可发的安装包。');btn.disabled=false;return;}"
             + "var mine=window.MiniUpdate.selfHash?window.MiniUpdate.selfHash():'';"
-            + "if(mine&&o.sha256&&mine===o.sha256){say('已经是最新版本（'+selfTag+'）。');btn.disabled=false;return;}"
-            + "say('发现新版本：本机 '+selfTag+' → 电脑 '+String(o.sha256||'').slice(0,8)+'，开始下载（'+(Math.round((o.size||0)/1048576))+' MB）…');"
+            // **按包的性质分流**（2026-11-16）：调试包比内容（版本号常年不动），
+            // 正式包比版本号（否则同一份源码重打一次就误报"有新版本"）。
+            + "var tag=o.localDebug?selfTag:('v'+(o.localVersion||'?'));"
+            + "var decide=o.decide||'';"
+            + "var fresh;"
+            + "if(decide==='compare-hash'){fresh=!!(mine&&o.sha256&&mine===o.sha256);}"
+            + "else{fresh=decide==='same-version'||decide==='same-version-different-content';}"
+            + "if(fresh){"
+            + "if(decide==='same-version-different-content'){say('已是最新（'+tag+'）。电脑上有一份同版本号但内容不同的包——要发版记得先改版本号。');}"
+            + "else{say('已经是最新版本（'+tag+'）。');}"
+            + "btn.disabled=false;return;}"
+            + "var remoteTag=o.localDebug?String(o.sha256||'').slice(0,8):('v'+(o.version||'?'));"
+            + "say('发现新版本：本机 '+tag+' → 电脑 '+remoteTag+'，开始下载（'+(Math.round((o.size||0)/1048576))+' MB）…');"
             + "window.__miniUpdateProgress=function(p,mb){say('正在下载 '+p+'%'+(mb?'（'+mb+'）':'')+'…');};"
             + "window.__miniUpdateSwitch=function(){say('这条线路整块传不动，改成分段下载…');};"
             + "window.__miniUpdateFail=function(detail){say(detail);};"
@@ -2906,10 +2917,59 @@ public final class MainActivity extends Activity {
             }
             try {
                 Net.Response r = Net.get(base + "/mini/api/app-update?flavor=" + BuildConfig.FLAVOR, cred);
-                return r.body == null ? "{\"ok\":false,\"error\":\"空回应\"}" : r.body;
+                if (r.body == null) {
+                    return "{\"ok\":false,\"error\":\"空回应\"}";
+                }
+                return withLocalFacts(r.body);
             } catch (Exception err) {
                 String msg = String.valueOf(err.getMessage()).replace("\"", "'");
                 return "{\"ok\":false,\"error\":\"查询失败：" + msg + "\"}";
+            }
+        }
+
+        /**
+         * 把"本机是什么包"和"该怎么比"补进服务端的回应（2026-11-16）。
+         *
+         * 为什么分两种规则：调试包是我们自己天天重打的，**版本号不动**，
+         * 只有比内容才知道"电脑上那份是不是更新的"；而正式包给用户，
+         * 必须比版本号，否则同一份源码重打一次就会误报"有新版本"。
+         */
+        private String withLocalFacts(String body) {
+            try {
+                org.json.JSONObject json = new org.json.JSONObject(body);
+                String localVersion = "";
+                try {
+                    localVersion = getPackageManager()
+                            .getPackageInfo(getPackageName(), 0).versionName;
+                } catch (Exception ignored) {
+                }
+                boolean localDebug = (getApplicationInfo().flags
+                        & android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0;
+                json.put("localVersion", localVersion == null ? "" : localVersion);
+                json.put("localDebug", localDebug);
+                String remote = json.optString("version", "");
+                String decide;
+                if (localDebug) {
+                    // 调试包：内容不同就是不同，交给页面对指纹。
+                    decide = "compare-hash";
+                } else if (remote.isEmpty()) {
+                    // 服务端读不到版本号时不敢断言"最新"，退回对指纹——宁可能装一次。
+                    decide = "compare-hash";
+                } else if (!remote.equals(localVersion)) {
+                    decide = "new-version";
+                } else if (!selfHash().isEmpty()
+                        && !json.optString("sha256", "").isEmpty()
+                        && !selfHash().equals(json.optString("sha256", ""))) {
+                    // 同版本号、内容不同：多半是发布前忘了改版本号，界面要如实提醒。
+                    decide = "same-version-different-content";
+                } else {
+                    decide = "same-version";
+                }
+                json.put("decide", decide);
+                return json.toString();
+            } catch (Exception err) {
+                // 补不上就算了：页面拿不到 decide 时会退回对指纹，不会因此装错东西。
+                return body;
             }
         }
         /** 页面告诉我们的总字节数（用来算百分比）；0 表示不知道。 */
