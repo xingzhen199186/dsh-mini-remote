@@ -127,3 +127,11 @@ HANDOFF.md
 android/app/libs/appctr.aar
 android/app/src/main/jniLibs/arm64-v8a/libtailscale.so
 android/app/.cxx/
+
+# 发布签名密钥一律不进版本库（2026-11-16）
+*.jks
+*.keystore
+*.p12
+*.pfx
+*.bks
+keys/
