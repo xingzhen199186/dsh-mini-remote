@@ -159,10 +159,9 @@ If you would rather not open a browser every time, or you need **approvals on th
 
 The app is called **DSH Everywhere**, distinct from the project name `dsh-mini-remote`. It is not a second product: connections, sessions, and permissions are shared with the web page, while the model and files stay on the computer.
 
-| Build | Package | Best for | What it adds |
-| :--- | :--- | :--- | :--- |
-| **standard (recommended)** | `DSH-Everywhere-0.1.0.apk` | Most people | No accessibility permission; pairing, sessions, notifications, quick approvals, system sharing, embedded Tailscale |
-| **bridge (experimental)** | `DSH-Everywhere-0.1.0-bridge.apk` | People who explicitly want the computer to observe or operate the phone | Adds an accessibility service on top of standard |
+| Package | What it includes |
+| :--- | :--- |
+| `DSH-Everywhere-0.1.0.apk` | **One complete build**: pairing, sessions, notifications, quick approvals, system sharing, embedded Tailscale, and optional screen operation. The accessibility permission is needed only when you enable screen operation |
 
 - **Download**: [latest GitHub Release](https://github.com/xingzhen199186/dsh-mini-remote/releases/latest)
 - **Requirements**: Android 9 or newer, arm64 phone; the plugin installed and running on the computer
