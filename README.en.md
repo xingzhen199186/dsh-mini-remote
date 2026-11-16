@@ -159,6 +159,8 @@ If you would rather not open a browser every time, or you need **approvals on th
 
 The app is called **DSH Everywhere**, distinct from the project name `dsh-mini-remote`. It is not a second product: connections, sessions, and permissions are shared with the web page, while the model and files stay on the computer.
 
+> **Before using the app, install and start `dsh-mini-remote` 0.3.0 or newer on the computer.** Earlier plugin versions do not provide the pairing, address-pool, and update interfaces the app needs.
+
 | Package | What it includes |
 | :--- | :--- |
 | `DSH-Everywhere-0.1.0.apk` | **One complete build**: pairing, sessions, notifications, quick approvals, system sharing, embedded Tailscale, and optional screen operation. The accessibility permission is needed only when you enable screen operation |

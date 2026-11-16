@@ -159,6 +159,8 @@ dsh plugin --profile web add C:\path\to\dsh-mini-remote
 
 应用名是 **DSH Everywhere**，和项目名 `dsh-mini-remote` 不同。它不是另一套产品：连接、会话和权限与网页版共用同一套，模型与文件仍然留在电脑。
 
+> **使用 App 前，请先在电脑上安装并启动 `dsh-mini-remote` 插件 0.3.0 或以上版本。** 更早的插件没有 App 需要的配对、地址池和更新接口。
+
 | 安装包 | 说明 |
 | :--- | :--- |
 | `DSH-Everywhere-0.1.0.apk` | **只提供一个完全版**：配对、会话、通知、快捷审批、系统分享、内置 Tailscale，以及可选的屏幕操作。无障碍权限只在你主动开启「屏幕操作」时才需要 |
