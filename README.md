@@ -163,7 +163,7 @@ dsh plugin --profile web add C:\path\to\dsh-mini-remote
 
 | 安装包 | 说明 |
 | :--- | :--- |
-| `DSH-Everywhere-0.1.0.apk` | **只提供一个完全版**：配对、会话、通知、快捷审批、系统分享、内置 Tailscale，以及可选的屏幕操作。无障碍权限只在你主动开启「屏幕操作」时才需要 |
+| `DSH-Everywhere-0.1.0.apk` | 配对、会话、通知、快捷审批、系统分享、内置 Tailscale，以及可选的屏幕操作。无障碍权限只在你主动开启「屏幕操作」时才需要 |
 
 - **下载**：[GitHub Releases 最新版](https://github.com/xingzhen199186/dsh-mini-remote/releases/latest)
 - **要求**：Android 9 及以上、arm64 手机；电脑端已安装并运行本插件
