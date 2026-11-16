@@ -1257,16 +1257,17 @@ public final class MainActivity extends Activity {
             // **按包的性质分流**（2026-11-16）：调试包比内容（版本号常年不动），
             // 正式包比版本号（否则同一份源码重打一次就误报"有新版本"）。
             + "var tag=o.localDebug?selfTag:('v'+(o.localVersion||'?'));"
+            + "var src=o.source==='release'?'更新服务器':'电脑';"
             + "var decide=o.decide||'';"
             + "var fresh;"
             + "if(decide==='compare-hash'){fresh=!!(mine&&o.sha256&&mine===o.sha256);}"
             + "else{fresh=decide==='same-version'||decide==='same-version-different-content';}"
             + "if(fresh){"
-            + "if(decide==='same-version-different-content'){say('已是最新（'+tag+'）。电脑上有一份同版本号但内容不同的包——要发版记得先改版本号。');}"
+            + "if(decide==='same-version-different-content'){say('已是最新（'+tag+'）。'+src+'上有一份同版本号但内容不同的包——发布时应先改版本号。');}"
             + "else{say('已经是最新版本（'+tag+'）。');}"
             + "btn.disabled=false;return;}"
             + "var remoteTag=o.localDebug?String(o.sha256||'').slice(0,8):('v'+(o.version||'?'));"
-            + "say('发现新版本：本机 '+tag+' → 电脑 '+remoteTag+'，开始下载（'+(Math.round((o.size||0)/1048576))+' MB）…');"
+            + "say('发现新版本：本机 '+tag+' → '+src+' '+remoteTag+'，开始下载（'+(Math.round((o.size||0)/1048576))+' MB）…');"
             + "window.__miniUpdateProgress=function(p,mb){say('正在下载 '+p+'%'+(mb?'（'+mb+'）':'')+'…');};"
             + "window.__miniUpdateSwitch=function(){say('这条线路整块传不动，改成分段下载…');};"
             + "window.__miniUpdateFail=function(detail){say(detail);};"
@@ -2910,6 +2911,10 @@ public final class MainActivity extends Activity {
          */
         @android.webkit.JavascriptInterface
         public String checkUpdate() {
+            // 正式版直接读公开更新清单，不向电脑要开发包；调试版保持原来的电脑端流程。
+            if (!isDebuggable()) {
+                return checkRemoteUpdate();
+            }
             final String base = loadedBase;
             final String cred = credentials == null ? null : credentials.deviceCredential();
             if (base == null) {
@@ -2924,6 +2929,85 @@ public final class MainActivity extends Activity {
             } catch (Exception err) {
                 String msg = String.valueOf(err.getMessage()).replace("\"", "'");
                 return "{\"ok\":false,\"error\":\"查询失败：" + msg + "\"}";
+            }
+        }
+
+        private boolean isDebuggable() {
+            return (getApplicationInfo().flags
+                    & android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0;
+        }
+
+        private String localVersionName() {
+            try {
+                String name = getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
+                return name == null ? "" : name;
+            } catch (Exception err) {
+                return "";
+            }
+        }
+
+        private int localVersionCode() {
+            try {
+                return getPackageManager().getPackageInfo(getPackageName(), 0).versionCode;
+            } catch (Exception err) {
+                return 0;
+            }
+        }
+
+        /**
+         * 正式版更新：读 R2 上的公开清单，按 versionCode 判断新旧，再下载清单里的正式包。
+         *
+         * 为什么不走电脑：正式版用户电脑上未必有正式安装包，电脑端的默认路径指向开发目录；
+         * 即使找到调试包，签名也不同，装不上去。公开清单把“哪一版、下哪个文件、哈希是多少”
+         * 一次讲清，手机直接取。
+         */
+        private String checkRemoteUpdate() {
+            try {
+                String url = BuildConfig.APP_UPDATE_MANIFEST
+                        + "?t=" + System.currentTimeMillis();
+                Net.Response response = Net.get(url, null);
+                if (response.body == null || !response.isSuccess()) {
+                    return "{\"ok\":false,\"error\":\"更新清单暂时取不到，请检查网络后重试。\"}";
+                }
+                org.json.JSONObject manifest = new org.json.JSONObject(response.body);
+                String version = manifest.optString("version", "");
+                int versionCode = manifest.optInt("versionCode", 0);
+                String sha256 = manifest.optString("sha256", "");
+                long size = manifest.optLong("size", 0);
+                String apkUrl = manifest.optString("url", "");
+                boolean validUrl = apkUrl.startsWith("https://") || apkUrl.startsWith("http://");
+                if (version.isEmpty() || sha256.length() != 64 || size <= 0 || !validUrl) {
+                    return "{\"ok\":false,\"error\":\"更新清单不完整，暂时不能检查更新。\"}";
+                }
+                org.json.JSONObject out = new org.json.JSONObject();
+                out.put("ok", true);
+                out.put("version", version);
+                out.put("versionCode", versionCode);
+                out.put("sha256", sha256);
+                out.put("size", size);
+                out.put("url", apkUrl);
+                out.put("source", "release");
+                out.put("localVersion", localVersionName());
+                out.put("localDebug", false);
+
+                int localCode = localVersionCode();
+                String decide;
+                if (versionCode > localCode) {
+                    decide = "new-version";
+                } else if (versionCode < localCode) {
+                    // 清单比本机旧：不降级，也不谎报最新之外的结论。
+                    decide = "same-version";
+                } else if (!selfHash().isEmpty()
+                        && !sha256.equalsIgnoreCase(selfHash())) {
+                    decide = "same-version-different-content";
+                } else {
+                    decide = "same-version";
+                }
+                out.put("decide", decide);
+                return out.toString();
+            } catch (Exception err) {
+                String msg = String.valueOf(err.getMessage()).replace("\"", "'");
+                return "{\"ok\":false,\"error\":\"检查更新失败：" + msg + "\"}";
             }
         }
 
@@ -3018,6 +3102,15 @@ public final class MainActivity extends Activity {
          */
         @android.webkit.JavascriptInterface
         public void install(String path, double totalBytes, String expectedSha256) {
+            if (path == null || path.isEmpty()) {
+                return;
+            }
+            // 正式版清单给的是完整 HTTPS 地址；调试版仍是电脑上的站内路径。
+            final boolean remoteSource = path.startsWith("https://") || path.startsWith("http://");
+            final String base = loadedBase;
+            if (!remoteSource && base == null) {
+                return;
+            }
             if (downloading) {
                 // 连点两次不该起两条下载线程写同一文件。
                 return;
@@ -3025,11 +3118,8 @@ public final class MainActivity extends Activity {
             downloading = true;
             expectedBytes = (long) totalBytes;
             lastPct = -1;
-            final String base = loadedBase;
+            final String target = remoteSource ? path : base + path;
             final String cred = credentials == null ? null : credentials.deviceCredential();
-            if (base == null || path == null || path.isEmpty()) {
-                return;
-            }
             // 下载期间**别让屏幕熄**（2026-11-11 真机）：26MB 要下好几分钟，
             // 中途熄屏后系统会收走这台 App 的网络，于是每次都断在 99%。
             // 这不是"网不稳"，是我们自己没撑住。
@@ -3063,7 +3153,7 @@ public final class MainActivity extends Activity {
                         java.io.File out = new java.io.File(dir, "app-" + tag + ".apk");
                         final long total = expectedBytes;
                         // 服务器可能不认分段：那种情况下 total 未知，也照样能下完。
-                        Net.DownloadOutcome outcome = Net.downloadPreferWhole(base + path, cred, out, total, written -> {
+                        Net.DownloadOutcome outcome = Net.downloadPreferWhole(target, remoteSource ? null : cred, out, total, written -> {
                             if (total <= 0) {
                                 return;
                             }
@@ -3083,7 +3173,8 @@ public final class MainActivity extends Activity {
                             // 用户在外面用流量，必须知道是"该换网络"还是"再点一次就行"。
                             String detail;
                             if (!outcome.connected) {
-                                detail = "连不上电脑。手机能上网吗？电脑那边还开着吗？";
+                                detail = "连不上" + (remoteSource ? "更新服务器" : "电脑")
+                                        + "。手机能上网吗？稍后再试一次。";
                             } else {
                                 detail = "下载没完成（已收 " + (outcome.written / 1024) + " KB / 共 "
                                         + (total / 1024) + " KB）。再点一次会接着下。";

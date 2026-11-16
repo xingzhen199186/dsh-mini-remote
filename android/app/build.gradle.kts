@@ -14,6 +14,14 @@ android {
         // 两个 flavor 都继承这里的版本号；禁止给 bridge 单独设置更高的号段。
         versionCode = 1
         versionName = "0.1.0"
+
+        // 正式版的应用内更新直接读公开更新清单，不再依赖电脑上的开发产物；
+        // 清单里给出正式签名包的地址、大小和 SHA-256（2026-11-16）。
+        buildConfigField(
+            "String",
+            "APP_UPDATE_MANIFEST",
+            "\"https://pub-d07b53ae593c42e295ea5482d0860d37.r2.dev/app-update.json\"",
+        )
     }
 
     flavorDimensions += "distribution"
