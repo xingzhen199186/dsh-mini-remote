@@ -19,6 +19,7 @@
 
 <p align="center">
   <a href="#quick-start">Quick Start</a> ·
+  <a href="#dsh-everywhere-app">App</a> ·
   <a href="#ai-setup-guide">AI Setup</a> ·
   <a href="#connection-routes">Connection Routes</a> ·
   <a href="#core-capabilities">Core Capabilities</a> ·
@@ -50,7 +51,7 @@ Connection routes range from LAN and Tailscale to fixed addresses and self-hoste
 - **DSH**: `>=0.1.5-rc.2 <0.3.0`
 - **Operating system**: Windows, macOS, or Linux
 
-This version was checked on DSH `0.2.1-rc.5` and includes the `getOrigin()` port fallback for rc.5. See [CHANGELOG.md](CHANGELOG.md) for release history.
+This version has been re-checked against DSH `0.2.2-rc.3`. See [CHANGELOG.md](CHANGELOG.md) for release history.
 
 ### Installation
 
@@ -96,7 +97,7 @@ dsh plugin --profile web add C:\path\to\dsh-mini-remote
 
 3. Open the DSH desktop UI and go to **Settings** → **Remote Settings** to see the pairing QR codes and connection details.
 
-> **The phone client is a web page only.** Scan the code and open it in a browser; there is no standalone app or mini-program. You can add it to the home screen; it opens full-screen from the icon but still runs in the browser. Changing phones or clearing browser data requires pairing again.
+> **The phone client has two forms: the browser page, or the Android app DSH Everywhere.** The browser page works on any phone after a scan. The Android app adds lock-screen notifications, quick approvals, system sharing, and embedded Tailscale. See [DSH Everywhere](docs/DSH-Everywhere.md). You can also add the page to the home screen; it opens full-screen from the icon but still runs in the browser. Changing phones or clearing browser data requires pairing again.
 >
 > The same address also works in a PC browser. After enabling **Advanced Settings**, the complete DSH desktop interface is available there as well.
 >
@@ -152,6 +153,25 @@ Open this computer's complete DSH interface directly inside another computer's D
 
 ---
 
+## DSH Everywhere App
+
+If you would rather not open a browser every time, or you need **approvals on the lock screen and system sharing from other apps into DSH**, install the Android companion app **DSH Everywhere**.
+
+The app is called **DSH Everywhere**, distinct from the project name `dsh-mini-remote`. It is not a second product: connections, sessions, and permissions are shared with the web page, while the model and files stay on the computer.
+
+| Build | Package | Best for | What it adds |
+| :--- | :--- | :--- | :--- |
+| **standard (recommended)** | `DSH-Everywhere-0.1.0.apk` | Most people | No accessibility permission; pairing, sessions, notifications, quick approvals, system sharing, embedded Tailscale |
+| **bridge (experimental)** | `DSH-Everywhere-0.1.0-bridge.apk` | People who explicitly want the computer to observe or operate the phone | Adds an accessibility service on top of standard |
+
+- **Download**: [latest GitHub Release](https://github.com/xingzhen199186/dsh-mini-remote/releases/latest)
+- **Requirements**: Android 9 or newer, arm64 phone; the plugin installed and running on the computer
+- **Full guide (Chinese)**: [DSH Everywhere](docs/DSH-Everywhere.md)
+
+The browser route remains available. Use it on iOS, tablets, or a borrowed phone.
+
+---
+
 ## AI Setup Guide
 
 The plugin package already contains the `dsh-mini-remote-setup` skill and the [docs/guide/](docs/guide/) knowledge base. **No separate skill installation is needed.**
@@ -193,6 +213,7 @@ Invite codes for the shared and dedicated fixed addresses are issued by the prov
 ## Core Capabilities
 
 - **Phone page**: Single frame, Chat, and Full views; queueing, slash commands, question cards, approvals, and session management. See [10-Phone Connection and Passphrase](docs/guide/10-手机连接与密码.md).
+- **DSH Everywhere app**: an Android entry point for the same page, adding lock-screen notifications, quick approvals, system sharing, embedded Tailscale, and phone commands without Termux. See [DSH Everywhere](docs/DSH-Everywhere.md).
 - **Remote Window**: Open this computer's complete DSH interface inside another computer's DSH desktop. See [16-Remote Window](docs/guide/16-远程窗口.md).
 - **A/B collaboration**: A uses `b_*` tools on B; B controls directories, writes, folder operations, and command permission locally. Re-pairing reuses the existing record via `machine-id`. See [12-A/B Collaboration](docs/guide/12-A-B端协作.md).
 - **B projects**: Register a real B directory as an A workspace without copying files; includes a B file panel and **New B Session**. See [13-B Projects](docs/guide/13-B项目.md).
@@ -271,6 +292,7 @@ See [CHANGELOG.md](CHANGELOG.md) for detailed changes.
 ## Documentation
 
 - **Full guide**: [docs/guide/](docs/guide/) (00–17). Connection, passphrases, devices, A/B, B projects, Feishu, self-check, Remote Window, and parameters are all here.
+- **Phone app**: [DSH Everywhere](docs/DSH-Everywhere.md). Download, installation, build variants, permissions, and troubleshooting.
 - **AI guide**: [SKILL.md](SKILL.md).
 - **Self-hosted relay server**: [relay-server/README.md](relay-server/README.md).
 - **Multi-user relay server**: [relay-multi/README.md](relay-multi/README.md).

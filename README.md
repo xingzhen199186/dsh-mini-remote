@@ -19,6 +19,7 @@
 
 <p align="center">
   <a href="#快速开始">快速开始</a> ·
+  <a href="#dsh-everywhere-手机-app">手机 App</a> ·
   <a href="#ai-配置向导">AI 配置</a> ·
   <a href="#连接方式">连接方式</a> ·
   <a href="#核心能力">核心能力</a> ·
@@ -50,7 +51,7 @@
 - **DSH**：`>=0.1.5-rc.2 <0.3.0`
 - **系统**：Windows、macOS 或 Linux
 
-当前版本在 DSH `0.2.1-rc.5` 上复核过，并适配 rc.5 的 `getOrigin()` 端口回退。各版本改了什么，见 [CHANGELOG.md](CHANGELOG.md)。
+当前版本在 DSH `0.2.2-rc.3` 上完成兼容复核。各版本改了什么，见 [CHANGELOG.md](CHANGELOG.md)。
 
 ### 安装
 
@@ -96,7 +97,7 @@ dsh plugin --profile web add C:\path\to\dsh-mini-remote
 
 3. 打开 DSH 桌面端界面，进入「设置」→ 左侧导航选择「遥控设置」，查看配对二维码与连接详情。
 
-> **手机端只有浏览器网页这一种形态。** 扫码并用浏览器打开即可，没有独立 App 或小程序。页面可以「添加到主屏幕」，图标打开时为全屏显示，实际仍由浏览器运行。更换手机或清除浏览器数据后，需要重新扫码配对。
+> **手机端有两种形态：浏览器网页，或 Android 应用 DSH Everywhere。** 网页扫码即可用，所有手机都能开；Android 应用额外提供锁屏通知、快捷审批、系统分享和内置 Tailscale，详见 [DSH Everywhere 手机应用](docs/DSH-Everywhere.md)。页面也可以「添加到主屏幕」，图标打开时为全屏显示，实际仍由浏览器运行。更换手机或清除浏览器数据后，需要重新扫码配对。
 >
 > 同一地址也能在 PC 浏览器中打开；开启「进阶设置」后，还可在其中使用完整的 DSH 电脑端界面。
 >
@@ -152,6 +153,25 @@ dsh plugin --profile web add C:\path\to\dsh-mini-remote
 
 ---
 
+## DSH Everywhere 手机 App
+
+如果你不想每次都开浏览器，或者需要**锁屏也能收到审批、把别的 App 里的内容直接分享给 DSH**，可以安装配套的 Android 应用 **DSH Everywhere**。
+
+应用名是 **DSH Everywhere**，和项目名 `dsh-mini-remote` 不同。它不是另一套产品：连接、会话和权限与网页版共用同一套，模型与文件仍然留在电脑。
+
+| 版本 | 安装包 | 适合谁 | 说明 |
+| :--- | :--- | :--- | :--- |
+| **standard（推荐）** | `DSH-Everywhere-0.1.0.apk` | 绝大多数人 | 不声明无障碍权限；配对、会话、通知、快捷审批、系统分享、内置 Tailscale |
+| **bridge（实验）** | `DSH-Everywhere-0.1.0-bridge.apk` | 明确要电脑观察／操作手机的人 | 在 standard 之上增加无障碍服务 |
+
+- **下载**：[GitHub Releases 最新版](https://github.com/xingzhen199186/dsh-mini-remote/releases/latest)
+- **要求**：Android 9 及以上、arm64 手机；电脑端已安装并运行本插件
+- **完整说明**：[DSH Everywhere 手机应用](docs/DSH-Everywhere.md)
+
+手机浏览器那条路不会消失。iOS、平板或临时用别人的手机，继续扫码开网页即可。
+
+---
+
 ## AI 配置向导
 
 插件包内已经带有 `dsh-mini-remote-setup` 技能和 [docs/guide/](docs/guide/) 知识库，**不需要单独安装技能**。
@@ -193,6 +213,7 @@ dsh plugin --profile web add C:\path\to\dsh-mini-remote
 ## 核心能力
 
 - **手机页面**：单帧、聊天、完整三种视图；支持队列、斜杠指令、选择题、审批和会话管理。详见 [10-手机连接与密码](docs/guide/10-手机连接与密码.md)。
+- **DSH Everywhere 手机 App**：同一套页面的 Android 原生入口，补上锁屏通知、快捷审批、系统分享、内置 Tailscale 和免 Termux 的手机命令；详见 [DSH Everywhere 手机应用](docs/DSH-Everywhere.md)。
 - **远程窗口**：在另一台电脑的 DSH 桌面端打开本机完整界面。详见 [16-远程窗口](docs/guide/16-远程窗口.md)。
 - **A/B 端协作**：A 端使用 `b_*` 操作 B；B 端本地控制目录、写入、文件夹管理和命令权限。重新配对会按 `machine-id` 复用原记录。详见 [12-A/B 端协作](docs/guide/12-A-B端协作.md)。
 - **B 项目**：把 B 端真实目录登记为 A 端工作区，不复制文件；提供 B 文件面板和「新建 B 会话」。详见 [13-B 项目](docs/guide/13-B项目.md)。
@@ -271,6 +292,7 @@ node client/verify.mjs
 ## 文档
 
 - **完整指南**：[docs/guide/](docs/guide/)（00–17）。连接、密码、设备、A/B、B 项目、飞书、自检、远程窗口和参数都在这里。
+- **手机 App**：[DSH Everywhere 手机应用](docs/DSH-Everywhere.md)。下载、安装、版本选择、权限与排障。
 - **AI 向导**：[SKILL.md](SKILL.md)。
 - **自建中继服务器**：[relay-server/README.md](relay-server/README.md)。
 - **多用户中继服务器**：[relay-multi/README.md](relay-multi/README.md)。
