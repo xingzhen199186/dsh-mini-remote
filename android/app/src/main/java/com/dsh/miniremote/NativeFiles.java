@@ -404,7 +404,8 @@ final class NativeFiles {
         if (depth > MAX_DEPTH) return true;
         if (hits.length() >= MAX_HITS) return true;
         File[] children = dir.listFiles();
-        if (children == null) return false;
+        // 读不了（权限、IO）意味着这一段没搜到：必须算"没搜完"，不能当作正常结束。
+        if (children == null) return true;
         for (File child : children) {
             if (hits.length() >= MAX_HITS) return true;
             scanned[0]++;
@@ -470,7 +471,8 @@ final class NativeFiles {
         if (dir == null) return false;
         if (depth > MAX_DEPTH || hits.length() >= MAX_HITS || budget[0] <= 0) return true;
         File[] children = dir.listFiles();
-        if (children == null) return false;
+        // 同上：读不了的目录要算"没搜完"。
+        if (children == null) return true;
         for (File child : children) {
             if (hits.length() >= MAX_HITS || budget[0] <= 0) return true;
             scanned[0]++;

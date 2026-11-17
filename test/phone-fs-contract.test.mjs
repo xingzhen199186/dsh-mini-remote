@@ -115,6 +115,8 @@ test('phone_find_file 和 phone_open_file 超时放宽到 45 秒', () => {
 
 test('深度上限与任一通道可用都不能被说成完整', () => {
   assert.match(nativeFiles, /depth > MAX_DEPTH\) return true/, '目录深度到顶要标成未搜完')
+  // 读不了的子目录也不能当作"正常结束"，否则又是一次假完整。
+  assert.match(nativeFiles, /children == null\) return true/, '不可读目录要标成未搜完')
   assert.match(bridgePoller, /out\.put\("complete", false\)/, '能力探测不能把任一通道可用说成完整')
   // 公共文档可见性必须如实反映全盘模式，不能写死 true/false。
   assert.match(bridgePoller, /out\.put\("publicDocuments", allFiles\)/, '公共文档可见性要跟全盘模式走')
