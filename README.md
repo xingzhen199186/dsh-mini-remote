@@ -171,6 +171,8 @@ dsh plugin --profile web add C:\path\to\dsh-mini-remote
 
 如果想在手机上用 Python、Node、git、ssh、ffmpeg 这类完整工具，可以另装官方 Termux 配合 App；Termux 不是前置必需，不装也能用 App。无论装不装 Termux，App 都要求电脑端插件 0.3.0+。详见 [Termux 板块](docs/DSH-Everywhere.md#termux)。
 
+App 执行手机命令有两条路：**无线调试**（轻量，推荐）和 **Termux**（可选，完整 Linux 环境）。两条都可用时，优先走无线调试自连通道，Termux 作为兜底和完整环境。详见 [手机命令：无线调试与 Termux](docs/DSH-Everywhere.md#手机命令无线调试与-termux)。
+
 手机浏览器那条路不会消失。iOS、平板或临时用别人的手机，继续扫码开网页即可。
 
 ---
@@ -216,7 +218,7 @@ dsh plugin --profile web add C:\path\to\dsh-mini-remote
 ## 核心能力
 
 - **手机页面**：单帧、聊天、完整三种视图；支持队列、斜杠指令、选择题、审批和会话管理。详见 [10-手机连接与密码](docs/guide/10-手机连接与密码.md)。
-- **DSH Everywhere 手机 App**：同一套页面的 Android 原生入口，补上锁屏通知、快捷审批、系统分享、内置 Tailscale 和免 Termux 的手机命令；详见 [DSH Everywhere 手机应用](docs/DSH-Everywhere.md)。
+- **DSH Everywhere 手机 App**：同一套页面的 Android 原生入口，补上锁屏通知、快捷审批、系统分享、内置 Tailscale，以及通过无线调试执行手机命令（需要完整 Linux 环境时可另装 Termux）；详见 [DSH Everywhere 手机应用](docs/DSH-Everywhere.md)。
 - **远程窗口**：在另一台电脑的 DSH 桌面端打开本机完整界面。详见 [16-远程窗口](docs/guide/16-远程窗口.md)。
 - **A/B 端协作**：A 端使用 `b_*` 操作 B；B 端本地控制目录、写入、文件夹管理和命令权限。重新配对会按 `machine-id` 复用原记录。详见 [12-A/B 端协作](docs/guide/12-A-B端协作.md)。
 - **B 项目**：把 B 端真实目录登记为 A 端工作区，不复制文件；提供 B 文件面板和「新建 B 会话」。详见 [13-B 项目](docs/guide/13-B项目.md)。

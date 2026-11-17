@@ -171,6 +171,8 @@ The app is called **DSH Everywhere**, distinct from the project name `dsh-mini-r
 
 If you want full tools like Python, Node, git, ssh, or ffmpeg on the phone, you can install the official Termux app alongside DSH Everywhere; Termux is not required—the app works without it. The app still requires plugin 0.3.0+. See the [Termux section](docs/DSH-Everywhere.md#termux) in the full guide.
 
+The app can run phone commands two ways: **wireless debugging** (lightweight, recommended) or **Termux** (optional, full Linux environment). When both are available, wireless debugging is preferred and Termux serves as the fallback and full environment. See [Phone commands: wireless debugging and Termux](docs/DSH-Everywhere.md#手机命令无线调试与-termux) in the full guide.
+
 The browser route remains available. Use it on iOS, tablets, or a borrowed phone.
 
 ---
@@ -216,7 +218,7 @@ Invite codes for the shared and dedicated fixed addresses are issued by the prov
 ## Core Capabilities
 
 - **Phone page**: Single frame, Chat, and Full views; queueing, slash commands, question cards, approvals, and session management. See [10-Phone Connection and Passphrase](docs/guide/10-手机连接与密码.md).
-- **DSH Everywhere app**: an Android entry point for the same page, adding lock-screen notifications, quick approvals, system sharing, embedded Tailscale, and phone commands without Termux. See [DSH Everywhere](docs/DSH-Everywhere.md).
+- **DSH Everywhere app**: an Android entry point for the same page, adding lock-screen notifications, quick approvals, system sharing, embedded Tailscale, and phone commands via wireless debugging (with optional Termux for a full Linux environment). See [DSH Everywhere](docs/DSH-Everywhere.md).
 - **Remote Window**: Open this computer's complete DSH interface inside another computer's DSH desktop. See [16-Remote Window](docs/guide/16-远程窗口.md).
 - **A/B collaboration**: A uses `b_*` tools on B; B controls directories, writes, folder operations, and command permission locally. Re-pairing reuses the existing record via `machine-id`. See [12-A/B Collaboration](docs/guide/12-A-B端协作.md).
 - **B projects**: Register a real B directory as an A workspace without copying files; includes a B file panel and **New B Session**. See [13-B Projects](docs/guide/13-B项目.md).
