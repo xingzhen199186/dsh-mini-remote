@@ -4,6 +4,8 @@
 
 DSH Everywhere 是极简遥控器（`dsh-mini-remote`）的配套 Android 应用。它不是另一套产品：连接、会话、权限和网页版共用同一套，插件仍然跑在电脑上，推理与文件也都留在电脑。
 
+**DSH 本体不运行在手机上。** 这个 App 只是遥控入口，不包含 DSH 运行时、模型或会话库；电脑关机或断网时，手机端无法单独工作。
+
 [下载最新版](https://github.com/xingzhen199186/dsh-mini-remote/releases/latest) · [返回主 README](../README.md)
 
 ---

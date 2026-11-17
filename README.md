@@ -39,6 +39,8 @@
 - **远程窗口**：在另一台电脑的 DSH 桌面端直接打开这台电脑的完整界面。
 - **A/B 跨机协作**：用A端电脑上的DSH在B端电脑上工作。A 端保留会话和模型，通过 `b_*` 工具读写 B 端文件、执行命令；B 端本地决定授权范围。
 
+**手机不是 DSH 本体。** DSH 始终运行在电脑上；手机浏览器和 DSH Everywhere 都只是遥控入口，不包含模型、会话引擎或会话文件。电脑关机或断网时，手机端不能单独运行 DSH。
+
 连接方式可以从内网、Tailscale 一路扩展到固定地址和自建中继。不熟悉网络配置时，可以让插件内置的 AI 向导带着走。
 
 ---
@@ -167,6 +169,7 @@ dsh plugin --profile web add C:\path\to\dsh-mini-remote
 
 - **下载**：[GitHub Releases 最新版](https://github.com/xingzhen199186/dsh-mini-remote/releases/latest)
 - **要求**：Android 9 及以上、arm64 手机；电脑端已安装并运行本插件
+- **DSH 本体仍要在电脑上运行**：App 只是遥控入口，不能单独运行模型或打开电脑上的会话
 - **完整说明**：[DSH Everywhere 手机应用](docs/DSH-Everywhere.md)
 
 如果想在手机上用 Python、Node、git、ssh、ffmpeg 这类完整工具，可以另装官方 Termux 配合 App；Termux 不是前置必需，不装也能用 App。无论装不装 Termux，App 都要求电脑端插件 0.3.0+。详见 [Termux 板块](docs/DSH-Everywhere.md#termux)。
