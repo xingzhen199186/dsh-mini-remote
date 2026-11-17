@@ -155,7 +155,7 @@ dsh plugin --profile web add C:\path\to\dsh-mini-remote
 
 ## DSH Everywhere 手机 App
 
-如果你不想每次都开浏览器，或者需要**锁屏也能收到审批、把别的 App 里的内容直接分享给 DSH**，可以安装配套的 Android 应用 **DSH Everywhere**。
+如果你不想每次都开浏览器，或者需要**锁屏也能收到审批、把别的 App 里的内容直接分享给 DSH、让电脑直接操作手机屏幕**，可以安装配套的 Android 应用 **DSH Everywhere**。
 
 应用名是 **DSH Everywhere**，和项目名 `dsh-mini-remote` 不同。它不是另一套产品：连接、会话和权限与网页版共用同一套，模型与文件仍然留在电脑。
 
@@ -174,7 +174,7 @@ dsh plugin --profile web add C:\path\to\dsh-mini-remote
 
 App 执行手机命令有两条路：**无线调试**（轻量，推荐）和 **Termux**（可选，完整 Linux 环境）。两条都可用时，优先走无线调试自连通道，Termux 作为兜底和完整环境。详见 [手机命令：无线调试与 Termux](docs/DSH-Everywhere.md#手机命令无线调试与-termux)。
 
-手机浏览器那条路不会消失。iOS、平板或临时用别人的手机，继续扫码开网页即可。
+**不用 App 也可以直接用手机浏览器。** 在电脑端打开「设置 → 遥控设置」，让手机扫描页面上的二维码（或手动打开配对链接）即可；iOS、平板和临时借用别人的手机都走这条网页路。详细步骤见 [10-手机连接与密码](docs/guide/10-手机连接与密码.md)。
 
 ---
 

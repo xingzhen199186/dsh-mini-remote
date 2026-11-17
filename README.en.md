@@ -155,7 +155,7 @@ Open this computer's complete DSH interface directly inside another computer's D
 
 ## DSH Everywhere App
 
-If you would rather not open a browser every time, or you need **approvals on the lock screen and system sharing from other apps into DSH**, install the Android companion app **DSH Everywhere**.
+If you would rather not open a browser every time, or you need **approvals on the lock screen, system sharing from other apps into DSH, or the computer to operate the phone screen directly**, install the Android companion app **DSH Everywhere**.
 
 The app is called **DSH Everywhere**, distinct from the project name `dsh-mini-remote`. It is not a second product: connections, sessions, and permissions are shared with the web page, while the model and files stay on the computer.
 
@@ -174,7 +174,7 @@ If you want full tools like Python, Node, git, ssh, or ffmpeg on the phone, you 
 
 The app can run phone commands two ways: **wireless debugging** (lightweight, recommended) or **Termux** (optional, full Linux environment). When both are available, wireless debugging is preferred and Termux serves as the fallback and full environment. See [Phone commands: wireless debugging and Termux](docs/DSH-Everywhere.md#手机命令无线调试与-termux) in the full guide.
 
-The browser route remains available. Use it on iOS, tablets, or a borrowed phone.
+**You can also use the phone browser without the app.** Open **Settings → Remote Settings** on the computer, then scan the QR code (or open the pairing link manually) on the phone; iOS, tablets, and borrowed phones use this web route. See [10-Phone Connection and Passphrase](docs/guide/10-手机连接与密码.md) for the full steps.
 
 ---
 
