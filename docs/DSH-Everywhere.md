@@ -157,7 +157,7 @@ pkg update && pkg upgrade -y
 2. 运行 `termux-reload-settings`（或重启 Termux）。
 3. 回到 DSH Everywhere → 设置 →「手机终端」→「去授权」，在系统弹窗里允许 `RUN_COMMAND` 权限。
 
-授权成功后，App 的「手机终端」那一行会显示「走 Termux 执行命令」。
+授权成功后，App 的「手机终端」那一行会显示已授权。如果同时配了免 Termux 的自连通道，那一行会显示「走自连通道」——这是正常的，Termux 仍会作为补充和兜底。
 
 #### 能具体做什么
 
@@ -248,7 +248,7 @@ App 设置里有「App 更新 → 检查」。
 
 ## 从源码构建
 
-应用源码在仓库的 [`android/`](../android/) 目录，构建步骤、两个变体与内置 Tailscale 的产物说明都写在 [android/README.md](../android/README.md)。
+应用源码在仓库的 [`android/`](../android/) 目录，构建步骤、源码构建变体与内置 Tailscale 的产物说明都写在 [android/README.md](../android/README.md)。
 
 发布包使用正式签名；自行构建的调试包与正式包签名不同，不能互相覆盖安装。
 
