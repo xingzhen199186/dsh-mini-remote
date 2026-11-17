@@ -14,6 +14,15 @@ test('手机桥：没上报过就是离线，上报了才算在线', () => {
   assert.equal(bridge.status().armed, false, '上线不等于武装：武装要手机上单独打开')
 })
 
+test('手机桥：记住手机当前确认档位，供始终免确认判断', () => {
+  const bridge = createBridge({ now: () => 0 })
+  bridge.hello(DEVICE, { protocol: 1, confirmMode: 'off' })
+  assert.equal(bridge.status().rows[0].confirmMode, 'off')
+  // 不认识的值不能悄悄当成免确认。
+  bridge.hello(DEVICE, { protocol: 1, confirmMode: 'bogus' })
+  assert.equal(bridge.status().rows[0].confirmMode, '')
+})
+
 test('手机桥：武装只能由手机改，关掉立刻失效', () => {
   const bridge = createBridge({ now: () => 0 })
   assert.equal(bridge.setArmed(DEVICE, true).armed, true)

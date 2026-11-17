@@ -203,6 +203,8 @@ final class BridgePoller {
                         + (firstPoll ? "&wait=0" : "&wait=1")
                         // 复用现有轮询上报确认需求；默认档不多任何一次请求。
                         + "&confirm=" + (ConfirmationControl.needsExtendedDeadline(context) ? "1" : "0")
+                        // 当前档位：电脑据此决定「始终免确认」时是否跳过不可逆界面的逐次放行。
+                        + "&confirmMode=" + ConfirmationControl.chosenMode(context)
                         // 有没有可用的手机终端：电脑据此决定是否优先走这条路（2026-11-12）。
                         + "&termux=" + (TermuxRun.available(context) ? "1" : "0");
                 // 读超时要比服务端压的 25 秒更长，否则正常的长轮询会被当成失败。

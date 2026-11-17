@@ -59,7 +59,7 @@ test('长按时长是个明确的值，别让调用方自己编', () => {
 // 敏感界面与「本次放行」（2026-11-14）
 // ---------------------------------------------------------------------------
 
-import { classifyScreen, allowOnceCheck, parseList } from '../lib/phone-aim.js'
+import { classifyScreen, allowOnceCheck, parseList, skipsSensitiveGate } from '../lib/phone-aim.js'
 
 test('微信里聊天放行，付款码那一层拦住', () => {
   const chat = classifyScreen({ pkg: 'com.tencent.mm', texts: ['张三', '晚上吃啥'] })
@@ -100,6 +100,14 @@ test('一次指令只放行一次，第二次要重新说', () => {
   assert.match(used.error, /已经放行过一次/)
   const next = allowOnceCheck({ userText: '放行', userMessageId: 'm2', consumedId: 'm1', requested: true })
   assert.equal(next.ok, true)
+})
+
+test('始终免确认只跳过不可逆界面，不跳过隐私界面', () => {
+  assert.equal(skipsSensitiveGate({ tier: 'irreversible', confirmMode: 'off' }), true)
+  assert.equal(skipsSensitiveGate({ tier: 'irreversible', confirmMode: 'task' }), false)
+  assert.equal(skipsSensitiveGate({ tier: 'irreversible', confirmMode: 'each' }), false)
+  assert.equal(skipsSensitiveGate({ tier: 'privacy', confirmMode: 'off' }), false,
+    '支付、银行、密码界面不能因为免确认就交给模型点')
 })
 
 test('清单解析：按行和逗号都认，包名统一小写', () => {
