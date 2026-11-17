@@ -30,6 +30,11 @@ const bridgePoller = readFileSync(
   'utf8'
 )
 
+const activityFiles = readFileSync(
+  new URL('../android/app/src/main/java/com/dsh/miniremote/MainActivity.java', import.meta.url),
+  'utf8'
+)
+
 test('phone_fs_list 返回带 scope / scanned / truncated / complete', () => {
   assert.match(nativeFiles, /put\("scope", target\.getString\("kind"\)\)/, 'list 要带 scope')
   assert.match(nativeFiles, /put\("scanned", scanned\)/, 'list 要带 scanned')
@@ -83,7 +88,7 @@ test('phone_storage_status 三种状态能区分', () => {
 
 test('phone_find_file 注册并免确认', () => {
   assert.match(indexJs, /name: 'phone_find_file'/, 'phone_find_file 要注册')
-  assert.match(indexJs, /phone_find_file.*只在 app:\/work: 里搜/s, 'phone_find_file 描述要说明范围')
+  assert.match(indexJs, /phone_find_file.*app:\/work:.*public:/s, 'phone_find_file 描述要说明范围与全盘模式')
   assert.match(bridgeJs, /phone_find_file/, 'bridge.js 免确认白名单要包含 phone_find_file')
 })
 
@@ -111,7 +116,20 @@ test('phone_find_file 和 phone_open_file 超时放宽到 45 秒', () => {
 test('深度上限与任一通道可用都不能被说成完整', () => {
   assert.match(nativeFiles, /depth > MAX_DEPTH\) return true/, '目录深度到顶要标成未搜完')
   assert.match(bridgePoller, /out\.put\("complete", false\)/, '能力探测不能把任一通道可用说成完整')
-  assert.match(bridgePoller, /publicDocuments", false/, '要明确公共文档仍不可见')
+  // 公共文档可见性必须如实反映全盘模式，不能写死 true/false。
+  assert.match(bridgePoller, /out\.put\("publicDocuments", allFiles\)/, '公共文档可见性要跟全盘模式走')
+  assert.match(bridgePoller, /missing\.put\("android_data"\)/, '即使全盘也进不去别的 App 的 Android/data')
+})
+
+test('全盘模式：public: 必须真的过系统授权，且有越界保护', () => {
+  assert.match(nativeFiles, /allFilesAllowed/, '要有授权判断')
+  assert.match(nativeFiles, /Environment\.isExternalStorageManager\(\)/, '要用系统的「所有文件访问」状态')
+  assert.match(nativeFiles, /全盘模式没有开启/, '没授权时要说清怎么开')
+  assert.match(nativeFiles, /publicRoot/, '公共根目录要单独取')
+  assert.match(nativeFiles, /startsWith\(rootPath \+ File\.separator\)/, '公共路径要锁在根目录内')
+  // 开启入口只能跳系统设置，App 内不能自己给自己授权。
+  assert.match(activityFiles, /ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION/, '开启入口要跳系统设置')
+  assert.match(activityFiles, /MANAGE_EXTERNAL_STORAGE|openAllFilesSettings/, '设置页要有全盘模式入口')
 })
 
 test('Termux 存储探针必须强制走 Termux，不能被 ADB 家目录误导', () => {

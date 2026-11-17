@@ -840,6 +840,16 @@ public final class MainActivity extends Activity {
             + "<div id=\"miniWorkState\" class=\"hint\">还没有选</div>"
             + "</div><div style=\"flex:0 0 auto\">"
             + "<button class=\"btn\" id=\"miniWorkPick\">选择</button></div>';"
+            // 全盘模式是实验开关：必须由用户去系统设置手动授予「所有文件访问」。
+            // 默认不选它也能用；默认路径仍是 app:/work:（2026-11-17）。
+            + "var allFilesRow=document.createElement('div');"
+            + "allFilesRow.id='miniAllFilesRow';allFilesRow.className='row';allFilesRow.style.marginTop='10px';"
+            + "allFilesRow.innerHTML='<div style=\"flex:1;min-width:0\">"
+            + "<div class=\"label\">全盘模式（实验）</div>"
+            + "<div id=\"miniAllFilesState\" class=\"hint\">关闭：只搜 App 私有目录和你选的工作文件夹。</div>"
+            + "<div class=\"hint\" style=\"font-size:12px;margin-top:4px\">开启后要到系统设置允许「所有文件访问」；能搜 Download、Documents 等公共目录，但仍看不到其他 App 的 Android/data。</div>"
+            + "</div><div style=\"flex:0 0 auto\">"
+            + "<button class=\"btn\" id=\"miniAllFilesGo\">去开启</button></div>';"
 
             + "function place(){"
             + "var conn=document.getElementById('miniConnBlock');"
@@ -851,6 +861,7 @@ public final class MainActivity extends Activity {
             + "var a11yBody=document.getElementById('miniA11yBody');"
             + "a11y.insertAdjacentElement('afterend',termuxRow);"
             + "termuxRow.insertAdjacentElement('afterend',workRow);"
+            + "workRow.insertAdjacentElement('afterend',allFilesRow);"
             + "var checkRow=document.createElement('div');"
             + "checkRow.id='miniCheckRow';checkRow.className='row';checkRow.style.marginTop='10px';"
             + "checkRow.innerHTML='<div style=\"flex:1;min-width:0\">"
@@ -858,7 +869,7 @@ public final class MainActivity extends Activity {
             + "<div id=\"miniCheckState\" class=\"hint\">正在读状态…</div>"
             + "</div><div style=\"flex:0 0 auto\">"
             + "<button class=\"btn\" id=\"miniCheckGo\">检查</button></div>';"
-            + "workRow.insertAdjacentElement('afterend',checkRow);"
+            + "allFilesRow.insertAdjacentElement('afterend',checkRow);"
             // 「手机执行命令（免 Termux）」：自连 ADB 的正式引导（2026-11-15）。
             // 未配对时一行说清"为什么/做什么/多久"；已配对显示"已就绪"，不再催促。
             // 配对过程有进度：等待端口→看到端口→正在配对→成功/失败，失败给下一步。
@@ -1083,6 +1094,22 @@ public final class MainActivity extends Activity {
             + "}catch(e){}"
             + "}"
             + "paintWork();"
+            // 全盘模式状态：只反映系统是否已授权，不在 App 内伪造一个开关。
+            + "function paintAllFiles(){"
+            + "var go=document.getElementById('miniAllFilesGo');"
+            + "var txt=document.getElementById('miniAllFilesState');"
+            + "if(!go||!txt||!window.MiniProbe.fsState)return;"
+            + "try{var st=JSON.parse(window.MiniProbe.fsState()||'{}');"
+            + "var on=st.allFiles===true;"
+            + "txt.textContent=on?'已开启：能搜 Download、Documents 等公共目录；仍看不到其他 App 的 Android/data。':'关闭：只搜 App 私有目录和你选的工作文件夹。';"
+            + "go.textContent=on?'系统设置':'去开启';"
+            + "if(!go.__wired){go.__wired=1;go.addEventListener('click',function(){"
+            + "try{window.MiniProbe.openAllFilesSettings();}catch(e){}"
+            + "setTimeout(paintAllFiles,1500);});}"
+            + "}catch(e){}"
+            + "}"
+            + "paintAllFiles();"
+            + "setInterval(paintAllFiles,3000);"
 
             // 三档切换：点一下存一次，文案跟着变；**从下一轮任务生效**（跑到一半不换规则）。
             + "function paintConfirm(){"
@@ -2622,6 +2649,7 @@ public final class MainActivity extends Activity {
             JSONObject out = new JSONObject();
             try {
                 out.put("work", NativeFiles.describe(MainActivity.this));
+                out.put("allFiles", NativeFiles.allFilesAllowed(MainActivity.this));
             } catch (Exception ignored) {
                 return "{}";
             }
@@ -2640,6 +2668,30 @@ public final class MainActivity extends Activity {
                     startActivityForResult(intent, REQUEST_WORK_TREE);
                 } catch (Exception ignored) {
                     // 没有文件管理器之类的系统组件时静默失败，界面上会显示仍未选择。
+                }
+            });
+        }
+
+        /** 打开系统「所有文件访问」页；全盘模式只在这里由用户手动开启。 */
+        @android.webkit.JavascriptInterface
+        public void openAllFilesSettings() {
+            runOnUiThread(() -> {
+                if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.R) {
+                    toastOnUi("这台手机的系统不支持「所有文件访问」");
+                    return;
+                }
+                try {
+                    Intent intent = new Intent(
+                            android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                            Uri.parse("package:" + getPackageName()));
+                    startActivity(intent);
+                } catch (Exception first) {
+                    try {
+                        startActivity(new Intent(
+                                android.provider.Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION));
+                    } catch (Exception ignored) {
+                        toastOnUi("打不开系统设置");
+                    }
                 }
             });
         }

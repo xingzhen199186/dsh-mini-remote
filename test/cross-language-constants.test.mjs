@@ -68,19 +68,33 @@ test('有 Termux 才优先走终端，没有就回落点屏幕（两条都保留
   assert.doesNotMatch(host, /phone_shell[\s\S]{0,200}alwaysConfirm/)
 })
 
-test('手机文件能力走系统选择器，不碰"所有文件访问"', () => {
-  // 商店只允许核心功能是文件管理的应用申请 MANAGE_EXTERNAL_STORAGE；
-  // 我们不是文件管理器，硬报会被驳回——所以必须完全不声明它。
+test('全盘模式是默认关闭的实验开关，默认路径仍是系统选择器', () => {
+  // 2026-11-17 决定：允许声明 MANAGE_EXTERNAL_STORAGE，但只作为用户手动开启的
+  // 实验模式；默认路径必须还是 SAF（ACTION_OPEN_DOCUMENT_TREE）。
+  // Play 合规：该权限只对核心功能是文件管理/设备内搜索/备份的应用开放，
+  // 本应用是远程遥控，上架 Play 时很可能被要求移除——manifest 里必须留注释提醒。
   const manifest = read('android/app/src/main/AndroidManifest.xml')
-  assert.doesNotMatch(manifest, /MANAGE_EXTERNAL_STORAGE/)
+  assert.match(manifest, /MANAGE_EXTERNAL_STORAGE/)
+  assert.match(manifest, /Play 合规/, 'manifest 要写明 Play 合规风险')
+  assert.match(manifest, /tools:ignore="ScopedStorage"/, '要显式标注 lint 豁免原因')
+
   const activity = read('android/app/src/main/java/com/dsh/miniremote/MainActivity.java')
+  // 默认入口仍是系统选择器，全盘模式只是另开一个开关。
   assert.match(activity, /Intent\.ACTION_OPEN_DOCUMENT_TREE/)
   // 取持久授权，否则重启后又要用户重选。
   assert.match(activity, /takePersistableUriPermission/)
-  // 只用 app: 与 work: 两种位置。
+  // 开全盘模式只能跳系统设置，不能在 App 内伪造授权。
+  assert.match(activity, /ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION/)
+
   const files = read('android/app/src/main/java/com/dsh/miniremote/NativeFiles.java')
   assert.match(files, /app:/)
   assert.match(files, /work:/)
+  // public: 必须先过 allFilesAllowed，不能只看路径前缀。
+  assert.match(files, /public:/)
+  assert.match(files, /allFilesAllowed\(context\)/)
+  assert.match(files, /Environment\.isExternalStorageManager\(\)/)
+  // 公共路径要锁在公共根目录内，防 ../ 越界。
+  assert.match(files, /路径越界/)
 })
 
 test('终端只保留后台能力，界面上不出现', () => {

@@ -876,16 +876,25 @@ final class BridgePoller {
             org.json.JSONObject adb = new org.json.JSONObject(adbState);
             out.put("adb", adb);
 
+            // 全盘模式是用户手动授予的「所有文件访问」，默认关闭。
+            boolean allFiles = NativeFiles.allFilesAllowed(context);
+            out.put("allFiles", allFiles);
+
             // 普通 App 没有任何一条通道能看「整台手机的公共文档」：
             // work 只覆盖用户授权的那个文件夹，Termux/ADB 也各有边界。
             // 所以这里不能把"有一条通道可用"说成 complete，否则又回到本次事故的坑里。
             out.put("complete", false);
-            out.put("scope", workReadable ? "app+work" : "app");
-            out.put("publicDocuments", false);
+            out.put("scope", allFiles ? "app+work+public"
+                    : (workReadable ? "app+work" : "app"));
+            out.put("publicDocuments", allFiles);
             org.json.JSONArray missing = new org.json.JSONArray();
-            missing.put("shared_documents");
+            if (!allFiles) missing.put("shared_documents");
+            // 即使有「所有文件访问」，Android 也不让普通 App 进别的 App 的 Android/data。
+            missing.put("android_data");
             out.put("missing", missing);
-            if (!workGranted) {
+            if (allFiles) {
+                out.put("next", "全盘模式已开启：公共目录可读；其他 App 的 Android/data 仍不可见。");
+            } else if (!workGranted) {
                 out.put("next", "请先在 App 设置里选一个工作文件夹");
             } else if (!workReadable) {
                 out.put("next", "工作文件夹已选但读不了，请重新选择");

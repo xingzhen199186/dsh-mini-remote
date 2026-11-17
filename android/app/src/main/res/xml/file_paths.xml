@@ -6,4 +6,7 @@
     <cache-path name="update" path="update/" />
     <!-- App 私有目录里的文件，用 FileProvider 交出去给系统应用打开（2026-11-17）。 -->
     <files-path name="files" path="." />
+    <!-- 全盘模式下的公共文件。只在用户已授予「所有文件访问」时才可读；
+         FileProvider 本身不会绕过权限，路径仍由 App 校验。 -->
+    <external-path name="external" path="." />
 </paths>

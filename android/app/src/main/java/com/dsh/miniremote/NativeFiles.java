@@ -3,6 +3,8 @@ package com.dsh.miniremote;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.net.Uri;
+import android.os.Build;
+import android.os.Environment;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -21,12 +23,14 @@ import java.util.List;
 /**
  * 手机上的文件能力，**全都跑在我们自己的 App 里**（2026-11-12）。
  *
- * 为什么不靠 Termux：用户不该为了用这个 App 再装一个 App。这里只用两种位置：
+ * 为什么不靠 Termux：用户不该为了用这个 App 再装一个 App。这里默认只用两种位置：
  *   · `app:` 开头的路径 —— App 自己的私有目录，不需要任何权限，用户看不见；
  *   · `work:` 开头的路径 —— 用户在系统选择器里**亲手选的一个文件夹**，之后归我们管。
  *
- * 关于商店：这两种方式都符合 Google Play 的要求。**绝不申请"所有文件访问"**
- * （MANAGE_EXTERNAL_STORAGE）——那要求应用的核心功能就是管文件，我们不是，硬报会被驳回。
+ * 另有一个**默认关闭的实验模式** `public:`：用户到系统设置手动授予
+ * 「所有文件访问」（MANAGE_EXTERNAL_STORAGE）后才可用。它能读公共目录里的普通
+ * 文档，但**仍然进不去**别的 App 的 Android/data；而且 Play 对上架应用申请这条
+ * 权限有严格限制。所以它只作为侧载/高级选项，默认路径始终是 app:/work:。
  */
 final class NativeFiles {
     static final String PREFS = "mini_ui_prefs";
@@ -68,7 +72,30 @@ final class NativeFiles {
 
     // ── 路径解析 ────────────────────────────────────────────────
 
-    /** `app:` 与 `work:` 两种前缀；其它一律拒绝，并给出可读的原因。 */
+    /** 全盘模式：只有 API 30+ 且用户已在系统设置授予「所有文件访问」才为 true。 */
+    static boolean allFilesAllowed(Context context) {
+        return Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
+                && Environment.isExternalStorageManager();
+    }
+
+    /** 公共存储根目录；调用前必须先确认 allFilesAllowed。 */
+    private static File publicRoot() {
+        return Environment.getExternalStorageDirectory();
+    }
+
+    /** 公共路径必须锁在公共根目录内，不能靠 ../ 跑到别处。 */
+    private static File publicFile(String rel) throws Exception {
+        File root = publicRoot();
+        File file = rel.isEmpty() ? root : new File(root, rel);
+        String rootPath = root.getCanonicalPath();
+        String filePath = file.getCanonicalPath();
+        if (!filePath.equals(rootPath) && !filePath.startsWith(rootPath + File.separator)) {
+            throw new IllegalArgumentException("路径越界：只能访问公共存储目录");
+        }
+        return file;
+    }
+
+    /** `app:`、`work:` 两种默认前缀；`public:` 仅在用户开启全盘模式后允许。 */
     static JSONObject resolve(Context context, String path) throws Exception {
         if (path == null || path.trim().isEmpty()) {
             throw new IllegalArgumentException("路径是空的");
@@ -83,7 +110,13 @@ final class NativeFiles {
             }
             return new JSONObject().put("kind", "work").put("rel", strip(p.substring(5)));
         }
-        throw new IllegalArgumentException("路径要以 app: 或 work: 开头（例如 work:下载/a.txt）");
+        if (p.startsWith("public:")) {
+            if (!allFilesAllowed(context)) {
+                throw new IllegalStateException("全盘模式没有开启。请到 App 设置 →「全盘模式（实验）」打开，并在系统设置里允许「所有文件访问」。");
+            }
+            return new JSONObject().put("kind", "public").put("rel", strip(p.substring(7)));
+        }
+        throw new IllegalArgumentException("路径要以 app:、work: 或 public: 开头（例如 work:下载/a.txt）");
     }
 
     private static String strip(String value) {
@@ -94,6 +127,15 @@ final class NativeFiles {
 
     private static File appFile(Context context, String rel) {
         return rel.isEmpty() ? context.getFilesDir() : new File(context.getFilesDir(), rel);
+    }
+
+    /** app/public 都是普通 File；work 走 SAF，返回 null。调用方先 resolve。 */
+    private static File plainFile(Context context, JSONObject target) throws Exception {
+        String kind = target.getString("kind");
+        String rel = target.getString("rel");
+        if ("app".equals(kind)) return appFile(context, rel);
+        if ("public".equals(kind)) return publicFile(rel);
+        return null;
     }
 
     /** 在 SAF 目录里按名字逐级找；找不到就返回 null。 */
@@ -129,8 +171,9 @@ final class NativeFiles {
             JSONArray items = new JSONArray();
             int scanned = 0;
             boolean truncated = false;
-            if ("app".equals(target.getString("kind"))) {
-                File dir = appFile(context, target.getString("rel"));
+            if (!"work".equals(target.getString("kind"))) {
+                File dir = plainFile(context, target);
+                if (dir == null) return err("这个目录不存在：" + path);
                 if (!dir.exists()) return err("这个目录不存在：" + path);
                 if (!dir.isDirectory()) return err("这不是目录：" + path);
                 File[] children = dir.listFiles();
@@ -175,11 +218,11 @@ final class NativeFiles {
                 return err("这是二进制文件（" + binaryKind(path) + "），不能按文本读。请用手机上的文件管理或文档应用打开，或先转成文本。");
             }
             List<String> lines = new ArrayList<>();
-            if ("app".equals(target.getString("kind"))) {
-                File file = appFile(context, target.getString("rel"));
-                if (!file.exists() || file.isDirectory()) return err("没有这个文件：" + path);
+            File plain = plainFile(context, target);
+            if (plain != null) {
+                if (!plain.exists() || plain.isDirectory()) return err("没有这个文件：" + path);
                 try (BufferedReader reader = new BufferedReader(
-                        new InputStreamReader(new FileInputStream(file), StandardCharsets.UTF_8))) {
+                        new InputStreamReader(new FileInputStream(plain), StandardCharsets.UTF_8))) {
                     String line;
                     while ((line = reader.readLine()) != null) lines.add(line);
                 }
@@ -255,15 +298,15 @@ final class NativeFiles {
             }
             JSONObject target = resolve(context, path);
             String body = content == null ? "" : content;
-            if ("app".equals(target.getString("kind"))) {
-                File file = appFile(context, target.getString("rel"));
-                File parent = file.getParentFile();
+            File plain = plainFile(context, target);
+            if (plain != null) {
+                File parent = plain.getParentFile();
                 if (parent != null && !parent.exists() && !parent.mkdirs()) return err("建不了上级目录");
-                try (FileOutputStream out = new FileOutputStream(file, false)) {
+                try (FileOutputStream out = new FileOutputStream(plain, false)) {
                     out.write(body.getBytes(StandardCharsets.UTF_8));
                 }
                 return new JSONObject().put("ok", true).put("path", path)
-                        .put("bytes", file.length()).toString();
+                        .put("bytes", plain.length()).toString();
             }
             String rel = target.getString("rel");
             int slash = rel.lastIndexOf('/');
@@ -334,8 +377,9 @@ final class NativeFiles {
             JSONArray hits = new JSONArray();
             int[] scanned = {0};
             boolean truncated = false;
-            if ("app".equals(target.getString("kind"))) {
-                truncated = walkApp(new File(context.getFilesDir(), target.getString("rel")), "", 0, rx, hits, scanned);
+            File plain = plainFile(context, target);
+            if (plain != null) {
+                truncated = walkApp(plain, "", 0, rx, hits, scanned);
             } else {
                 androidx.documentfile.provider.DocumentFile dir =
                         walk(context, target.getString("rel"), false);
@@ -401,8 +445,9 @@ final class NativeFiles {
             int[] budget = {MAX_SCAN_FILES};
             int[] scanned = {0};
             boolean truncated = false;
-            if ("app".equals(target.getString("kind"))) {
-                truncated = grepApp(new File(context.getFilesDir(), target.getString("rel")), "", 0, pattern, hits, budget, scanned);
+            File plain = plainFile(context, target);
+            if (plain != null) {
+                truncated = grepApp(plain, "", 0, pattern, hits, budget, scanned);
             } else {
                 androidx.documentfile.provider.DocumentFile dir =
                         walk(context, target.getString("rel"), false);
@@ -518,11 +563,11 @@ final class NativeFiles {
             String rel = target.getString("rel");
             Uri uri;
             String mime = mimeOf(rel);
-            if ("app".equals(target.getString("kind"))) {
-                File file = appFile(context, rel);
-                if (!file.exists() || file.isDirectory()) return err("没有这个文件：" + path);
+            File plain = plainFile(context, target);
+            if (plain != null) {
+                if (!plain.exists() || plain.isDirectory()) return err("没有这个文件：" + path);
                 uri = androidx.core.content.FileProvider.getUriForFile(
-                        context, context.getPackageName() + ".fileprovider", file);
+                        context, context.getPackageName() + ".fileprovider", plain);
             } else {
                 androidx.documentfile.provider.DocumentFile file = walk(context, rel, false);
                 if (file == null || !file.isFile()) return err("没有这个文件：" + path);
