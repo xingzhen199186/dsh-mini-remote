@@ -169,6 +169,8 @@ The app is called **DSH Everywhere**, distinct from the project name `dsh-mini-r
 - **Requirements**: Android 9 or newer, arm64 phone; the plugin installed and running on the computer
 - **Full guide (Chinese)**: [DSH Everywhere](docs/DSH-Everywhere.md)
 
+If you want full tools like Python, Node, git, ssh, or ffmpeg on the phone, you can install the official Termux app alongside DSH Everywhere; Termux is not required—the app works without it. The app still requires plugin 0.3.0+. See the [Termux section](docs/DSH-Everywhere.md#termux) in the full guide.
+
 The browser route remains available. Use it on iOS, tablets, or a borrowed phone.
 
 ---

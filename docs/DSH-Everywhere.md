@@ -123,6 +123,71 @@ App 可以借本机「无线调试」自行连自己，执行手机上的 shell 
 
 入口是 App 设置里的「手机执行命令（免 Termux）」：按提示在开发者选项打开「使用配对码配对设备」，把 6 位配对码填进通知即可，约 1 分钟。无线调试关着时会自动退回 Termux。
 
+### Termux
+
+Termux 是另一个开源终端应用，不是 DSH Everywhere 内置的。DSH 通过 `RUN_COMMAND` 权限调用它，让电脑能在手机上跑完整的 Linux 命令。
+
+**Termux 是补充，不是必需。** 不装 Termux，App 的配对、会话、通知、审批、系统分享、内置 Tailscale 都照常工作；只有当你需要在手机上跑 Python、Node、git、ssh、ffmpeg 这类完整工具时，才值得装一个。
+
+#### 下载安装
+
+Termux 只从官方渠道发布：
+
+- **F-Droid**：[f-droid.org/packages/com.termux](https://f-droid.org/packages/com.termux/)
+- **GitHub Releases**：[github.com/termux/termux-app/releases](https://github.com/termux/termux-app/releases)
+
+**不要装 Google Play 版本**——它是旧版，已弃用，可能与当前 Termux 不兼容。也不要装来路不明的改包。
+
+安装时系统会提示「禁止安装未知来源应用」——点「设置」，允许这个来源安装，然后返回继续。
+
+#### 首次设置与授权
+
+装好后先打开一次 Termux，让它完成初始化。建议运行：
+
+```bash
+pkg update && pkg upgrade -y
+```
+
+然后让 DSH Everywhere 能调用它：
+
+1. 在 Termux 里创建或编辑 `~/.termux/termux.properties`，加入一行：
+   ```
+   allow-external-apps=true
+   ```
+2. 运行 `termux-reload-settings`（或重启 Termux）。
+3. 回到 DSH Everywhere → 设置 →「手机终端」→「去授权」，在系统弹窗里允许 `RUN_COMMAND` 权限。
+
+授权成功后，App 的「手机终端」那一行会显示「走 Termux 执行命令」。
+
+#### 能具体做什么
+
+Termux 提供的是完整的 Linux 用户环境，不是 root。你可以：
+
+- **批量处理文件**：让 DSH 把手机相册或下载目录里的图片批量压缩、改名、整理；
+- **跑脚本**：在手机上用 Python 处理 CSV、文本或 JSON；
+- **版本控制**：用 git 拉取、提交小仓库；
+- **远程操作**：ssh 到自己的服务器拉日志、传文件；
+- **媒体处理**：用 ffmpeg 转码音频或视频。
+
+访问共享存储（相册、下载等）需要先在 Termux 里运行 `termux-setup-storage`，路径通常是 `/sdcard/...`。注意：App 的 `work:` 是 SAF 虚拟路径，不能直接当 Termux 工作目录。
+
+#### 边界与安全
+
+- Termux 命令以 Termux 用户身份运行，**不是 root**；
+- `allow-external-apps` 是**应用级宽权限**：任何拿到 `RUN_COMMAND` 权限的可信应用都能请求 Termux 执行命令，不只是 DSH。不要在不可信环境开启；
+- 只从官方渠道装 Termux，只给可信应用授权；
+- Termux 进程被系统杀掉时，正在跑的命令会失败。
+
+#### 排障
+
+| 现象 | 下一步 |
+| :--- | :--- |
+| Termux 装了但 App 显示没装 | 确认装的是官方版（F-Droid 或 GitHub），不是 Play Store 旧版 |
+| App 显示未授权 | 回 Termux 检查 `allow-external-apps=true` 已写入 `~/.termux/termux.properties`，并运行过 `termux-reload-settings` |
+| `RUN_COMMAND` 权限被拒绝 | 回 App 设置 →「手机终端」→「去授权」，在系统弹窗里点允许 |
+| 命令跑一半失败 | Termux 可能被系统杀掉了；回 Termux 重新打开，再试一次 |
+| 无法访问 `/sdcard` | 在 Termux 里运行 `termux-setup-storage`，并允许存储权限 |
+
 ### 应用内更新
 
 App 设置里有「App 更新 → 检查」。

@@ -169,6 +169,8 @@ dsh plugin --profile web add C:\path\to\dsh-mini-remote
 - **要求**：Android 9 及以上、arm64 手机；电脑端已安装并运行本插件
 - **完整说明**：[DSH Everywhere 手机应用](docs/DSH-Everywhere.md)
 
+如果想在手机上用 Python、Node、git、ssh、ffmpeg 这类完整工具，可以另装官方 Termux 配合 App；Termux 不是前置必需，不装也能用 App。装之前 App 仍要求插件 0.3.0+。详见 [Termux 板块](docs/DSH-Everywhere.md#termux)。
+
 手机浏览器那条路不会消失。iOS、平板或临时用别人的手机，继续扫码开网页即可。
 
 ---
