@@ -127,15 +127,17 @@ final class NativeFiles {
         try {
             JSONObject target = resolve(context, path);
             JSONArray items = new JSONArray();
+            int scanned = 0;
+            boolean truncated = false;
             if ("app".equals(target.getString("kind"))) {
                 File dir = appFile(context, target.getString("rel"));
                 if (!dir.exists()) return err("这个目录不存在：" + path);
                 if (!dir.isDirectory()) return err("这不是目录：" + path);
                 File[] children = dir.listFiles();
                 if (children == null) return err("读不了这个目录");
-                int count = 0;
                 for (File child : children) {
-                    if (count++ >= MAX_LIST) break;
+                    if (scanned >= MAX_LIST) { truncated = true; break; }
+                    scanned++;
                     items.put(new JSONObject()
                             .put("name", child.getName())
                             .put("dir", child.isDirectory())
@@ -145,16 +147,21 @@ final class NativeFiles {
                 androidx.documentfile.provider.DocumentFile dir =
                         walk(context, target.getString("rel"), false);
                 if (dir == null || !dir.isDirectory()) return err("这个目录不存在或不是目录：" + path);
-                int count = 0;
                 for (androidx.documentfile.provider.DocumentFile child : dir.listFiles()) {
-                    if (count++ >= MAX_LIST) break;
+                    if (scanned >= MAX_LIST) { truncated = true; break; }
+                    scanned++;
                     items.put(new JSONObject()
                             .put("name", child.getName() == null ? "" : child.getName())
                             .put("dir", child.isDirectory())
                             .put("size", child.length()));
                 }
             }
-            return new JSONObject().put("ok", true).put("path", path).put("items", items).toString();
+            return new JSONObject().put("ok", true).put("path", path)
+                    .put("scope", target.getString("kind"))
+                    .put("scanned", scanned)
+                    .put("truncated", truncated)
+                    .put("complete", !truncated)
+                    .put("items", items).toString();
         } catch (Exception e) {
             return err(reason(e));
         }
@@ -163,6 +170,10 @@ final class NativeFiles {
     static String read(Context context, String path, int offset, int limit) {
         try {
             JSONObject target = resolve(context, path);
+            // 二进制文件（docx/zip/pdf 等）不能按文本读：先探一下是不是文本。
+            if (isBinaryPath(path)) {
+                return err("这是二进制文件（" + binaryKind(path) + "），不能按文本读。请用 phone_open_file 打开，或先转成文本。");
+            }
             List<String> lines = new ArrayList<>();
             if ("app".equals(target.getString("kind"))) {
                 File file = appFile(context, target.getString("rel"));
@@ -192,13 +203,49 @@ final class NativeFiles {
             }
             String body = text.length() > MAX_READ_CHARS
                     ? text.substring(0, MAX_READ_CHARS) : text.toString();
+            boolean truncated = text.length() > MAX_READ_CHARS;
             return new JSONObject().put("ok", true).put("path", path)
+                    .put("scope", target.getString("kind"))
                     .put("totalLines", lines.size())
                     .put("from", from + 1).put("to", to)
+                    .put("truncated", truncated)
+                    .put("complete", !truncated && to >= lines.size())
                     .put("text", body).toString();
         } catch (Exception e) {
             return err(reason(e));
         }
+    }
+
+    /** 按扩展名判断是不是二进制文件；是的话拒绝按文本读。 */
+    private static boolean isBinaryPath(String path) {
+        String lower = path.toLowerCase(java.util.Locale.ROOT);
+        return lower.endsWith(".docx") || lower.endsWith(".doc")
+                || lower.endsWith(".xlsx") || lower.endsWith(".xls")
+                || lower.endsWith(".pptx") || lower.endsWith(".ppt")
+                || lower.endsWith(".pdf") || lower.endsWith(".zip")
+                || lower.endsWith(".rar") || lower.endsWith(".7z")
+                || lower.endsWith(".apk") || lower.endsWith(".aab")
+                || lower.endsWith(".jpg") || lower.endsWith(".jpeg")
+                || lower.endsWith(".png") || lower.endsWith(".gif")
+                || lower.endsWith(".mp3") || lower.endsWith(".mp4")
+                || lower.endsWith(".wav") || lower.endsWith(".avi")
+                || lower.endsWith(".mov") || lower.endsWith(".mkv");
+    }
+
+    private static String binaryKind(String path) {
+        String lower = path.toLowerCase(java.util.Locale.ROOT);
+        if (lower.endsWith(".docx") || lower.endsWith(".doc")) return "Word 文档";
+        if (lower.endsWith(".xlsx") || lower.endsWith(".xls")) return "Excel 表格";
+        if (lower.endsWith(".pptx") || lower.endsWith(".ppt")) return "PPT 演示";
+        if (lower.endsWith(".pdf")) return "PDF";
+        if (lower.endsWith(".zip") || lower.endsWith(".rar") || lower.endsWith(".7z")) return "压缩包";
+        if (lower.endsWith(".apk") || lower.endsWith(".aab")) return "安装包";
+        if (lower.endsWith(".jpg") || lower.endsWith(".jpeg") || lower.endsWith(".png")
+                || lower.endsWith(".gif")) return "图片";
+        if (lower.endsWith(".mp3") || lower.endsWith(".wav")) return "音频";
+        if (lower.endsWith(".mp4") || lower.endsWith(".avi") || lower.endsWith(".mov")
+                || lower.endsWith(".mkv")) return "视频";
+        return "二进制";
     }
 
     static String write(Context context, String path, String content) {
@@ -285,49 +332,60 @@ final class NativeFiles {
             JSONObject target = resolve(context, path);
             java.util.regex.Pattern rx = globToRegex(pattern == null || pattern.isEmpty() ? "*" : pattern);
             JSONArray hits = new JSONArray();
+            int[] scanned = {0};
+            boolean truncated = false;
             if ("app".equals(target.getString("kind"))) {
-                walkApp(new File(context.getFilesDir(), target.getString("rel")), "", 0, rx, hits);
+                truncated = walkApp(new File(context.getFilesDir(), target.getString("rel")), "", 0, rx, hits, scanned);
             } else {
                 androidx.documentfile.provider.DocumentFile dir =
                         walk(context, target.getString("rel"), false);
                 if (dir == null || !dir.isDirectory()) return err("这个目录不存在或不是目录：" + path);
-                walkTree(dir, "", 0, rx, hits);
+                truncated = walkTree(dir, "", 0, rx, hits, scanned);
             }
-            return new JSONObject().put("ok", true).put("count", hits.length()).put("files", hits).toString();
+            return new JSONObject().put("ok", true)
+                    .put("scope", target.getString("kind"))
+                    .put("scanned", scanned[0])
+                    .put("truncated", truncated)
+                    .put("complete", !truncated)
+                    .put("count", hits.length()).put("files", hits).toString();
         } catch (Exception e) {
             return err(reason(e));
         }
     }
 
-    private static void walkApp(File dir, String prefix, int depth,
-                                java.util.regex.Pattern rx, JSONArray hits) {
-        if (dir == null || depth > MAX_DEPTH || hits.length() >= MAX_HITS) return;
+    private static boolean walkApp(File dir, String prefix, int depth,
+                                 java.util.regex.Pattern rx, JSONArray hits, int[] scanned) {
+        if (dir == null || depth > MAX_DEPTH || hits.length() >= MAX_HITS) return hits.length() >= MAX_HITS;
         File[] children = dir.listFiles();
-        if (children == null) return;
+        if (children == null) return false;
         for (File child : children) {
-            if (hits.length() >= MAX_HITS) return;
+            if (hits.length() >= MAX_HITS) return true;
+            scanned[0]++;
             String rel = prefix.isEmpty() ? child.getName() : prefix + "/" + child.getName();
             if (child.isDirectory()) {
-                walkApp(child, rel, depth + 1, rx, hits);
+                if (walkApp(child, rel, depth + 1, rx, hits, scanned)) return true;
             } else if (rx.matcher(child.getName()).matches()) {
                 hits.put(rel + "\t" + child.length());
             }
         }
+        return false;
     }
 
-    private static void walkTree(androidx.documentfile.provider.DocumentFile dir, String prefix,
-                                 int depth, java.util.regex.Pattern rx, JSONArray hits) {
-        if (dir == null || depth > MAX_DEPTH || hits.length() >= MAX_HITS) return;
+    private static boolean walkTree(androidx.documentfile.provider.DocumentFile dir, String prefix,
+                                  int depth, java.util.regex.Pattern rx, JSONArray hits, int[] scanned) {
+        if (dir == null || depth > MAX_DEPTH || hits.length() >= MAX_HITS) return hits.length() >= MAX_HITS;
         for (androidx.documentfile.provider.DocumentFile child : dir.listFiles()) {
-            if (hits.length() >= MAX_HITS) return;
+            if (hits.length() >= MAX_HITS) return true;
+            scanned[0]++;
             String name = child.getName() == null ? "" : child.getName();
             String rel = prefix.isEmpty() ? name : prefix + "/" + name;
             if (child.isDirectory()) {
-                walkTree(child, rel, depth + 1, rx, hits);
+                if (walkTree(child, rel, depth + 1, rx, hits, scanned)) return true;
             } else if (rx.matcher(name).matches()) {
                 hits.put(rel + "\t" + child.length());
             }
         }
+        return false;
     }
 
     static String grep(Context context, String path, String pattern) {
@@ -336,51 +394,64 @@ final class NativeFiles {
             JSONObject target = resolve(context, path);
             JSONArray hits = new JSONArray();
             int[] budget = {MAX_SCAN_FILES};
+            int[] scanned = {0};
+            boolean truncated = false;
             if ("app".equals(target.getString("kind"))) {
-                grepApp(new File(context.getFilesDir(), target.getString("rel")), "", 0, pattern, hits, budget);
+                truncated = grepApp(new File(context.getFilesDir(), target.getString("rel")), "", 0, pattern, hits, budget, scanned);
             } else {
                 androidx.documentfile.provider.DocumentFile dir =
                         walk(context, target.getString("rel"), false);
                 if (dir == null) return err("这个位置不存在：" + path);
-                grepTree(context, dir, "", 0, pattern, hits, budget);
+                truncated = grepTree(context, dir, "", 0, pattern, hits, budget, scanned);
             }
-            return new JSONObject().put("ok", true).put("count", hits.length()).put("matches", hits).toString();
+            return new JSONObject().put("ok", true)
+                    .put("scope", target.getString("kind"))
+                    .put("scanned", scanned[0])
+                    .put("truncated", truncated)
+                    .put("complete", !truncated)
+                    .put("count", hits.length()).put("matches", hits).toString();
         } catch (Exception e) {
             return err(reason(e));
         }
     }
 
-    private static void grepApp(File dir, String prefix, int depth, String pattern,
-                                JSONArray hits, int[] budget) {
-        if (dir == null || depth > MAX_DEPTH || hits.length() >= MAX_HITS || budget[0] <= 0) return;
+    private static boolean grepApp(File dir, String prefix, int depth, String pattern,
+                                 JSONArray hits, int[] budget, int[] scanned) {
+        if (dir == null || depth > MAX_DEPTH || hits.length() >= MAX_HITS || budget[0] <= 0)
+            return hits.length() >= MAX_HITS || budget[0] <= 0;
         File[] children = dir.listFiles();
-        if (children == null) return;
+        if (children == null) return false;
         for (File child : children) {
-            if (hits.length() >= MAX_HITS || budget[0] <= 0) return;
+            if (hits.length() >= MAX_HITS || budget[0] <= 0) return true;
+            scanned[0]++;
             String rel = prefix.isEmpty() ? child.getName() : prefix + "/" + child.getName();
             if (child.isDirectory()) {
-                grepApp(child, rel, depth + 1, pattern, hits, budget);
+                if (grepApp(child, rel, depth + 1, pattern, hits, budget, scanned)) return true;
             } else if (child.length() <= MAX_SCAN_BYTES) {
                 budget[0]--;
                 scanFile(child.getName(), rel, readLinesApp(child), pattern, hits);
             }
         }
+        return false;
     }
 
-    private static void grepTree(Context context, androidx.documentfile.provider.DocumentFile dir,
-                                 String prefix, int depth, String pattern, JSONArray hits, int[] budget) {
-        if (dir == null || depth > MAX_DEPTH || hits.length() >= MAX_HITS || budget[0] <= 0) return;
+    private static boolean grepTree(Context context, androidx.documentfile.provider.DocumentFile dir,
+                                  String prefix, int depth, String pattern, JSONArray hits, int[] budget, int[] scanned) {
+        if (dir == null || depth > MAX_DEPTH || hits.length() >= MAX_HITS || budget[0] <= 0)
+            return hits.length() >= MAX_HITS || budget[0] <= 0;
         for (androidx.documentfile.provider.DocumentFile child : dir.listFiles()) {
-            if (hits.length() >= MAX_HITS || budget[0] <= 0) return;
+            if (hits.length() >= MAX_HITS || budget[0] <= 0) return true;
+            scanned[0]++;
             String name = child.getName() == null ? "" : child.getName();
             String rel = prefix.isEmpty() ? name : prefix + "/" + name;
             if (child.isDirectory()) {
-                grepTree(context, child, rel, depth + 1, pattern, hits, budget);
+                if (grepTree(context, child, rel, depth + 1, pattern, hits, budget, scanned)) return true;
             } else if (child.length() <= MAX_SCAN_BYTES) {
                 budget[0]--;
                 scanFile(name, rel, readLinesUri(context, child.getUri()), pattern, hits);
             }
         }
+        return false;
     }
 
     private static void scanFile(String name, String rel, List<String> lines, String pattern, JSONArray hits) {

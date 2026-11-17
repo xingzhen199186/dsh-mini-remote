@@ -428,6 +428,11 @@ final class BridgePoller {
                         args == null ? "" : args.optString("pattern", "")));
                 return;
             }
+            if ("phone_storage_status".equals(tool)) {
+                // 只读探测：各条存储通道现在能不能用（2026-11-17）。
+                reportRaw(id, true, storageStatus(context));
+                return;
+            }
             if ("phone_shell".equals(tool)) {
                 // 在手机上的 Termux 里执行命令（2026-11-12）。这是**任意命令执行**，
                 // 所以它和点屏幕一样走确认档位，不另开旁路。
@@ -804,6 +809,84 @@ final class BridgePoller {
         } catch (Exception err) {
             return false;
         }
+    }
+
+    /**
+     * 各条存储通道现在能不能用（2026-11-17）。
+     *
+     * 只读探测，不申请权限、不改设置。返回：
+     *   app: 可用性（总是 true，App 私有目录不需要权限）；
+     *   work: 是否已授权且真的还能读一次；
+     *   termux: 是否安装/授权/存储是否可用；
+     *   adb: 后端状态（复用 ShellBackend.backendState）；
+     *   complete/scope/next：整体判断与下一步建议。
+     */
+    private String storageStatus(android.content.Context context) {
+        org.json.JSONObject out = new org.json.JSONObject();
+        try {
+            // app: 总是可用
+            out.put("app", true);
+
+            // work: 是否已授权且真的还能读一次
+            boolean workGranted = !NativeFiles.workUri(context).isEmpty();
+            boolean workReadable = false;
+            if (workGranted) {
+                try {
+                    String test = NativeFiles.list(context, "work:");
+                    org.json.JSONObject parsed = new org.json.JSONObject(test);
+                    workReadable = parsed.optBoolean("ok", false);
+                } catch (Exception err) {
+                    workReadable = false;
+                }
+            }
+            out.put("workGranted", workGranted);
+            out.put("workReadable", workReadable);
+
+            // Termux：装没装、授权没有、存储是否可用
+            boolean termuxInstalled = termuxInstalled();
+            boolean termuxPermitted = context.checkSelfPermission("com.termux.permission.RUN_COMMAND")
+                    == android.content.pm.PackageManager.PERMISSION_GRANTED;
+            boolean termuxStorage = false;
+            if (termuxInstalled && termuxPermitted) {
+                // 用 phone_shell 探一次 ~/storage，不要在 Java 里扩大权限。
+                String probe = ShellBackend.exec(context, "test -d ~/storage && echo yes || echo no", 10, null, null);
+                termuxStorage = probe != null && probe.contains("\"ok\":true") && probe.contains("yes");
+            }
+            out.put("termuxInstalled", termuxInstalled);
+            out.put("termuxPermitted", termuxPermitted);
+            out.put("termuxStorage", termuxStorage);
+
+            // ADB 后端状态
+            String adbState = ShellBackend.backendState(context);
+            org.json.JSONObject adb = new org.json.JSONObject(adbState);
+            out.put("adb", adb);
+
+            // 整体判断与下一步建议
+            boolean anyAvailable = workReadable || termuxStorage || adb.optBoolean("adbReady", false);
+            out.put("complete", anyAvailable);
+            out.put("scope", anyAvailable ? "full" : "limited");
+            if (!workGranted) {
+                out.put("next", "请先在 App 设置里选一个工作文件夹");
+            } else if (!workReadable) {
+                out.put("next", "工作文件夹已选但读不了，请重新选择");
+            } else if (!termuxInstalled) {
+                out.put("next", "可装官方 Termux 获得完整 Linux 环境");
+            } else if (!termuxPermitted) {
+                out.put("next", "请在 App 设置里授权 Termux");
+            } else if (!termuxStorage) {
+                out.put("next", "请在 Termux 里运行 termux-setup-storage");
+            } else if (!adb.optBoolean("adbReady", false)) {
+                out.put("next", "无线调试未开或不可用，会退回 Termux");
+            } else {
+                out.put("next", "所有通道都可用");
+            }
+        } catch (Exception err) {
+            try {
+                out.put("error", String.valueOf(err.getMessage()));
+            } catch (Exception ignored) {
+            }
+        }
+        return out.toString();
     }
 
     private String statusJson() {
