@@ -4,4 +4,6 @@
     <cache-path name="camera" path="camera/" />
     <!-- 下载好的安装包放在这里，装完即弃（2026-11-09）。 -->
     <cache-path name="update" path="update/" />
+    <!-- App 私有目录里的文件，用 FileProvider 交出去给系统应用打开（2026-11-17）。 -->
+    <files-path name="files" path="." />
 </paths>

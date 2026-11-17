@@ -433,6 +433,19 @@ final class BridgePoller {
                 reportRaw(id, true, storageStatus(context));
                 return;
             }
+            if ("phone_find_file".equals(tool)) {
+                // 在 app:/work: 里按文件名搜索（2026-11-17）。
+                String pattern = args == null ? "*" : args.optString("pattern", "*");
+                String path = args == null ? "work:" : args.optString("path", "work:");
+                reportRaw(id, true, NativeFiles.glob(context, path, pattern));
+                return;
+            }
+            if ("phone_open_file".equals(tool)) {
+                // 用系统应用打开一个文件（2026-11-17）。
+                String path = args == null ? "" : args.optString("path", "");
+                reportRaw(id, true, NativeFiles.openFile(context, path));
+                return;
+            }
             if ("phone_shell".equals(tool)) {
                 // 在手机上的 Termux 里执行命令（2026-11-12）。这是**任意命令执行**，
                 // 所以它和点屏幕一样走确认档位，不另开旁路。

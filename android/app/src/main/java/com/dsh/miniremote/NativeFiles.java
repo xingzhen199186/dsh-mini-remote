@@ -504,6 +504,76 @@ final class NativeFiles {
         return lines;
     }
 
+    // ── 打开文件 ───────────────────────────────────────────────
+
+    /**
+     * 用系统应用打开一个文件（2026-11-17）。
+     *
+     * work: 路径用 DocumentFile 拿 content:// URI；app: 路径用 FileProvider。
+     * 只读动作，不修改文件；返回 {ok, path, uri, mime, opened}。
+     */
+    static String openFile(Context context, String path) {
+        try {
+            JSONObject target = resolve(context, path);
+            String rel = target.getString("rel");
+            Uri uri;
+            String mime = mimeOf(rel);
+            if ("app".equals(target.getString("kind"))) {
+                File file = appFile(context, rel);
+                if (!file.exists() || file.isDirectory()) return err("没有这个文件：" + path);
+                uri = androidx.core.content.FileProvider.getUriForFile(
+                        context, context.getPackageName() + ".fileprovider", file);
+            } else {
+                androidx.documentfile.provider.DocumentFile file = walk(context, rel, false);
+                if (file == null || !file.isFile()) return err("没有这个文件：" + path);
+                uri = file.getUri();
+            }
+            android.content.Intent intent = new android.content.Intent(android.content.Intent.ACTION_VIEW);
+            intent.setDataAndType(uri, mime);
+            intent.addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
+            try {
+                context.startActivity(intent);
+            } catch (Exception err) {
+                return err("打不开这个文件：没有能处理 " + mime + " 的应用");
+            }
+            return new JSONObject().put("ok", true).put("path", path)
+                    .put("uri", uri.toString()).put("mime", mime).put("opened", true).toString();
+        } catch (Exception e) {
+            return err(reason(e));
+        }
+    }
+
+    /** 按扩展名给 MIME；认不出的用 application/octet-stream。 */
+    private static String mimeOf(String name) {
+        String lower = name.toLowerCase(java.util.Locale.ROOT);
+        if (lower.endsWith(".docx")) return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+        if (lower.endsWith(".doc")) return "application/msword";
+        if (lower.endsWith(".xlsx")) return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+        if (lower.endsWith(".xls")) return "application/vnd.ms-excel";
+        if (lower.endsWith(".pptx")) return "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+        if (lower.endsWith(".ppt")) return "application/vnd.ms-powerpoint";
+        if (lower.endsWith(".pdf")) return "application/pdf";
+        if (lower.endsWith(".txt")) return "text/plain";
+        if (lower.endsWith(".md")) return "text/markdown";
+        if (lower.endsWith(".json")) return "application/json";
+        if (lower.endsWith(".xml")) return "application/xml";
+        if (lower.endsWith(".zip")) return "application/zip";
+        if (lower.endsWith(".rar")) return "application/vnd.rar";
+        if (lower.endsWith(".7z")) return "application/x-7z-compressed";
+        if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return "image/jpeg";
+        if (lower.endsWith(".png")) return "image/png";
+        if (lower.endsWith(".gif")) return "image/gif";
+        if (lower.endsWith(".mp3")) return "audio/mpeg";
+        if (lower.endsWith(".wav")) return "audio/wav";
+        if (lower.endsWith(".mp4")) return "video/mp4";
+        if (lower.endsWith(".avi")) return "video/x-msvideo";
+        if (lower.endsWith(".mov")) return "video/quicktime";
+        if (lower.endsWith(".mkv")) return "video/x-matroska";
+        if (lower.endsWith(".apk")) return "application/vnd.android.package-archive";
+        return "application/octet-stream";
+    }
+
     // ── 小工具 ─────────────────────────────────────────────────
 
 

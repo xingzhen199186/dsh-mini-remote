@@ -81,6 +81,33 @@ test('phone_storage_status 三种状态能区分', () => {
   assert.match(bridgePoller, /termuxStorage.*termux-setup-storage/s, 'Termux 存储不可用时提示 termux-setup-storage')
 })
 
+test('phone_find_file 注册并免确认', () => {
+  assert.match(indexJs, /name: 'phone_find_file'/, 'phone_find_file 要注册')
+  assert.match(indexJs, /phone_find_file.*只在 app:\/work: 里搜/s, 'phone_find_file 描述要说明范围')
+  assert.match(bridgeJs, /phone_find_file/, 'bridge.js 免确认白名单要包含 phone_find_file')
+})
+
+test('phone_open_file 注册并免确认', () => {
+  assert.match(indexJs, /name: 'phone_open_file'/, 'phone_open_file 要注册')
+  assert.match(indexJs, /phone_open_file.*用系统应用打开/s, 'phone_open_file 描述要说明用途')
+  assert.match(bridgeJs, /phone_open_file/, 'bridge.js 免确认白名单要包含 phone_open_file')
+})
+
+test('phone_open_file 用 ACTION_VIEW + FLAG_GRANT_READ_URI_PERMISSION', () => {
+  assert.match(nativeFiles, /ACTION_VIEW/, '要用 ACTION_VIEW 打开')
+  assert.match(nativeFiles, /FLAG_GRANT_READ_URI_PERMISSION/, '要授权读 URI')
+  assert.match(nativeFiles, /mimeOf/, '要按扩展名给 MIME')
+  assert.match(nativeFiles, /application\/vnd\.openxmlformats-officedocument\.wordprocessingml\.document/, 'docx 要有正确 MIME')
+})
+
+test('phone_find_file 复用 NativeFiles.glob', () => {
+  assert.match(bridgePoller, /phone_find_file.*NativeFiles\.glob/s, 'phone_find_file 要复用 glob')
+})
+
+test('phone_find_file 和 phone_open_file 超时放宽到 45 秒', () => {
+  assert.match(indexJs, /tool === 'phone_find_file' \|\| tool === 'phone_open_file'.*45_000/s, '超时要放宽到 45 秒')
+})
+
 test('深度上限与任一通道可用都不能被说成完整', () => {
   assert.match(nativeFiles, /depth > MAX_DEPTH\) return true/, '目录深度到顶要标成未搜完')
   assert.match(bridgePoller, /out\.put\("complete", false\)/, '能力探测不能把任一通道可用说成完整')
