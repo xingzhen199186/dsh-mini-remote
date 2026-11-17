@@ -80,3 +80,14 @@ test('phone_storage_status 三种状态能区分', () => {
   assert.match(bridgePoller, /!workReadable.*next.*重新选择/s, '已选但失效时要提示重新选择')
   assert.match(bridgePoller, /termuxStorage.*termux-setup-storage/s, 'Termux 存储不可用时提示 termux-setup-storage')
 })
+
+test('深度上限与任一通道可用都不能被说成完整', () => {
+  assert.match(nativeFiles, /depth > MAX_DEPTH\) return true/, '目录深度到顶要标成未搜完')
+  assert.match(bridgePoller, /out\.put\("complete", false\)/, '能力探测不能把任一通道可用说成完整')
+  assert.match(bridgePoller, /publicDocuments", false/, '要明确公共文档仍不可见')
+})
+
+test('Termux 存储探针必须强制走 Termux，不能被 ADB 家目录误导', () => {
+  assert.match(bridgePoller, /TermuxRun\.exec\(context,[\s\S]*?test -d ~\/storage/, '探针要直接调 Termux')
+  assert.doesNotMatch(bridgePoller, /ShellBackend\.exec\(context, "test -d ~\/storage/, '不能走会自动选 ADB 的 exec')
+})

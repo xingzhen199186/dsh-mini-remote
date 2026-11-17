@@ -848,8 +848,10 @@ final class BridgePoller {
                     == android.content.pm.PackageManager.PERMISSION_GRANTED;
             boolean termuxStorage = false;
             if (termuxInstalled && termuxPermitted) {
-                // 用 phone_shell 探一次 ~/storage，不要在 Java 里扩大权限。
-                String probe = ShellBackend.exec(context, "test -d ~/storage && echo yes || echo no", 10, null, null);
+                // 必须强制走 Termux：ShellBackend.exec 会优先试 ADB，拿 shell 的家目录
+                // 去判断 ~/storage 会得到假阴性（2026-11-17）。
+                String probe = TermuxRun.exec(context,
+                        "test -d ~/storage && echo yes || echo no", 5, null, null);
                 termuxStorage = probe != null && probe.contains("\"ok\":true") && probe.contains("yes");
             }
             out.put("termuxInstalled", termuxInstalled);
@@ -861,24 +863,29 @@ final class BridgePoller {
             org.json.JSONObject adb = new org.json.JSONObject(adbState);
             out.put("adb", adb);
 
-            // 整体判断与下一步建议
-            boolean anyAvailable = workReadable || termuxStorage || adb.optBoolean("adbReady", false);
-            out.put("complete", anyAvailable);
-            out.put("scope", anyAvailable ? "full" : "limited");
+            // 普通 App 没有任何一条通道能看「整台手机的公共文档」：
+            // work 只覆盖用户授权的那个文件夹，Termux/ADB 也各有边界。
+            // 所以这里不能把"有一条通道可用"说成 complete，否则又回到本次事故的坑里。
+            out.put("complete", false);
+            out.put("scope", workReadable ? "app+work" : "app");
+            out.put("publicDocuments", false);
+            org.json.JSONArray missing = new org.json.JSONArray();
+            missing.put("shared_documents");
+            out.put("missing", missing);
             if (!workGranted) {
                 out.put("next", "请先在 App 设置里选一个工作文件夹");
             } else if (!workReadable) {
                 out.put("next", "工作文件夹已选但读不了，请重新选择");
             } else if (!termuxInstalled) {
-                out.put("next", "可装官方 Termux 获得完整 Linux 环境");
+                out.put("next", "工作文件夹可读；公共文档仍不可见，需要系统文件管理或再授权文件夹。可选装 Termux 获得完整 Linux 环境");
             } else if (!termuxPermitted) {
-                out.put("next", "请在 App 设置里授权 Termux");
+                out.put("next", "工作文件夹可读；公共文档仍不可见。请在 App 设置里授权 Termux，或使用系统文件管理");
             } else if (!termuxStorage) {
-                out.put("next", "请在 Termux 里运行 termux-setup-storage");
+                out.put("next", "工作文件夹可读；公共文档仍不可见。请在 Termux 前台运行 termux-setup-storage，或使用系统文件管理");
             } else if (!adb.optBoolean("adbReady", false)) {
-                out.put("next", "无线调试未开或不可用，会退回 Termux");
+                out.put("next", "工作文件夹可读；无线调试未开或不可用，公共文档请用系统文件管理或 SAF 授权");
             } else {
-                out.put("next", "所有通道都可用");
+                out.put("next", "工作文件夹可读；无线调试可用，但公共文档仍建议用系统文件管理或 SAF 授权");
             }
         } catch (Exception err) {
             try {

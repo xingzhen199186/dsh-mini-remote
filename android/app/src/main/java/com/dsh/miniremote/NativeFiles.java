@@ -172,7 +172,7 @@ final class NativeFiles {
             JSONObject target = resolve(context, path);
             // 二进制文件（docx/zip/pdf 等）不能按文本读：先探一下是不是文本。
             if (isBinaryPath(path)) {
-                return err("这是二进制文件（" + binaryKind(path) + "），不能按文本读。请用 phone_open_file 打开，或先转成文本。");
+                return err("这是二进制文件（" + binaryKind(path) + "），不能按文本读。请用手机上的文件管理或文档应用打开，或先转成文本。");
             }
             List<String> lines = new ArrayList<>();
             if ("app".equals(target.getString("kind"))) {
@@ -355,7 +355,10 @@ final class NativeFiles {
 
     private static boolean walkApp(File dir, String prefix, int depth,
                                  java.util.regex.Pattern rx, JSONArray hits, int[] scanned) {
-        if (dir == null || depth > MAX_DEPTH || hits.length() >= MAX_HITS) return hits.length() >= MAX_HITS;
+        if (dir == null) return false;
+        // 深度上限是“没搜完”，不是“搜完了没命中”。
+        if (depth > MAX_DEPTH) return true;
+        if (hits.length() >= MAX_HITS) return true;
         File[] children = dir.listFiles();
         if (children == null) return false;
         for (File child : children) {
@@ -373,7 +376,9 @@ final class NativeFiles {
 
     private static boolean walkTree(androidx.documentfile.provider.DocumentFile dir, String prefix,
                                   int depth, java.util.regex.Pattern rx, JSONArray hits, int[] scanned) {
-        if (dir == null || depth > MAX_DEPTH || hits.length() >= MAX_HITS) return hits.length() >= MAX_HITS;
+        if (dir == null) return false;
+        if (depth > MAX_DEPTH) return true;
+        if (hits.length() >= MAX_HITS) return true;
         for (androidx.documentfile.provider.DocumentFile child : dir.listFiles()) {
             if (hits.length() >= MAX_HITS) return true;
             scanned[0]++;
@@ -417,8 +422,8 @@ final class NativeFiles {
 
     private static boolean grepApp(File dir, String prefix, int depth, String pattern,
                                  JSONArray hits, int[] budget, int[] scanned) {
-        if (dir == null || depth > MAX_DEPTH || hits.length() >= MAX_HITS || budget[0] <= 0)
-            return hits.length() >= MAX_HITS || budget[0] <= 0;
+        if (dir == null) return false;
+        if (depth > MAX_DEPTH || hits.length() >= MAX_HITS || budget[0] <= 0) return true;
         File[] children = dir.listFiles();
         if (children == null) return false;
         for (File child : children) {
@@ -437,8 +442,8 @@ final class NativeFiles {
 
     private static boolean grepTree(Context context, androidx.documentfile.provider.DocumentFile dir,
                                   String prefix, int depth, String pattern, JSONArray hits, int[] budget, int[] scanned) {
-        if (dir == null || depth > MAX_DEPTH || hits.length() >= MAX_HITS || budget[0] <= 0)
-            return hits.length() >= MAX_HITS || budget[0] <= 0;
+        if (dir == null) return false;
+        if (depth > MAX_DEPTH || hits.length() >= MAX_HITS || budget[0] <= 0) return true;
         for (androidx.documentfile.provider.DocumentFile child : dir.listFiles()) {
             if (hits.length() >= MAX_HITS || budget[0] <= 0) return true;
             scanned[0]++;
