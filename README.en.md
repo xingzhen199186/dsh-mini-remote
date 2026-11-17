@@ -39,8 +39,6 @@ Minimal Remote is a plugin for [DeepSeek Harness (DSH)](https://github.com/deeps
 - **Remote Window**: open this computer's complete DSH interface inside another computer's DSH desktop.
 - **A/B cross-computer work**: Work on computer B using the DSH on computer A. A keeps the session and model and uses `b_*` tools to read or write files and run commands on B; B decides locally what is allowed.
 
-**The phone is not DSH itself.** DSH always runs on the computer; the browser page and DSH Everywhere are remote entry points only, with no model, session engine, or session store on the phone. If the computer is off or offline, the phone cannot run DSH on its own.
-
 Connection routes range from LAN and Tailscale to fixed addresses and self-hosted relays. If network setup is unfamiliar, the built-in AI guide can walk you through it.
 
 ---
@@ -169,7 +167,7 @@ The app is called **DSH Everywhere**, distinct from the project name `dsh-mini-r
 
 - **Download**: [latest GitHub Release](https://github.com/xingzhen199186/dsh-mini-remote/releases/latest)
 - **Requirements**: Android 9 or newer, arm64 phone; the plugin installed and running on the computer
-- **DSH still runs on the computer**: the app is a remote entry point and cannot run the model or open computer sessions by itself
+- **DSH always runs on the computer, not on the phone.** The browser page and DSH Everywhere are remote entry points only: the model, session engine, and session files stay on the computer. The phone cannot run DSH on its own, and cannot continue when the computer is off or offline.
 - **Full guide (Chinese)**: [DSH Everywhere](docs/DSH-Everywhere.md)
 
 If you want full tools like Python, Node, git, ssh, or ffmpeg on the phone, you can install the official Termux app alongside DSH Everywhere; Termux is not required—the app works without it. The app still requires plugin 0.3.0+. See the [Termux section](docs/DSH-Everywhere.md#termux) in the full guide.
